@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UFO Galaxy</string>
+    <string name="accessibility_service_description">UFO Galaxy 无障碍服务，用于自动化操控 Android 设备。需要授权才能使用。</string>
+</resources>
