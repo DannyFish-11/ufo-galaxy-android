@@ -102,7 +102,22 @@ class WebSocketClient(
             
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 Log.d(TAG, "Received binary message: ${bytes.size()} bytes")
-                // TODO: 处理二进制消息（多媒体传输）
+                // 处理二进制消息（多媒体传输）
+                // 将二进制数据转换为 Base64 并封装为 JSON
+                try {
+                    val base64Data = android.util.Base64.encodeToString(
+                        bytes.toByteArray(),
+                        android.util.Base64.NO_WRAP
+                    )
+                    val jsonMessage = org.json.JSONObject().apply {
+                        put("type", "binary_data")
+                        put("data", base64Data)
+                        put("size", bytes.size())
+                    }
+                    onMessageReceived(jsonMessage.toString())
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to process binary message", e)
+                }
             }
             
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

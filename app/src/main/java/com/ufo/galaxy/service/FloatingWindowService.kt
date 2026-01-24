@@ -422,8 +422,9 @@ class FloatingWindowService : Service() {
      * 初始化设备管理器
      */
     private fun initDeviceManager() {
-        // TODO: 从配置文件或 SharedPreferences 读取 Gateway URL
-        val gatewayUrl = "ws://192.168.1.100:8000/ws"
+        // 从配置管理器读取 Gateway URL
+        val configManager = com.ufo.galaxy.config.ConfigManager(applicationContext)
+        val gatewayUrl = configManager.getGatewayUrl()
         
         deviceManager = DeviceManager(
             context = applicationContext,
@@ -454,12 +455,16 @@ class FloatingWindowService : Service() {
         
         Log.i(TAG, "Received task: $taskId ($taskType)")
         
-        // TODO: 根据任务类型执行任务
-        // 这里应该调用相应的节点来执行任务
+        // 使用 TaskExecutor 执行任务
+        val taskExecutor = com.ufo.galaxy.task.TaskExecutor(applicationContext)
+        val result = taskExecutor.executeTask(taskId, taskType, payload)
+        
+        // 发送任务结果回 Gateway
+        deviceManager.sendTaskResult(taskId, result)
         
         // 在 UI 上显示任务通知
         scope.launch {
-            addHistory("[任务] $taskType")
+            addHistory("[任务] $taskType: ${result.optString("status")}")
         }
     }
     
@@ -472,11 +477,16 @@ class FloatingWindowService : Service() {
         
         Log.i(TAG, "Received command: $commandId ($commandType)")
         
-        // TODO: 根据命令类型执行命令
+        // 使用 CommandHandler 处理命令
+        val commandHandler = com.ufo.galaxy.command.CommandHandler(applicationContext)
+        val result = commandHandler.handleCommand(commandId, commandType, payload)
+        
+        // 发送命令结果回 Gateway
+        deviceManager.sendCommandResult(commandId, result)
         
         // 在 UI 上显示命令通知
         scope.launch {
-            addHistory("[命令] $commandType")
+            addHistory("[命令] $commandType: ${result.optString("status")}")
         }
     }
     

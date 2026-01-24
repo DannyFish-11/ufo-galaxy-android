@@ -147,35 +147,30 @@ class DeviceManager(
     private fun handleTaskRequest(message: AIPMessage) {
         val taskId = message.payload.optString("task_id")
         val taskType = message.payload.optString("task_type")
-        val taskData = message.payload.optJSONObject("data")
         
         Log.i(TAG, "Received task request: $taskId ($taskType)")
         
-        // TODO: 根据任务类型执行任务
-        // 这里应该调用相应的节点来执行任务
-        
-        // 发送任务状态
-        val statusMessage = AIPMessage.createTaskStatus(
+        // 调用注册的任务处理器
+        val handler = messageHandlers["task_request"]
+        if (handler != null) {
+            handler(message.payload)
+        } else {
+            Log.w(TAG, "No handler for task_request")
+        }
+    }
+    
+    /**
+     * 发送任务结果
+     */
+    fun sendTaskResult(taskId: String, result: JSONObject) {
+        val success = result.optString("status") == "success"
+        val responseMessage = AIPMessage.createTaskResponse(
             deviceId = deviceId,
             taskId = taskId,
-            status = "processing",
-            progress = 0
+            success = success,
+            result = result.toString()
         )
-        sendMessage(statusMessage)
-        
-        // 模拟任务执行
-        scope.launch {
-            delay(1000)
-            
-            // 发送任务响应
-            val responseMessage = AIPMessage.createTaskResponse(
-                deviceId = deviceId,
-                taskId = taskId,
-                success = true,
-                result = "Task completed successfully"
-            )
-            sendMessage(responseMessage)
-        }
+        sendMessage(responseMessage)
     }
     
     /**
@@ -184,19 +179,28 @@ class DeviceManager(
     private fun handleCommand(message: AIPMessage) {
         val commandId = message.payload.optString("command_id")
         val commandType = message.payload.optString("command_type")
-        val commandData = message.payload.optJSONObject("data")
         
         Log.i(TAG, "Received command: $commandId ($commandType)")
         
-        // TODO: 根据命令类型执行命令
-        // 这里应该调用相应的节点来执行命令
-        
-        // 发送命令响应
+        // 调用注册的命令处理器
+        val handler = messageHandlers["command"]
+        if (handler != null) {
+            handler(message.payload)
+        } else {
+            Log.w(TAG, "No handler for command")
+        }
+    }
+    
+    /**
+     * 发送命令结果
+     */
+    fun sendCommandResult(commandId: String, result: JSONObject) {
+        val success = result.optString("status") == "success"
         val responseMessage = AIPMessage.createCommandResponse(
             deviceId = deviceId,
             commandId = commandId,
-            success = true,
-            result = "Command executed successfully"
+            success = success,
+            result = result.toString()
         )
         sendMessage(responseMessage)
     }
