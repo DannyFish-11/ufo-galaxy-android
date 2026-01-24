@@ -1,7 +1,9 @@
 package com.ufo.galaxy.task
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
+import com.ufo.galaxy.service.ScreenCaptureService
 import org.json.JSONObject
 
 /**
@@ -31,18 +33,38 @@ class TaskExecutor(private val context: Context) {
         try {
             when (taskType) {
                 "screen_capture" -> {
-                    // 屏幕截图任务
-                    result.put("message", "Screen capture initiated")
+                    // 启动屏幕采集服务
+                    val intent = Intent(context, ScreenCaptureService::class.java)
+                    context.startService(intent)
+                    result.put("message", "Screen capture service started")
                     result.put("data", JSONObject().apply {
                         put("timestamp", System.currentTimeMillis())
+                        put("service", "ScreenCaptureService")
                     })
                 }
                 
                 "app_control" -> {
-                    // 应用控制任务
+                    // 应用控制任务（需要无障碍服务支持）
                     val action = payload.optString("action")
                     val packageName = payload.optString("package_name")
-                    result.put("message", "App control: $action for $packageName")
+                    
+                    when (action) {
+                        "launch" -> {
+                            // 启动应用
+                            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+                            if (launchIntent != null) {
+                                context.startActivity(launchIntent)
+                                result.put("message", "Launched app: $packageName")
+                            } else {
+                                result.put("status", "error")
+                                result.put("message", "App not found: $packageName")
+                            }
+                        }
+                        else -> {
+                            result.put("message", "App control action queued: $action for $packageName")
+                            result.put("note", "Full control requires UFOAccessibilityService")
+                        }
+                    }
                 }
                 
                 "system_info" -> {
@@ -51,9 +73,14 @@ class TaskExecutor(private val context: Context) {
                 }
                 
                 "text_input" -> {
-                    // 文本输入任务
+                    // 文本输入任务（需要无障碍服务支持）
                     val text = payload.optString("text")
-                    result.put("message", "Text input: $text")
+                    result.put("message", "Text input queued: $text")
+                    result.put("note", "Actual input requires UFOAccessibilityService")
+                    result.put("data", JSONObject().apply {
+                        put("text", text)
+                        put("length", text.length)
+                    })
                 }
                 
                 else -> {
