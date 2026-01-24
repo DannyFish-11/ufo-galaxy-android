@@ -1,5 +1,18 @@
 # UFO Galaxy Android Sub-Agent
 
+---
+
+## 📝 **最新状态 (2026-01-24)**
+
+- **最新提交:** `05198cb Fix AndroidManifest: remove non-existent ui.FloatingWindowService`
+- **静态代码检查:** ✅ 通过
+- **已知问题:** 缺少 Android SDK，无法在沙箱中编译。
+
+---
+
+
+
+
 安卓子 Agent 原生 App，与 PC 主 Agent 协同工作。
 
 ## 🎉 最新更新（v1.1.0）
