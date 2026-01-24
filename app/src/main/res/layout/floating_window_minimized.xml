@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/capsule_view"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:background="@drawable/bg_capsule"
+    android:padding="12dp"
+    android:gravity="center"
+    android:elevation="8dp">
+
+    <!-- UFO 图标 -->
+    <ImageView
+        android:id="@+id/capsule_icon"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:src="@android:drawable/star_on"
+        android:tint="#FFFFFF"
+        android:contentDescription="UFO³ Galaxy" />
+
+    <!-- 状态指示点 -->
+    <View
+        android:layout_width="6dp"
+        android:layout_height="6dp"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/bg_status_indicator"
+        android:backgroundTint="#00FF00" />
+</LinearLayout>
