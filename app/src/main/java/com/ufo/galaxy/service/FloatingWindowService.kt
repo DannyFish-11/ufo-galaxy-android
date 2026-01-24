@@ -9,7 +9,8 @@ import android.view.*
 import android.widget.*
 import androidx.core.content.ContextCompat
 import com.ufo.galaxy.R
-import com.ufo.galaxy.UFOGalaxyApplication
+import com.ufo.galaxy.network.DeviceManager
+import com.ufo.galaxy.network.AIPMessage
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import android.util.Log
@@ -49,6 +50,9 @@ class FloatingWindowService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
     
+    // 设备管理器
+    private lateinit var deviceManager: DeviceManager
+    
     // 协程作用域
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -57,6 +61,9 @@ class FloatingWindowService : Service() {
         Log.i(TAG, "FloatingWindowService created")
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        
+        // 初始化设备管理器
+        initDeviceManager()
         
         createFloatingWindow()
         initSpeechRecognizer()
@@ -411,8 +418,75 @@ class FloatingWindowService : Service() {
         }
     }
 
+    /**
+     * 初始化设备管理器
+     */
+    private fun initDeviceManager() {
+        // TODO: 从配置文件或 SharedPreferences 读取 Gateway URL
+        val gatewayUrl = "ws://192.168.1.100:8000/ws"
+        
+        deviceManager = DeviceManager(
+            context = applicationContext,
+            gatewayUrl = gatewayUrl
+        )
+        
+        deviceManager.initialize()
+        deviceManager.connect()
+        
+        // 注册消息处理器
+        deviceManager.registerMessageHandler("task_request") { payload ->
+            handleTaskRequest(payload)
+        }
+        
+        deviceManager.registerMessageHandler("command") { payload ->
+            handleCommand(payload)
+        }
+        
+        Log.i(TAG, "DeviceManager initialized")
+    }
+    
+    /**
+     * 处理任务请求
+     */
+    private fun handleTaskRequest(payload: JSONObject) {
+        val taskId = payload.optString("task_id")
+        val taskType = payload.optString("task_type")
+        
+        Log.i(TAG, "Received task: $taskId ($taskType)")
+        
+        // TODO: 根据任务类型执行任务
+        // 这里应该调用相应的节点来执行任务
+        
+        // 在 UI 上显示任务通知
+        scope.launch {
+            addHistory("[任务] $taskType")
+        }
+    }
+    
+    /**
+     * 处理命令
+     */
+    private fun handleCommand(payload: JSONObject) {
+        val commandId = payload.optString("command_id")
+        val commandType = payload.optString("command_type")
+        
+        Log.i(TAG, "Received command: $commandId ($commandType)")
+        
+        // TODO: 根据命令类型执行命令
+        
+        // 在 UI 上显示命令通知
+        scope.launch {
+            addHistory("[命令] $commandType")
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
+        
+        // 清理设备管理器
+        if (::deviceManager.isInitialized) {
+            deviceManager.cleanup()
+        }
         
         // 停止语音识别
         speechRecognizer?.destroy()
