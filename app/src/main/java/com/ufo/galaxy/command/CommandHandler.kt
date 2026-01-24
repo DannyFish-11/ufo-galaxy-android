@@ -1,14 +1,21 @@
 package com.ufo.galaxy.command
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.util.Log
+import com.ufo.galaxy.config.ConfigManager
 import org.json.JSONObject
+import java.io.File
 
 /**
  * 命令处理器
  * 负责处理从 Galaxy Gateway 接收到的命令
  */
 class CommandHandler(private val context: Context) {
+    
+    private val configManager = ConfigManager(context)
     
     companion object {
         private const val TAG = "CommandHandler"
@@ -45,7 +52,19 @@ class CommandHandler(private val context: Context) {
                     // 设置配置
                     val key = payload.optString("key")
                     val value = payload.optString("value")
-                    result.put("message", "Config set: $key = $value")
+                    
+                    when (key) {
+                        "gateway_url" -> configManager.setGatewayUrl(value)
+                        "device_name" -> configManager.setDeviceName(value)
+                        else -> {
+                            result.put("status", "error")
+                            result.put("message", "Unknown config key: $key")
+                        }
+                    }
+                    
+                    if (result.optString("status") != "error") {
+                        result.put("message", "Config set: $key = $value")
+                    }
                 }
                 
                 "restart_service" -> {
@@ -55,7 +74,17 @@ class CommandHandler(private val context: Context) {
                 
                 "clear_cache" -> {
                     // 清除缓存
-                    result.put("message", "Cache cleared")
+                    try {
+                        val cacheDir = context.cacheDir
+                        val cacheSize = deleteRecursive(cacheDir)
+                        result.put("message", "Cache cleared")
+                        result.put("data", JSONObject().apply {
+                            put("bytes_freed", cacheSize)
+                        })
+                    } catch (e: Exception) {
+                        result.put("status", "error")
+                        result.put("message", "Failed to clear cache: ${e.message}")
+                    }
                 }
                 
                 else -> {
@@ -79,9 +108,40 @@ class CommandHandler(private val context: Context) {
     private fun getDeviceStatus(): JSONObject {
         return JSONObject().apply {
             put("online", true)
-            put("battery_level", 100) // 实际应该读取真实电量
+            put("battery_level", getBatteryLevel())
             put("network", "WiFi")
             put("timestamp", System.currentTimeMillis())
         }
+    }
+    
+    /**
+     * 获取真实电量
+     */
+    private fun getBatteryLevel(): Int {
+        val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
+            context.registerReceiver(null, ifilter)
+        }
+        val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        return if (level >= 0 && scale > 0) {
+            (level * 100 / scale)
+        } else {
+            -1
+        }
+    }
+    
+    /**
+     * 递归删除文件夹
+     */
+    private fun deleteRecursive(fileOrDirectory: File): Long {
+        var size = 0L
+        if (fileOrDirectory.isDirectory) {
+            fileOrDirectory.listFiles()?.forEach { child ->
+                size += deleteRecursive(child)
+            }
+        }
+        size += fileOrDirectory.length()
+        fileOrDirectory.delete()
+        return size
     }
 }
