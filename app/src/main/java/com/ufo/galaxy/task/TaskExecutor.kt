@@ -3,7 +3,7 @@ package com.ufo.galaxy.task
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.ufo.galaxy.service.ScreenCaptureService
+import com.ufo.galaxy.webrtc.ScreenCaptureService
 import org.json.JSONObject
 
 /**
