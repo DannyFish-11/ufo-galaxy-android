@@ -68,13 +68,6 @@
             android:enabled="true"
             android:exported="false" />
 
-        <!-- 浮动窗口服务 (新版 - UI 层) -->
-        <service
-            android:name=".ui.FloatingWindowService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
-
         <!-- WebRTC 屏幕采集服务 -->
         <service
             android:name=".webrtc.ScreenCaptureService"
