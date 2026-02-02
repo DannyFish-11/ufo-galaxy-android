@@ -1,12 +1,18 @@
 # UFO Galaxy Android Sub-Agent
 
+[![Android CI/CD Build](https://github.com/DannyFish-11/ufo-galaxy-android/actions/workflows/build.yml/badge.svg)](https://github.com/DannyFish-11/ufo-galaxy-android/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/DannyFish-11/ufo-galaxy-android?include_prereleases)](https://github.com/DannyFish-11/ufo-galaxy-android/releases)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 ---
 
 ## 📝 **最新状态 (2026-01-24)**
 
 - **最新提交:** `05198cb Fix AndroidManifest: remove non-existent ui.FloatingWindowService`
 - **静态代码检查:** ✅ 通过
-- **已知问题:** 缺少 Android SDK，无法在沙箱中编译。
+- **CI/CD 状态:** ✅ GitHub Actions 自动构建已启用
+- **自动构建:** 每次 push 和 PR 自动构建 Debug APK
+- **自动发布:** 打 tag 时自动发布到 GitHub Releases
 
 ---
 
@@ -186,6 +192,34 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 adb install ufo-galaxy-agent.apk
+```
+
+### 自动构建 (CI/CD)
+
+本项目已配置 GitHub Actions 自动构建：
+
+#### 触发方式
+- **Push 到 main/master/develop 分支**: 自动构建 Debug APK
+- **Pull Request**: 自动运行测试和构建
+- **打 Tag (v*)**: 自动构建 Release APK 并发布到 GitHub Releases
+
+#### 下载构建产物
+1. 进入 [Actions](https://github.com/DannyFish-11/ufo-galaxy-android/actions) 页面
+2. 选择最新的成功构建
+3. 在 Artifacts 区域下载 `debug-apk`
+
+#### 发布新版本
+```bash
+# 1. 更新版本号 (app/build.gradle.kts)
+# 2. 提交更改
+git add .
+git commit -m "Bump version to v1.2.0"
+
+# 3. 打标签并推送
+git tag v1.2.0
+git push origin v1.2.0
+
+# 4. GitHub Actions 将自动构建并发布到 Releases
 ```
 
 ---

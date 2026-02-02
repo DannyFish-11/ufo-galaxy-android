@@ -1,0 +1,178 @@
+name: Android CI/CD Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  JAVA_VERSION: '17'
+  GRADLE_VERSION: '8.2'
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v3
+      with:
+        gradle-version: ${{ env.GRADLE_VERSION }}
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Run Lint Check
+      run: ./gradlew lintDebug --continue
+
+    - name: Run Unit Tests
+      run: ./gradlew testDebugUnitTest --continue
+
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug
+
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-apk
+        path: app/build/outputs/apk/debug/*.apk
+        retention-days: 30
+
+    - name: Upload Lint Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: lint-report
+        path: app/build/reports/lint-results-debug.html
+        retention-days: 14
+
+    - name: Upload Test Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-reports
+        path: app/build/reports/tests/
+        retention-days: 14
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v3
+      with:
+        gradle-version: ${{ env.GRADLE_VERSION }}
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build Release APK
+      run: ./gradlew assembleRelease
+
+    - name: Sign Release APK
+      uses: r0adkll/sign-android-release@v1
+      id: sign_app
+      with:
+        releaseDirectory: app/build/outputs/apk/release
+        signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+        alias: ${{ secrets.ALIAS }}
+        keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+        keyPassword: ${{ secrets.KEY_PASSWORD }}
+      env:
+        BUILD_TOOLS_VERSION: "34.0.0"
+
+    - name: Get Version Name
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Release ${{ steps.get_version.outputs.VERSION }}
+        draft: false
+        prerelease: false
+        files: |
+          app/build/outputs/apk/release/*.apk
+          ${{ steps.sign_app.outputs.signedReleaseFile }}
+        body: |
+          ## UFO Galaxy Android Release ${{ steps.get_version.outputs.VERSION }}
+          
+          ### 构建信息
+          - **版本**: ${{ steps.get_version.outputs.VERSION }}
+          - **构建时间**: ${{ github.event.head_commit.timestamp }}
+          - **提交**: ${{ github.sha }}
+          
+          ### 下载
+          - 下载 APK 文件进行安装
+          - 支持 Android 8.0+ (API 26+)
+          
+          ### 注意事项
+          - Debug 版本使用调试签名
+          - Release 版本使用发布签名
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Build Status Notification
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Build Success Notification
+      if: needs.build.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped')
+      run: |
+        echo "✅ Build completed successfully!"
+        echo "📱 APK artifacts are available for download"
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          echo "🚀 Release published: ${{ github.ref_name }}"
+        fi
+
+    - name: Build Failure Notification
+      if: needs.build.result == 'failure' || needs.release.result == 'failure'
+      run: |
+        echo "❌ Build failed!"
+        echo "Please check the logs for details."
+        exit 1
