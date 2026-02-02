@@ -2,15 +2,21 @@ package com.ufo.galaxy.ai
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.projection.MediaProjection
 import android.util.Base64
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
+import com.ufo.galaxy.utils.ScreenshotHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.coroutines.resume
 
 /**
  * UFO Galaxy - GUI 理解模块
@@ -41,6 +47,15 @@ class GUIUnderstanding(private val context: Context) {
     private var serverUrl: String = ""
     private var apiKey: String = ""
     
+    // WebSocket 回调 (用于发送截图)
+    private var webSocketSender: ((JSONObject) -> Boolean)? = null
+    
+    // 截图辅助类
+    private val screenshotHelper = ScreenshotHelper(context)
+    
+    // MediaProjection (用于截图)
+    private var mediaProjection: MediaProjection? = null
+    
     // 本地 OCR 引擎
     private var useLocalOCR: Boolean = true
     
@@ -57,6 +72,140 @@ class GUIUnderstanding(private val context: Context) {
      */
     fun setUseLocalOCR(use: Boolean) {
         this.useLocalOCR = use
+    }
+    
+    /**
+     * 设置 MediaProjection (用于截图)
+     */
+    fun setMediaProjection(projection: MediaProjection) {
+        this.mediaProjection = projection
+    }
+    
+    /**
+     * 设置 WebSocket 发送回调
+     */
+    fun setWebSocketSender(sender: (JSONObject) -> Boolean) {
+        this.webSocketSender = sender
+    }
+    
+    // ============================================================================
+    // 截图 → Base64 → WebSocket 传输
+    // ============================================================================
+    
+    /**
+     * 截图并通过 WebSocket 发送到服务端
+     * 
+     * @param instruction 用户指令 (可选)
+     * @param callback 回调函数，返回发送结果
+     */
+    fun captureAndSendScreenshot(
+        instruction: String = "",
+        callback: (Boolean, String) -> Unit
+    ) {
+        val projection = mediaProjection
+        if (projection == null) {
+            Log.e(TAG, "MediaProjection not set")
+            callback(false, "MediaProjection not set")
+            return
+        }
+        
+        val sender = webSocketSender
+        if (sender == null) {
+            Log.e(TAG, "WebSocket sender not set")
+            callback(false, "WebSocket sender not set")
+            return
+        }
+        
+        screenshotHelper.takeScreenshotWithMediaProjection(projection) { bitmap ->
+            if (bitmap == null) {
+                Log.e(TAG, "Screenshot capture failed")
+                callback(false, "Screenshot capture failed")
+                return@takeScreenshotWithMediaProjection
+            }
+            
+            // 转换为 Base64
+            val base64Image = screenshotHelper.bitmapToBase64(bitmap, quality = 85)
+            Log.d(TAG, "Screenshot captured, base64 length: ${base64Image.length}")
+            
+            // 构建消息
+            val message = JSONObject().apply {
+                put("version", "2.0")
+                put("type", "vision_request")
+                put("timestamp", System.currentTimeMillis())
+                put("image", base64Image)
+                put("image_format", "jpeg")
+                put("screen_size", JSONObject().apply {
+                    val (width, height) = screenshotHelper.getScreenSize()
+                    put("width", width)
+                    put("height", height)
+                })
+                if (instruction.isNotEmpty()) {
+                    put("instruction", instruction)
+                }
+            }
+            
+            // 通过 WebSocket 发送
+            val success = sender(message)
+            if (success) {
+                Log.i(TAG, "Screenshot sent successfully via WebSocket")
+                callback(true, "Screenshot sent successfully")
+            } else {
+                Log.e(TAG, "Failed to send screenshot via WebSocket")
+                callback(false, "Failed to send screenshot via WebSocket")
+            }
+        }
+    }
+    
+    /**
+     * 协程版本的截图发送
+     */
+    suspend fun captureAndSendScreenshotAsync(instruction: String = ""): Pair<Boolean, String> = 
+        suspendCancellableCoroutine { continuation ->
+            captureAndSendScreenshot(instruction) { success, message ->
+                continuation.resume(Pair(success, message))
+            }
+        }
+    
+    /**
+     * 处理服务端返回的视觉理解结果
+     * @param response 服务端返回的 JSON
+     * @return 解析后的 GUI 动作
+     */
+    fun processVisionResponse(response: JSONObject): GUIAction {
+        Log.d(TAG, "Processing vision response: ${response.toString().take(200)}")
+        
+        val action = response.optString("action", ACTION_STATUS)
+        val thought = response.optString("thought", "")
+        
+        return when (action) {
+            ACTION_POINT -> GUIAction(
+                action = ACTION_POINT,
+                x = response.optInt("x", 0),
+                y = response.optInt("y", 0),
+                duration = response.optLong("duration", 0),
+                thought = thought
+            )
+            ACTION_SCROLL -> GUIAction(
+                action = ACTION_SCROLL,
+                direction = response.optString("direction", "down"),
+                thought = thought
+            )
+            ACTION_TYPE -> GUIAction(
+                action = ACTION_TYPE,
+                text = response.optString("text", ""),
+                thought = thought
+            )
+            ACTION_PRESS -> GUIAction(
+                action = ACTION_PRESS,
+                key = response.optString("key", ""),
+                thought = thought
+            )
+            else -> GUIAction(
+                action = ACTION_STATUS,
+                status = response.optString("status", "unknown"),
+                thought = thought
+            )
+        }
     }
     
     // ============================================================================
