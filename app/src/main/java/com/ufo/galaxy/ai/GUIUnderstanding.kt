@@ -81,8 +81,8 @@ class GUIUnderstanding(private val context: Context) {
 
     // DeepSeek OCR 2 直接 API 配置
     private var deepseekApiKey: String = ""
-    private var deepseekApiBase: String = "https://api.novita.ai/openai"
-    private var deepseekModel: String = "deepseek/deepseek-ocr-2"
+    private var deepseekApiBase: String = "https://api.novita.ai/v3/openai"
+    private var deepseekModel: String = "deepseek/deepseek-ocr2"
 
     // WebSocket 回调
     private var webSocketSender: ((JSONObject) -> Boolean)? = null
