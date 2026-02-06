@@ -8,6 +8,7 @@ import android.util.Base64
 import android.util.Log
 import android.os.Handler
 import android.os.Looper
+import com.ufo.galaxy.config.GalaxyConfig
 import com.ufo.galaxy.utils.ScreenshotHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -127,6 +128,50 @@ class GUIUnderstanding(private val context: Context) {
 
     fun setWebSocketSender(sender: (JSONObject) -> Boolean) {
         this.webSocketSender = sender
+    }
+
+    /**
+     * 从 GalaxyConfig 自动加载配置（包括 DeepSeek OCR 2 API Key）
+     * 应在 Application 或 Activity 初始化时调用
+     */
+    fun loadConfigFromGalaxyConfig() {
+        try {
+            val config = GalaxyConfig.getInstance(context)
+            
+            // 加载服务器配置
+            val serverUrl = config.getServerUrl()
+            if (serverUrl.isNotEmpty()) {
+                configure(serverUrl, "")
+            }
+            
+            // 加载 DeepSeek OCR 2 配置
+            val ocrApiKey = config.getDeepSeekOCR2ApiKey()
+            if (ocrApiKey.isNotEmpty()) {
+                configureDeepSeekOCR2(
+                    apiKey = ocrApiKey,
+                    apiBase = config.getDeepSeekOCR2ApiBase(),
+                    model = config.getDeepSeekOCR2Model()
+                )
+            }
+            
+            // 加载引擎模式
+            val engine = config.getOCREngine()
+            if (engine.isNotEmpty()) {
+                setEngineMode(when(engine) {
+                    "deepseek_ocr2" -> ENGINE_AUTO
+                    "server" -> ENGINE_FUSED_SERVER
+                    "direct" -> ENGINE_FUSED_DIRECT
+                    "local" -> ENGINE_SEPARATED
+                    else -> ENGINE_AUTO
+                })
+            }
+            
+            Log.i(TAG, "Config loaded from GalaxyConfig: " +
+                "server=$serverUrl, ocr_key=${if (ocrApiKey.isNotEmpty()) "configured" else "empty"}, " +
+                "engine=$engine")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load config from GalaxyConfig", e)
+        }
     }
 
     // ============================================================================

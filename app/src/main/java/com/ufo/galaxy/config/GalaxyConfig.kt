@@ -47,6 +47,17 @@ class GalaxyConfig private constructor(private val context: Context) {
         private const val KEY_ENABLE_FLOATING_WINDOW = "enable_floating_window"
         private const val KEY_ENABLE_AUTO_START = "enable_auto_start"
         
+        // AI/OCR 配置键
+        private const val KEY_DEEPSEEK_OCR2_API_KEY = "deepseek_ocr2_api_key"
+        private const val KEY_DEEPSEEK_OCR2_API_BASE = "deepseek_ocr2_api_base"
+        private const val KEY_DEEPSEEK_OCR2_MODEL = "deepseek_ocr2_model"
+        private const val KEY_OCR_ENGINE = "ocr_engine"
+        
+        // DeepSeek OCR 2 默认值
+        private const val DEFAULT_DEEPSEEK_OCR2_API_BASE = "https://api.novita.ai/v3/openai"
+        private const val DEFAULT_DEEPSEEK_OCR2_MODEL = "deepseek/deepseek-ocr2"
+        private const val DEFAULT_OCR_ENGINE = "deepseek_ocr2"
+        
         // UI 配置键
         private const val KEY_UI_THEME = "ui_theme"
         private const val KEY_UI_DYNAMIC_ISLAND = "ui_dynamic_island"
@@ -168,6 +179,50 @@ class GalaxyConfig private constructor(private val context: Context) {
     fun setAutoStartEnabled(enabled: Boolean) = prefs.edit().putBoolean(KEY_ENABLE_AUTO_START, enabled).apply()
     
     // ========================================================================
+    // AI/OCR 配置
+    // ========================================================================
+    
+    fun getDeepSeekOCR2ApiKey(): String {
+        return prefs.getString(KEY_DEEPSEEK_OCR2_API_KEY, "") ?: ""
+    }
+    
+    fun setDeepSeekOCR2ApiKey(key: String) {
+        prefs.edit().putString(KEY_DEEPSEEK_OCR2_API_KEY, key).apply()
+        Log.d(TAG, "DeepSeek OCR 2 API Key configured")
+    }
+    
+    fun getDeepSeekOCR2ApiBase(): String {
+        return prefs.getString(KEY_DEEPSEEK_OCR2_API_BASE, DEFAULT_DEEPSEEK_OCR2_API_BASE)
+            ?: DEFAULT_DEEPSEEK_OCR2_API_BASE
+    }
+    
+    fun setDeepSeekOCR2ApiBase(base: String) {
+        prefs.edit().putString(KEY_DEEPSEEK_OCR2_API_BASE, base).apply()
+    }
+    
+    fun getDeepSeekOCR2Model(): String {
+        return prefs.getString(KEY_DEEPSEEK_OCR2_MODEL, DEFAULT_DEEPSEEK_OCR2_MODEL)
+            ?: DEFAULT_DEEPSEEK_OCR2_MODEL
+    }
+    
+    fun setDeepSeekOCR2Model(model: String) {
+        prefs.edit().putString(KEY_DEEPSEEK_OCR2_MODEL, model).apply()
+    }
+    
+    fun getOCREngine(): String {
+        return prefs.getString(KEY_OCR_ENGINE, DEFAULT_OCR_ENGINE) ?: DEFAULT_OCR_ENGINE
+    }
+    
+    fun setOCREngine(engine: String) {
+        prefs.edit().putString(KEY_OCR_ENGINE, engine).apply()
+        Log.d(TAG, "OCR engine set to: $engine")
+    }
+    
+    fun isDeepSeekOCR2Configured(): Boolean {
+        return getDeepSeekOCR2ApiKey().isNotEmpty()
+    }
+    
+    // ========================================================================
     // UI 配置
     // ========================================================================
     
@@ -231,6 +286,14 @@ class GalaxyConfig private constructor(private val context: Context) {
                 put("auto_start", isAutoStartEnabled())
             })
             
+            // AI/OCR 配置
+            put("ai", JSONObject().apply {
+                put("deepseek_ocr2_api_key", getDeepSeekOCR2ApiKey())
+                put("deepseek_ocr2_api_base", getDeepSeekOCR2ApiBase())
+                put("deepseek_ocr2_model", getDeepSeekOCR2Model())
+                put("ocr_engine", getOCREngine())
+            })
+            
             // UI 配置
             put("ui", JSONObject().apply {
                 put("theme", getTheme().name)
@@ -268,6 +331,14 @@ class GalaxyConfig private constructor(private val context: Context) {
                 if (features.has("accessibility")) setAccessibilityEnabled(features.getBoolean("accessibility"))
                 if (features.has("floating_window")) setFloatingWindowEnabled(features.getBoolean("floating_window"))
                 if (features.has("auto_start")) setAutoStartEnabled(features.getBoolean("auto_start"))
+            }
+            
+            // AI/OCR 配置
+            json.optJSONObject("ai")?.let { ai ->
+                ai.optString("deepseek_ocr2_api_key", null)?.let { setDeepSeekOCR2ApiKey(it) }
+                ai.optString("deepseek_ocr2_api_base", null)?.let { setDeepSeekOCR2ApiBase(it) }
+                ai.optString("deepseek_ocr2_model", null)?.let { setDeepSeekOCR2Model(it) }
+                ai.optString("ocr_engine", null)?.let { setOCREngine(it) }
             }
             
             // UI 配置
