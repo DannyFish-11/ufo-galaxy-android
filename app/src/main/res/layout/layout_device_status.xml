@@ -1,0 +1,351 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+UFO Galaxy - 设备状态显示布局
+显示 Android 设备的各种硬件状态
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/bg_rounded_dark">
+
+    <!-- 标题 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="设备状态"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp"/>
+
+    <!-- 状态网格 -->
+    <GridLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:columnCount="3"
+        android:rowCount="3"
+        android:alignmentMode="alignBounds">
+
+        <!-- 摄像头状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_camera"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_camera"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_camera"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="摄像头"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_camera_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="可用"
+                android:textColor="#4CAF50"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- 蓝牙状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_bluetooth"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_bluetooth"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_bluetooth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="蓝牙"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_bluetooth_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="关闭"
+                android:textColor="#F44336"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- NFC 状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_nfc"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_nfc"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_nfc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="NFC"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_nfc_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="不支持"
+                android:textColor="#888888"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- WiFi 状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_wifi"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_wifi"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_wifi"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="WiFi"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_wifi_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="未连接"
+                android:textColor="#F44336"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- 音频状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_audio"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_mic"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_audio"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="音频"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_audio_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="正常"
+                android:textColor="#4CAF50"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- 电池状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_battery"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_battery"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_battery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="电池"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_battery_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="100%"
+                android:textColor="#4CAF50"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- 服务器连接状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_server"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_cloud"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_server"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="服务器"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_server_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="未连接"
+                android:textColor="#F44336"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- 传感器状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_sensor"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_sensors"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_sensor"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="传感器"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_sensor_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="5/5"
+                android:textColor="#4CAF50"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+        <!-- 节点状态 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp">
+            
+            <ImageView
+                android:id="@+id/icon_nodes"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_hub"
+                android:tint="#888888"/>
+            
+            <TextView
+                android:id="@+id/text_nodes"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="节点"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/text_nodes_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0/113"
+                android:textColor="#888888"
+                android:textSize="10sp"/>
+        </LinearLayout>
+
+    </GridLayout>
+
+    <!-- 最后更新时间 -->
+    <TextView
+        android:id="@+id/text_last_updated"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="最后更新: --"
+        android:textColor="#666666"
+        android:textSize="10sp"
+        android:layout_marginTop="8dp"
+        android:layout_gravity="end"/>
+
+</LinearLayout>
