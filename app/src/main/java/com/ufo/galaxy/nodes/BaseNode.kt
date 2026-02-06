@@ -32,6 +32,29 @@ abstract class BaseNode(
     open fun shutdown() {
         Log.i(TAG, "Node $nodeId ($name) shutdown")
     }
+    
+    /**
+     * 获取节点能力列表
+     */
+    open fun getCapabilities(): List<String> = emptyList()
+    
+    /**
+     * 执行节点操作
+     */
+    open suspend fun execute(action: String, params: JSONObject): NodeResult {
+        val request = JSONObject().apply {
+            put("action", action)
+            params.keys().forEach { key ->
+                put(key, params.get(key))
+            }
+        }
+        val result = handle(request)
+        return if (result.optBoolean("success", false)) {
+            NodeResult.success(result)
+        } else {
+            NodeResult.error(result.optString("error", "Unknown error"))
+        }
+    }
 }
 
 /**

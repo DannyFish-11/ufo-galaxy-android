@@ -2,12 +2,12 @@ package com.ufo.galaxy.webrtc
 
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjection
 import android.util.Log
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import org.webrtc.*
 import com.ufo.galaxy.network.DeviceManager
-import com.ufo.galaxy.network.AIPMessage
 
 /**
  * WebRTC 管理器
@@ -19,8 +19,8 @@ import com.ufo.galaxy.network.AIPMessage
  * 4. 协调 ScreenCaptureService
  * 
  * @author Manus AI
- * @version 2.0
- * @date 2026-01-24
+ * @version 2.1
+ * @date 2026-02-05
  */
 class WebRTCManager(private val context: Context) {
     
@@ -124,6 +124,14 @@ class WebRTCManager(private val context: Context) {
             override fun onStop() {
                 Log.i(TAG, "Screen capture stopped")
             }
+            
+            override fun onCapturedContentResize(width: Int, height: Int) {
+                Log.i(TAG, "Screen capture resized: ${width}x${height}")
+            }
+            
+            override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+                Log.i(TAG, "Screen capture visibility changed: $isVisible")
+            }
         })
     }
     
@@ -141,6 +149,10 @@ class WebRTCManager(private val context: Context) {
                 override fun onIceCandidate(iceCandidate: IceCandidate) {
                     Log.i(TAG, "ICE Candidate: ${iceCandidate.sdp}")
                     sendIceCandidate(iceCandidate)
+                }
+                
+                override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {
+                    Log.i(TAG, "ICE Candidates removed")
                 }
                 
                 override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
@@ -202,16 +214,17 @@ class WebRTCManager(private val context: Context) {
      * 发送 Offer 到 Gateway
      */
     private fun sendOffer(sessionDescription: SessionDescription) {
-        val message = AIPMessage.createCustomMessage(
-            deviceId = deviceManager?.getDeviceId() ?: "unknown",
-            messageType = "webrtc_offer",
-            data = mapOf(
-                "type" to "offer",
-                "sdp" to sessionDescription.description
-            )
-        )
+        val deviceId = deviceManager?.deviceId ?: "unknown"
+        val message = JSONObject().apply {
+            put("type", "webrtc_offer")
+            put("device_id", deviceId)
+            put("data", JSONObject().apply {
+                put("type", "offer")
+                put("sdp", sessionDescription.description)
+            })
+        }
         
-        deviceManager?.sendMessage(message)
+        deviceManager?.sendRawMessage(message.toString())
         Log.i(TAG, "Offer sent to Gateway")
     }
     
@@ -219,18 +232,19 @@ class WebRTCManager(private val context: Context) {
      * 发送 ICE Candidate 到 Gateway
      */
     private fun sendIceCandidate(iceCandidate: IceCandidate) {
-        val message = AIPMessage.createCustomMessage(
-            deviceId = deviceManager?.getDeviceId() ?: "unknown",
-            messageType = "webrtc_ice_candidate",
-            data = mapOf(
-                "type" to "ice_candidate",
-                "candidate" to iceCandidate.sdp,
-                "sdpMid" to iceCandidate.sdpMid,
-                "sdpMLineIndex" to iceCandidate.sdpMLineIndex
-            )
-        )
+        val deviceId = deviceManager?.deviceId ?: "unknown"
+        val message = JSONObject().apply {
+            put("type", "webrtc_ice_candidate")
+            put("device_id", deviceId)
+            put("data", JSONObject().apply {
+                put("type", "ice_candidate")
+                put("candidate", iceCandidate.sdp)
+                put("sdpMid", iceCandidate.sdpMid)
+                put("sdpMLineIndex", iceCandidate.sdpMLineIndex)
+            })
+        }
         
-        deviceManager?.sendMessage(message)
+        deviceManager?.sendRawMessage(message.toString())
         Log.i(TAG, "ICE Candidate sent to Gateway")
     }
     
@@ -327,16 +341,17 @@ class WebRTCManager(private val context: Context) {
      * 发送 Answer 到 Gateway
      */
     private fun sendAnswer(sessionDescription: SessionDescription) {
-        val message = AIPMessage.createCustomMessage(
-            deviceId = deviceManager?.getDeviceId() ?: "unknown",
-            messageType = "webrtc_answer",
-            data = mapOf(
-                "type" to "answer",
-                "sdp" to sessionDescription.description
-            )
-        )
+        val deviceId = deviceManager?.deviceId ?: "unknown"
+        val message = JSONObject().apply {
+            put("type", "webrtc_answer")
+            put("device_id", deviceId)
+            put("data", JSONObject().apply {
+                put("type", "answer")
+                put("sdp", sessionDescription.description)
+            })
+        }
         
-        deviceManager?.sendMessage(message)
+        deviceManager?.sendRawMessage(message.toString())
         Log.i(TAG, "Answer sent to Gateway")
     }
     

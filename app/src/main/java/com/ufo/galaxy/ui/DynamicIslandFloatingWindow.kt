@@ -12,8 +12,9 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import androidx.cardview.widget.CardView
 import com.ufo.galaxy.R
-import com.ufo.galaxy.network.WebSocketClient
+import com.ufo.galaxy.network.DeviceManager
 import kotlinx.coroutines.*
+import org.json.JSONObject
 
 /**
  * UFO Galaxy - Dynamic Island Style Floating Window
@@ -48,164 +49,150 @@ class DynamicIslandFloatingWindow(private val context: Context) {
     private lateinit var statActive: TextView
     private lateinit var statHealth: TextView
     
-    // WebSocket Client
-    private var wsClient: WebSocketClient? = null
+    // Network
+    private var deviceManager: DeviceManager? = null
     
     fun show() {
-        if (::floatingView.isInitialized) return
+        val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        floatingView = inflater.inflate(R.layout.floating_window_dynamic_island, null)
         
-        // Inflate layout
-        floatingView = LayoutInflater.from(context).inflate(
-            R.layout.floating_window_dynamic_island,
-            null
-        )
-        
-        // Initialize views
-        initializeViews()
-        
-        // Setup window parameters
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                WindowManager.LayoutParams.TYPE_PHONE
-            },
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
-        
-        params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        
-        // Add view to window
-        windowManager.addView(floatingView, params)
-        
-        // Setup listeners
+        initViews()
         setupListeners()
+        
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = 50
+        }
+        
+        windowManager.addView(floatingView, params)
         
         // Connect to server
         connectToServer()
-        
-        // Start status updates
-        startStatusUpdates()
     }
     
-    private fun initializeViews() {
+    private fun initViews() {
         minimizedView = floatingView.findViewById(R.id.floating_minimized)
         expandedView = floatingView.findViewById(R.id.floating_expanded)
-        
         statusDot = floatingView.findViewById(R.id.status_dot)
         statusDotExpanded = floatingView.findViewById(R.id.status_dot_expanded)
         activityIndicator = floatingView.findViewById(R.id.activity_indicator)
         minimizedText = floatingView.findViewById(R.id.minimized_text)
-        
         inputText = floatingView.findViewById(R.id.input_text)
         btnVoiceInput = floatingView.findViewById(R.id.btn_voice_input)
         btnSend = floatingView.findViewById(R.id.btn_send)
         btnMinimize = floatingView.findViewById(R.id.btn_minimize)
-        
         statNodes = floatingView.findViewById(R.id.stat_nodes)
         statActive = floatingView.findViewById(R.id.stat_active)
         statHealth = floatingView.findViewById(R.id.stat_health)
+        
+        // Initial state
+        expandedView.visibility = View.GONE
+        minimizedView.visibility = View.VISIBLE
     }
     
     private fun setupListeners() {
-        // Toggle expand/minimize on tap
         minimizedView.setOnClickListener {
-            toggleExpanded()
+            expand()
         }
         
         btnMinimize.setOnClickListener {
-            toggleExpanded()
+            collapse()
         }
         
-        // Voice input
-        btnVoiceInput.setOnClickListener {
-            startVoiceInput()
-        }
-        
-        // Text input
         btnSend.setOnClickListener {
-            sendTextCommand()
+            val command = inputText.text.toString().trim()
+            if (command.isNotEmpty()) {
+                sendCommand(command)
+            }
         }
         
-        inputText.setOnEditorActionListener { _, _, _ ->
-            sendTextCommand()
-            true
+        btnVoiceInput.setOnClickListener {
+            // TODO: Implement voice input
+            Toast.makeText(context, "Voice input coming soon", Toast.LENGTH_SHORT).show()
         }
     }
     
-    private fun toggleExpanded() {
-        isExpanded = !isExpanded
+    private fun expand() {
+        if (isExpanded) return
+        isExpanded = true
         
-        if (isExpanded) {
-            // Expand animation
-            minimizedView.visibility = View.GONE
-            expandedView.visibility = View.VISIBLE
-            animateExpand()
+        // Animate expansion
+        minimizedView.animate()
+            .alpha(0f)
+            .setDuration(150)
+            .withEndAction {
+                minimizedView.visibility = View.GONE
+                expandedView.visibility = View.VISIBLE
+                expandedView.alpha = 0f
+                expandedView.animate()
+                    .alpha(1f)
+                    .setDuration(200)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            .start()
+        
+        // Update window params to allow focus
+        updateWindowParams(true)
+    }
+    
+    private fun collapse() {
+        if (!isExpanded) return
+        isExpanded = false
+        
+        // Animate collapse
+        expandedView.animate()
+            .alpha(0f)
+            .setDuration(150)
+            .withEndAction {
+                expandedView.visibility = View.GONE
+                minimizedView.visibility = View.VISIBLE
+                minimizedView.alpha = 0f
+                minimizedView.animate()
+                    .alpha(1f)
+                    .setDuration(200)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            .start()
+        
+        // Update window params to not focusable
+        updateWindowParams(false)
+    }
+    
+    private fun updateWindowParams(focusable: Boolean) {
+        val params = floatingView.layoutParams as WindowManager.LayoutParams
+        params.flags = if (focusable) {
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         } else {
-            // Minimize animation
-            expandedView.visibility = View.GONE
-            minimizedView.visibility = View.VISIBLE
-            animateMinimize()
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         }
+        windowManager.updateViewLayout(floatingView, params)
     }
     
-    private fun animateExpand() {
-        val animator = ValueAnimator.ofFloat(0f, 1f)
-        animator.duration = 300
-        animator.interpolator = DecelerateInterpolator()
-        animator.addUpdateListener { animation ->
-            val value = animation.animatedValue as Float
-            expandedView.alpha = value
-            expandedView.scaleX = 0.9f + (0.1f * value)
-            expandedView.scaleY = 0.9f + (0.1f * value)
-        }
-        animator.start()
-    }
-    
-    private fun animateMinimize() {
-        val animator = ValueAnimator.ofFloat(0f, 1f)
-        animator.duration = 200
-        animator.interpolator = DecelerateInterpolator()
-        animator.addUpdateListener { animation ->
-            val value = animation.animatedValue as Float
-            minimizedView.alpha = value
-            minimizedView.scaleX = 0.8f + (0.2f * value)
-            minimizedView.scaleY = 0.8f + (0.2f * value)
-        }
-        animator.start()
-    }
-    
-    private fun startVoiceInput() {
-        // TODO: Implement voice recognition
-        Toast.makeText(context, "Voice input starting...", Toast.LENGTH_SHORT).show()
-        showActivity(true)
-        
-        // Simulate voice processing
-        scope.launch {
-            delay(2000)
-            showActivity(false)
-        }
-    }
-    
-    private fun sendTextCommand() {
-        val command = inputText.text.toString().trim()
-        if (command.isEmpty()) return
-        
+    private fun sendCommand(command: String) {
         showActivity(true)
         
         // Send command to server
         scope.launch {
             try {
-                wsClient?.sendMessage(mapOf(
-                    "message_type" to "COMMAND",
-                    "command" to command,
-                    "source" to "android_floating_window"
-                ))
+                val message = JSONObject().apply {
+                    put("message_type", "COMMAND")
+                    put("command", command)
+                    put("source", "android_floating_window")
+                }
+                deviceManager?.sendRawMessage(message.toString())
                 
                 inputText.text.clear()
                 Toast.makeText(context, "Command sent", Toast.LENGTH_SHORT).show()
@@ -226,8 +213,9 @@ class DynamicIslandFloatingWindow(private val context: Context) {
             try {
                 // TODO: Get server URL from settings
                 val serverUrl = "ws://192.168.1.100:8765/android"
-                wsClient = WebSocketClient(serverUrl)
-                wsClient?.connect()
+                deviceManager = DeviceManager(context, serverUrl)
+                deviceManager?.initialize()
+                deviceManager?.connect()
                 
                 updateStatusDot(true)
             } catch (e: Exception) {
@@ -243,38 +231,27 @@ class DynamicIslandFloatingWindow(private val context: Context) {
             context.getColor(R.color.status_offline)
         }
         
-        statusDot.backgroundTintList = android.content.res.ColorStateList.valueOf(color)
-        statusDotExpanded.backgroundTintList = android.content.res.ColorStateList.valueOf(color)
+        statusDot.setBackgroundColor(color)
+        statusDotExpanded.setBackgroundColor(color)
     }
     
-    private fun startStatusUpdates() {
-        scope.launch {
-            while (isActive) {
-                updateStats()
-                delay(5000) // Update every 5 seconds
-            }
-        }
+    fun updateStats(nodes: Int, active: Int, health: Int) {
+        statNodes.text = "$nodes"
+        statActive.text = "$active"
+        statHealth.text = "$health%"
     }
     
-    private fun updateStats() {
-        // TODO: Get real stats from server
-        scope.launch {
-            try {
-                // Placeholder values
-                statNodes.text = "107"
-                statActive.text = "0"
-                statHealth.text = "100%"
-            } catch (e: Exception) {
-                // Handle error
-            }
-        }
+    fun updateStatus(text: String) {
+        minimizedText.text = text
     }
     
     fun hide() {
-        if (::floatingView.isInitialized) {
+        try {
             windowManager.removeView(floatingView)
+        } catch (e: Exception) {
+            // View might not be attached
         }
         scope.cancel()
-        wsClient?.disconnect()
+        deviceManager?.cleanup()
     }
 }

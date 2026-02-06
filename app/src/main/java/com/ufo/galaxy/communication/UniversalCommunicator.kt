@@ -26,6 +26,21 @@ import kotlin.coroutines.suspendCoroutine
 private const val TAG = "UniversalCommunicator"
 
 /**
+ * Helper function to convert JSONObject to Map
+ */
+private fun jsonObjectToMap(json: JSONObject): Map<String, Any> {
+    val map = mutableMapOf<String, Any>()
+    val keys = json.keys()
+    while (keys.hasNext()) {
+        val key = keys.next()
+        if (key !in setOf("message_id", "source_id", "target_id", "priority")) {
+            map[key] = json.get(key)
+        }
+    }
+    return map
+}
+
+/**
  * Node identity information
  */
 data class NodeIdentity(
@@ -75,14 +90,18 @@ data class UniversalMessage(
     val priority: Int = 5  // 1-10, lower = higher priority
 ) {
     fun toAIPMessage(): AIPMessageV3 {
+        val payloadJson = JSONObject()
+        payload.forEach { (key, value) ->
+            payloadJson.put(key, value)
+        }
+        payloadJson.put("message_id", messageId)
+        payloadJson.put("source_id", sourceId)
+        payloadJson.put("target_id", targetId)
+        payloadJson.put("priority", priority)
+        
         return AIPMessageV3(
             type = messageType,
-            payload = payload + mapOf(
-                "message_id" to messageId,
-                "source_id" to sourceId,
-                "target_id" to targetId,
-                "priority" to priority
-            ),
+            payload = payloadJson,
             deviceId = sourceId
         )
     }
@@ -92,12 +111,12 @@ data class UniversalMessage(
             val payload = message.payload
             return UniversalMessage(
                 messageType = message.type,
-                sourceId = payload["source_id"] as? String ?: message.deviceId,
-                targetId = payload["target_id"] as? String ?: "*",
-                payload = payload - setOf("message_id", "source_id", "target_id", "priority"),
-                messageId = payload["message_id"] as? String ?: UUID.randomUUID().toString(),
+                sourceId = payload.optString("source_id", message.deviceId),
+                targetId = payload.optString("target_id", "*"),
+                payload = jsonObjectToMap(payload),
+                messageId = payload.optString("message_id", UUID.randomUUID().toString()),
                 timestamp = message.timestamp,
-                priority = (payload["priority"] as? Number)?.toInt() ?: 5
+                priority = payload.optInt("priority", 5)
             )
         }
     }
@@ -420,7 +439,7 @@ class UniversalCommunicator(
             val deferred = CompletableDeferred<Map<String, Any>?>()
             pendingResponses[message.messageId] = deferred
 
-            webSocketClient.send(aipMessage)
+            webSocketClient.sendMessage(aipMessage.toJSON())
 
             try {
                 withTimeout(timeout) {
@@ -432,7 +451,7 @@ class UniversalCommunicator(
                 null
             }
         } else {
-            webSocketClient.send(aipMessage)
+            webSocketClient.sendMessage(aipMessage.toJSON())
             mapOf("success" to true, "message_id" to message.messageId)
         }
     }

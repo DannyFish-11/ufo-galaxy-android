@@ -230,7 +230,7 @@ class SetupActivity : AppCompatActivity() {
                 
                 // 测试连接
                 val coreManager = UFOGalaxyApplication.getInstance().getCoreManager()
-                val result = coreManager.initialize(serverUrl)
+                val result = coreManager.initialize()
                 
                 withContext(Dispatchers.Main) {
                     if (result.isSuccess) {

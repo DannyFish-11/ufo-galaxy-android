@@ -90,6 +90,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startFloatingWindow() {
+        val intent = Intent(this, FloatingWindowService::class.java)
+        startForegroundService(intent)
+        Toast.makeText(this, "悬浮窗口已启动", Toast.LENGTH_SHORT).show()
+    }
+
     private fun registerDevice() {
         val node50Url = node50UrlInput.text.toString().ifEmpty { "http://192.168.1.100:8050" }
         

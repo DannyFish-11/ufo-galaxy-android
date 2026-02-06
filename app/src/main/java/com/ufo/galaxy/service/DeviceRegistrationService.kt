@@ -36,13 +36,13 @@ class DeviceRegistrationService(private val context: Context) {
     private var isRegistered = false
 
     // 设备信息
-    private val deviceId: String by lazy {
+    private val _deviceId: String by lazy {
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
     }
 
     private val deviceInfo: JSONObject by lazy {
         JSONObject().apply {
-            put("device_id", "Android_${deviceId}")
+            put("device_id", "Android_${_deviceId}")
             put("device_type", "Android")
             put("os_version", "Android ${Build.VERSION.RELEASE}")
             put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -131,7 +131,7 @@ class DeviceRegistrationService(private val context: Context) {
             try {
                 val url = "$node50Url/api/heartbeat"
                 val json = JSONObject().apply {
-                    put("device_id", "Android_${deviceId}")
+                    put("device_id", "Android_${_deviceId}")
                     put("status", "online")
                     put("timestamp", System.currentTimeMillis())
                 }.toString()
@@ -165,7 +165,7 @@ class DeviceRegistrationService(private val context: Context) {
 
                 val url = "$node50Url/api/unregister_device"
                 val json = JSONObject().apply {
-                    put("device_id", "Android_${deviceId}")
+                    put("device_id", "Android_${_deviceId}")
                 }.toString()
 
                 val body = json.toRequestBody("application/json".toMediaType())
@@ -195,7 +195,7 @@ class DeviceRegistrationService(private val context: Context) {
     /**
      * 获取设备 ID
      */
-    fun getDeviceId(): String = "Android_${deviceId}"
+    fun getDeviceId(): String = "Android_${_deviceId}"
 
     /**
      * 检查是否已注册

@@ -15,7 +15,7 @@ import org.json.JSONObject
  * 与服务端 Node_33 对齐
  */
 class ScreenCaptureNode(context: Context) : BaseNode(context, "33", "ScreenCapture") {
-    fun getCapabilities() = listOf("screen_capture", "screenshot", "screen_record")
+    override fun getCapabilities() = listOf("screen_capture", "screenshot", "screen_record")
 
     override suspend fun handle(request: JSONObject): JSONObject {
         val action = request.optString("action", "capture")
@@ -28,7 +28,7 @@ class ScreenCaptureNode(context: Context) : BaseNode(context, "33", "ScreenCaptu
         }
     }
 
-    suspend fun execute(action: String, params: JSONObject): NodeResult {
+    override suspend fun execute(action: String, params: JSONObject): NodeResult {
         return when (action) {
             "capture" -> captureScreen(params)
             "start_record" -> startRecording(params)
@@ -64,14 +64,14 @@ class ScreenCaptureNode(context: Context) : BaseNode(context, "33", "ScreenCaptu
  * 与服务端 Node_35 对齐
  */
 class AccessibilityNode(context: Context) : BaseNode(context, "35", "Accessibility") {
-    fun getCapabilities() = listOf("accessibility", "ui_automation", "gesture", "text_input")
+    override fun getCapabilities() = listOf("accessibility", "ui_automation", "gesture", "text_input")
 
     override suspend fun handle(request: JSONObject): JSONObject {
         val action = request.optString("action", "")
         return execute(action, request).toJson()
     }
 
-    suspend fun execute(action: String, params: JSONObject): NodeResult {
+    override suspend fun execute(action: String, params: JSONObject): NodeResult {
         return when (action) {
             "click" -> performClick(params)
             "input_text" -> inputText(params)
@@ -135,14 +135,14 @@ class AccessibilityNode(context: Context) : BaseNode(context, "35", "Accessibili
  * 与服务端 Node_36 对齐
  */
 class InputInjectionNode(context: Context) : BaseNode(context, "36", "InputInjection") {
-    fun getCapabilities() = listOf("input_injection", "key_event", "touch_event")
+    override fun getCapabilities() = listOf("input_injection", "key_event", "touch_event")
 
     override suspend fun handle(request: JSONObject): JSONObject {
         val action = request.optString("action", "")
         return execute(action, request).toJson()
     }
 
-    suspend fun execute(action: String, params: JSONObject): NodeResult {
+    override suspend fun execute(action: String, params: JSONObject): NodeResult {
         return when (action) {
             "tap" -> performTap(params)
             "swipe" -> performSwipe(params)
@@ -206,14 +206,14 @@ class InputInjectionNode(context: Context) : BaseNode(context, "36", "InputInjec
  * 与服务端 Node_37 对齐
  */
 class AppManagerNode(context: Context) : BaseNode(context, "37", "AppManager") {
-    fun getCapabilities() = listOf("app_manager", "install", "uninstall", "launch", "list_apps")
+    override fun getCapabilities() = listOf("app_manager", "install", "uninstall", "launch", "list_apps")
 
     override suspend fun handle(request: JSONObject): JSONObject {
         val action = request.optString("action", "")
         return execute(action, request).toJson()
     }
 
-    suspend fun execute(action: String, params: JSONObject): NodeResult {
+    override suspend fun execute(action: String, params: JSONObject): NodeResult {
         return when (action) {
             "launch" -> launchApp(params)
             "list" -> listApps(params)
@@ -302,14 +302,14 @@ class AppManagerNode(context: Context) : BaseNode(context, "37", "AppManager") {
  * 与服务端 Node_38 对齐
  */
 class NotificationNode(context: Context) : BaseNode(context, "38", "Notification") {
-    fun getCapabilities() = listOf("notification", "read_notifications", "dismiss_notification")
+    override fun getCapabilities() = listOf("notification", "read_notifications", "dismiss_notification")
 
     override suspend fun handle(request: JSONObject): JSONObject {
         val action = request.optString("action", "")
         return execute(action, request).toJson()
     }
 
-    suspend fun execute(action: String, params: JSONObject): NodeResult {
+    override suspend fun execute(action: String, params: JSONObject): NodeResult {
         return when (action) {
             "list" -> listNotifications()
             "dismiss" -> dismissNotification(params)

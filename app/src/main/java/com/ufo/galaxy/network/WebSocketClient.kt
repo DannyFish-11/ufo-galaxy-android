@@ -101,7 +101,7 @@ class WebSocketClient(
             }
             
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                Log.d(TAG, "Received binary message: ${bytes.size()} bytes")
+                Log.d(TAG, "Received binary message: ${bytes.size} bytes")
                 // 处理二进制消息（多媒体传输）
                 // 将二进制数据转换为 Base64 并封装为 JSON
                 try {
@@ -112,9 +112,9 @@ class WebSocketClient(
                     val jsonMessage = org.json.JSONObject().apply {
                         put("type", "binary_data")
                         put("data", base64Data)
-                        put("size", bytes.size())
+                        put("size", bytes.size)
                     }
-                    onMessageReceived(jsonMessage.toString())
+                    onMessageReceived(jsonMessage)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process binary message", e)
                 }
@@ -172,6 +172,20 @@ class WebSocketClient(
         val text = message.toString()
         Log.d(TAG, "Sending message: ${text.take(100)}")
         return ws.send(text)
+    }
+    
+    /**
+     * 发送原始消息
+     */
+    fun sendRawMessage(message: String): Boolean {
+        val ws = webSocket
+        if (ws == null || currentState != ConnectionState.CONNECTED) {
+            Log.w(TAG, "Cannot send message: not connected")
+            return false
+        }
+        
+        Log.d(TAG, "Sending raw message: ${message.take(100)}")
+        return ws.send(message)
     }
     
     /**

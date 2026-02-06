@@ -9,8 +9,9 @@ import android.view.*
 import android.widget.*
 import androidx.core.content.ContextCompat
 import com.ufo.galaxy.R
+import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.network.DeviceManager
-import com.ufo.galaxy.network.AIPMessage
+import com.ufo.galaxy.protocol.AIPMessage
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import android.util.Log
@@ -464,7 +465,7 @@ class FloatingWindowService : Service() {
         
         // 在 UI 上显示任务通知
         scope.launch {
-            addHistory("[任务] $taskType: ${result.optString("status")}")
+            addToHistory("[任务] $taskType: ${result.optString("status")}")
         }
     }
     
@@ -486,7 +487,7 @@ class FloatingWindowService : Service() {
         
         // 在 UI 上显示命令通知
         scope.launch {
-            addHistory("[命令] $commandType: ${result.optString("status")}")
+            addToHistory("[命令] $commandType: ${result.optString("status")}")
         }
     }
     

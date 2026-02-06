@@ -35,11 +35,16 @@ class UFOGalaxyApplication : Application() {
         const val CHANNEL_ALERT = "ufo_galaxy_alert"
         
         @Volatile
-        private var instance: UFOGalaxyApplication? = null
+        private lateinit var _instance: UFOGalaxyApplication
         
+        @JvmStatic
         fun getInstance(): UFOGalaxyApplication {
-            return instance ?: throw IllegalStateException("Application not initialized")
+            return _instance
         }
+        
+        @get:JvmName("getInstanceProperty")
+        val instance: UFOGalaxyApplication
+            get() = _instance
     }
 
     // 核心管理器
@@ -48,12 +53,17 @@ class UFOGalaxyApplication : Application() {
     // 配置
     private lateinit var config: GalaxyConfig
     
+    // AgentCore 实例（用于向后兼容）
+    val agentCore: com.ufo.galaxy.core.AgentCore by lazy {
+        com.ufo.galaxy.core.AgentCore.getInstance(this)
+    }
+    
     // 协程作用域
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
+        _instance = this
         
         Log.i(TAG, "UFO Galaxy Application starting...")
         
@@ -180,7 +190,7 @@ class UFOGalaxyApplication : Application() {
             try {
                 val serverUrl = config.getServerUrl()
                 if (serverUrl.isNotEmpty()) {
-                    val result = coreManager.initialize(serverUrl)
+                    val result = coreManager.initialize()
                     if (result.isSuccess) {
                         Log.i(TAG, "Core manager initialized successfully")
                     } else {

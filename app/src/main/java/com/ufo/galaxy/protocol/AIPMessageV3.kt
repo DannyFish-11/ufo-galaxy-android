@@ -148,6 +148,14 @@ enum class MessageType(val value: String) {
     COORD_LOCK("coord_lock"),
     COORD_UNLOCK("coord_unlock"),
     
+    // === 节点管理 ===
+    NODE_ACTIVATE("node_activate"),
+    NODE_WAKEUP("node_wakeup"),
+    NODE_SLEEP("node_sleep"),
+    
+    // === 事件广播 ===
+    EVENT_BROADCAST("event_broadcast"),
+    
     // === 错误处理 ===
     ERROR("error"),
     ERROR_RECOVERY("error_recovery");
@@ -559,3 +567,6 @@ data class AIPMessageV3(
         }
     }
 }
+
+// 类型别名，用于向后兼容
+typealias AIPMessage = AIPMessageV3

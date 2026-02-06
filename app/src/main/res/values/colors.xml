@@ -1,8 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 基础颜色 -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="dark_gray">#FF2A2A2A</color>
     <color name="medium_gray">#FF1A1A1A</color>
     <color name="light_gray">#FFCCCCCC</color>
+    
+    <!-- 状态颜色 -->
+    <color name="status_online">#FF4CAF50</color>
+    <color name="status_offline">#FFF44336</color>
+    <color name="status_warning">#FFFFC107</color>
+    <color name="status_disabled">#FF9E9E9E</color>
+    
+    <!-- 文本颜色 -->
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#B3FFFFFF</color>
+    <color name="text_tertiary">#66FFFFFF</color>
+    
+    <!-- 强调色 -->
+    <color name="accent_blue">#FF2196F3</color>
+    <color name="accent_green">#FF4CAF50</color>
+    <color name="accent_red">#FFF44336</color>
+    
+    <!-- 背景颜色 -->
+    <color name="island_bg">#E6000000</color>
+    <color name="floating_bg">#CC1A1A1A</color>
+    <color name="glass_bg">#4D1A1A1A</color>
+    <color name="glass_border">#33FFFFFF</color>
+    
+    <!-- 渐变颜色 -->
+    <color name="gradient_start">#FF000000</color>
+    <color name="gradient_end">#FF2A2A2A</color>
 </resources>

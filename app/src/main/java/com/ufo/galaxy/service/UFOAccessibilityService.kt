@@ -26,23 +26,22 @@ import kotlin.coroutines.suspendCoroutine
  */
 class UFOAccessibilityService : AccessibilityService() {
 
-     companion object {
+    companion object {
         private const val TAG = "UFOAccessibilityService"
         
         @Volatile
         private var instance: UFOAccessibilityService? = null
         
         fun getInstance(): UFOAccessibilityService? = instance
-    }
-    
-    // 截图辅助类
-    private lateinit var screenshotHelper: com.ufo.galaxy.utils.ScreenshotHelper
         
         /**
          * 检查服务是否已启用
          */
         fun isEnabled(): Boolean = instance != null
     }
+    
+    // 截图辅助类
+    private lateinit var screenshotHelper: com.ufo.galaxy.utils.ScreenshotHelper
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -61,6 +60,7 @@ class UFOAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                     Log.d(TAG, "View clicked: ${it.text}")
                 }
+                else -> {}
             }
         }
     }
@@ -489,13 +489,12 @@ class UFOAccessibilityService : AccessibilityService() {
         return performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
     }
 
-    /**
+     /**
      * 打开快速设置
      */
     fun performQuickSettings(): Boolean {
         return performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
     }
-}
 
     // ============================================================================
     // 截图功能
@@ -514,33 +513,33 @@ class UFOAccessibilityService : AccessibilityService() {
                         val (width, height) = screenshotHelper.getScreenSize()
                         
                         callback(org.json.JSONObject().apply {
-                            put("success", true)
-                            put("image", base64)
-                            put("width", width)
-                            put("height", height)
-                            put("format", "jpeg")
-                            put("timestamp", System.currentTimeMillis())
+                            put("success", true as Any)
+                            put("image", base64 as Any)
+                            put("width", width as Any)
+                            put("height", height as Any)
+                            put("format", "jpeg" as Any)
+                            put("timestamp", System.currentTimeMillis() as Any)
                         })
                         
                         bitmap.recycle()
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to process screenshot", e)
                         callback(org.json.JSONObject().apply {
-                            put("success", false)
-                            put("error", e.message)
+                            put("success", false as Any)
+                            put("error", (e.message ?: "Unknown error") as Any)
                         })
                     }
                 } else {
                     callback(org.json.JSONObject().apply {
-                        put("success", false)
-                        put("error", "Failed to take screenshot")
+                        put("success", false as Any)
+                        put("error", "Failed to take screenshot" as Any)
                     })
                 }
             }
         } else {
             callback(org.json.JSONObject().apply {
-                put("success", false)
-                put("error", "Screenshot requires Android 11+ (API 30+)")
+                put("success", false as Any)
+                put("error", "Screenshot requires Android 11+ (API 30+)" as Any)
             })
         }
     }
@@ -557,32 +556,32 @@ class UFOAccessibilityService : AccessibilityService() {
                         val (width, height) = screenshotHelper.getScreenSize()
                         
                         callback(org.json.JSONObject().apply {
-                            put("success", success)
-                            put("file_path", filePath)
-                            put("width", width)
-                            put("height", height)
-                            put("timestamp", System.currentTimeMillis())
+                            put("success", success as Any)
+                            put("file_path", filePath as Any)
+                            put("width", width as Any)
+                            put("height", height as Any)
+                            put("timestamp", System.currentTimeMillis() as Any)
                         })
                         
                         bitmap.recycle()
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to save screenshot", e)
                         callback(org.json.JSONObject().apply {
-                            put("success", false)
-                            put("error", e.message)
+                            put("success", false as Any)
+                            put("error", (e.message ?: "Unknown error") as Any)
                         })
                     }
                 } else {
                     callback(org.json.JSONObject().apply {
-                        put("success", false)
-                        put("error", "Failed to take screenshot")
+                        put("success", false as Any)
+                        put("error", "Failed to take screenshot" as Any)
                     })
                 }
             }
         } else {
             callback(org.json.JSONObject().apply {
-                put("success", false)
-                put("error", "Screenshot requires Android 11+ (API 30+)")
+                put("success", false as Any)
+                put("error", "Screenshot requires Android 11+ (API 30+)" as Any)
             })
         }
     }

@@ -1,5 +1,10 @@
 package com.ufo.galaxy.network
 
+import com.ufo.galaxy.protocol.AIPMessage
+import com.ufo.galaxy.protocol.MessageType
+import com.ufo.galaxy.protocol.TaskStatus
+import com.ufo.galaxy.protocol.ResultStatus
+
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
@@ -25,11 +30,27 @@ class DeviceManager(
     private val gatewayUrl: String
 ) {
     
+    companion object {
+        @Volatile
+        private var instance: DeviceManager? = null
+        
+        fun getInstance(context: Context): DeviceManager {
+            return instance ?: synchronized(this) {
+                instance ?: DeviceManager(
+                    context.applicationContext,
+                    "ws://localhost:8765/ws"
+                ).also { instance = it }
+            }
+        }
+    }
+    
     private val TAG = "DeviceManager"
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
     private var webSocketClient: WebSocketClient? = null
-    private var deviceId: String = ""
+    private var _deviceId: String = ""
+    val deviceId: String
+        get() = _deviceId
     
     @Volatile
     private var isRegistered = false
@@ -40,7 +61,7 @@ class DeviceManager(
      * 初始化
      */
     fun initialize() {
-        deviceId = getDeviceId()
+        _deviceId = generateDeviceId()
         Log.i(TAG, "Device ID: $deviceId")
         
         webSocketClient = WebSocketClient(
@@ -88,6 +109,13 @@ class DeviceManager(
     }
     
     /**
+     * 发送原始消息
+     */
+    fun sendRawMessage(message: String): Boolean {
+        return webSocketClient?.sendRawMessage(message) ?: false
+    }
+    
+    /**
      * 处理接收到的消息
      */
     private fun handleMessage(message: JSONObject) {
@@ -100,16 +128,16 @@ class DeviceManager(
         Log.d(TAG, "Received message type: ${aipMessage.type.value}")
         
         when (aipMessage.type) {
-            AIPMessage.MessageType.DEVICE_REGISTER_ACK -> {
+            MessageType.DEVICE_REGISTER_ACK -> {
                 handleDeviceRegisterAck(aipMessage)
             }
-            AIPMessage.MessageType.HEARTBEAT_ACK -> {
+            MessageType.DEVICE_HEARTBEAT_ACK -> {
                 Log.d(TAG, "Heartbeat acknowledged")
             }
-            AIPMessage.MessageType.TASK_REQUEST -> {
+            MessageType.TASK_ASSIGN -> {
                 handleTaskRequest(aipMessage)
             }
-            AIPMessage.MessageType.COMMAND -> {
+            MessageType.COMMAND -> {
                 handleCommand(aipMessage)
             }
             else -> {
@@ -164,11 +192,11 @@ class DeviceManager(
      */
     fun sendTaskResult(taskId: String, result: JSONObject) {
         val success = result.optString("status") == "success"
-        val responseMessage = AIPMessage.createTaskResponse(
+        val status = if (success) TaskStatus.COMPLETED else TaskStatus.FAILED
+        val responseMessage = AIPMessage.createTaskResult(
             deviceId = deviceId,
             taskId = taskId,
-            success = success,
-            result = result.toString()
+            status = status
         )
         sendMessage(responseMessage)
     }
@@ -196,10 +224,11 @@ class DeviceManager(
      */
     fun sendCommandResult(commandId: String, result: JSONObject) {
         val success = result.optString("status") == "success"
-        val responseMessage = AIPMessage.createCommandResponse(
+        val status = if (success) ResultStatus.SUCCESS else ResultStatus.FAILURE
+        val responseMessage = AIPMessage.createCommandResult(
             deviceId = deviceId,
             commandId = commandId,
-            success = success,
+            status = status,
             result = result.toString()
         )
         sendMessage(responseMessage)
@@ -230,26 +259,30 @@ class DeviceManager(
      */
     private fun registerTools() {
         // 注册 Android 控制工具
-        val toolMessage = AIPMessage.createToolRegister(
-            deviceId = deviceId,
-            toolName = "android_control",
-            toolType = "device_control",
-            capabilities = listOf(
+        val toolPayload = JSONObject().apply {
+            put("tool_name", "android_control")
+            put("tool_type", "device_control")
+            put("capabilities", org.json.JSONArray(listOf(
                 "screen_capture",
                 "input_control",
                 "accessibility",
                 "voice_input",
                 "app_management"
-            ),
-            endpoint = "local://android_control"
-        )
-        sendMessage(toolMessage)
+            )))
+            put("endpoint", "local://android_control")
+        }
+        val toolMessage = JSONObject().apply {
+            put("type", "tool_register")
+            put("device_id", deviceId)
+            put("payload", toolPayload)
+        }
+        webSocketClient?.sendMessage(toolMessage)
     }
     
     /**
      * 获取设备 ID
      */
-    private fun getDeviceId(): String {
+    private fun generateDeviceId(): String {
         return try {
             Settings.Secure.getString(
                 context.contentResolver,
@@ -293,5 +326,25 @@ class DeviceManager(
         disconnect()
         webSocketClient?.cleanup()
         scope.cancel()
+    }
+    
+    /**
+     * 发送设备状态
+     */
+    fun sendDeviceStatus(status: JSONObject) {
+        val statusMessage = JSONObject().apply {
+            put("type", "device_status")
+            put("device_id", deviceId)
+            put("status", status)
+            put("timestamp", System.currentTimeMillis())
+        }
+        webSocketClient?.sendMessage(statusMessage)
+    }
+    
+    /**
+     * 发送原始消息
+     */
+    fun sendRawMessage(message: JSONObject) {
+        webSocketClient?.sendMessage(message)
     }
 }

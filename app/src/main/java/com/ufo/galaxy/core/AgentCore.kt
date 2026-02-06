@@ -17,6 +17,17 @@ class AgentCore(private val context: Context) {
 
     companion object {
         private const val TAG = "AgentCore"
+        
+        @Volatile
+        private var instance: AgentCore? = null
+        
+        fun getInstance(context: Context): AgentCore {
+            return instance ?: synchronized(this) {
+                instance ?: AgentCore(context.applicationContext).also {
+                    instance = it
+                }
+            }
+        }
     }
 
     // 节点注册表

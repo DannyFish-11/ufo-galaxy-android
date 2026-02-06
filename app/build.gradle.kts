@@ -54,8 +54,8 @@ dependencies {
     // JSON
     implementation("org.json:json:20231013")
     
-    // WebRTC
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    // WebRTC (using Stream's WebRTC Android from Maven Central)
+    implementation("io.getstream:stream-webrtc-android:1.3.9")
     
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")

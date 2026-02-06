@@ -79,7 +79,7 @@ class AgentService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("UFO Galaxy Agent")
             .setContentText("Agent 正在运行")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }

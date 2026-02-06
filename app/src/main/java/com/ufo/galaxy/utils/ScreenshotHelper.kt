@@ -157,7 +157,7 @@ class ScreenshotHelper(private val context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Android 11+ 支持无障碍服务截图
             accessibilityService.takeScreenshot(
-                android.accessibilityservice.AccessibilityService.TAKE_SCREENSHOT_FULL_SCREEN,
+                0,  // TAKE_SCREENSHOT_FULL_SCREEN = 0
                 { command -> command.run() },
                 object : android.accessibilityservice.AccessibilityService.TakeScreenshotCallback {
                     override fun onSuccess(screenshot: android.accessibilityservice.AccessibilityService.ScreenshotResult) {
