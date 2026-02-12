@@ -6,13 +6,15 @@
 
 ---
 
-## 📝 **最新状态 (2026-01-24)**
+## 📝 **最新状态 (2026-02-11)**
 
-- **最新提交:** `05198cb Fix AndroidManifest: remove non-existent ui.FloatingWindowService`
-- **静态代码检查:** ✅ 通过
+- **最新提交:** `构建系统统一 - 移除重复 Groovy 文件，使用 Kotlin DSL`
+- **构建系统:** ✅ 已统一为 Kotlin DSL（移除 Groovy 构建文件冲突）
+- **代码质量:** ✅ 通过静态检查
 - **CI/CD 状态:** ✅ GitHub Actions 自动构建已启用
 - **自动构建:** 每次 push 和 PR 自动构建 Debug APK
 - **自动发布:** 打 tag 时自动发布到 GitHub Releases
+- **下一步计划:** A-2 轮次将进行协议对齐（AIP 协议版本统一）
 
 ---
 
@@ -164,11 +166,23 @@
 
 ## 构建与安装
 
+### 构建系统说明
+
+**v1.1.1 更新 (2026-02-11)**：项目已统一使用 Kotlin DSL 构建脚本。
+
+- ✅ **已移除**：重复的 Groovy 构建文件（`build.gradle`、`settings.gradle`）
+- ✅ **已保留**：Kotlin DSL 文件（`build.gradle.kts`、`settings.gradle.kts`）
+- ✅ **构建工具**：Gradle 8.2 + Android Gradle Plugin 8.2.0
+- ✅ **Kotlin 版本**：1.9.20
+
+这次清理解决了构建配置冲突问题，为后续协议对齐和功能开发打下了清晰的基础。
+
 ### 前置要求
 
 - Android Studio Hedgehog | 2023.1.1 或更高版本
 - Android SDK 34
 - Kotlin 1.9+
+- Gradle 8.2+ (项目已包含 wrapper)
 
 ### 构建步骤
 
@@ -221,6 +235,55 @@ git push origin v1.2.0
 
 # 4. GitHub Actions 将自动构建并发布到 Releases
 ```
+
+---
+
+## 配置说明
+
+### 连接配置
+
+UFO Galaxy Android 需要与主系统（PC Agent/Gateway）进行通信。以下是推荐的配置方式：
+
+#### 方式一：通过配置文件
+
+在设备上创建配置文件 `/sdcard/Android/data/com.ufo.galaxy/files/config.json`：
+
+```json
+{
+  "gateway_url": "http://your-server-ip:8000",
+  "mqtt_broker": "mqtt://your-server-ip:1883",
+  "device_id": "android-device-001",
+  "enable_webrtc": true
+}
+```
+
+#### 方式二：通过 App 设置界面
+
+在 App 中配置以下参数：
+
+| 配置项 | 说明 | 示例值 |
+|--------|------|--------|
+| Gateway URL | 主系统网关地址 | `http://192.168.1.100:8000` |
+| MQTT Broker | MQTT 消息代理 | `mqtt://192.168.1.100:1883` |
+| Device ID | 设备唯一标识 | `android-device-001` |
+| WebRTC | 屏幕共享支持 | `启用/禁用` |
+
+#### 关于 AIP 协议版本
+
+**重要说明**：当前 Android 端使用的协议版本将在后续轮次中与主系统统一。本轮重点是确保构建系统清晰、代码可编译。
+
+- **当前版本**：使用自定义消息格式进行通信
+- **计划升级**：将在 A-2 轮次中对齐到主系统的 AIP 协议规范
+- **兼容性**：现有功能不受影响，升级时会保持向后兼容
+
+### 与主系统对齐
+
+为了与 PC 主 Agent 正确协同工作，请确保：
+
+1. **网络连通性**：Android 设备与主系统在同一网络或可互相访问
+2. **端口开放**：确保防火墙允许配置的端口（默认 8000, 1883）
+3. **协议版本**：当前使用基础协议，后续将统一为 AIP 协议
+4. **设备注册**：首次连接时会自动向主系统注册设备
 
 ---
 
