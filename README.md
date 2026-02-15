@@ -299,3 +299,23 @@ export MASTER_URL="ws://master-host:8765"
 | Linux | `python register_device.py` |
 | macOS | `python register_device.py` |
 
+
+---
+
+## 🖥️ 可视化管理
+
+### 服务端界面
+
+| 界面 | 地址 |
+|------|------|
+| 控制面板 | http://服务器IP:8080 |
+| **设备管理** | http://服务器IP:8080/devices |
+| API 文档 | http://服务器IP:8080/docs |
+
+### 设备管理功能
+
+- 📱 可视化注册设备
+- 📋 查看所有设备状态
+- 🟢 实时在线/离线监控
+- ⚡ 发送控制命令
+
