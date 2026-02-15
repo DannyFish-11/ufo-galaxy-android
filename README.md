@@ -420,3 +420,44 @@ Galaxy 支持 7×24 小时无间断运行：
 - 健康检查
 - 心跳监控
 
+
+---
+
+## 🚀 完整部署流程
+
+### 1. 主系统安装 (一次配置)
+
+```bash
+# 克隆主系统
+git clone https://github.com/DannyFish-11/ufo-galaxy-realization-v2.git
+cd ufo-galaxy-realization-v2
+
+# 一键安装 (自动配置开机自启动)
+./install.sh    # Linux/macOS
+install.bat     # Windows
+
+# 完成！主系统现在 7×24 运行，开机自启动
+```
+
+### 2. Android 客户端安装
+
+```bash
+# 克隆 Android 仓库
+git clone https://github.com/DannyFish-11/ufo-galaxy-android.git
+cd ufo-galaxy-android
+
+# 配置服务器地址 (编辑 app/build.gradle)
+# buildConfigField "String", "GALAXY_SERVER_URL", '"ws://你的服务器IP:8765"'
+
+# 构建 APK
+./gradlew assembleDebug
+
+# 安装到设备
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+### 3. 开始使用
+
+- **主系统**: 按 F12 键唤醒交互界面
+- **Android**: 从屏幕右侧边缘滑动唤醒灵动岛
+
