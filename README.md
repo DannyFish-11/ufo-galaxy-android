@@ -210,3 +210,33 @@ MIT License
 |-------------|-----------|---------|------|
 | v2.0.1 | v2.0.3 | AIP v2.0 | ✅ 兼容 |
 
+
+---
+
+## 📱 最新版本
+
+| 组件 | 版本 | 状态 |
+|------|------|------|
+| 服务端 | v2.0.4 | ✅ 已发布 |
+| Android 客户端 | v2.0.1 | ✅ 已发布 |
+| 协议版本 | AIP v2.0 | ✅ 兼容 |
+
+### 快速开始
+
+1. 克隆服务端仓库
+```bash
+git clone https://github.com/DannyFish-11/ufo-galaxy-realization-v2.git
+cd ufo-galaxy-realization-v2
+./deploy.sh
+```
+
+2. 构建 Android 客户端
+```bash
+./gradlew assembleDebug
+```
+
+3. 安装到设备
+```bash
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
