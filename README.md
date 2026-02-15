@@ -240,3 +240,33 @@ cd ufo-galaxy-realization-v2
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
+
+---
+
+## 🌐 分布式部署
+
+UFO Galaxy V2 支持分布式部署，可以将任意设备设为主节点：
+
+### 支持的部署模式
+
+| 模式 | 说明 |
+|------|------|
+| 云服务器主节点 | 云服务器作为主节点，本地设备作为工作节点 |
+| 本地电脑主节点 | 本地电脑作为主节点，云服务器作为备用 |
+| 多主节点集群 | 多个主节点负载均衡 |
+
+### 配置方法
+
+```bash
+# 主节点
+export UFO_NODE_ID="master"
+export UFO_NODE_ROLE="coordinator"
+./start.sh
+
+# 工作节点
+export UFO_NODE_ID="worker-$(hostname)"
+export UFO_NODE_ROLE="worker"
+export MASTER_URL="ws://master-host:8765"
+./start.sh --worker
+```
+
