@@ -380,3 +380,43 @@ export MASTER_URL="ws://master-host:8765"
    - 输入服务器地址
    - 连接成功后即可交互
 
+
+---
+
+## 🔗 配合 Galaxy 主系统
+
+本 Android 客户端配合 Galaxy 主系统使用：
+
+### 主系统启动
+
+```bash
+# 克隆主系统
+git clone https://github.com/DannyFish-11/ufo-galaxy-realization-v2.git
+cd ufo-galaxy-realization-v2
+
+# 启动系统
+./galaxy.sh daemon
+
+# 配置系统
+open http://localhost:8080/config
+```
+
+### 三级优先模型
+
+Galaxy 支持三级优先 LLM 模型：
+
+| 优先级 | 模型 | 权重 |
+|--------|------|------|
+| 1 | GPT-4o | 60% |
+| 2 | DeepSeek | 30% |
+| 3 | Groq | 10% |
+
+### 7×24 运行
+
+Galaxy 支持 7×24 小时无间断运行：
+
+- 自动启动
+- 崩溃自动重启
+- 健康检查
+- 心跳监控
+
