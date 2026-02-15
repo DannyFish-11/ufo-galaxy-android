@@ -270,3 +270,32 @@ export MASTER_URL="ws://master-host:8765"
 ./start.sh --worker
 ```
 
+
+---
+
+## 📋 设备注册流程
+
+### Android 设备注册
+
+1. **安装 APK**
+   - 下载并安装 UFO Galaxy 客户端
+
+2. **配置服务器地址**
+   - 打开应用 → 设置
+   - 输入服务器地址：
+     - 本地网络: `ws://192.168.x.x:8765`
+     - Tailscale: `ws://100.x.x.x:8765`
+     - 云服务器: `wss://your-domain.com:8765`
+
+3. **自动注册**
+   - 应用启动后自动发送注册消息
+   - 设备 ID、类型、能力自动上报
+
+### 其他设备注册
+
+| 设备类型 | 注册方式 |
+|----------|----------|
+| Windows | `python register_device.py` |
+| Linux | `python register_device.py` |
+| macOS | `python register_device.py` |
+
