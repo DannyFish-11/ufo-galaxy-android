@@ -442,18 +442,3 @@ class DeviceCommunication(
 /**
  * 设备消息
  */
-data class DeviceMessage(
-    val type: String,
-    val action: String,
-    val payload: JSONObject,
-    val messageId: String
-)
-
-/**
- * 命令消息
- */
-data class CommandMessage(
-    val action: String,
-    val payload: JSONObject,
-    val messageId: String
-)
