@@ -209,6 +209,7 @@ MIT License
 | Android 版本 | 服务端版本 | 协议版本 | 状态 |
 |-------------|-----------|---------|------|
 | v2.0.1 | v2.0.3 | AIP v2.0 | ✅ 兼容 |
+| v2.0.1 | v2.0.4+ | AIP v3.0 | ✅ 兼容 |
 
 
 ---
@@ -219,7 +220,7 @@ MIT License
 |------|------|------|
 | 服务端 | v2.0.4 | ✅ 已发布 |
 | Android 客户端 | v2.0.1 | ✅ 已发布 |
-| 协议版本 | AIP v2.0 | ✅ 兼容 |
+| 协议版本 | AIP v3.0 | ✅ 兼容 |
 
 ### 快速开始
 
@@ -383,7 +384,96 @@ export MASTER_URL="ws://master-host:8765"
 
 ---
 
-## 🔗 配合 Galaxy 主系统
+## 🔄 V2 后端兼容性 (AIP v3.0)
+
+### 单一 Android 客户端声明
+
+本仓库 (`ufo-galaxy-android`) 是 **唯一的 Android 客户端实现**。所有 Android 能力上报、任务执行和诊断遥测均以本 APK 为准。
+
+### 服务端端点要求
+
+Android 客户端要求 V2 后端暴露以下 WebSocket 端点（AIP v3.0 协议）：
+
+| 端点 | 用途 |
+|------|------|
+| `/ws/android` | Android 客户端统一接入端点 |
+| `/ws/device/{device_id}` | 按设备 ID 点对点通信 |
+
+### 端对端握手流程
+
+Android 客户端与 V2 后端的完整交互序列：
+
+```
+Android 客户端                        V2 后端 (Galaxy)
+      |                                     |
+      |── WebSocket connect /ws/android ──▶ |
+      |                                     |
+      |── capability_report ───────────────▶|  ← AIP v3.0，包含 platform、
+      |   {platform, device_id,             |    device_id、supported_actions、
+      |    supported_actions, version}       |    version；供 Loop 3 推断能力差距
+      |                                     |
+      |◀─ registration_ack ─────────────── |
+      |                                     |
+      |── heartbeat (每 30 秒) ────────────▶|
+      |◀─ heartbeat_ack ────────────────── |
+      |                                     |
+      |◀─ task_assign ─────────────────── |  ← 服务端下发任务
+      |                                     |
+      |── task_result ────────────────────▶|  ← 成功结果
+      |   或                               |
+      |── diagnostics_payload ────────────▶|  ← 失败时上报，供 Loop 1 & Loop 2
+      |   {error_type, error_context,       |    分类重复失败、触发自修复或学习
+      |    task_id, node_name}              |
+      |                                     |
+```
+
+### 能力上报示例（capability_report）
+
+```json
+{
+  "type": "capability_report",
+  "protocol_version": "3.0",
+  "platform": "android",
+  "device_id": "<android_id>",
+  "supported_actions": [
+    "location", "camera", "sensor_data", "automation",
+    "notification", "sms", "phone_call", "contacts",
+    "calendar", "voice_input", "screen_capture", "app_control"
+  ]
+}
+```
+
+### 诊断载荷示例（diagnostics_payload）
+
+任务失败时通过 `GalaxyWebSocketClient.sendDiagnostics()` 上报：
+
+```json
+{
+  "version": "3.0",
+  "type": "ERROR",
+  "timestamp": 1700000000000,
+  "payload": {
+    "error_type": "permission_denied",
+    "error_context": "Camera permission not granted on step 1",
+    "task_id": "task-abc-123",
+    "node_name": "android_agent_01",
+    "timestamp": 1700000000000
+  }
+}
+```
+
+服务端需处理的诊断字段：
+
+| 字段 | 说明 |
+|------|------|
+| `error_type` | 错误分类（如 `network_timeout`、`permission_denied`、`execution_failed`） |
+| `error_context` | 错误详情或堆栈摘要 |
+| `task_id` | 失败任务的唯一标识 |
+| `node_name` | 上报诊断的 Android 节点名称 |
+
+---
+
+
 
 本 Android 客户端配合 Galaxy 主系统使用：
 
