@@ -432,7 +432,7 @@ Android 客户端                        V2 后端 (Galaxy)
 ```json
 {
   "type": "capability_report",
-  "protocol_version": "3.0",
+  "version": "3.0",
   "platform": "android",
   "device_id": "<android_id>",
   "supported_actions": [
@@ -449,16 +449,12 @@ Android 客户端                        V2 后端 (Galaxy)
 
 ```json
 {
-  "version": "3.0",
-  "type": "ERROR",
-  "timestamp": 1700000000000,
-  "payload": {
-    "error_type": "permission_denied",
-    "error_context": "Camera permission not granted on step 1",
-    "task_id": "task-abc-123",
-    "node_name": "android_agent_01",
-    "timestamp": 1700000000000
-  }
+  "type": "diagnostics_payload",
+  "device_id": "<android_id>",
+  "error_type": "permission_denied",
+  "error_context": "Camera permission not granted on step 1",
+  "task_id": "task-abc-123",
+  "node_name": "android_agent_01"
 }
 ```
 
