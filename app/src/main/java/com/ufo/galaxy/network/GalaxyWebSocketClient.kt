@@ -6,7 +6,6 @@ import com.google.gson.JsonObject
 import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
-import com.ufo.galaxy.data.DiagnosticsPayload
 import kotlinx.coroutines.*
 import okhttp3.*
 import java.util.concurrent.TimeUnit
@@ -166,7 +165,7 @@ class GalaxyWebSocketClient(
      * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距
      */
     private fun sendHandshake() {
-        val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        val deviceId = getDeviceId()
 
         val report = CapabilityReport(
             platform = "android",
@@ -181,7 +180,7 @@ class GalaxyWebSocketClient(
 
         val handshake = JsonObject().apply {
             addProperty("type", "capability_report")
-            addProperty("protocol_version", report.version)
+            addProperty("version", report.version)
             addProperty("platform", report.platform)
             addProperty("device_id", report.device_id)
             add("supported_actions", gson.toJsonTree(report.supported_actions))
@@ -210,19 +209,18 @@ class GalaxyWebSocketClient(
             return false
         }
 
-        val payload = DiagnosticsPayload(
-            error_type = errorType,
-            error_context = errorContext,
-            task_id = taskId,
-            node_name = nodeName
-        )
+        val deviceId = getDeviceId()
 
-        val message = AIPMessage(
-            type = AIPMessageType.ERROR,
-            payload = payload
-        )
+        val diagnostics = JsonObject().apply {
+            addProperty("type", "diagnostics_payload")
+            addProperty("device_id", deviceId)
+            addProperty("error_type", errorType)
+            addProperty("error_context", errorContext)
+            addProperty("task_id", taskId)
+            addProperty("node_name", nodeName)
+        }
 
-        return sendAIPMessage(message)
+        return webSocket?.send(gson.toJson(diagnostics)) ?: false
     }
     
     /**
@@ -314,4 +312,10 @@ class GalaxyWebSocketClient(
      * 是否已连接
      */
     fun isConnected(): Boolean = isConnected
+
+    /**
+     * 获取设备唯一标识
+     */
+    private fun getDeviceId(): String =
+        "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
 }
