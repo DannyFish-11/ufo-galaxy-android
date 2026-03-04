@@ -5,6 +5,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
+import com.ufo.galaxy.data.CapabilityReport
+import com.ufo.galaxy.data.DiagnosticsPayload
 import kotlinx.coroutines.*
 import okhttp3.*
 import java.util.concurrent.TimeUnit
@@ -160,17 +162,67 @@ class GalaxyWebSocketClient(
     }
     
     /**
-     * 发送握手消息
+     * 发送 AIP v3.0 能力上报（握手消息）
+     * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距
      */
     private fun sendHandshake() {
+        val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+
+        val report = CapabilityReport(
+            platform = "android",
+            device_id = deviceId,
+            supported_actions = listOf(
+                "location", "camera", "sensor_data", "automation",
+                "notification", "sms", "phone_call", "contacts",
+                "calendar", "voice_input", "screen_capture", "app_control"
+            ),
+            version = "3.0"
+        )
+
         val handshake = JsonObject().apply {
-            addProperty("type", "handshake")
-            addProperty("version", "2.0")
-            addProperty("platform", "android")
-            addProperty("device_id", android.os.Build.MODEL)
+            addProperty("type", "capability_report")
+            addProperty("protocol_version", report.version)
+            addProperty("platform", report.platform)
+            addProperty("device_id", report.device_id)
+            add("supported_actions", gson.toJsonTree(report.supported_actions))
         }
-        
+
         webSocket?.send(gson.toJson(handshake))
+    }
+
+    /**
+     * 发送结构化诊断载荷（任务失败时调用）
+     * 服务端 Loop 1（自修复）和 Loop 2（学习反馈）依据此信息分类重复失败
+     *
+     * @param taskId    失败任务的唯一标识
+     * @param nodeName  上报诊断的节点名称
+     * @param errorType 错误分类（如 "network_timeout"、"permission_denied"）
+     * @param errorContext 具体错误描述或堆栈摘要
+     */
+    fun sendDiagnostics(
+        taskId: String,
+        nodeName: String,
+        errorType: String,
+        errorContext: String
+    ): Boolean {
+        if (!isConnected) {
+            Log.w(TAG, "未连接，无法发送诊断载荷")
+            return false
+        }
+
+        val payload = DiagnosticsPayload(
+            error_type = errorType,
+            error_context = errorContext,
+            task_id = taskId,
+            node_name = nodeName
+        )
+
+        val message = AIPMessage(
+            type = AIPMessageType.ERROR,
+            payload = payload
+        )
+
+        return sendAIPMessage(message)
     }
     
     /**

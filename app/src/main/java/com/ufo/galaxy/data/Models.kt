@@ -49,12 +49,35 @@ enum class AIPMessageType {
  * AIP 协议消息
  */
 data class AIPMessage(
-    val version: String = "2.0",
+    val version: String = "3.0",
     val type: AIPMessageType,
     val payload: Any,
     val timestamp: Long = System.currentTimeMillis(),
     val sessionId: String? = null,
     val deviceId: String? = null
+)
+
+/**
+ * AIP v3.0 能力上报载荷
+ * 用于 Loop 3（自动扩展）：服务端依据此信息推断能力差距
+ */
+data class CapabilityReport(
+    val platform: String,
+    val device_id: String,
+    val supported_actions: List<String>,
+    val version: String = "3.0"
+)
+
+/**
+ * 结构化诊断/遥测载荷
+ * 用于 Loop 1（自修复）和 Loop 2（学习反馈）：服务端依据此信息分类重复失败
+ */
+data class DiagnosticsPayload(
+    val error_type: String,
+    val error_context: String,
+    val task_id: String,
+    val node_name: String,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 /**
