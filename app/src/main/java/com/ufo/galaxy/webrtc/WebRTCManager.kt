@@ -23,7 +23,7 @@ class WebRTCManager(private val context: Context) {
     private val TAG = "WebRTCManager"
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
-    companion {
+    companion object {
         @Volatile
         private var instance: WebRTCManager? = null
         

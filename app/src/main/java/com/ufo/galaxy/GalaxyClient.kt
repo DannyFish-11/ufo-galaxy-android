@@ -194,62 +194,87 @@ class GalaxyClient private constructor(
      * 注册命令处理器
      */
     private fun registerCommandHandlers() {
-        // 点击命令
+        // 点击命令 - 委托给 AutonomyService
         communication.registerHandler("click") { payload ->
-            val x = payload.optInt("x", 0)
-            val y = payload.optInt("y", 0)
-            
-            // 执行点击
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "click")
-                put("x", x)
-                put("y", y)
+            val service = com.ufo.galaxy.autonomy.AutonomyService.getInstance()
+            if (service != null) {
+                val actionParams = JSONObject().apply {
+                    if (payload.has("node_id")) put("node_id", payload.getInt("node_id"))
+                    if (payload.has("x")) put("x", payload.getInt("x"))
+                    if (payload.has("y")) put("y", payload.getInt("y"))
+                }
+                val action = JSONObject().apply {
+                    put("type", "tap")
+                    put("params", actionParams)
+                }
+                service.executeAction(action)
+            } else {
+                JSONObject().apply {
+                    put("success", false)
+                    put("action", "click")
+                    put("message", "AutonomyService 未启用")
+                }
             }
         }
-        
+
         // 滑动命令
         communication.registerHandler("swipe") { payload ->
-            val startX = payload.optInt("startX", 0)
-            val startY = payload.optInt("startY", 0)
-            val endX = payload.optInt("endX", 0)
-            val endY = payload.optInt("endY", 0)
-            val duration = payload.optLong("duration", 300)
-            
-            // 执行滑动
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "swipe")
+            val service = com.ufo.galaxy.autonomy.AutonomyService.getInstance()
+            if (service != null) {
+                val actionParams = JSONObject().apply {
+                    put("x1", payload.optInt("startX", 0))
+                    put("y1", payload.optInt("startY", 0))
+                    put("x2", payload.optInt("endX", 0))
+                    put("y2", payload.optInt("endY", 0))
+                    put("duration", payload.optInt("duration", 300))
+                }
+                val action = JSONObject().apply {
+                    put("type", "swipe")
+                    put("params", actionParams)
+                }
+                service.executeAction(action)
+            } else {
+                JSONObject().apply {
+                    put("success", false)
+                    put("action", "swipe")
+                    put("message", "AutonomyService 未启用")
+                }
             }
         }
-        
+
         // 输入文本命令
         communication.registerHandler("input_text") { payload ->
-            val text = payload.optString("text", "")
-            
-            // 执行输入
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "input_text")
-                put("text_length", text.length)
+            val service = com.ufo.galaxy.autonomy.AutonomyService.getInstance()
+            if (service != null) {
+                val actionParams = JSONObject().apply {
+                    put("text", payload.optString("text", ""))
+                    if (payload.has("node_id")) put("node_id", payload.getInt("node_id"))
+                }
+                val action = JSONObject().apply {
+                    put("type", "input_text")
+                    put("params", actionParams)
+                }
+                service.executeAction(action)
+            } else {
+                JSONObject().apply {
+                    put("success", false)
+                    put("action", "input_text")
+                    put("message", "AutonomyService 未启用")
+                }
             }
         }
-        
-        // 截图命令
+
+        // 截图命令 - 返回 UI 树
         communication.registerHandler("screenshot") { payload ->
-            // 执行截图
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "screenshot")
-                // put("image_base64", ...)
+            val service = com.ufo.galaxy.autonomy.AutonomyService.getInstance()
+            if (service != null) {
+                service.captureUITree()
+            } else {
+                JSONObject().apply {
+                    put("success", false)
+                    put("action", "screenshot")
+                    put("message", "AutonomyService 未启用")
+                }
             }
         }
         

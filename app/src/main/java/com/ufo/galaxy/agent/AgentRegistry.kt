@@ -4,9 +4,14 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import org.json.JSONObject
+import java.security.SecureRandom
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Galaxy Agent 注册和身份认证管理器
@@ -87,18 +92,59 @@ class AgentRegistry(private val context: Context) {
     }
     
     /**
-     * 获取 Agent Token
+     * 获取 Agent Token（解密）
      */
     fun getAgentToken(): String? {
-        return prefs.getString(KEY_AGENT_TOKEN, null)
+        val encrypted = prefs.getString(KEY_AGENT_TOKEN, null) ?: return null
+        return try {
+            decryptToken(encrypted)
+        } catch (e: Exception) {
+            Log.e(TAG, "Token 解密失败，清除无效数据", e)
+            prefs.edit().remove(KEY_AGENT_TOKEN).apply()
+            null
+        }
     }
-    
+
     /**
-     * 保存 Agent Token
+     * 保存 Agent Token（加密）
      */
     fun saveAgentToken(token: String) {
-        prefs.edit().putString(KEY_AGENT_TOKEN, token).apply()
-        Log.i(TAG, "已保存 Agent Token")
+        try {
+            val encrypted = encryptToken(token)
+            prefs.edit().putString(KEY_AGENT_TOKEN, encrypted).apply()
+            Log.i(TAG, "已保存加密的 Agent Token")
+        } catch (e: Exception) {
+            Log.e(TAG, "Token 加密失败", e)
+        }
+    }
+
+    private fun getEncryptionKey(): SecretKeySpec {
+        val deviceId = getDeviceId()
+        val keyBytes = (deviceId + "galaxy_agent_salt").toByteArray()
+        val key = ByteArray(16)
+        for (i in key.indices) {
+            key[i] = keyBytes[i % keyBytes.size]
+        }
+        return SecretKeySpec(key, "AES")
+    }
+
+    private fun encryptToken(token: String): String {
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        val iv = ByteArray(16)
+        SecureRandom().nextBytes(iv)
+        cipher.init(Cipher.ENCRYPT_MODE, getEncryptionKey(), IvParameterSpec(iv))
+        val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
+        val combined = iv + encrypted
+        return Base64.encodeToString(combined, Base64.NO_WRAP)
+    }
+
+    private fun decryptToken(encryptedBase64: String): String {
+        val combined = Base64.decode(encryptedBase64, Base64.NO_WRAP)
+        val iv = combined.sliceArray(0 until 16)
+        val encrypted = combined.sliceArray(16 until combined.size)
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.DECRYPT_MODE, getEncryptionKey(), IvParameterSpec(iv))
+        return String(cipher.doFinal(encrypted), Charsets.UTF_8)
     }
     
     /**
@@ -239,7 +285,8 @@ class AgentRegistry(private val context: Context) {
     private fun getBatteryLevel(): Int {
         return try {
             val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-            batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val level = batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (level in 0..100) level else -1
         } catch (e: Exception) {
             -1
         }

@@ -48,6 +48,8 @@ class DeviceCommunication(
     private var isConnected = false
     private var reconnectAttempts = 0
     private var heartbeatJob: Job? = null
+    @Volatile
+    private var lastHeartbeatAckTime: Long = 0L
     
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -61,7 +63,7 @@ class DeviceCommunication(
     
     // 命令流
     private val _commands = MutableSharedFlow<CommandMessage>()
-    val commands: SharedFlow<CommandMessage> = _messages.asSharedFlow()
+    val commands: SharedFlow<CommandMessage> = _commands.asSharedFlow()
     
     // 等待响应的请求
     private val pendingRequests = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
@@ -109,7 +111,8 @@ class DeviceCommunication(
             Log.d(TAG, "已连接，跳过")
             return
         }
-        
+
+        lastServerUrl = serverUrl
         _connectionState.value = ConnectionState.CONNECTING
         
         val deviceId = deviceRegistry.getDeviceId()
@@ -332,7 +335,8 @@ class DeviceCommunication(
                     
                     // 心跳确认
                     "heartbeat_ack", "heartbeat" -> {
-                        // 更新心跳时间
+                        lastHeartbeatAckTime = System.currentTimeMillis()
+                        Log.d(TAG, "收到心跳确认")
                     }
                     
                     // 错误消息
@@ -415,21 +419,26 @@ class DeviceCommunication(
     /**
      * 安排重连
      */
+    private var lastServerUrl: String? = null
+
     private fun scheduleReconnect() {
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
             Log.e(TAG, "达到最大重连次数")
             return
         }
-        
+
         reconnectAttempts++
         _connectionState.value = ConnectionState.RECONNECTING
-        
+
         val delay = RECONNECT_DELAY_MS * reconnectAttempts
         Log.i(TAG, "将在 ${delay}ms 后重连 (第 $reconnectAttempts 次)")
-        
+
         scope.launch {
             delay(delay)
-            // 需要外部调用 connect
+            lastServerUrl?.let { url ->
+                Log.i(TAG, "执行重连: $url")
+                connect(url)
+            }
         }
     }
     

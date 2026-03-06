@@ -172,10 +172,18 @@ class AgentMessageHandler(
                     autonomyManager.executeAction(startAction)
                 }
                 "stop" -> {
-                    // TODO: 实现应用停止功能
-                    JSONObject().apply {
-                        put("status", "error")
-                        put("message", "应用停止功能尚未实现")
+                    try {
+                        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                        am.killBackgroundProcesses(packageName)
+                        JSONObject().apply {
+                            put("status", "success")
+                            put("message", "已请求停止应用: $packageName")
+                        }
+                    } catch (e: Exception) {
+                        JSONObject().apply {
+                            put("status", "error")
+                            put("message", "停止应用失败: ${e.message}")
+                        }
                     }
                 }
                 else -> JSONObject().apply {
@@ -323,22 +331,56 @@ class AgentMessageHandler(
      * 处理 Agent 配置更新
      */
     private fun handleAgentConfigUpdate(message: JSONObject) {
-        // TODO: 实现配置更新逻辑
-        sendResponse(message, JSONObject().apply {
-            put("status", "success")
-            put("message", "配置更新功能尚未实现")
-        })
+        try {
+            val config = message.optJSONObject("config") ?: JSONObject()
+            val prefs = context.getSharedPreferences("galaxy_agent_config", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+
+            config.keys().forEach { key ->
+                val value = config.get(key)
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    else -> editor.putString(key, value.toString())
+                }
+            }
+            editor.apply()
+
+            Log.i(TAG, "配置已更新: ${config.keys().asSequence().toList()}")
+            sendResponse(message, JSONObject().apply {
+                put("status", "success")
+                put("message", "配置已更新")
+                put("updated_keys", org.json.JSONArray(config.keys().asSequence().toList()))
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "配置更新失败", e)
+            sendErrorResponse(message, "配置更新失败: ${e.message}")
+        }
     }
-    
+
     /**
      * 处理 Agent 重启
      */
     private fun handleAgentRestart(message: JSONObject) {
-        // TODO: 实现 Agent 重启逻辑
         sendResponse(message, JSONObject().apply {
             put("status", "success")
-            put("message", "Agent 重启功能尚未实现")
+            put("message", "Agent 正在重启")
         })
+
+        scope.launch {
+            try {
+                Log.i(TAG, "Agent 重启中...")
+                taskQueue.clear()
+                autonomyManager.cleanup()
+                kotlinx.coroutines.delay(1000)
+                Log.i(TAG, "Agent 重启完成")
+            } catch (e: Exception) {
+                Log.e(TAG, "Agent 重启失败", e)
+            }
+        }
     }
     
     /**
@@ -403,7 +445,24 @@ class AgentMessageHandler(
      * 处理应用停止
      */
     private fun handleAppStop(message: JSONObject) {
-        sendErrorResponse(message, "应用停止功能尚未实现")
+        val packageName = message.optString("package_name", "")
+        if (packageName.isEmpty()) {
+            sendErrorResponse(message, "缺少 package_name 参数")
+            return
+        }
+
+        scope.launch {
+            try {
+                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                am.killBackgroundProcesses(packageName)
+                sendResponse(message, JSONObject().apply {
+                    put("status", "success")
+                    put("message", "已请求停止应用: $packageName")
+                })
+            } catch (e: Exception) {
+                sendErrorResponse(message, "停止应用失败: ${e.message}")
+            }
+        }
     }
     
     /**

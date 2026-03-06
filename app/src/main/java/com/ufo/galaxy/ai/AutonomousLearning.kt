@@ -33,20 +33,24 @@ class AutonomousLearning(private val context: Context) {
         File(context.filesDir, LEARNING_DB_NAME)
     }
     
-    // 操作历史
-    private val operationHistory = mutableListOf<OperationRecord>()
-    
-    // 学习到的模式
-    private val learnedPatterns = mutableMapOf<String, ActionPattern>()
-    
-    // 用户偏好
-    private val userPreferences = mutableMapOf<String, Any>()
-    
-    // 应用适配规则
-    private val appAdaptations = mutableMapOf<String, AppAdaptation>()
+    // 操作历史（使用同步列表保证线程安全）
+    private val operationHistory = java.util.Collections.synchronizedList(mutableListOf<OperationRecord>())
+
+    // 学习到的模式（使用线程安全 Map）
+    private val learnedPatterns = java.util.concurrent.ConcurrentHashMap<String, ActionPattern>()
+
+    // 用户偏好（使用线程安全 Map）
+    private val userPreferences = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    // 应用适配规则（使用线程安全 Map）
+    private val appAdaptations = java.util.concurrent.ConcurrentHashMap<String, AppAdaptation>()
     
     init {
-        loadLearningData()
+        try {
+            loadLearningData()
+        } catch (e: Exception) {
+            Log.e(TAG, "加载学习数据失败，使用空数据启动", e)
+        }
     }
     
     // ============================================================================
@@ -94,9 +98,10 @@ class AutonomousLearning(private val context: Context) {
     /**
      * 分析操作模式
      */
+    @Synchronized
     private fun analyzePatterns() {
-        // 按应用分组
-        val groupedByApp = operationHistory.groupBy { it.packageName }
+        // 按应用分组（快照副本以避免并发修改）
+        val groupedByApp = operationHistory.toList().groupBy { it.packageName }
         
         for ((packageName, records) in groupedByApp) {
             // 分析成功的操作

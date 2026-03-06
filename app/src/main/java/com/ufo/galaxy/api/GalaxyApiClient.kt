@@ -25,7 +25,18 @@ class GalaxyApiClient(
     private val baseUrl: String = "http://100.123.215.126:8888",
     private val apiKey: String? = null
 ) {
-    
+
+    companion object {
+        @Volatile
+        private var instance: GalaxyApiClient? = null
+
+        fun getInstance(context: android.content.Context): GalaxyApiClient {
+            return instance ?: synchronized(this) {
+                instance ?: GalaxyApiClient().also { instance = it }
+            }
+        }
+    }
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -304,6 +315,28 @@ class GalaxyApiClient(
         }.toString())
     }
     
+    /**
+     * 检查是否已连接
+     */
+    fun isConnected(): Boolean = _connectionState.value == ConnectionState.CONNECTED
+
+    /**
+     * 发送消息（通过 WebSocket）
+     */
+    fun sendMessage(message: String): JSONObject {
+        val result = JSONObject()
+        return try {
+            val sent = webSocket?.send(message) ?: false
+            result.put("status", if (sent) "success" else "error")
+            result.put("message", if (sent) "消息已发送" else "WebSocket 未连接")
+            result
+        } catch (e: Exception) {
+            result.put("status", "error")
+            result.put("message", "发送失败: ${e.message}")
+            result
+        }
+    }
+
     /**
      * 关闭客户端
      */

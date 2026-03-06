@@ -50,7 +50,7 @@ class EnhancedAIPClient(
     )
 
     // 消息类型映射：微软格式 -> 我们的格式
-    private val reversTypeMapping = mapOf(
+    private val reverseTypeMapping = mapOf(
         "REGISTER" to "registration",
         "TASK" to "command",
         "COMMAND" to "command",
@@ -187,14 +187,14 @@ class EnhancedAIPClient(
      * 将微软 AIP 消息转换为我们的 AIP/1.0 格式
      */
     private fun convertFromMicrosoftAIP(microsoftMessage: JSONObject): JSONObject {
-        val messageType = reversTypeMapping[microsoftMessage.getString("message_type")] ?: "command"
+        val messageType = reverseTypeMapping[microsoftMessage.getString("message_type")] ?: "command"
         
         return JSONObject().apply {
             put("protocol", "AIP/1.0")
             put("type", messageType)
             put("source_node", microsoftMessage.optString("agent_id", "Galaxy"))
             put("target_node", deviceId)
-            put("timestamp", microsoftMessage.optLong("session_id", System.currentTimeMillis()) / 1000)
+            put("timestamp", microsoftMessage.optLong("session_id", System.currentTimeMillis()))
             put("payload", microsoftMessage.getJSONObject("payload"))
         }
     }
@@ -252,7 +252,7 @@ class EnhancedAIPClient(
             put("type", "command_result")
             put("source_node", deviceId)
             put("target_node", "Galaxy")
-            put("timestamp", System.currentTimeMillis() / 1000)
+            put("timestamp", System.currentTimeMillis())
             put("payload", result)
         }
         
@@ -272,7 +272,7 @@ class EnhancedAIPClient(
             put("session_id", System.currentTimeMillis())
             put("payload", JSONObject().apply {
                 put("status", "online")
-                put("timestamp", System.currentTimeMillis() / 1000)
+                put("timestamp", System.currentTimeMillis())
             })
         }.toString()
         
@@ -288,7 +288,7 @@ class EnhancedAIPClient(
             put("type", messageType)
             put("source_node", deviceId)
             put("target_node", "Galaxy")
-            put("timestamp", System.currentTimeMillis() / 1000)
+            put("timestamp", System.currentTimeMillis())
             put("payload", payload)
         }
         
