@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
  * @date 2026-01-22
  */
 class GalaxyApiClient(
-    private val baseUrl: String = "http://100.123.215.126:8888",
+    private val baseUrl: String = "http://100.x.x.x:8888",
     private val apiKey: String? = null
 ) {
     

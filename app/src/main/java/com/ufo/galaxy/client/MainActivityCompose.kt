@@ -36,8 +36,10 @@ class MainActivityCompose : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         // 初始化 API 客户端
+        // Load config and use configurable URL
+        com.ufo.galaxy.config.AppConfig.loadConfig(applicationContext)
         apiClient = GalaxyApiClient(
-            baseUrl = "http://100.123.215.126:8888",
+            baseUrl = com.ufo.galaxy.config.AppConfig.getGatewayApiUrl(),
             apiKey = null // 如果需要认证，在这里设置
         )
         apiClient.initialize()

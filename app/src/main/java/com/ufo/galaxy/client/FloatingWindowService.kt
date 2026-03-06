@@ -52,7 +52,8 @@ class FloatingWindowService : Service() {
         
         // 初始化 AIP 客户端
         val deviceId = "android_${android.os.Build.MODEL.replace(" ", "_")}_${System.currentTimeMillis()}"
-        val galaxyUrl = "ws://100.123.215.126:8050"  // Windows PC 的 Node 50
+        com.ufo.galaxy.config.AppConfig.loadConfig(applicationContext)
+        val galaxyUrl = com.ufo.galaxy.config.AppConfig.getGatewayWsUrl()
         aipClient = EnhancedAIPClient(deviceId, galaxyUrl, applicationContext, scope)
         aipClient.connect()
 

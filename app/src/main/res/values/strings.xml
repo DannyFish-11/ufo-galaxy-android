@@ -2,4 +2,14 @@
     <string name="app_name">UFO³ Galaxy Agent</string>
     <string name="mic_button_desc">Start Voice Command</string>
     <string name="accessibility_service_description">UFO³ Galaxy 自动化服务，用于控制应用和执行自动化任务。</string>
+
+    <!-- Compatibility Test Screen -->
+    <string name="compat_test_title">UFO³ Galaxy 兼容性测试</string>
+    <string name="test_tailscale">测试 1\nTailscale</string>
+    <string name="test_auto_discover">测试 2\n自动发现</string>
+    <string name="test_connection">测试 3\n连接测试</string>
+    <string name="test_protocol">测试 4\n协议测试</string>
+    <string name="test_send_command">测试 5\n发送命令</string>
+    <string name="test_full">完整测试</string>
+    <string name="clear_log">清除日志</string>
 </resources>

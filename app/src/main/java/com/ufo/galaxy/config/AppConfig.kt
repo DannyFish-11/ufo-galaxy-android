@@ -41,4 +41,14 @@ object AppConfig {
     fun getBoolean(key: String, defaultValue: Boolean = false): Boolean {
         return properties.getProperty(key)?.toBoolean() ?: defaultValue
     }
+
+    /** Galaxy Gateway HTTP API base URL */
+    fun getGatewayApiUrl(): String {
+        return getString("galaxy.api.url", "http://100.x.x.x:8888")
+    }
+
+    /** Galaxy Gateway WebSocket URL */
+    fun getGatewayWsUrl(): String {
+        return getString("galaxy.gateway.url", "ws://100.x.x.x:8050/ws/agent")
+    }
 }

@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.ufo.galaxy.agent.GalaxyAgentV2
 import com.ufo.galaxy.input.NaturalLanguageInputManager
-import com.ufo.galaxy.service.FloatingWindowService
+import com.ufo.galaxy.client.FloatingWindowService
 import com.ufo.galaxy.ui.theme.GeekThemePremium
 import kotlinx.coroutines.launch
 import java.util.*

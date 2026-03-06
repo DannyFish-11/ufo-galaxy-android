@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="UFO³ Galaxy 兼容性测试"
+        android:text="@string/compat_test_title"
         android:textSize="24sp"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
@@ -27,7 +27,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="测试 1\nTailscale"
+            android:text="@string/test_tailscale"
             android:textSize="12sp"
             android:layout_margin="4dp"/>
 
@@ -36,7 +36,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="测试 2\n自动发现"
+            android:text="@string/test_auto_discover"
             android:textSize="12sp"
             android:layout_margin="4dp"/>
 
@@ -45,7 +45,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="测试 3\n连接测试"
+            android:text="@string/test_connection"
             android:textSize="12sp"
             android:layout_margin="4dp"/>
     </LinearLayout>
@@ -61,7 +61,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="测试 4\n协议测试"
+            android:text="@string/test_protocol"
             android:textSize="12sp"
             android:layout_margin="4dp"/>
 
@@ -70,7 +70,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="测试 5\n发送命令"
+            android:text="@string/test_send_command"
             android:textSize="12sp"
             android:layout_margin="4dp"/>
 
@@ -79,7 +79,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="完整测试"
+            android:text="@string/test_full"
             android:textSize="12sp"
             android:layout_margin="4dp"
             android:backgroundTint="#4CAF50"/>
@@ -89,7 +89,7 @@
         android:id="@+id/btn_clear_log"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="清除日志"
+        android:text="@string/clear_log"
         android:layout_margin="4dp"/>
 
     <ScrollView

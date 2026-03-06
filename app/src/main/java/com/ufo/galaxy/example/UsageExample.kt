@@ -23,7 +23,8 @@ object UsageExample {
             override fun onError(error: String) {}
         })
         
-        client.connect("http://100.123.215.126:8888")
+        com.ufo.galaxy.config.AppConfig.loadConfig(context)
+        client.connect(com.ufo.galaxy.config.AppConfig.getGatewayApiUrl())
         client.sendText("你好，Galaxy！")
     }
 }
