@@ -107,4 +107,44 @@ class ServerConfigTest {
     fun `wsToHttpBase leaves http base unchanged`() {
         assertEquals("http://host:8000", ServerConfig.wsToHttpBase("http://host:8000"))
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // buildWebRtcWsUrl
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `buildWebRtcWsUrl produces correct signaling endpoint`() {
+        val url = ServerConfig.buildWebRtcWsUrl(baseUrl, deviceId)
+        assertEquals("$baseUrl/ws/webrtc/$deviceId", url)
+    }
+
+    @Test
+    fun `buildWebRtcWsUrl substitutes device id in path`() {
+        val id = "my_device_42"
+        val url = ServerConfig.buildWebRtcWsUrl("ws://gw:9000", id)
+        assertTrue("URL should end with the device id", url.endsWith(id))
+        assertTrue("URL should contain /ws/webrtc/", url.contains("/ws/webrtc/"))
+    }
+
+    @Test
+    fun `buildWebRtcWsUrl does not add double slash`() {
+        val url = ServerConfig.buildWebRtcWsUrl("ws://host:8000", "dev1")
+        assertTrue("URL must not contain double slash after host", !url.contains("//ws/"))
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // buildWebRtcEndpointUrl
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `buildWebRtcEndpointUrl returns correct REST discovery URL`() {
+        val url = ServerConfig.buildWebRtcEndpointUrl("http://host:8050")
+        assertEquals("http://host:8050/api/v1/webrtc/endpoint", url)
+    }
+
+    @Test
+    fun `buildWebRtcEndpointUrl works with https base`() {
+        val url = ServerConfig.buildWebRtcEndpointUrl("https://secure-gw.example.com")
+        assertEquals("https://secure-gw.example.com/api/v1/webrtc/endpoint", url)
+    }
 }
