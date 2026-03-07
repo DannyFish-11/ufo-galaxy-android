@@ -118,25 +118,48 @@ rest.base.url=http://100.x.x.x:8000
 | `sendDeviceHeartbeat` | `POST /api/v1/devices/heartbeat` | `POST /api/devices/heartbeat` |
 | `discoverDevices` | `GET  /api/v1/devices/discover` | `GET  /api/devices/discover` |
 
-### AIP 消息格式
+### AIP 消息格式（AIP v3 标准）
 
-所有出站消息由 `AIPMessageBuilder.build()` 统一构建。消息同时包含 **AIP/1.0** 必需字段（向后兼容）和可选的 **v3** 附加字段（最大化服务器兼容性）：
+所有出站消息由 `AIPMessageBuilder.build()` 统一构建。消息同时包含 **AIP/1.0** 必需字段（向后兼容）和 **v3** 附加字段（最大化服务器兼容性）：
 
 ```json
 {
   "protocol": "AIP/1.0",
   "type": "registration",
-  "source_node": "android_Pixel_7_1700000000",
-  "target_node": "Galaxy",
+  "source_node": "android_abc12345",
+  "target_node": "server",
   "timestamp": 1700000000,
-  "payload": { "..." : "..." },
+  "message_id": "a1b2c3d4",
+  "payload": { "device_id": "android_abc12345", "capabilities": ["screen", "touch", "..."] },
   "version": "3.0",
-  "device_id": "android_Pixel_7_1700000000",
+  "device_id": "android_abc12345",
   "device_type": "Android_Agent"
 }
 ```
 
+关键字段说明：
+- `message_id` – 每条消息的唯一标识，由 `AIPMessageBuilder` 自动生成（8位UUID）
+- `device_id` – 设备唯一标识（格式：`android_xxxxxxxx`），同时出现在顶层和 `payload` 中
+- `device_type` – AIP 智能体类型标识（顶层 `"Android_Agent"`；`payload.device_type` 为 OS 类型 `"android"`）
+- `capabilities` – 设备能力列表，由 `DeviceRegistry` 自动收集
+- `timestamp` – Unix 时间戳（秒）
+
 入站消息由 `AIPMessageBuilder.parse()` 统一解析，支持三种格式：AIP/1.0 原生、Microsoft Galaxy 格式以及 v3 格式。
+
+### 🏗 通信栈架构
+
+```
+GalaxyClient  (统一入口)
+    └── DeviceCommunication  (WebSocket 管理 + 心跳)
+            └── AIPMessageBuilder  (消息构建/解析)
+            └── ServerConfig  (URL 路径管理)
+
+AIPClient / EnhancedAIPClient  (兼容/回退)
+    └── AIPMessageBuilder  (消息构建/解析)
+    └── ServerConfig  (URL 路径管理)
+```
+
+优先使用 `GalaxyClient + DeviceCommunication` 作为核心通信栈。`AIPClient` 和 `EnhancedAIPClient` 仅用于特定格式兼容/回退场景。
 
 ---
 
@@ -159,6 +182,7 @@ rest.base.url=http://100.x.x.x:8000
 
 | 版本 | 日期 | 更新内容 |
 |------|------|----------|
+| v2.5.1 | 2026-03-07 | AIP v3 系统性对齐：message_id 统一、DeviceCommunication 使用 ServerConfig 路径回退、DeviceRegistry 消息通过 AIPMessageBuilder 构建 |
 | v2.5.0 | 2026-02-21 | 合并两个仓库优点，系统性升级 |
 | v2.2.0 | 2026-02-20 | 添加 Agent 系统、自主性服务 |
 | v1.0.0 | 2026-01-01 | 初始版本 |

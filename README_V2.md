@@ -103,17 +103,37 @@ client.addTag("test_device")
 client.addToGroup("development")
 ```
 
-## 消息协议
+## 消息协议（AIP v3 标准）
+
+所有出站消息统一通过 `AIPMessageBuilder.build()` 构建，保证以下字段始终存在：
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| `protocol` | 协议标识 | `"AIP/1.0"` |
+| `version` | v3 版本号 | `"3.0"` |
+| `type` | 消息类型 | `"register"` / `"heartbeat"` / `"command"` |
+| `source_node` | 发送方设备 ID | `"android_abc12345"` |
+| `target_node` | 目标节点 | `"server"` |
+| `device_id` | 设备唯一标识 (v3) | `"android_abc12345"` |
+| `device_type` | AIP 智能体类型 | `"Android_Agent"` |
+| `message_id` | 消息唯一标识 | `"a1b2c3d4"` |
+| `timestamp` | Unix 时间戳（秒） | `1700000000` |
+| `payload` | 业务数据 | `{...}` |
 
 ### 设备注册消息
 
 ```json
 {
+    "protocol": "AIP/1.0",
+    "version": "3.0",
     "type": "register",
-    "action": "device_register",
+    "source_node": "android_abc12345",
+    "target_node": "server",
     "device_id": "android_abc12345",
-    "timestamp": 1234567890,
-    "message_id": "abc12345",
+    "device_type": "Android_Agent",
+    "message_id": "a1b2c3d4",
+    "timestamp": 1700000000,
+    "action": "device_register",
     "payload": {
         "device_id": "android_abc12345",
         "device_type": "android",
@@ -121,9 +141,9 @@ client.addToGroup("development")
         "manufacturer": "Samsung",
         "model": "Galaxy S21",
         "os_version": "Android 13",
-        "capabilities": ["screen", "touch", "camera", ...],
+        "capabilities": ["screen", "touch", "camera", "ui_automation", "..."],
         "groups": ["mobile", "android"],
-        "tags": ["android", "mobile"]
+        "tags": ["android", "mobile", "auto-registered"]
     }
 }
 ```
@@ -132,11 +152,18 @@ client.addToGroup("development")
 
 ```json
 {
+    "protocol": "AIP/1.0",
+    "version": "3.0",
     "type": "heartbeat",
+    "source_node": "android_abc12345",
+    "target_node": "server",
     "device_id": "android_abc12345",
-    "timestamp": 1234567890,
+    "device_type": "Android_Agent",
+    "message_id": "e5f6g7h8",
+    "timestamp": 1700000030,
     "payload": {
-        "status": "online"
+        "status": "online",
+        "capabilities_count": 15
     }
 }
 ```
@@ -145,12 +172,18 @@ client.addToGroup("development")
 
 ```json
 {
+    "protocol": "AIP/1.0",
+    "version": "3.0",
     "type": "command",
-    "action": "click",
+    "source_node": "android_abc12345",
+    "target_node": "server",
     "device_id": "android_abc12345",
-    "timestamp": 1234567890,
-    "message_id": "xyz789",
+    "device_type": "Android_Agent",
+    "message_id": "xyz789ab",
+    "timestamp": 1700000060,
+    "action": "click",
     "payload": {
+        "action": "click",
         "x": 100,
         "y": 200
     }
@@ -177,26 +210,36 @@ client.addToGroup("development")
 
 ## 兼容性
 
-- 完全兼容服务端 `device_registry.py`
-- 完全兼容服务端 `device_communication.py`
-- 完全兼容服务端 `system_integration.py`
-- 向后兼容现有 AIP/1.0 协议
+- 完全对齐服务端 `device_registry.py`（AIP v3 标准字段）
+- 完全对齐服务端 `device_communication.py`（`/ws/device/{id}` 优先）
+- 完全对齐服务端 `system_integration.py`
+- 向后兼容现有 AIP/1.0 协议（三种格式自动解析）
+- REST API 优先使用 `/api/v1/devices/*`，自动回退到旧版路径
 
 ## 文件结构
 
 ```
 app/src/main/java/com/ufo/galaxy/
-├── GalaxyClient.kt              # 客户端集成管理器
+├── GalaxyClient.kt              # 客户端集成管理器（核心入口）
 ├── device/
-│   └── DeviceRegistry.kt        # 设备注册管理器
+│   └── DeviceRegistry.kt        # 设备注册管理器（AIPMessageBuilder 构建消息）
 ├── communication/
-│   └── DeviceCommunication.kt   # 统一通信管理器
-├── example/
-│   └── UsageExample.kt          # 使用示例
-└── ... (现有文件保持不变)
+│   └── DeviceCommunication.kt   # 统一通信管理器（ServerConfig 路径回退）
+├── protocol/
+│   └── AIPMessageBuilder.kt     # AIP v3 消息构建器（统一字段）
+├── config/
+│   └── ServerConfig.kt          # URL 配置（/ws/device/{id} 优先）
+├── client/
+│   ├── AIPClient.kt             # AIP/1.0 兼容客户端（回退用）
+│   └── EnhancedAIPClient.kt     # Microsoft Galaxy 格式兼容（回退用）
+├── api/
+│   └── GalaxyApiClient.kt       # REST API 客户端（v1 优先 + 旧版回退）
+└── example/
+    └── UsageExample.kt          # 使用示例
 ```
 
 ## 版本历史
 
+- V2.1 - AIP v3 系统性对齐：message_id 统一、路径回退、AIPMessageBuilder 统一消息构建
 - V2.0 - 完全对齐服务端协议
 - V1.0 - 初始版本

@@ -79,6 +79,44 @@ class AIPMessageBuilderTest {
         assertEquals("Custom_Device", msg.getString("device_type"))
     }
 
+    @Test
+    fun `build includes message_id field`() {
+        val msg = AIPMessageBuilder.build(
+            messageType = "command",
+            sourceNodeId = "device_1",
+            targetNodeId = "Node_50",
+            payload = JSONObject()
+        )
+
+        assertTrue("message_id should be present", msg.has("message_id"))
+        assertTrue("message_id should be non-empty", msg.getString("message_id").isNotEmpty())
+    }
+
+    @Test
+    fun `build respects custom messageId`() {
+        val customId = "custom_abc"
+        val msg = AIPMessageBuilder.build(
+            messageType = "command",
+            sourceNodeId = "device_1",
+            targetNodeId = "Node_50",
+            payload = JSONObject(),
+            messageId = customId
+        )
+
+        assertEquals(customId, msg.getString("message_id"))
+    }
+
+    @Test
+    fun `build generates distinct message_ids by default`() {
+        val msg1 = AIPMessageBuilder.build("heartbeat", "d1", "s", JSONObject())
+        val msg2 = AIPMessageBuilder.build("heartbeat", "d1", "s", JSONObject())
+
+        assertTrue(
+            "consecutive calls should produce different message_ids",
+            msg1.getString("message_id") != msg2.getString("message_id")
+        )
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // parse()
     // ──────────────────────────────────────────────────────────────────────

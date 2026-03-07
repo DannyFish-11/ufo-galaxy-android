@@ -1,13 +1,14 @@
 package com.ufo.galaxy.communication
 
 import android.util.Log
+import com.ufo.galaxy.config.ServerConfig
 import com.ufo.galaxy.device.DeviceRegistry
 import com.ufo.galaxy.device.DeviceStatus
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import okhttp3.*
 import org.json.JSONObject
-import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -48,6 +49,12 @@ class DeviceCommunication(
     private var isConnected = false
     private var reconnectAttempts = 0
     private var heartbeatJob: Job? = null
+
+    // Index into ServerConfig.WS_PATHS for the current connection attempt
+    private var wsPathIndex = 0
+
+    // Stored server URL (ws-scheme base) for reconnection attempts
+    private var lastServerWsBase: String? = null
     
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -103,6 +110,11 @@ class DeviceCommunication(
     
     /**
      * 连接到服务器
+     *
+     * The connection URL is built via [ServerConfig.buildWsUrl] starting from
+     * path index 0 (`/ws/device/{id}`, the preferred path).  On failure the
+     * index advances and the next candidate path is used (same strategy as
+     * [com.ufo.galaxy.client.AIPClient]).
      */
     fun connect(serverUrl: String) {
         if (isConnected) {
@@ -112,53 +124,60 @@ class DeviceCommunication(
         
         _connectionState.value = ConnectionState.CONNECTING
         
+        val wsBase = serverUrl.replace("http://", "ws://").replace("https://", "wss://")
+        lastServerWsBase = wsBase
+        connectToWsBase(wsBase)
+    }
+
+    /**
+     * Open a WebSocket connection to [wsBase] using the current [wsPathIndex].
+     *
+     * Shared by [connect] and [scheduleReconnect] to avoid duplicating the
+     * [WebSocketListener] implementation.
+     */
+    private fun connectToWsBase(wsBase: String) {
         val deviceId = deviceRegistry.getDeviceId()
-        val wsUrl = serverUrl.replace("http://", "ws://").replace("https://", "wss://")
-        val fullUrl = "$wsUrl/ws/device/$deviceId"
-        
-        Log.i(TAG, "连接到服务器: $fullUrl")
-        
-        val request = Request.Builder()
-            .url(fullUrl)
-            .build()
-        
-        webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket 已打开")
-                isConnected = true
-                reconnectAttempts = 0
-                _connectionState.value = ConnectionState.CONNECTED
-                deviceRegistry.updateStatus(DeviceStatus.ONLINE)
-                
-                // 发送注册消息
-                sendDeviceRegister()
-                
-                // 启动心跳
-                startHeartbeat()
-                
-                listener?.onConnected()
-            }
-            
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "收到消息: ${text.take(100)}...")
-                handleMessage(text)
-            }
-            
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "WebSocket 正在关闭: $code - $reason")
-                webSocket.close(1000, null)
-            }
-            
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "WebSocket 已关闭: $code - $reason")
-                handleDisconnect()
-            }
-            
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket 失败: ${t.message}", t)
-                handleError(t.message ?: "连接失败")
-            }
-        })
+        val fullUrl = ServerConfig.buildWsUrl(wsBase, deviceId, wsPathIndex)
+        Log.i(TAG, "连接到服务器 (path index $wsPathIndex): $fullUrl")
+
+        val request = Request.Builder().url(fullUrl).build()
+        webSocket = httpClient.newWebSocket(request, createWsListener())
+    }
+
+    /** Create the [WebSocketListener] shared by all connection attempts. */
+    private fun createWsListener() = object : WebSocketListener() {
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            Log.i(TAG, "WebSocket 已打开")
+            isConnected = true
+            reconnectAttempts = 0
+            wsPathIndex = 0  // Reset to preferred path for future connections
+            _connectionState.value = ConnectionState.CONNECTED
+            deviceRegistry.updateStatus(DeviceStatus.ONLINE)
+            sendDeviceRegister()
+            startHeartbeat()
+            listener?.onConnected()
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            Log.d(TAG, "收到消息: ${text.take(100)}...")
+            handleMessage(text)
+        }
+
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            Log.i(TAG, "WebSocket 正在关闭: $code - $reason")
+            webSocket.close(1000, null)
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            Log.i(TAG, "WebSocket 已关闭: $code - $reason")
+            handleDisconnect()
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            Log.e(TAG, "WebSocket 失败 (path index $wsPathIndex): ${t.message}", t)
+            wsPathIndex = (wsPathIndex + 1) % ServerConfig.WS_PATHS.size
+            handleError(t.message ?: "连接失败")
+        }
     }
     
     /**
@@ -208,22 +227,31 @@ class DeviceCommunication(
     
     /**
      * 发送命令并等待响应
+     *
+     * The outbound message is built via [AIPMessageBuilder] so that all
+     * AIP/1.0 + v3 fields (`protocol`, `version`, `device_id`, `device_type`,
+     * `message_id`, `timestamp`) are populated consistently.  The `message_id`
+     * is extracted from the built message and used as the correlation key.
      */
     suspend fun sendCommand(
         action: String,
         payload: JSONObject,
         timeoutMs: Long = 30000
     ): JSONObject {
-        val messageId = UUID.randomUUID().toString().take(8)
-        
-        val message = JSONObject().apply {
-            put("type", "command")
+        val deviceId = deviceRegistry.getDeviceId()
+
+        val message = AIPMessageBuilder.build(
+            messageType = "command",
+            sourceNodeId = deviceId,
+            targetNodeId = "server",
+            payload = payload
+        ).apply {
+            // Keep `action` at top level for server-side command routing
             put("action", action)
-            put("device_id", deviceRegistry.getDeviceId())
-            put("timestamp", System.currentTimeMillis())
-            put("message_id", messageId)
-            put("payload", payload)
         }
+
+        // Reuse the message_id generated by AIPMessageBuilder for correlation
+        val messageId = message.getString("message_id")
         
         val deferred = CompletableDeferred<JSONObject>()
         pendingRequests[messageId] = deferred
@@ -241,19 +269,20 @@ class DeviceCommunication(
     
     /**
      * 发送文本消息
+     *
+     * Built via [AIPMessageBuilder] for a consistent AIP v3 envelope.
      */
     fun sendText(text: String): Boolean {
-        val message = JSONObject().apply {
-            put("type", "command")
+        val deviceId = deviceRegistry.getDeviceId()
+        val payload = JSONObject().apply { put("content", text) }
+
+        val message = AIPMessageBuilder.build(
+            messageType = "command",
+            sourceNodeId = deviceId,
+            targetNodeId = "server",
+            payload = payload
+        ).apply {
             put("action", "chat")
-            put("device_id", deviceRegistry.getDeviceId())
-            put("timestamp", System.currentTimeMillis())
-            put("message_id", UUID.randomUUID().toString().take(8))
-            
-            val payload = JSONObject().apply {
-                put("content", text)
-            }
-            put("payload", payload)
         }
         
         return send(message)
@@ -315,15 +344,15 @@ class DeviceCommunication(
                             val result = handler(payload)
                             
                             if (result != null) {
-                                // 发送响应
-                                val response = JSONObject().apply {
-                                    put("type", "response")
+                                // 发送响应 - built via AIPMessageBuilder for consistent fields
+                                val response = AIPMessageBuilder.build(
+                                    messageType = "response",
+                                    sourceNodeId = deviceRegistry.getDeviceId(),
+                                    targetNodeId = "server",
+                                    payload = result
+                                ).apply {
                                     put("action", action)
-                                    put("device_id", deviceRegistry.getDeviceId())
-                                    put("timestamp", System.currentTimeMillis())
-                                    put("message_id", UUID.randomUUID().toString().take(8))
                                     put("correlation_id", messageId)
-                                    put("payload", result)
                                 }
                                 send(response)
                             }
@@ -414,6 +443,10 @@ class DeviceCommunication(
     
     /**
      * 安排重连
+     *
+     * Uses [lastServerWsBase] stored at connection time so that the reconnect
+     * attempt targets the same server (but possibly the next WS path candidate).
+     * Calls [connectToWsBase] to reuse the shared [WebSocketListener].
      */
     private fun scheduleReconnect() {
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -427,9 +460,12 @@ class DeviceCommunication(
         val delay = RECONNECT_DELAY_MS * reconnectAttempts
         Log.i(TAG, "将在 ${delay}ms 后重连 (第 $reconnectAttempts 次)")
         
+        val wsBase = lastServerWsBase ?: return
         scope.launch {
             delay(delay)
-            // 需要外部调用 connect
+            if (!isConnected) {
+                connectToWsBase(wsBase)
+            }
         }
     }
     
