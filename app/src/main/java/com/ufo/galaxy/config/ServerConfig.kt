@@ -18,6 +18,13 @@ object ServerConfig {
     const val DEFAULT_BASE_URL = "ws://100.123.215.126:8050"
 
     /**
+     * Default STUN server URL used for ICE candidate gathering in the WebRTC
+     * [PeerConnection].  Override in the gateway discovery response when TURN
+     * servers are required.
+     */
+    const val DEFAULT_STUN_URL = "stun:stun.l.google.com:19302"
+
+    /**
      * WebSocket paths in descending priority order.
      * `{id}` is substituted with the actual device identifier at runtime.
      */

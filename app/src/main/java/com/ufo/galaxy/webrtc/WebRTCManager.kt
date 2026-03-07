@@ -2,12 +2,14 @@ package com.ufo.galaxy.webrtc
 
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjection
 import android.util.Log
 import com.ufo.galaxy.config.ServerConfig
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import org.webrtc.*
 import java.util.concurrent.TimeUnit
 
 /**
@@ -15,36 +17,47 @@ import java.util.concurrent.TimeUnit
  *
  * Responsibilities:
  * 1. Manage the WebRTC connection lifecycle (start / stop streaming).
- * 2. Connect to the Galaxy Gateway signaling proxy via
+ * 2. Initialise [PeerConnectionFactory] with hardware video encoder/decoder.
+ * 3. Create a [PeerConnection] with STUN ICE servers from [ServerConfig].
+ * 4. Build a [VideoSource] + [VideoTrack] fed by a [ScreenCapturerAndroid].
+ * 5. Connect to the Galaxy Gateway signaling proxy via
  *    `ws://<host>/ws/webrtc/{device_id}` using [WebRTCSignalingClient].
- * 3. Handle signaling message exchange (offer / answer / ice_candidate).
- * 4. Discover the signaling endpoint dynamically via
- *    `GET /api/v1/webrtc/endpoint`; fall back to the default WS path when
- *    the endpoint is unavailable.
- * 5. Start / stop [ScreenCaptureService] in lock-step with the streaming
- *    session.
- *
- * Note: A full peer-to-peer WebRTC media pipeline (PeerConnectionFactory,
- * VideoTrack, etc.) requires the `org.webrtc` native library which is not
- * bundled in this project. The signaling layer is fully functional; encoded
- * frames from [ScreenCaptureService] are available to be plumbed into a
- * WebRTC track when the native library is added.  See docs/WEBRTC_ANDROID.md
- * for details.
+ * 6. Handle SDP offer/answer and ICE candidate exchange with the real
+ *    `org.webrtc` API.
+ * 7. Integrate with [ScreenCaptureService] which holds the foreground-service
+ *    notification required on Android 14+ for MediaProjection.
  */
 class WebRTCManager(private val context: Context) {
 
     private val TAG = "WebRTCManager"
-    // All work in this manager is network I/O or state bookkeeping; no UI interactions.
-    // Dispatcher.IO is intentional. Callbacks passed into WebRTCSignalingClient and
-    // ScreenCaptureService are also thread-safe (they only log or toggle flags).
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private var signalingClient: WebRTCSignalingClient? = null
+    // ─── Configuration ────────────────────────────────────────────────────────
     private var deviceId: String = "unknown_device"
     private var gatewayWsBase: String = ServerConfig.DEFAULT_BASE_URL
+
+    // ─── Signaling ────────────────────────────────────────────────────────────
+    private var signalingClient: WebRTCSignalingClient? = null
+
+    // ─── WebRTC objects ───────────────────────────────────────────────────────
+    private var eglBase: EglBase? = null
+    private var peerConnectionFactory: PeerConnectionFactory? = null
+    private var peerConnection: PeerConnection? = null
+    private var videoSource: VideoSource? = null
+    private var videoTrack: VideoTrack? = null
+    private var surfaceTextureHelper: SurfaceTextureHelper? = null
+    private var screenCapturer: ScreenCapturerAndroid? = null
+
     @Volatile private var isStreaming: Boolean = false
+    @Volatile private var factoryInitialized: Boolean = false
 
     companion object {
+        private const val CAPTURE_WIDTH = 1280
+        private const val CAPTURE_HEIGHT = 720
+        private const val CAPTURE_FPS = 30
+        private const val VIDEO_TRACK_ID = "video0"
+        private const val STREAM_ID = "stream0"
+
         @Volatile
         private var instance: WebRTCManager? = null
 
@@ -56,7 +69,8 @@ class WebRTCManager(private val context: Context) {
     }
 
     /**
-     * Initialize the manager with the gateway base URL and device identifier.
+     * Initialise the manager with the gateway base URL and device identifier,
+     * and set up the [PeerConnectionFactory] with hardware codec support.
      *
      * @param gatewayWsBase WebSocket base URL, e.g. `"ws://100.123.215.126:8050"`.
      * @param deviceId      Identifier for this device; substituted into the WS path.
@@ -64,16 +78,20 @@ class WebRTCManager(private val context: Context) {
     fun initialize(gatewayWsBase: String = ServerConfig.DEFAULT_BASE_URL, deviceId: String = "android_device") {
         this.gatewayWsBase = gatewayWsBase
         this.deviceId = deviceId
+        initializeFactory()
         Log.i(TAG, "WebRTCManager initialized — gateway=$gatewayWsBase device=$deviceId")
     }
 
     /**
      * Start a screen-sharing / streaming session.
      *
-     * 1. Starts [ScreenCaptureService] to capture and encode the screen.
-     * 2. Resolves the signaling endpoint (REST discovery → default fallback).
-     * 3. Connects [WebRTCSignalingClient] to the gateway WS.
-     * 4. Sends an SDP offer once the WS is open.
+     * 1. Ensures [PeerConnectionFactory] is initialised.
+     * 2. Creates a [PeerConnection] with STUN ICE servers.
+     * 3. Attaches a [VideoTrack] to the peer connection.
+     * 4. Starts [ScreenCaptureService] as a foreground service; the service
+     *    calls back via [onCaptureServiceReady] once foreground is active,
+     *    at which point [ScreenCapturerAndroid] is created and started.
+     * 5. Resolves the signaling URL and connects [WebRTCSignalingClient].
      *
      * @param resultCode MediaProjection permission result code.
      * @param data       MediaProjection permission Intent data.
@@ -86,10 +104,13 @@ class WebRTCManager(private val context: Context) {
         Log.i(TAG, "Starting screen sharing session")
         isStreaming = true
 
-        // 1. Start the screen capture foreground service
+        initializeFactory()
+        createPeerConnection()
+
+        // ScreenCaptureService starts the foreground notification and then
+        // calls onCaptureServiceReady(), which starts the screen capturer.
         startCaptureService(resultCode, data)
 
-        // 2. Resolve signaling WS URL and connect
         scope.launch {
             val signalingUrl = resolveSignalingUrl()
             Log.i(TAG, "Using signaling URL: $signalingUrl")
@@ -98,9 +119,46 @@ class WebRTCManager(private val context: Context) {
     }
 
     /**
+     * Called by [ScreenCaptureService] once the foreground service is active
+     * and it is safe to call [android.media.projection.MediaProjectionManager.getMediaProjection].
+     *
+     * Creates a [ScreenCapturerAndroid] and starts screen capture into the
+     * [VideoSource] attached to the peer connection.
+     *
+     * @param data The MediaProjection permission Intent originally received in
+     *             `onActivityResult` (passed through from [startScreenSharing]).
+     */
+    fun onCaptureServiceReady(data: Intent) {
+        Log.i(TAG, "Capture service ready; starting ScreenCapturerAndroid")
+        val helper = surfaceTextureHelper ?: run {
+            Log.e(TAG, "SurfaceTextureHelper not ready — was initialize() called?")
+            return
+        }
+        val source = videoSource ?: run {
+            Log.e(TAG, "VideoSource not ready — was initialize() called?")
+            return
+        }
+
+        val capturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.i(TAG, "MediaProjection stopped by system")
+                if (isStreaming) {
+                    isStreaming = false
+                    stopCaptureService()
+                }
+            }
+        })
+        capturer.initialize(helper, context, source.capturerObserver)
+        capturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS)
+        screenCapturer = capturer
+        Log.i(TAG, "Screen capturer started at ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}@${CAPTURE_FPS}fps")
+    }
+
+    /**
      * Stop the current streaming session.
      *
-     * Disconnects the signaling WebSocket and stops [ScreenCaptureService].
+     * Stops the screen capturer, closes the peer connection, disconnects
+     * the signaling WebSocket, and stops [ScreenCaptureService].
      */
     fun stopScreenSharing() {
         if (!isStreaming) {
@@ -109,6 +167,9 @@ class WebRTCManager(private val context: Context) {
         }
         Log.i(TAG, "Stopping screen sharing session")
         isStreaming = false
+
+        stopScreenCapturer()
+        closePeerConnection()
 
         signalingClient?.disconnect()
         signalingClient = null
@@ -143,7 +204,64 @@ class WebRTCManager(private val context: Context) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Private helpers
+    // Factory / peer-connection setup
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private fun initializeFactory() {
+        if (factoryInitialized) return
+        factoryInitialized = true
+
+        PeerConnectionFactory.initialize(
+            PeerConnectionFactory.InitializationOptions.builder(context)
+                .createInitializationOptions()
+        )
+
+        eglBase = EglBase.create()
+        val eglContext = eglBase!!.eglBaseContext
+
+        peerConnectionFactory = PeerConnectionFactory.builder()
+            .setOptions(PeerConnectionFactory.Options())
+            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglContext, true, true))
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglContext))
+            .createPeerConnectionFactory()
+
+        surfaceTextureHelper = SurfaceTextureHelper.create("VideoCapture", eglContext)
+        videoSource = peerConnectionFactory!!.createVideoSource(/* isScreencast = */ true)
+        videoTrack = peerConnectionFactory!!.createVideoTrack(VIDEO_TRACK_ID, videoSource!!)
+
+        Log.i(TAG, "PeerConnectionFactory initialised")
+    }
+
+    private fun createPeerConnection() {
+        val factory = peerConnectionFactory ?: return
+
+        val iceServers = listOf(
+            PeerConnection.IceServer.builder(ServerConfig.DEFAULT_STUN_URL)
+                .createIceServer()
+        )
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
+
+        peerConnection = factory.createPeerConnection(rtcConfig, peerConnectionObserver)
+            ?: run {
+                Log.e(TAG, "Failed to create PeerConnection")
+                return
+            }
+
+        val stream = factory.createLocalMediaStream(STREAM_ID)
+        stream.addTrack(videoTrack)
+        peerConnection!!.addStream(stream)
+
+        Log.i(TAG, "PeerConnection created")
+    }
+
+    private fun closePeerConnection() {
+        peerConnection?.close()
+        peerConnection?.dispose()
+        peerConnection = null
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Signaling helpers
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
@@ -194,7 +312,6 @@ class WebRTCManager(private val context: Context) {
             onDisconnected = {
                 Log.w(TAG, "Signaling WS disconnected")
                 if (isStreaming) {
-                    // Session was active — clean up capture
                     isStreaming = false
                     stopCaptureService()
                 }
@@ -203,69 +320,207 @@ class WebRTCManager(private val context: Context) {
         signalingClient!!.connect()
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // SDP / ICE handling
+    // ──────────────────────────────────────────────────────────────────────────
+
     /**
-     * Build and send an SDP offer to the gateway.
-     *
-     * A minimal SDP offer is constructed here to initiate the signaling
-     * exchange.  When the `org.webrtc` native library is integrated,
-     * PeerConnectionFactory should generate the real SDP instead.
+     * Create a real SDP offer via [PeerConnection.createOffer], set it as the
+     * local description, and send it to the gateway via [WebRTCSignalingClient].
      */
     private fun sendOffer() {
-        val sdp = buildMinimalSdpOffer()
-        val offer = SignalingMessage(
-            type     = "offer",
-            sdp      = sdp,
-            deviceId = deviceId
-        )
-        Log.i(TAG, "Sending SDP offer to gateway")
-        signalingClient?.send(offer)
+        val pc = peerConnection ?: run {
+            Log.e(TAG, "PeerConnection not ready for offer")
+            return
+        }
+        val constraints = MediaConstraints()
+        pc.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription) {
+                pc.setLocalDescription(object : SdpObserver {
+                    override fun onSetSuccess() {
+                        val offer = SignalingMessage(
+                            type     = "offer",
+                            sdp      = sdp.description,
+                            deviceId = deviceId
+                        )
+                        signalingClient?.send(offer)
+                        Log.i(TAG, "SDP offer sent (${sdp.description.length} chars)")
+                    }
+                    override fun onSetFailure(error: String?) {
+                        Log.e(TAG, "setLocalDescription failed: $error")
+                    }
+                    override fun onCreateSuccess(p0: SessionDescription?) {}
+                    override fun onCreateFailure(p0: String?) {}
+                }, sdp)
+            }
+            override fun onCreateFailure(error: String?) {
+                Log.e(TAG, "createOffer failed: $error")
+            }
+            override fun onSetSuccess() {}
+            override fun onSetFailure(p0: String?) {}
+        }, constraints)
     }
 
     /**
      * Handle an incoming SDP offer (when the gateway initiates).
-     * Creates and sends an SDP answer.
+     * Sets it as the remote description and creates + sends an SDP answer.
      */
     private fun handleOffer(message: SignalingMessage) {
-        Log.i(TAG, "Handling incoming SDP offer")
         val sdp = message.sdp ?: run {
             Log.w(TAG, "Offer missing SDP body")
             return
         }
-        Log.d(TAG, "Remote SDP offer: ${sdp.take(120)}…")
-        // When org.webrtc is available: peerConnection.setRemoteDescription(…)
-        // Then create and send an answer:
-        val answer = SignalingMessage(
-            type     = "answer",
-            sdp      = buildMinimalSdpAnswer(sdp),
-            deviceId = deviceId
-        )
-        signalingClient?.send(answer)
-        Log.i(TAG, "SDP answer sent")
+        Log.i(TAG, "Handling incoming SDP offer (${sdp.length} chars)")
+        val pc = peerConnection ?: run {
+            Log.e(TAG, "PeerConnection not ready")
+            return
+        }
+
+        val remoteDesc = SessionDescription(SessionDescription.Type.OFFER, sdp)
+        pc.setRemoteDescription(object : SdpObserver {
+            override fun onSetSuccess() {
+                Log.i(TAG, "Remote description set (offer); creating answer")
+                val constraints = MediaConstraints()
+                pc.createAnswer(object : SdpObserver {
+                    override fun onCreateSuccess(answerSdp: SessionDescription) {
+                        pc.setLocalDescription(object : SdpObserver {
+                            override fun onSetSuccess() {
+                                val answer = SignalingMessage(
+                                    type     = "answer",
+                                    sdp      = answerSdp.description,
+                                    deviceId = deviceId
+                                )
+                                signalingClient?.send(answer)
+                                Log.i(TAG, "SDP answer sent")
+                            }
+                            override fun onSetFailure(error: String?) {
+                                Log.e(TAG, "setLocalDescription (answer) failed: $error")
+                            }
+                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                            override fun onCreateFailure(p0: String?) {}
+                        }, answerSdp)
+                    }
+                    override fun onCreateFailure(error: String?) {
+                        Log.e(TAG, "createAnswer failed: $error")
+                    }
+                    override fun onSetSuccess() {}
+                    override fun onSetFailure(p0: String?) {}
+                }, constraints)
+            }
+            override fun onSetFailure(error: String?) {
+                Log.e(TAG, "setRemoteDescription (offer) failed: $error")
+            }
+            override fun onCreateSuccess(p0: SessionDescription?) {}
+            override fun onCreateFailure(p0: String?) {}
+        }, remoteDesc)
     }
 
     /**
-     * Handle an incoming SDP answer from the remote peer.
+     * Handle an incoming SDP answer from the remote peer by setting it as the
+     * remote description on the [PeerConnection].
      */
     private fun handleAnswer(message: SignalingMessage) {
         val sdp = message.sdp ?: run {
             Log.w(TAG, "Answer missing SDP body")
             return
         }
-        Log.i(TAG, "Received SDP answer (${sdp.length} chars)")
-        // When org.webrtc is available: peerConnection.setRemoteDescription(…)
+        Log.i(TAG, "Handling SDP answer (${sdp.length} chars)")
+        val remoteDesc = SessionDescription(SessionDescription.Type.ANSWER, sdp)
+        peerConnection?.setRemoteDescription(object : SdpObserver {
+            override fun onSetSuccess() {
+                Log.i(TAG, "Remote description set (answer) — media negotiation complete")
+            }
+            override fun onSetFailure(error: String?) {
+                Log.e(TAG, "setRemoteDescription (answer) failed: $error")
+            }
+            override fun onCreateSuccess(p0: SessionDescription?) {}
+            override fun onCreateFailure(p0: String?) {}
+        }, remoteDesc)
     }
 
     /**
-     * Handle an incoming ICE candidate from the remote peer.
+     * Handle an incoming ICE candidate from the remote peer by adding it to the
+     * [PeerConnection].
      */
     private fun handleIceCandidate(message: SignalingMessage) {
         val candidate = message.candidate ?: run {
             Log.w(TAG, "ice_candidate message missing candidate body")
             return
         }
-        Log.i(TAG, "Received ICE candidate: ${candidate.candidate.take(60)}…")
-        // When org.webrtc is available: peerConnection.addIceCandidate(…)
+        Log.i(TAG, "Adding remote ICE candidate: ${candidate.candidate.take(60)}…")
+        val iceCandidate = IceCandidate(
+            candidate.sdpMid ?: "",
+            candidate.sdpMLineIndex,
+            candidate.candidate
+        )
+        peerConnection?.addIceCandidate(iceCandidate)
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // PeerConnection observer
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private val peerConnectionObserver = object : PeerConnection.Observer {
+        override fun onIceCandidate(candidate: IceCandidate) {
+            Log.d(TAG, "Local ICE candidate: ${candidate.sdp.take(60)}…")
+            val msg = SignalingMessage(
+                type      = "ice_candidate",
+                candidate = SignalingMessage.IceCandidate(
+                    candidate     = candidate.sdp,
+                    sdpMid        = candidate.sdpMid,
+                    sdpMLineIndex = candidate.sdpMLineIndex
+                ),
+                deviceId = deviceId
+            )
+            signalingClient?.send(msg)
+        }
+
+        override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
+            Log.i(TAG, "ICE connection state: $newState")
+            if (newState == PeerConnection.IceConnectionState.FAILED ||
+                newState == PeerConnection.IceConnectionState.DISCONNECTED) {
+                Log.w(TAG, "ICE connection failed/disconnected")
+            }
+        }
+
+        override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {
+            Log.d(TAG, "ICE gathering state: $newState")
+        }
+
+        override fun onSignalingChange(newState: PeerConnection.SignalingState) {
+            Log.d(TAG, "Signaling state: $newState")
+        }
+
+        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {
+            Log.d(TAG, "ICE candidates removed: ${candidates.size}")
+        }
+
+        override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+
+        override fun onAddStream(stream: MediaStream) {
+            Log.d(TAG, "Remote stream added: ${stream.id}")
+        }
+
+        override fun onRemoveStream(stream: MediaStream) {
+            Log.d(TAG, "Remote stream removed: ${stream.id}")
+        }
+
+        override fun onDataChannel(dataChannel: DataChannel) {
+            Log.d(TAG, "Data channel opened: ${dataChannel.label()}")
+        }
+
+        override fun onRenegotiationNeeded() {
+            Log.d(TAG, "Renegotiation needed")
+        }
+
+        override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {
+            Log.d(TAG, "Track added: ${receiver.id()}")
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Capture service control
+    // ──────────────────────────────────────────────────────────────────────────
 
     /** Start the [ScreenCaptureService] foreground service. */
     private fun startCaptureService(resultCode: Int, data: Intent) {
@@ -287,59 +542,48 @@ class WebRTCManager(private val context: Context) {
         Log.i(TAG, "ScreenCaptureService stop requested")
     }
 
-    /**
-     * Build a minimal SDP offer string describing a video-only session.
-     *
-     * This placeholder SDP is sufficient for initiating the signaling exchange
-     * with the gateway proxy.  Once `org.webrtc` is integrated, replace this
-     * with the SDP generated by `PeerConnection.createOffer()`.
-     */
-    private fun buildMinimalSdpOffer(): String {
-        val ts = System.currentTimeMillis() / 1000
-        return """
-            v=0
-            o=- $ts $ts IN IP4 127.0.0.1
-            s=UFO Galaxy Android Screen Share
-            t=0 0
-            a=group:BUNDLE 0
-            m=video 9 UDP/TLS/RTP/SAVPF 96
-            c=IN IP4 0.0.0.0
-            a=rtpmap:96 H264/90000
-            a=fmtp:96 profile-level-id=42e01f
-            a=sendonly
-            a=mid:0
-        """.trimIndent()
+    private fun stopScreenCapturer() {
+        try {
+            screenCapturer?.stopCapture()
+        } catch (e: InterruptedException) {
+            Log.w(TAG, "stopCapture interrupted", e)
+        }
+        screenCapturer?.dispose()
+        screenCapturer = null
     }
 
-    /**
-     * Build a minimal SDP answer in response to the given [remoteSdp].
-     *
-     * Replace with `PeerConnection.createAnswer()` when org.webrtc is available.
-     */
-    private fun buildMinimalSdpAnswer(remoteSdp: String): String {
-        val ts = System.currentTimeMillis() / 1000
-        return """
-            v=0
-            o=- $ts $ts IN IP4 127.0.0.1
-            s=UFO Galaxy Android Screen Share
-            t=0 0
-            a=group:BUNDLE 0
-            m=video 9 UDP/TLS/RTP/SAVPF 96
-            c=IN IP4 0.0.0.0
-            a=rtpmap:96 H264/90000
-            a=fmtp:96 profile-level-id=42e01f
-            a=recvonly
-            a=mid:0
-        """.trimIndent()
-    }
+    // ──────────────────────────────────────────────────────────────────────────
+    // Lifecycle
+    // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Cancel all coroutines and disconnect signaling.
+     * Release all WebRTC resources, disconnect signaling, and cancel coroutines.
+     * Call this when the application is finishing to prevent leaks.
      */
     fun cleanup() {
+        isStreaming = false
+        stopScreenCapturer()
+        closePeerConnection()
+
+        videoTrack?.dispose()
+        videoTrack = null
+
+        videoSource?.dispose()
+        videoSource = null
+
+        surfaceTextureHelper?.dispose()
+        surfaceTextureHelper = null
+
+        peerConnectionFactory?.dispose()
+        peerConnectionFactory = null
+        factoryInitialized = false
+
+        eglBase?.release()
+        eglBase = null
+
         signalingClient?.disconnect()
         signalingClient = null
-        isStreaming = false
+
         scope.cancel()
         Log.i(TAG, "WebRTCManager cleaned up")
     }

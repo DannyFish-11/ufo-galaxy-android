@@ -6,12 +6,12 @@ This document describes the WebRTC screen-streaming integration in the UFO Galax
 
 ## Overview
 
-The integration enables the Android device to **stream its screen** to a remote viewer (Node_95 or any WebRTC-capable client) via the Galaxy Gateway signaling proxy introduced in Server PR #35.
+The integration enables the Android device to **stream its screen** to a remote viewer (Node_95 or any WebRTC-capable client) via the Galaxy Gateway signaling proxy.
 
 ```
 Android device
-  └─ ScreenCaptureService  (MediaProjection + MediaCodec H.264)
-  └─ WebRTCManager         (lifecycle, signaling orchestration)
+  └─ ScreenCaptureService  (foreground service – satisfies Android 14+ MediaProjection requirement)
+  └─ WebRTCManager         (PeerConnectionFactory, PeerConnection, VideoSource, ScreenCapturerAndroid)
        └─ WebRTCSignalingClient  ──WS──▶  Galaxy Gateway  ──▶  Remote Peer
 ```
 
@@ -19,12 +19,25 @@ Android device
 
 | Class | Package | Purpose |
 |-------|---------|---------|
-| `WebRTCManager` | `com.ufo.galaxy.webrtc` | Lifecycle, endpoint discovery, SDP offer/answer |
+| `WebRTCManager` | `com.ufo.galaxy.webrtc` | PeerConnectionFactory init, PeerConnection, VideoSource/Track, ScreenCapturerAndroid, SDP offer/answer, ICE handling |
 | `WebRTCSignalingClient` | `com.ufo.galaxy.webrtc` | OkHttp WebSocket to `/ws/webrtc/{device_id}` |
 | `SignalingMessage` | `com.ufo.galaxy.webrtc` | JSON serialization for offer / answer / ICE |
-| `ScreenCaptureService` | `com.ufo.galaxy.webrtc` | Foreground service: MediaProjection + H.264 |
-| `ServerConfig` | `com.ufo.galaxy.config` | URL builders for WS and REST endpoints |
+| `ScreenCaptureService` | `com.ufo.galaxy.webrtc` | Foreground service: holds the `mediaProjection` foreground-service type required on Android 14+ |
+| `ServerConfig` | `com.ufo.galaxy.config` | URL builders for WS and REST endpoints; `DEFAULT_STUN_URL` |
 | `TaskExecutor` | `com.ufo.galaxy.task` | Task dispatch: `screen_stream_start` / `screen_stream_stop` |
+
+---
+
+## Required Dependencies
+
+Add to `app/build.gradle.kts`:
+
+```kotlin
+// WebRTC — community-maintained build of libwebrtc hosted on mavenCentral
+implementation("io.github.webrtc-sdk:android:104.5112.07")
+```
+
+No additional Maven repository configuration is needed; `mavenCentral()` is already declared in the root `build.gradle`.
 
 ---
 
@@ -39,6 +52,15 @@ Add the following to `AndroidManifest.xml` (already included):
 ```
 
 The `FOREGROUND_SERVICE_MEDIA_PROJECTION` permission is required by Android 14+ (API 34) for foreground services that use `mediaProjection` as the `foregroundServiceType`.
+
+Declare the service in `AndroidManifest.xml` with the correct `foregroundServiceType`:
+
+```xml
+<service
+    android:name=".webrtc.ScreenCaptureService"
+    android:foregroundServiceType="mediaProjection"
+    android:exported="false" />
+```
 
 ### Runtime Permission
 
@@ -59,14 +81,19 @@ Pass the resulting `resultCode` and `data` Intent to `WebRTCManager.startScreenS
 1. Activity calls startActivityForResult(manager.createScreenCaptureIntent(), …)
 2. User approves → onActivityResult(resultCode, data)
 3. Activity calls WebRTCManager.startScreenSharing(resultCode, data)
-4. WebRTCManager starts ScreenCaptureService (foreground) with the result
-5. ScreenCaptureService creates MediaProjection → VirtualDisplay → MediaCodec surface
-6. MediaCodec encodes frames as H.264 (baseline, 1280×720 @ 30 fps, 2 Mbps)
-7. Encoded frames are available via sendEncodedData() callback
-   (wired to WebRTC when org.webrtc is integrated; see Limitations)
-8. WebRTCManager connects WebRTCSignalingClient to the gateway
-9. SDP offer is sent once the WebSocket is open
-10. Gateway relays offer/answer/ICE between peers
+4. WebRTCManager initialises PeerConnectionFactory + EglBase + VideoSource + VideoTrack
+5. WebRTCManager creates PeerConnection with STUN ICE server from ServerConfig.DEFAULT_STUN_URL
+6. WebRTCManager starts ScreenCaptureService (foreground) with resultCode + data
+7. ScreenCaptureService calls startForeground() then WebRTCManager.onCaptureServiceReady(data)
+8. WebRTCManager creates ScreenCapturerAndroid(data, …), which internally calls
+   MediaProjectionManager.getMediaProjection() and creates a VirtualDisplay
+9. ScreenCapturerAndroid feeds video frames into the VideoSource → VideoTrack → PeerConnection
+10. WebRTCManager connects WebRTCSignalingClient to the gateway
+11. On WebSocket open, PeerConnection.createOffer() is called; the real SDP is sent via SignalingClient
+12. Gateway relays offer/answer/ICE between peers
+13. Incoming answer → PeerConnection.setRemoteDescription()
+14. Incoming ICE candidates → PeerConnection.addIceCandidate()
+15. Local ICE candidates (from PeerConnection.Observer.onIceCandidate) → sent via SignalingClient
 ```
 
 ---
@@ -106,14 +133,14 @@ All messages are JSON objects with a `type` field:
 // Offer (Android → Gateway → Peer)
 {
   "type": "offer",
-  "sdp": "<SDP string>",
+  "sdp": "<real SDP from PeerConnection.createOffer()>",
   "device_id": "android_abc123"
 }
 
 // Answer (Peer → Gateway → Android)
 {
   "type": "answer",
-  "sdp": "<SDP string>",
+  "sdp": "<real SDP from remote peer>",
   "device_id": "android_abc123"
 }
 
@@ -136,6 +163,7 @@ All messages are JSON objects with a `type` field:
 | Key | Location | Description |
 |-----|----------|-------------|
 | `DEFAULT_BASE_URL` | `ServerConfig` | Default WS base, e.g. `ws://100.123.215.126:8050` |
+| `DEFAULT_STUN_URL` | `ServerConfig` | Default STUN server, e.g. `stun:stun.l.google.com:19302` |
 | `WEBRTC_WS_PATH` | `ServerConfig` | `/ws/webrtc/{id}` – signaling WS path template |
 | `WEBRTC_ENDPOINT_REST_PATH` | `ServerConfig` | `/api/v1/webrtc/endpoint` – discovery REST path |
 
@@ -148,7 +176,7 @@ gateway.base_url=ws://your-gateway-host:8050
 
 ## Task Executor Integration
 
-Two new task types are handled by `com.ufo.galaxy.task.TaskExecutor`:
+Two task types are handled by `com.ufo.galaxy.task.TaskExecutor`:
 
 ### `screen_stream_start`
 
@@ -173,34 +201,6 @@ Stop the current WebRTC streaming session.
 
 ---
 
-## Limitations & Future Work
-
-### Native WebRTC library not bundled
-
-A full peer-to-peer WebRTC media pipeline (PeerConnectionFactory, VideoTrack, RTP sender) requires the `org.webrtc` native library (e.g., `io.github.webrtc-sdk:android`). Adding this library (~20 MB AAR) was out of scope for this PR.
-
-**What works today:**
-- Full signaling infrastructure (WS connect, offer/answer/ICE JSON exchange).
-- Screen capture with H.264 encoding via `ScreenCaptureService`.
-- Gateway endpoint discovery with fallback.
-- `screen_stream_start` / `screen_stream_stop` task types.
-
-**To complete the media pipeline (future PR):**
-1. Add `implementation 'io.github.webrtc-sdk:android:<version>'` to `app/build.gradle`.
-2. In `WebRTCManager.initialize()`:
-   - Call `PeerConnectionFactory.initialize()`.
-   - Create a `PeerConnectionFactory` with default options.
-   - Create a `PeerConnection` with STUN/TURN ICE servers from the gateway.
-3. In `ScreenCaptureService`, pass the encoder `Surface` (currently `encoderSurface`) to a `VideoSource` created by the factory.
-4. Replace the minimal SDP strings in `buildMinimalSdpOffer()` / `buildMinimalSdpAnswer()` with calls to `peerConnection.createOffer()` / `createAnswer()`.
-5. Implement `peerConnection.addIceCandidate()` in `handleIceCandidate()`.
-
-### STUN / TURN
-
-No ICE servers are configured in the current placeholder SDP. Add them to `PeerConnection.RTCConfiguration` once the native library is available.
-
----
-
 ## Testing
 
 Unit tests (no device required):
@@ -209,6 +209,7 @@ Unit tests (no device required):
 ./gradlew :app:test
 ```
 
-Tests added:
-- `ServerConfigTest` — `buildWebRtcWsUrl` and `buildWebRtcEndpointUrl` helpers.
+Tests included:
+- `ServerConfigTest` — `buildWebRtcWsUrl`, `buildWebRtcEndpointUrl`, and `DEFAULT_STUN_URL` helpers.
 - `SignalingMessageTest` — JSON round-trip for offer, answer, and ice_candidate messages.
+
