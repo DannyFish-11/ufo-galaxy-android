@@ -445,9 +445,29 @@ class AgentMessageHandler(
     
     /**
      * 处理应用停止
+     *
+     * Requests the OS to remove the background processes for [packageName].
+     * Requires the KILL_BACKGROUND_PROCESSES permission.  This does not force-stop
+     * foreground apps; it only affects processes that are in the background.
      */
     private fun handleAppStop(message: JSONObject) {
-        sendErrorResponse(message, "应用停止功能尚未实现")
+        val packageName = message.optString("package_name", "")
+        if (packageName.isEmpty()) {
+            sendErrorResponse(message, "缺少 package_name 参数")
+            return
+        }
+        try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.killBackgroundProcesses(packageName)
+            sendResponse(message, JSONObject().apply {
+                put("status", "success")
+                put("message", "已请求停止后台进程: $packageName")
+                put("package_name", packageName)
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "停止应用失败: $packageName", e)
+            sendErrorResponse(message, "停止应用失败: ${e.message}")
+        }
     }
     
     /**
