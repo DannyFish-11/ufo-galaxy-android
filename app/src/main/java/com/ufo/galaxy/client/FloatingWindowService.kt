@@ -160,13 +160,13 @@ class FloatingWindowService : Service() {
     }
 
     private fun startVoiceRecognition() {
-        try {
-            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-                Toast.makeText(this, "语音识别不可用", Toast.LENGTH_SHORT).show()
-                return
-            }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "语音识别不可用", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-            val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        try {
             val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -198,8 +198,8 @@ class FloatingWindowService : Service() {
             })
 
             speechRecognizer.startListening(recognizerIntent)
-
         } catch (e: Exception) {
+            speechRecognizer.destroy()
             Toast.makeText(this, "语音识别不可用: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
