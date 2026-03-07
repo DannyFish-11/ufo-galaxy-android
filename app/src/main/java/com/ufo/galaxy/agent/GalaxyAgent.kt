@@ -3,7 +3,12 @@ package com.ufo.galaxy.agent
 import android.content.Context
 import android.util.Log
 import com.ufo.galaxy.autonomy.AutonomyManager
+import com.ufo.galaxy.config.ServerConfig
 import kotlinx.coroutines.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 /**
@@ -166,33 +171,55 @@ class GalaxyAgent private constructor(private val context: Context) {
     
     /**
      * 向 Gateway 注册
+     *
+     * Sends an HTTP POST to the Gateway's /api/v1/devices/register endpoint.
+     * If the network is unreachable the agent falls back to local (offline) registration
+     * so the rest of the startup flow can still proceed.
      */
     private suspend fun registerToGateway(): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 val registrationRequest = agentRegistry.generateRegistrationRequest()
-                
-                // TODO: 通过 HTTP POST 发送注册请求到 Gateway
-                // 这里暂时模拟成功
                 Log.i(TAG, "📤 发送注册请求: ${registrationRequest.toString(2)}")
-                
-                // 模拟响应
-                val response = JSONObject().apply {
-                    put("status", "success")
-                    put("token", "mock-token-${System.currentTimeMillis()}")
-                    put("message", "Agent 注册成功")
+
+                val httpBase = ServerConfig.wsToHttpBase(
+                    gatewayUrl.replaceFirst(Regex("/ws(/.*)?$"), "")
+                )
+                val registerUrl = ServerConfig.buildRestUrl(httpBase, "/register")
+
+                val client = OkHttpClient()
+                val body = registrationRequest.toString()
+                    .toRequestBody("application/json; charset=utf-8".toMediaType())
+                val request = Request.Builder()
+                    .url(registerUrl)
+                    .post(body)
+                    .build()
+
+                val response = try {
+                    client.newCall(request).execute()
+                } catch (netEx: Exception) {
+                    // Gateway unreachable – use an offline registration token so the
+                    // agent can still start and retry registration on the next run.
+                    Log.w(TAG, "⚠️ Gateway 不可达，使用离线注册模式: ${netEx.message}")
+                    val fallback = JSONObject().apply {
+                        put("status", "success")
+                        put("token", "offline-token-${System.currentTimeMillis()}")
+                        put("message", "离线注册模式（Gateway 不可达）")
+                    }
+                    return@withContext agentRegistry.handleRegistrationResponse(fallback)
                 }
-                
-                val success = agentRegistry.handleRegistrationResponse(response)
-                
+
+                val bodyStr = response.body?.string() ?: "{}"
+                val responseJson = runCatching { JSONObject(bodyStr) }.getOrDefault(JSONObject())
+                val success = agentRegistry.handleRegistrationResponse(responseJson)
+
                 if (success) {
                     Log.i(TAG, "✅ Agent 注册成功")
                 } else {
-                    Log.e(TAG, "❌ Agent 注册失败")
+                    Log.e(TAG, "❌ Agent 注册失败: $bodyStr")
                 }
-                
                 success
-                
+
             } catch (e: Exception) {
                 Log.e(TAG, "❌ 注册过程异常", e)
                 false

@@ -4,8 +4,11 @@ import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -158,19 +161,44 @@ class FloatingWindowService : Service() {
 
     private fun startVoiceRecognition() {
         try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                Toast.makeText(this, "语音识别不可用", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "说出您的命令...")
             }
-            
-            // 由于 Service 中无法直接启动 Activity，这里使用 Toast 提示
-            // 实际应用中应该使用 SpeechRecognizer API
-            Toast.makeText(this, "语音识别启动中...", Toast.LENGTH_SHORT).show()
-            
-            // TODO: 实现 SpeechRecognizer API
-            // 这里应该使用 SpeechRecognizer 而不是 startActivityForResult
-            
+
+            speechRecognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    Toast.makeText(this@FloatingWindowService, "🎤 请说话...", Toast.LENGTH_SHORT).show()
+                }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onError(error: Int) {
+                    Toast.makeText(this@FloatingWindowService, "语音识别错误: $error", Toast.LENGTH_SHORT).show()
+                    speechRecognizer.destroy()
+                }
+                override fun onResults(results: Bundle?) {
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull()
+                    if (!text.isNullOrEmpty()) {
+                        sendCommandToGalaxy(text)
+                    }
+                    speechRecognizer.destroy()
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+
+            speechRecognizer.startListening(recognizerIntent)
+
         } catch (e: Exception) {
             Toast.makeText(this, "语音识别不可用: ${e.message}", Toast.LENGTH_SHORT).show()
         }

@@ -1,5 +1,6 @@
 package com.ufo.galaxy.agent
 
+import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
 import com.ufo.galaxy.autonomy.AutonomyManager
@@ -172,10 +173,22 @@ class AgentMessageHandler(
                     autonomyManager.executeAction(startAction)
                 }
                 "stop" -> {
-                    // TODO: 实现应用停止功能
-                    JSONObject().apply {
-                        put("status", "error")
-                        put("message", "应用停止功能尚未实现")
+                    // Request the OS to remove the app's background processes.
+                    // This requires the KILL_BACKGROUND_PROCESSES permission and only
+                    // affects processes that are not in the foreground.
+                    try {
+                        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        am.killBackgroundProcesses(packageName)
+                        JSONObject().apply {
+                            put("status", "success")
+                            put("message", "已请求停止应用: $packageName")
+                            put("package", packageName)
+                        }
+                    } catch (e: Exception) {
+                        JSONObject().apply {
+                            put("status", "error")
+                            put("message", "停止应用失败: ${e.message}")
+                        }
                     }
                 }
                 else -> JSONObject().apply {
@@ -321,24 +334,55 @@ class AgentMessageHandler(
     
     /**
      * 处理 Agent 配置更新
+     *
+     * Persists every key/value pair from the incoming "config" object to
+     * SharedPreferences (galaxy_agent_config).  JSON-null values are skipped to
+     * avoid storing the literal string "null".
      */
     private fun handleAgentConfigUpdate(message: JSONObject) {
-        // TODO: 实现配置更新逻辑
-        sendResponse(message, JSONObject().apply {
-            put("status", "success")
-            put("message", "配置更新功能尚未实现")
-        })
+        try {
+            val config = message.optJSONObject("config") ?: JSONObject()
+            val prefs = context.getSharedPreferences("galaxy_agent_config", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            var updatedCount = 0
+            config.keys().forEach { key ->
+                val value = config.opt(key)
+                if (value != null && value != JSONObject.NULL) {
+                    editor.putString(key, value.toString())
+                    updatedCount++
+                }
+            }
+            editor.apply()
+            Log.i(TAG, "配置已更新: $updatedCount 个键")
+            sendResponse(message, JSONObject().apply {
+                put("status", "success")
+                put("message", "配置已更新")
+                put("updated_keys", updatedCount)
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "配置更新失败", e)
+            sendErrorResponse(message, "配置更新失败: ${e.message}")
+        }
     }
     
     /**
      * 处理 Agent 重启
+     *
+     * Acknowledges the request immediately, then asynchronously calls
+     * GalaxyAgent.restart() so the WebSocket connection is re-established.
      */
     private fun handleAgentRestart(message: JSONObject) {
-        // TODO: 实现 Agent 重启逻辑
         sendResponse(message, JSONObject().apply {
             put("status", "success")
-            put("message", "Agent 重启功能尚未实现")
+            put("message", "Agent 重启中...")
         })
+        scope.launch {
+            try {
+                GalaxyAgent.getInstance(context).restart()
+            } catch (e: Exception) {
+                Log.e(TAG, "Agent 重启失败", e)
+            }
+        }
     }
     
     /**
