@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.json.JSONArray
@@ -202,58 +203,48 @@ class DeviceRegistry(private val context: Context) {
     
     /**
      * 创建注册消息
+     *
+     * Built via [AIPMessageBuilder] so that AIP/1.0 + v3 envelope fields
+     * (`protocol`, `version`, `device_id`, `device_type`, `message_id`,
+     * `timestamp`) are always present and consistent.  The payload reuses
+     * [DeviceInfo.toJson] to avoid duplicating field assignments.  The `action`
+     * field is appended afterwards for server-side routing.
      */
     fun createRegisterMessage(): JSONObject {
         val info = _deviceInfo.value ?: initialize()
-        
-        return JSONObject().apply {
-            put("type", "register")
+
+        return AIPMessageBuilder.build(
+            messageType = "register",
+            sourceNodeId = info.deviceId,
+            targetNodeId = "server",
+            payload = info.toJson(),
+            deviceType = "Android_Agent"
+        ).apply {
+            // `action` is an extra routing hint consumed by the server
             put("action", "device_register")
-            put("device_id", info.deviceId)
-            put("timestamp", System.currentTimeMillis())
-            put("message_id", UUID.randomUUID().toString().take(8))
-            
-            val payload = JSONObject().apply {
-                put("device_id", info.deviceId)
-                put("device_type", info.deviceType)
-                put("device_name", info.deviceName)
-                put("manufacturer", info.manufacturer)
-                put("model", info.model)
-                put("brand", info.brand)
-                put("os_version", info.osVersion)
-                put("sdk_version", info.sdkVersion)
-                put("app_version", info.appVersion)
-                
-                put("capabilities", JSONArray(info.capabilities))
-                put("groups", JSONArray(info.groups))
-                put("tags", JSONArray(info.tags))
-                
-                put("metadata", JSONObject(info.metadata))
-            }
-            
-            put("payload", payload)
         }
     }
-    
+
     /**
      * 创建心跳消息
+     *
+     * Built via [AIPMessageBuilder] for consistent envelope fields.
      */
     fun createHeartbeatMessage(): JSONObject {
         val info = _deviceInfo.value ?: initialize()
-        
-        return JSONObject().apply {
-            put("type", "heartbeat")
-            put("device_id", info.deviceId)
-            put("timestamp", System.currentTimeMillis())
-            put("message_id", UUID.randomUUID().toString().take(8))
-            
-            val payload = JSONObject().apply {
-                put("status", _deviceStatus.value.value)
-                put("capabilities_count", _capabilities.value.size)
-            }
-            
-            put("payload", payload)
+
+        val payload = JSONObject().apply {
+            put("status", _deviceStatus.value.value)
+            put("capabilities_count", _capabilities.value.size)
         }
+
+        return AIPMessageBuilder.build(
+            messageType = "heartbeat",
+            sourceNodeId = info.deviceId,
+            targetNodeId = "server",
+            payload = payload,
+            deviceType = "Android_Agent"
+        )
     }
     
     /**

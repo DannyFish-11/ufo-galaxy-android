@@ -238,19 +238,23 @@ class EnhancedAIPClient(
 
     /**
      * 发送心跳
+     *
+     * The AIP/1.0 envelope is built via [AIPMessageBuilder] first, then
+     * converted to Microsoft Galaxy format so that `message_id`, `timestamp`,
+     * and other v3-compatible fields are always present and consistent.
      */
     private fun sendHeartbeat() {
-        val microsoftMessage = JSONObject().apply {
-            put("message_type", "HEARTBEAT")
-            put("agent_id", deviceId)
-            put("session_id", System.currentTimeMillis())
-            put("payload", JSONObject().apply {
-                put("status", "online")
-                put("timestamp", System.currentTimeMillis() / 1000)
-            })
-        }.toString()
-
-        webSocket?.send(microsoftMessage) ?: Log.e(TAG, "WebSocket is null. Heartbeat not sent.")
+        val payload = JSONObject().apply {
+            put("status", "online")
+        }
+        val ourMessage = AIPMessageBuilder.build(
+            messageType = "heartbeat",
+            sourceNodeId = deviceId,
+            targetNodeId = "Galaxy",
+            payload = payload
+        )
+        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
+        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Heartbeat not sent.")
     }
 
     /**

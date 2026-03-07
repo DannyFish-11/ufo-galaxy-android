@@ -1,6 +1,7 @@
 package com.ufo.galaxy.protocol
 
 import org.json.JSONObject
+import java.util.UUID
 
 /**
  * Central builder and parser for AIP messages.
@@ -29,7 +30,8 @@ object AIPMessageBuilder {
      *
      * The resulting [JSONObject] contains:
      * - All required **AIP/1.0** fields (`protocol`, `type`, `source_node`,
-     *   `target_node`, `timestamp`, `payload`) for backward compatibility.
+     *   `target_node`, `timestamp`, `message_id`, `payload`) for backward
+     *   compatibility.
      * - Optional **v3-compatible** fields (`version`, `device_id`, `device_type`)
      *   that maximise server compatibility when [includeV3] is `true` (the default).
      *
@@ -39,6 +41,7 @@ object AIPMessageBuilder {
      * @param payload       Arbitrary payload [JSONObject].
      * @param deviceType    Optional device-type hint (default `"Android_Agent"`).
      * @param includeV3     When `true`, v3-compatible extra fields are included.
+     * @param messageId     Unique message identifier; auto-generated if omitted.
      */
     fun build(
         messageType: String,
@@ -46,7 +49,8 @@ object AIPMessageBuilder {
         targetNodeId: String,
         payload: JSONObject,
         deviceType: String = "Android_Agent",
-        includeV3: Boolean = true
+        includeV3: Boolean = true,
+        messageId: String = UUID.randomUUID().toString().take(8)
     ): JSONObject {
         return JSONObject().apply {
             // ── AIP/1.0 required fields ──────────────────────────────────────
@@ -55,6 +59,7 @@ object AIPMessageBuilder {
             put("source_node", sourceNodeId)
             put("target_node", targetNodeId)
             put("timestamp", System.currentTimeMillis() / 1000)
+            put("message_id", messageId)
             put("payload", payload)
 
             // ── v3-compatible optional fields ─────────────────────────────────
