@@ -6,6 +6,7 @@ import com.ufo.galaxy.autonomy.AutonomyManager
 import com.ufo.galaxy.client.Node50Client
 import com.ufo.galaxy.executor.TaskExecutor
 import com.ufo.galaxy.network.TailscaleAdapter
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import com.ufo.galaxy.protocol.AIPProtocol
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -123,12 +124,16 @@ class GalaxyAgentV2(private val context: Context) {
     
     /**
      * 处理来自 Node 50 的消息
+     *
+     * The [message] has already been normalised to AIP/1.0 field names by
+     * [Node50Client] via [AIPMessageBuilder.parse], so standard field names
+     * (`type`, `message_id`, `payload`) are always available.
      */
     private fun handleMessage(message: JSONObject) {
         scope.launch {
             try {
-                val messageType = AIPProtocol.getMessageType(message)
-                val messageId = AIPProtocol.getMessageId(message)
+                val messageType = message.optString("type")
+                val messageId = message.optString("message_id", "unknown")
                 
                 Log.i(TAG, "📨 收到消息: type=$messageType, id=$messageId")
                 
@@ -161,19 +166,31 @@ class GalaxyAgentV2(private val context: Context) {
     
     /**
      * 处理任务命令
+     *
+     * Result and error responses are built via [AIPMessageBuilder] so that
+     * all AIP v3 envelope fields are present and consistent.
      */
     private suspend fun handleTaskCommand(message: JSONObject) {
         withContext(Dispatchers.Default) {
             try {
-                val messageId = AIPProtocol.getMessageId(message) ?: "unknown"
+                val messageId = message.optString("message_id", "unknown")
                 
                 Log.i(TAG, "🎯 开始执行任务: $messageId")
                 
                 // 执行任务
                 val result = taskExecutor.executeTask(message)
                 
-                // 发送响应
-                val responseMessage = AIPProtocol.createResponseMessage(messageId, result)
+                // 发送响应 – built via AIPMessageBuilder for consistent v3 fields
+                val responsePayload = JSONObject().apply {
+                    put("original_message_id", messageId)
+                    put("result", result)
+                }
+                val responseMessage = AIPMessageBuilder.build(
+                    messageType = AIPProtocol.MessageType.RESPONSE,
+                    sourceNodeId = AIPProtocol.CLIENT_ID,
+                    targetNodeId = AIPProtocol.NODE_50_ID,
+                    payload = responsePayload
+                )
                 node50Client?.sendMessage(responseMessage)
                 
                 Log.i(TAG, "✅ 任务执行完成并已回传结果")
@@ -182,10 +199,16 @@ class GalaxyAgentV2(private val context: Context) {
                 Log.e(TAG, "❌ 任务执行失败", e)
                 
                 // 发送错误响应
-                val messageId = AIPProtocol.getMessageId(message) ?: "unknown"
-                val errorMessage = AIPProtocol.createErrorMessage(
-                    messageId,
-                    "任务执行失败: ${e.message}"
+                val messageId = message.optString("message_id", "unknown")
+                val errorPayload = JSONObject().apply {
+                    put("original_message_id", messageId)
+                    put("error_message", "任务执行失败: ${e.message}")
+                }
+                val errorMessage = AIPMessageBuilder.build(
+                    messageType = AIPProtocol.MessageType.ERROR,
+                    sourceNodeId = AIPProtocol.CLIENT_ID,
+                    targetNodeId = AIPProtocol.NODE_50_ID,
+                    payload = errorPayload
                 )
                 node50Client?.sendMessage(errorMessage)
             }
@@ -196,7 +219,7 @@ class GalaxyAgentV2(private val context: Context) {
      * 处理响应
      */
     private fun handleResponse(message: JSONObject) {
-        val payload = AIPProtocol.getPayload(message)
+        val payload = message.optJSONObject("payload")
         Log.i(TAG, "📬 收到响应: ${payload?.toString(2)}")
         
         // 根据响应类型进行处理
@@ -205,11 +228,14 @@ class GalaxyAgentV2(private val context: Context) {
     
     /**
      * 处理状态查询
+     *
+     * The status response is built via [AIPMessageBuilder] for consistent
+     * AIP v3 envelope fields.
      */
     private suspend fun handleStatusQuery(message: JSONObject) {
         withContext(Dispatchers.Default) {
             try {
-                val messageId = AIPProtocol.getMessageId(message) ?: "unknown"
+                val messageId = message.optString("message_id", "unknown")
                 
                 // 收集 Agent 状态
                 val status = JSONObject().apply {
@@ -222,9 +248,19 @@ class GalaxyAgentV2(private val context: Context) {
                     put("capabilities", AIPProtocol.getCapabilities())
                     put("timestamp", System.currentTimeMillis())
                 }
+
+                val statusPayload = JSONObject().apply {
+                    put("original_message_id", messageId)
+                    put("result", status)
+                }
                 
                 // 发送状态响应
-                val responseMessage = AIPProtocol.createResponseMessage(messageId, status)
+                val responseMessage = AIPMessageBuilder.build(
+                    messageType = AIPProtocol.MessageType.RESPONSE,
+                    sourceNodeId = AIPProtocol.CLIENT_ID,
+                    targetNodeId = AIPProtocol.NODE_50_ID,
+                    payload = statusPayload
+                )
                 node50Client?.sendMessage(responseMessage)
                 
                 Log.i(TAG, "✅ 状态已上报")

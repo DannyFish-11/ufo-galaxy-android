@@ -123,47 +123,55 @@ class EnhancedAIPClient(
 
     /**
      * 发送增强的注册消息（符合微软 Galaxy 的 AgentProfile 格式）
+     *
+     * The AIP v3 envelope (`device_id`, `device_type`, `message_id`,
+     * `timestamp`, `version`) is built via [AIPMessageBuilder] first so that
+     * these fields are always present and consistent.  The resulting message is
+     * then converted to Microsoft Galaxy wire format via [convertToMicrosoftAIP].
      */
     private fun sendEnhancedRegistration() {
-        val microsoftMessage = JSONObject().apply {
-            put("message_type", "REGISTER")
-            put("agent_id", deviceId)
-            put("session_id", null)
-            put("payload", JSONObject().apply {
-                put("platform", "android")
-                put("os_version", android.os.Build.VERSION.RELEASE)
-                put("hardware", JSONObject().apply {
-                    put("manufacturer", android.os.Build.MANUFACTURER)
-                    put("model", android.os.Build.MODEL)
-                    put("device", android.os.Build.DEVICE)
-                })
-                put("tools", JSONArray().apply {
-                    // Android 特有能力
-                    put("location")
-                    put("camera")
-                    put("sensor_data")
-                    put("automation")
-                    put("notification")
-                    put("sms")
-                    put("phone_call")
-                    put("contacts")
-                    put("calendar")
-                    // 增强能力
-                    put("voice_input")
-                    put("screen_capture")
-                    put("app_control")
-                })
-                put("capabilities", JSONObject().apply {
-                    put("nlu", false)  // Android 端不做 NLU，交给 Galaxy
-                    put("hardware_control", true)
-                    put("sensor_access", true)
-                    put("network_access", true)
-                    put("ui_automation", true)
-                })
+        val registrationPayload = JSONObject().apply {
+            put("platform", "android")
+            put("os_version", android.os.Build.VERSION.RELEASE)
+            put("hardware", JSONObject().apply {
+                put("manufacturer", android.os.Build.MANUFACTURER)
+                put("model", android.os.Build.MODEL)
+                put("device", android.os.Build.DEVICE)
             })
-        }.toString()
+            put("tools", JSONArray().apply {
+                // Android 特有能力
+                put("location")
+                put("camera")
+                put("sensor_data")
+                put("automation")
+                put("notification")
+                put("sms")
+                put("phone_call")
+                put("contacts")
+                put("calendar")
+                // 增强能力
+                put("voice_input")
+                put("screen_capture")
+                put("app_control")
+            })
+            put("capabilities", JSONObject().apply {
+                put("nlu", false)  // Android 端不做 NLU，交给 Galaxy
+                put("hardware_control", true)
+                put("sensor_access", true)
+                put("network_access", true)
+                put("ui_automation", true)
+            })
+        }
 
-        webSocket?.send(microsoftMessage) ?: Log.e(TAG, "WebSocket is null. Registration failed.")
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = "registration",
+            sourceNodeId = deviceId,
+            targetNodeId = "Galaxy",
+            payload = registrationPayload
+        )
+
+        val microsoftMessage = convertToMicrosoftAIP(aipMessage)
+        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Registration failed.")
         Log.i(TAG, "Enhanced registration message sent to Microsoft Galaxy.")
     }
 

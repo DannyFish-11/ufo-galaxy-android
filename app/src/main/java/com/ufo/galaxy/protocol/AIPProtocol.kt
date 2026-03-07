@@ -21,6 +21,12 @@ import java.util.*
  *   "type": "command|response|heartbeat|register",
  *   "payload": { ... }
  * }
+ *
+ * ⚠️  **Deprecation notice** – New code should use [com.ufo.galaxy.protocol.AIPMessageBuilder]
+ * instead of this class for message construction and parsing.  This class is
+ * retained only as a compatibility shim for legacy callers ([Node50Client],
+ * [CompatibilityTestActivity]) and for its read-only utilities
+ * ([getDeviceInfo], [getCapabilities], constant definitions).
  * 
  * @author Manus AI
  * @version 1.0
@@ -64,7 +70,18 @@ object AIPProtocol {
     
     /**
      * 创建 AIP/1.0 消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] instead,
+     * which produces messages with consistent AIP v3 fields (`device_id`,
+     * `device_type`, `message_id`, `timestamp`).
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(type, CLIENT_ID, to, payload)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createMessage(
         to: String,
         type: String,
@@ -83,7 +100,16 @@ object AIPProtocol {
     
     /**
      * 创建命令消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] instead.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(AIPProtocol.MessageType.COMMAND, CLIENT_ID, NODE_50_ID, payload)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createCommandMessage(
         command: String,
         context: JSONObject? = null
@@ -102,7 +128,17 @@ object AIPProtocol {
     
     /**
      * 创建注册消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] and pass
+     * the device info as the payload instead.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(AIPProtocol.MessageType.REGISTER, CLIENT_ID, NODE_50_ID, payload)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createRegisterMessage(
         deviceInfo: JSONObject,
         capabilities: org.json.JSONArray
@@ -119,7 +155,16 @@ object AIPProtocol {
     
     /**
      * 创建心跳消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] instead.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(AIPProtocol.MessageType.HEARTBEAT, CLIENT_ID, NODE_50_ID, payload)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createHeartbeatMessage(
         status: String = "online"
     ): JSONObject {
@@ -133,7 +178,16 @@ object AIPProtocol {
     
     /**
      * 创建响应消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] instead.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(AIPProtocol.MessageType.RESPONSE, CLIENT_ID, NODE_50_ID, payload)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createResponseMessage(
         originalMessageId: String,
         result: JSONObject
@@ -148,7 +202,16 @@ object AIPProtocol {
     
     /**
      * 创建错误消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] instead.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(AIPProtocol.MessageType.ERROR, CLIENT_ID, NODE_50_ID, payload)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createErrorMessage(
         originalMessageId: String,
         errorMessage: String,
@@ -167,7 +230,16 @@ object AIPProtocol {
     
     /**
      * 创建状态消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.build] instead.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.build() for consistent AIP v3 fields.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.build(AIPProtocol.MessageType.STATUS, CLIENT_ID, NODE_50_ID, status)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun createStatusMessage(
         status: JSONObject
     ): JSONObject {
@@ -220,7 +292,17 @@ object AIPProtocol {
     
     /**
      * 验证消息格式
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.parse] which
+     * accepts AIP/1.0, Microsoft Galaxy, and v3 wire formats.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.parse() for flexible multi-format validation.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.parse(message.toString()) != null",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun validateMessage(message: JSONObject): Boolean {
         return try {
             message.has("protocol") &&
@@ -238,7 +320,17 @@ object AIPProtocol {
     
     /**
      * 解析消息
+     *
+     * @deprecated Use [com.ufo.galaxy.protocol.AIPMessageBuilder.parse] instead,
+     * which handles AIP/1.0, Microsoft Galaxy, and v3 wire formats.
      */
+    @Deprecated(
+        message = "Use AIPMessageBuilder.parse() for multi-format support.",
+        replaceWith = ReplaceWith(
+            "AIPMessageBuilder.parse(messageString)",
+            "com.ufo.galaxy.protocol.AIPMessageBuilder"
+        )
+    )
     fun parseMessage(messageString: String): JSONObject? {
         return try {
             val message = JSONObject(messageString)

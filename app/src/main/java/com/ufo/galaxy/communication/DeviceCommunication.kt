@@ -290,11 +290,19 @@ class DeviceCommunication(
     
     /**
      * 处理收到的消息
+     *
+     * Inbound text is first normalised to AIP/1.0 field names via
+     * [AIPMessageBuilder.parse] so that Microsoft Galaxy, v3, and native
+     * AIP/1.0 wire formats are all handled uniformly by the same routing
+     * logic below.
      */
     private fun handleMessage(text: String) {
         scope.launch {
             try {
-                val json = JSONObject(text)
+                val json = AIPMessageBuilder.parse(text) ?: run {
+                    Log.w(TAG, "无法解析消息，已忽略: ${text.take(100)}")
+                    return@launch
+                }
                 val type = json.optString("type")
                 val action = json.optString("action")
                 val messageId = json.optString("message_id")

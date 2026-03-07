@@ -3,7 +3,6 @@ package com.ufo.galaxy.executor
 import android.content.Context
 import android.util.Log
 import com.ufo.galaxy.autonomy.AutonomyManager
-import com.ufo.galaxy.protocol.AIPProtocol
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -44,7 +43,7 @@ class TaskExecutor(
     /**
      * 执行任务
      * 
-     * @param taskMessage AIP/1.0 格式的任务消息
+     * @param taskMessage AIP/1.0 格式的任务消息（已由 [com.ufo.galaxy.protocol.AIPMessageBuilder] 标准化）
      * @return 执行结果
      */
     suspend fun executeTask(taskMessage: JSONObject): JSONObject {
@@ -52,9 +51,9 @@ class TaskExecutor(
             try {
                 Log.i(TAG, "📋 开始执行任务")
                 
-                // 提取任务信息
-                val messageId = AIPProtocol.getMessageId(taskMessage) ?: "unknown"
-                val payload = AIPProtocol.getPayload(taskMessage)
+                // 提取任务信息（AIP/1.0 标准字段）
+                val messageId = taskMessage.optString("message_id", "unknown")
+                val payload = taskMessage.optJSONObject("payload")
                 
                 if (payload == null) {
                     return@withContext createErrorResult(messageId, "无效的任务 Payload")
