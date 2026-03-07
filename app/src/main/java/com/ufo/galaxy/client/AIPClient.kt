@@ -1,6 +1,8 @@
 package com.ufo.galaxy.client
 
 import android.util.Log
+import com.ufo.galaxy.config.ServerConfig
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +29,9 @@ class AIPClient(
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
 
+    // Index into ServerConfig.WS_PATHS used for the current connection attempt
+    private var wsPathIndex = 0
+
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             Log.i(TAG, "Connection established to Node 50.")
@@ -46,8 +51,10 @@ class AIPClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.e(TAG, "Connection failed: ${t.message}", t)
+            Log.e(TAG, "Connection failed (path index $wsPathIndex): ${t.message}", t)
             this@AIPClient.webSocket = null
+            // Advance to the next candidate path before reconnecting
+            wsPathIndex = (wsPathIndex + 1) % ServerConfig.WS_PATHS.size
             startReconnectLoop()
         }
 
@@ -59,7 +66,7 @@ class AIPClient(
     }
 
     fun connect() {
-        val wsUrl = "$node50Url/ws/ufo3/$deviceId"
+        val wsUrl = ServerConfig.buildWsUrl(node50Url, deviceId, wsPathIndex)
         val request = Request.Builder().url(wsUrl).build()
         Log.i(TAG, "Connecting to $wsUrl...")
         client.newWebSocket(request, wsListener)
@@ -73,7 +80,7 @@ class AIPClient(
 
     private fun startReconnectLoop() {
         if (reconnectJob?.isActive == true) return
-        
+
         reconnectJob = scope.launch {
             while (isActive) {
                 Log.i(TAG, "Attempting to reconnect in 5 seconds...")
@@ -81,21 +88,19 @@ class AIPClient(
                 if (webSocket == null) {
                     connect()
                 } else {
-                    break // 已连接，退出重连循环
+                    break // connected – exit reconnect loop
                 }
             }
         }
     }
 
     fun sendAIPMessage(messageType: String, payload: JSONObject) {
-        val message = JSONObject().apply {
-            put("protocol", "AIP/1.0")
-            put("type", messageType)
-            put("source_node", deviceId)
-            put("target_node", "Node_50_Transformer")
-            put("timestamp", System.currentTimeMillis() / 1000)
-            put("payload", payload)
-        }.toString()
+        val message = AIPMessageBuilder.build(
+            messageType = messageType,
+            sourceNodeId = deviceId,
+            targetNodeId = "Node_50_Transformer",
+            payload = payload
+        ).toString()
 
         webSocket?.send(message) ?: Log.e(TAG, "WebSocket is null. Message not sent: $messageType")
     }
@@ -111,7 +116,10 @@ class AIPClient(
 
     private fun handleAIPMessage(text: String) {
         try {
-            val data = JSONObject(text)
+            val data = AIPMessageBuilder.parse(text) ?: run {
+                Log.w(TAG, "Failed to parse message: $text")
+                return
+            }
             val msgType = data.getString("type")
             val payload = data.getJSONObject("payload")
 
@@ -120,21 +128,16 @@ class AIPClient(
                     val command = payload.getString("command")
                     val params = payload.optJSONObject("params") ?: JSONObject()
                     Log.i(TAG, "Executing command: $command with params: $params")
-                    
-                    // 模拟执行 Android 上的操作
+
                     val resultPayload = JSONObject().apply {
                         put("command", command)
                         put("status", "success")
                         put("details", "Command $command executed on Android.")
                     }
-                    
-                    // 实际应用中，这里会调用本地服务或广播执行具体操作
-                    // ... execute_android_action(command, params) ...
 
                     sendAIPMessage("command_result", resultPayload)
                 }
                 "status_request" -> {
-                    // 模拟发送 Android 状态
                     val statusPayload = JSONObject().apply {
                         put("battery_level", 85)
                         put("location", "Lat: 34.0522, Lon: -118.2437")

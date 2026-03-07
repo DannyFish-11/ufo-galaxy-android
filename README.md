@@ -80,6 +80,66 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 - 配置服务器地址 (如: http://192.168.1.100:8080)
 - 点击连接
 
+---
+
+## 🔌 服务器 URL 配置与端点回退
+
+### 配置文件
+
+编辑 `app/src/main/assets/config.properties` 来设置服务器地址，**不要**将任何 ws 路径写入该值——客户端会自动拼接：
+
+```properties
+# WebSocket 基础地址（仅主机 + 端口）
+galaxy.gateway.url=ws://100.x.x.x:8000
+
+# REST HTTP 基础地址
+rest.base.url=http://100.x.x.x:8000
+```
+
+### WebSocket 路径回退顺序
+
+`ServerConfig.WS_PATHS` 定义了按优先级排列的 WebSocket 路径候选列表：
+
+| 优先级 | 路径 | 说明 |
+|--------|------|------|
+| 1 (最高) | `/ws/device/{id}` | 推荐路径，含设备 ID |
+| 2 | `/ws/android` | 通用 Android 路径 |
+| 3 | `/ws/ufo3/{id}` | 传统 UFO³ 路径（兼容旧版服务器） |
+
+连接失败时，`AIPClient` 和 `EnhancedAIPClient` 会自动尝试下一个路径。
+
+### REST API 回退
+
+`GalaxyApiClient` 的设备注册、心跳和发现方法首先尝试 **v1 路由**，若服务器返回 `404` 则自动回退到**旧版路由**：
+
+| 方法 | v1 路由（优先） | 旧版路由（回退） |
+|------|----------------|-----------------|
+| `registerDevice` | `POST /api/v1/devices/register` | `POST /api/devices/register` |
+| `sendDeviceHeartbeat` | `POST /api/v1/devices/heartbeat` | `POST /api/devices/heartbeat` |
+| `discoverDevices` | `GET  /api/v1/devices/discover` | `GET  /api/devices/discover` |
+
+### AIP 消息格式
+
+所有出站消息由 `AIPMessageBuilder.build()` 统一构建。消息同时包含 **AIP/1.0** 必需字段（向后兼容）和可选的 **v3** 附加字段（最大化服务器兼容性）：
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "type": "registration",
+  "source_node": "android_Pixel_7_1700000000",
+  "target_node": "Galaxy",
+  "timestamp": 1700000000,
+  "payload": { "..." : "..." },
+  "version": "3.0",
+  "device_id": "android_Pixel_7_1700000000",
+  "device_type": "Android_Agent"
+}
+```
+
+入站消息由 `AIPMessageBuilder.parse()` 统一解析，支持三种格式：AIP/1.0 原生、Microsoft Galaxy 格式以及 v3 格式。
+
+---
+
 ### 📋 权限要求
 
 | 权限 | 用途 |
