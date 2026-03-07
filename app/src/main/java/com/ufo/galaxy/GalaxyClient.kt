@@ -1,13 +1,18 @@
 package com.ufo.galaxy
 
 import android.content.Context
+import android.os.Build
+import com.ufo.galaxy.autonomy.ActionExecutor
+import com.ufo.galaxy.autonomy.AutonomyService
 import com.ufo.galaxy.communication.DeviceCommunication
 import com.ufo.galaxy.communication.DeviceMessage
 import com.ufo.galaxy.communication.CommandMessage
 import com.ufo.galaxy.device.DeviceRegistry
 import com.ufo.galaxy.device.DeviceStatus
+import com.ufo.galaxy.utils.ScreenshotHelper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlin.coroutines.resume
 import org.json.JSONObject
 
 /**
@@ -43,6 +48,8 @@ class GalaxyClient private constructor(
     // 组件
     private val deviceRegistry: DeviceRegistry = DeviceRegistry.getInstance(context)
     private lateinit var communication: DeviceCommunication
+    private val actionExecutor = ActionExecutor()
+    private val screenshotHelper = ScreenshotHelper(context)
     
     // 协程作用域
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -198,16 +205,9 @@ class GalaxyClient private constructor(
         communication.registerHandler("click") { payload ->
             val x = payload.optInt("x", 0)
             val y = payload.optInt("y", 0)
-            
-            // 执行点击
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "click")
-                put("x", x)
-                put("y", y)
-            }
+            val action = actionExecutor.createTapAction(x = x, y = y)
+            val result = withContext(Dispatchers.Main) { actionExecutor.executeAction(action) }
+            result
         }
         
         // 滑动命令
@@ -216,40 +216,48 @@ class GalaxyClient private constructor(
             val startY = payload.optInt("startY", 0)
             val endX = payload.optInt("endX", 0)
             val endY = payload.optInt("endY", 0)
-            val duration = payload.optLong("duration", 300)
-            
-            // 执行滑动
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "swipe")
-            }
+            val duration = payload.optInt("duration", 300)
+            val action = actionExecutor.createSwipeAction(startX, startY, endX, endY, duration)
+            val result = withContext(Dispatchers.Main) { actionExecutor.executeAction(action) }
+            result
         }
         
         // 输入文本命令
         communication.registerHandler("input_text") { payload ->
             val text = payload.optString("text", "")
-            
-            // 执行输入
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "input_text")
-                put("text_length", text.length)
-            }
+            val action = actionExecutor.createInputTextAction(text)
+            val result = withContext(Dispatchers.Main) { actionExecutor.executeAction(action) }
+            result
         }
         
         // 截图命令
-        communication.registerHandler("screenshot") { payload ->
-            // 执行截图
-            // ...
-            
-            JSONObject().apply {
-                put("success", true)
-                put("action", "screenshot")
-                // put("image_base64", ...)
+        communication.registerHandler("screenshot") { _ ->
+            val service = AutonomyService.getInstance()
+            if (service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                suspendCancellableCoroutine { cont ->
+                    screenshotHelper.takeScreenshotWithAccessibility(service) { bitmap ->
+                        if (bitmap != null) {
+                            val base64 = screenshotHelper.bitmapToBase64(bitmap)
+                            cont.resume(JSONObject().apply {
+                                put("success", true)
+                                put("action", "screenshot")
+                                put("image_base64", base64)
+                            })
+                        } else {
+                            cont.resume(JSONObject().apply {
+                                put("success", false)
+                                put("action", "screenshot")
+                                put("message", "截图采集失败")
+                            })
+                        }
+                    }
+                }
+            } else {
+                JSONObject().apply {
+                    put("success", false)
+                    put("action", "screenshot")
+                    put("message", if (service == null) "自主操纵服务未启用" else "截图需要 Android 11+")
+                }
             }
         }
         
