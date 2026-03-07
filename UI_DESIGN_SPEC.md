@@ -115,11 +115,10 @@
 
 ---
 
-## 5. 下一步计划
+## 5. 实现现状与后续计划
 
-1.  **原型验证:** 使用 `Figma` 或 `ProtoPie` 制作高保真交互原型，验证动画和交互流程的可行性。
-2.  **代码重构:** 将现有的 `View` 系统逐步迁移到 `Jetpack Compose`。
-3.  **组件开发:** 优先开发“灵动岛”的核心组件及其三种状态的切换逻辑。
-4.  **风格实现:** 将优化后的“极客终端”视觉风格应用到 `Compose` 组件中。
-5.  **API 对接:** 实现与 `Galaxy Gateway` 的 `WebSocket` 通信，完成节点推送和指令执行的闭环。
-6.  **测试与迭代:** 在不同设备和安卓版本上进行广泛测试，收集反馈并持续优化。
+1.  **灵动岛已完成开发**（`DynamicIsland.kt`、`DynamicIslandPremium.kt`），包含折叠态、概览态和通知态三种状态切换动画。
+2.  **UI 框架**：已使用 Jetpack Compose 实现，动画基于 `DynamicAnimation` 弹性物理模型。
+3.  **极客终端模式已完成**（`GeekTheme.kt`、`GeekThemePremium.kt`、`MinimalistFloatingWindow.kt`），具备扫描线效果、辉光动画及历史记录渲染。
+4.  **WebSocket / AIP 通信已完成**（`AIPClient`、`EnhancedAIPClient`、`AIPMessageBuilder`），实现节点推送与指令执行闭环。
+5.  **后续**：在不同设备和安卓版本上持续测试，根据反馈迭代优化。
