@@ -150,16 +150,21 @@ rest.base.url=http://100.x.x.x:8000
 
 ```
 GalaxyClient  (统一入口)
-    └── DeviceCommunication  (WebSocket 管理 + 心跳)
-            └── AIPMessageBuilder  (消息构建/解析)
+    └── DeviceCommunication  (WebSocket 管理 + 心跳 + 入站规范化)
+            └── AIPMessageBuilder  (消息构建/解析/规范化)
             └── ServerConfig  (URL 路径管理)
 
 AIPClient / EnhancedAIPClient  (兼容/回退)
     └── AIPMessageBuilder  (消息构建/解析)
     └── ServerConfig  (URL 路径管理)
+
+Node50Client  (legacy Node 50 连接)
+    └── AIPMessageBuilder  (消息构建/解析)
+    └── ServerConfig  (URL 路径管理，/ws/device/{id} 优先)
+    └── AIPProtocol  (常量引用，设备信息/能力查询)
 ```
 
-优先使用 `GalaxyClient + DeviceCommunication` 作为核心通信栈。`AIPClient` 和 `EnhancedAIPClient` 仅用于特定格式兼容/回退场景。
+优先使用 `GalaxyClient + DeviceCommunication` 作为核心通信栈。`AIPClient`、`EnhancedAIPClient` 和 `Node50Client` 仅用于特定格式兼容/回退场景。所有出站消息均通过 `AIPMessageBuilder.build()` 构建；所有入站消息均通过 `AIPMessageBuilder.parse()` 规范化为 AIP/1.0 字段。
 
 ---
 
@@ -182,6 +187,7 @@ AIPClient / EnhancedAIPClient  (兼容/回退)
 
 | 版本 | 日期 | 更新内容 |
 |------|------|----------|
+| v2.5.2 | 2026-03-07 | AIP v3 全栈系统性对齐：DeviceCommunication 入站消息通过 AIPMessageBuilder.parse() 统一规范化；EnhancedAIPClient 注册消息通过 AIPMessageBuilder.build() 构建 v3 信封后转换；Node50Client 切换 ServerConfig.buildWsUrl() + AIPMessageBuilder；GalaxyAgentV2/TaskExecutor 切换 AIPMessageBuilder；AIPProtocol 废弃标注 |
 | v2.5.1 | 2026-03-07 | AIP v3 系统性对齐：message_id 统一、DeviceCommunication 使用 ServerConfig 路径回退、DeviceRegistry 消息通过 AIPMessageBuilder 构建 |
 | v2.5.0 | 2026-02-21 | 合并两个仓库优点，系统性升级 |
 | v2.2.0 | 2026-02-20 | 添加 Agent 系统、自主性服务 |

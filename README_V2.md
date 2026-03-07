@@ -224,14 +224,20 @@ app/src/main/java/com/ufo/galaxy/
 ├── device/
 │   └── DeviceRegistry.kt        # 设备注册管理器（AIPMessageBuilder 构建消息）
 ├── communication/
-│   └── DeviceCommunication.kt   # 统一通信管理器（ServerConfig 路径回退）
+│   └── DeviceCommunication.kt   # 统一通信管理器（ServerConfig 路径回退 + AIPMessageBuilder 入站规范化）
 ├── protocol/
-│   └── AIPMessageBuilder.kt     # AIP v3 消息构建器（统一字段）
+│   ├── AIPMessageBuilder.kt     # AIP v3 消息构建器（统一字段，核心）
+│   └── AIPProtocol.kt           # AIP/1.0 兼容层（已废弃消息构建方法，保留常量与设备信息工具）
 ├── config/
 │   └── ServerConfig.kt          # URL 配置（/ws/device/{id} 优先）
 ├── client/
 │   ├── AIPClient.kt             # AIP/1.0 兼容客户端（回退用）
-│   └── EnhancedAIPClient.kt     # Microsoft Galaxy 格式兼容（回退用）
+│   ├── EnhancedAIPClient.kt     # Microsoft Galaxy 格式兼容（回退用，AIPMessageBuilder 构建注册信封）
+│   └── Node50Client.kt          # Node 50 传统客户端（ServerConfig + AIPMessageBuilder）
+├── agent/
+│   └── GalaxyAgentV2.kt         # Agent 主控（AIPMessageBuilder 构建响应/错误消息）
+├── executor/
+│   └── TaskExecutor.kt          # 任务执行器（读取规范化 AIP/1.0 字段）
 ├── api/
 │   └── GalaxyApiClient.kt       # REST API 客户端（v1 优先 + 旧版回退）
 └── example/
@@ -240,6 +246,13 @@ app/src/main/java/com/ufo/galaxy/
 
 ## 版本历史
 
+- V2.5.2 - AIP v3 全栈系统性对齐：
+  - `DeviceCommunication.handleMessage()` 通过 `AIPMessageBuilder.parse()` 规范化所有入站消息（AIP/1.0、Microsoft Galaxy、v3）
+  - `EnhancedAIPClient.sendEnhancedRegistration()` 通过 `AIPMessageBuilder.build()` 构建 v3 信封后转换为 Microsoft Galaxy 格式
+  - `Node50Client` 切换到 `ServerConfig.buildWsUrl()` + `AIPMessageBuilder`（`/ws/device/{id}` 优先）
+  - `GalaxyAgentV2` 响应/错误消息通过 `AIPMessageBuilder.build()` 构建
+  - `TaskExecutor` 直接读取 AIP/1.0 规范字段（`message_id`、`payload`）
+  - `AIPProtocol` 消息构建/解析方法标注为废弃，指向 `AIPMessageBuilder`
 - V2.1 - AIP v3 系统性对齐：message_id 统一、路径回退、AIPMessageBuilder 统一消息构建
 - V2.0 - 完全对齐服务端协议
 - V1.0 - 初始版本

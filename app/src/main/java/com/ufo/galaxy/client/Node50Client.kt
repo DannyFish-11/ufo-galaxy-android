@@ -2,6 +2,8 @@ package com.ufo.galaxy.client
 
 import android.content.Context
 import android.util.Log
+import com.ufo.galaxy.config.ServerConfig
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import com.ufo.galaxy.protocol.AIPProtocol
 import kotlinx.coroutines.*
 import okhttp3.*
@@ -51,6 +53,10 @@ class Node50Client(
     
     /**
      * 连接到 Node 50
+     *
+     * The WebSocket URL is built via [ServerConfig.buildWsUrl] so that the
+     * preferred `/ws/device/{id}` path is used (index 0), consistent with
+     * the rest of the communication stack.
      */
     fun connect() {
         if (isConnected) {
@@ -60,8 +66,9 @@ class Node50Client(
         
         Log.i(TAG, "🔗 正在连接到 Node 50: $node50Url")
         
-        // 构建 WebSocket URL
-        val wsUrl = node50Url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+        // Build WebSocket URL using ServerConfig (preferred path: /ws/device/{id})
+        val wsBase = node50Url.replace("http://", "ws://").replace("https://", "wss://")
+        val wsUrl = ServerConfig.buildWsUrl(wsBase, AIPProtocol.CLIENT_ID, 0)
         
         val request = Request.Builder()
             .url(wsUrl)
@@ -85,14 +92,30 @@ class Node50Client(
     
     /**
      * 发送命令到 Node 50
+     *
+     * The outbound message is built via [AIPMessageBuilder] so that all
+     * AIP/1.0 + v3 fields (`protocol`, `version`, `device_id`, `device_type`,
+     * `message_id`, `timestamp`) are populated consistently.
      */
     fun sendCommand(command: String, context: JSONObject? = null): Boolean {
         if (!isConnected) {
             Log.w(TAG, "未连接到 Node 50，无法发送命令")
             return false
         }
-        
-        val message = AIPProtocol.createCommandMessage(command, context)
+
+        val payload = JSONObject().apply {
+            put("command", command)
+            put("context", context ?: JSONObject().apply {
+                put("platform", "android")
+                put("client_id", AIPProtocol.CLIENT_ID)
+            })
+        }
+        val message = AIPMessageBuilder.build(
+            messageType = AIPProtocol.MessageType.COMMAND,
+            sourceNodeId = AIPProtocol.CLIENT_ID,
+            targetNodeId = AIPProtocol.NODE_50_ID,
+            payload = payload
+        )
         return sendMessage(message)
     }
     
@@ -121,22 +144,44 @@ class Node50Client(
     
     /**
      * 注册到 Node 50
+     *
+     * Built via [AIPMessageBuilder] for a consistent AIP v3 envelope with
+     * `device_id`, `device_type`, `message_id`, and `timestamp`.
      */
     private fun registerToNode50() {
         Log.i(TAG, "📝 正在向 Node 50 注册...")
-        
-        val deviceInfo = AIPProtocol.getDeviceInfo()
-        val capabilities = AIPProtocol.getCapabilities()
-        val registerMessage = AIPProtocol.createRegisterMessage(deviceInfo, capabilities)
-        
+
+        val payload = JSONObject().apply {
+            put("client_type", "android")
+            put("client_id", AIPProtocol.CLIENT_ID)
+            put("device_info", AIPProtocol.getDeviceInfo())
+            put("capabilities", AIPProtocol.getCapabilities())
+        }
+        val registerMessage = AIPMessageBuilder.build(
+            messageType = AIPProtocol.MessageType.REGISTER,
+            sourceNodeId = AIPProtocol.CLIENT_ID,
+            targetNodeId = AIPProtocol.NODE_50_ID,
+            payload = payload
+        )
         sendMessage(registerMessage)
     }
     
     /**
      * 发送心跳
+     *
+     * Built via [AIPMessageBuilder] for consistent AIP v3 envelope fields.
      */
     private fun sendHeartbeat() {
-        val heartbeat = AIPProtocol.createHeartbeatMessage("online")
+        val payload = JSONObject().apply {
+            put("status", "online")
+            put("client_id", AIPProtocol.CLIENT_ID)
+        }
+        val heartbeat = AIPMessageBuilder.build(
+            messageType = AIPProtocol.MessageType.HEARTBEAT,
+            sourceNodeId = AIPProtocol.CLIENT_ID,
+            targetNodeId = AIPProtocol.NODE_50_ID,
+            payload = payload
+        )
         sendMessage(heartbeat)
     }
     
@@ -231,13 +276,14 @@ class Node50Client(
             Log.d(TAG, "📨 收到消息: ${text.take(100)}...")
             
             try {
-                val message = AIPProtocol.parseMessage(text)
+                // Normalise to AIP/1.0 field names regardless of wire format
+                val message = AIPMessageBuilder.parse(text)
                 
                 if (message != null) {
                     // 检查是否是注册响应
-                    val messageType = AIPProtocol.getMessageType(message)
+                    val messageType = message.optString("type")
                     if (messageType == AIPProtocol.MessageType.RESPONSE) {
-                        val payload = AIPProtocol.getPayload(message)
+                        val payload = message.optJSONObject("payload")
                         if (payload?.optString("type") == "register_success") {
                             isRegistered = true
                             Log.i(TAG, "✅ 已成功注册到 Node 50")
@@ -249,7 +295,7 @@ class Node50Client(
                         messageHandler(message)
                     }
                 } else {
-                    Log.w(TAG, "⚠️ 收到无效的 AIP/1.0 消息")
+                    Log.w(TAG, "⚠️ 收到无效的消息（非 JSON）")
                 }
                 
             } catch (e: Exception) {

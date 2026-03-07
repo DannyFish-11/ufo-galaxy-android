@@ -214,4 +214,99 @@ class AIPMessageBuilderTest {
         assertEquals("unknown", AIPMessageBuilder.detectProtocol("""{"foo":"bar"}"""))
         assertEquals("unknown", AIPMessageBuilder.detectProtocol("bad json"))
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Inbound normalization – DeviceCommunication scenarios
+    // These mirror the wire formats the Galaxy backend may send so that
+    // DeviceCommunication.handleMessage() can be validated end-to-end.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `parse normalises inbound command message from Microsoft Galaxy TASK format`() {
+        val microsoftCommand = JSONObject().apply {
+            put("message_type", "TASK")
+            put("agent_id", "galaxy_orchestrator")
+            put("session_id", 1700000060000L)
+            put("payload", JSONObject().apply {
+                put("action", "click")
+                put("x", 100)
+                put("y", 200)
+            })
+        }
+        val parsed = AIPMessageBuilder.parse(microsoftCommand.toString())
+
+        assertNotNull(parsed)
+        assertEquals(AIPMessageBuilder.PROTOCOL_AIP1, parsed!!.getString("protocol"))
+        // Microsoft "TASK" is lowercased to "task" then mapped through normalise
+        assertEquals("task", parsed.getString("type"))
+        assertEquals("galaxy_orchestrator", parsed.getString("source_node"))
+        // payload should be preserved
+        val payload = parsed.getJSONObject("payload")
+        assertEquals("click", payload.getString("action"))
+    }
+
+    @Test
+    fun `parse normalises inbound status request from v3 format`() {
+        val v3Status = JSONObject().apply {
+            put("version", "3.0")
+            put("msg_type", "status_request")
+            put("device_id", "server_node_95")
+            put("timestamp", 1700001000L)
+            put("payload", JSONObject().apply { put("detail", "full") })
+        }
+        val parsed = AIPMessageBuilder.parse(v3Status.toString())
+
+        assertNotNull(parsed)
+        assertEquals("status_request", parsed!!.getString("type"))
+        assertEquals("server_node_95", parsed.getString("source_node"))
+        assertEquals(1700001000L, parsed.getLong("timestamp"))
+    }
+
+    @Test
+    fun `parse preserves all AIP-1-0 fields for ack command messages`() {
+        val ackMsg = JSONObject().apply {
+            put("protocol", "AIP/1.0")
+            put("type", "ack")
+            put("action", "register")
+            put("source_node", "server")
+            put("target_node", "android_test")
+            put("message_id", "msg_ack_001")
+            put("timestamp", 1700002000L)
+            put("payload", JSONObject().apply { put("status", "ok") })
+        }
+        val parsed = AIPMessageBuilder.parse(ackMsg.toString())
+
+        assertNotNull(parsed)
+        assertEquals("ack", parsed!!.getString("type"))
+        assertEquals("register", parsed.optString("action"))
+        assertEquals("msg_ack_001", parsed.getString("message_id"))
+    }
+
+    @Test
+    fun `build registration message includes device_id capabilities and message_id`() {
+        val capabilities = org.json.JSONArray().apply {
+            put("screen"); put("touch"); put("camera")
+        }
+        val payload = JSONObject().apply {
+            put("device_id", "android_test123")
+            put("device_type", "android")
+            put("capabilities", capabilities)
+        }
+        val msg = AIPMessageBuilder.build(
+            messageType = "register",
+            sourceNodeId = "android_test123",
+            targetNodeId = "server",
+            payload = payload,
+            deviceType = "Android_Agent"
+        )
+
+        assertEquals("register", msg.getString("type"))
+        assertEquals("android_test123", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
+        assertTrue("message_id should be present", msg.has("message_id"))
+        assertTrue("timestamp should be positive", msg.getLong("timestamp") > 0)
+        assertEquals("3.0", msg.getString("version"))
+        val msgPayload = msg.getJSONObject("payload")
+        assertEquals("android_test123", msgPayload.getString("device_id"))
+    }
 }
