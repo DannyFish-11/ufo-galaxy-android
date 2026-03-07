@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.ufo.galaxy.agent.GalaxyAgentV2
+import com.ufo.galaxy.config.AppConfig
 import com.ufo.galaxy.input.NaturalLanguageInputManager
 import com.ufo.galaxy.service.FloatingWindowService
 import com.ufo.galaxy.ui.theme.GeekThemePremium
@@ -391,10 +392,33 @@ class MainActivity : ComponentActivity() {
     
     /**
      * 打开 Agent 设置
+     *
+     * Shows a modal dialog with the current gateway URL read from config.properties.
+     * The dialog is purely informational; runtime URL changes require editing
+     * assets/config.properties and restarting the agent.
      */
     private fun openAgentSettings() {
-        // TODO: 实现设置界面
-        Toast.makeText(this, "设置功能开发中...", Toast.LENGTH_SHORT).show()
+        AppConfig.loadConfig(applicationContext)
+        val gatewayUrl = AppConfig.getString("galaxy.gateway.url", "未配置")
+        val agentName = AppConfig.getString("agent.name", "Android Agent")
+        val heartbeat = AppConfig.getString("heartbeat.interval", "30000")
+
+        val message = buildString {
+            appendLine("Gateway URL: $gatewayUrl")
+            appendLine("Agent 名称: $agentName")
+            val heartbeatDisplay = heartbeat.toLongOrNull()
+                ?.let { "${it / 1000}s" }
+                ?: "未知配置"
+            appendLine("心跳间隔: $heartbeatDisplay")
+            appendLine()
+            appendLine("如需修改，请编辑 assets/config.properties 后重启应用。")
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Agent 设置")
+            .setMessage(message)
+            .setPositiveButton("确定", null)
+            .show()
     }
     
     override fun onDestroy() {

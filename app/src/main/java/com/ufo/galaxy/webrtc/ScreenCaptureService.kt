@@ -18,7 +18,15 @@ import android.os.IBinder
 import android.util.Log
 import android.view.Surface
 import androidx.core.app.NotificationCompat
+import com.ufo.galaxy.config.AppConfig
+import com.ufo.galaxy.config.ServerConfig
 import kotlinx.coroutines.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONObject
 import java.nio.ByteBuffer
 
@@ -48,6 +56,10 @@ class ScreenCaptureService : Service() {
     
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var encodingJob: Job? = null
+
+    // OkHttp WebSocket for streaming encoded H.264 frames to the PC gateway
+    private val okHttpClient = OkHttpClient()
+    private var webSocketClient: WebSocket? = null
     
     // 配置参数
     private var screenWidth = 1280
@@ -64,22 +76,24 @@ class ScreenCaptureService : Service() {
         const val EXTRA_WIDTH = "width"
         const val EXTRA_HEIGHT = "height"
         const val EXTRA_FPS = "fps"
-        
+        /** Optional WebSocket URL override; falls back to config.properties when absent. */
+        const val EXTRA_WS_URL = "ws_url"
+
         @Volatile
         private var instance: ScreenCaptureService? = null
-        
+
         fun getInstance(): ScreenCaptureService? = instance
-        
+
         fun isRunning(): Boolean = instance != null
     }
-    
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannel()
         Log.i(TAG, "ScreenCaptureService created")
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
@@ -88,9 +102,27 @@ class ScreenCaptureService : Service() {
                 screenWidth = intent.getIntExtra(EXTRA_WIDTH, 1280)
                 screenHeight = intent.getIntExtra(EXTRA_HEIGHT, 720)
                 frameRate = intent.getIntExtra(EXTRA_FPS, 30)
-                
+
+                // Resolve WebSocket URL: intent extra > config.properties > empty (no streaming)
+                val wsUrlOverride = intent.getStringExtra(EXTRA_WS_URL)
+                val wsUrl = if (!wsUrlOverride.isNullOrEmpty()) {
+                    wsUrlOverride
+                } else {
+                    AppConfig.loadConfig(applicationContext)
+                    val baseUrl = AppConfig.getString("galaxy.gateway.url", "").trimEnd('/')
+                    if (baseUrl.isNotEmpty()) {
+                        val deviceId = android.provider.Settings.Secure.getString(
+                            contentResolver, android.provider.Settings.Secure.ANDROID_ID
+                        ) ?: "unknown"
+                        ServerConfig.buildWebRtcWsUrl(baseUrl, deviceId)
+                    } else ""
+                }
+
                 if (resultCode != -1 && data != null) {
                     startForeground(NOTIFICATION_ID, createNotification())
+                    if (wsUrl.isNotEmpty()) {
+                        initWebSocket(wsUrl)
+                    }
                     startScreenCapture(resultCode, data)
                 }
             }
@@ -107,6 +139,8 @@ class ScreenCaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopScreenCapture()
+        webSocketClient?.close(1000, "Service destroyed")
+        webSocketClient = null
         instance = null
         scope.cancel()
         Log.i(TAG, "ScreenCaptureService destroyed")
@@ -256,17 +290,47 @@ class ScreenCaptureService : Service() {
     }
     
     /**
-     * 发送编码后的数据
-     * TODO: 集成 WebRTC 或 WebSocket 发送逻辑
+     * Initialise the OkHttp WebSocket that will receive encoded H.264 frames.
+     */
+    private fun initWebSocket(url: String) {
+        val request = Request.Builder().url(url).build()
+        webSocketClient = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.i(TAG, "WebSocket 已连接: $url")
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.w(TAG, "WebSocket 连接失败: ${t.message}")
+                webSocketClient = null
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i(TAG, "WebSocket 已关闭: $code $reason")
+                webSocketClient = null
+            }
+        })
+    }
+
+    /**
+     * 发送编码后的 H.264 帧数据
+     *
+     * Extracts the encoded bytes from [buffer] and sends them as a binary WebSocket
+     * message.  If the WebSocket is not connected the frame is dropped and a verbose
+     * log entry is written (avoids flooding the log with warnings on every frame).
      */
     private fun sendEncodedData(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo) {
-        // 这里需要将编码后的 H.264 数据通过 WebRTC 或 WebSocket 发送到 PC 端
-        // 当前版本仅记录日志
-        Log.d(TAG, "Encoded frame: size=${bufferInfo.size}, pts=${bufferInfo.presentationTimeUs}, flags=${bufferInfo.flags}")
-        
-        // TODO: 实现 WebSocket 发送
-        // val data = ByteArray(bufferInfo.size)
-        // buffer.get(data)
-        // webSocketClient.send(data)
+        val size = bufferInfo.size
+        if (size <= 0) return
+
+        Log.d(TAG, "Encoded frame: size=$size, pts=${bufferInfo.presentationTimeUs}, flags=${bufferInfo.flags}")
+
+        val ws = webSocketClient
+        if (ws != null) {
+            val data = ByteArray(size)
+            buffer.position(bufferInfo.offset)
+            buffer.limit(bufferInfo.offset + size)
+            buffer.get(data)
+            ws.send(ByteString.of(data, 0, data.size))
+        } else {
+            Log.v(TAG, "WebSocket 未连接，跳过帧发送 (size=$size)")
+        }
     }
 }

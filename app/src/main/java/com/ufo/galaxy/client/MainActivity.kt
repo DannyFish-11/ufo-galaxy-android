@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.ufo.galaxy.agent.GalaxyAgent
+import com.ufo.galaxy.config.AppConfig
 
 class MainActivity : AppCompatActivity() {
     
@@ -19,9 +20,12 @@ class MainActivity : AppCompatActivity() {
         // 初始化 Galaxy Agent
         galaxyAgent = GalaxyAgent.getInstance(this)
         
-        // TODO: 从配置文件或用户输入获取 Gateway URL
-        // 这里使用默认值，实际部署时需要修改为您的 Windows 电脑的 Tailscale IP
-        val gatewayUrl = "ws://192.168.1.100:8000/ws/agent"
+        // Read Gateway URL from assets/config.properties; fall back to a safe default
+        // so the agent can start even without a configured server.
+        AppConfig.loadConfig(this)
+        val configUrl = AppConfig.getString("galaxy.gateway.url", "").trimEnd('/')
+        val gatewayUrl = if (configUrl.isNotEmpty()) "$configUrl/ws/agent"
+                         else "ws://192.168.1.100:8000/ws/agent"
         
         galaxyAgent.initialize(gatewayUrl)
         galaxyAgent.start()

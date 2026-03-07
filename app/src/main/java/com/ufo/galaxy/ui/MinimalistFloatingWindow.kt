@@ -2,7 +2,12 @@ package com.ufo.galaxy.ui
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.*
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -11,6 +16,8 @@ import android.widget.*
 import androidx.cardview.widget.CardView
 import androidx.constraintlayout.widget.ConstraintLayout
 import com.ufo.galaxy.R
+import com.ufo.galaxy.agent.GalaxyAgent
+import java.util.Locale
 
 /**
  * UFO³ Galaxy Android 悬浮窗 - 黑白渐变极客风格
@@ -434,19 +441,66 @@ class MinimalistFloatingWindow(private val context: Context) {
     private fun sendMessage() {
         val message = inputEditText.text.toString().trim()
         if (message.isEmpty()) return
-        
+
         appendHistory("[USER] $message")
         inputEditText.setText("")
-        
-        // TODO: 发送到 Galaxy 系统
+
+        // Forward the message to the Galaxy Agent for processing.
+        try {
+            val agent = GalaxyAgent.getInstance(context)
+            val payload = org.json.JSONObject().apply {
+                put("type", "user_input")
+                put("text", message)
+                put("source", "floating_window")
+                put("timestamp", System.currentTimeMillis())
+            }
+            agent.sendMessage(payload)
+        } catch (e: Exception) {
+            appendHistory("[ERROR] 发送失败: ${e.message}")
+        }
     }
-    
+
     /**
      * 开始语音输入
      */
     private fun startVoiceInput() {
-        // TODO: 实现语音输入
-        appendHistory("[SYSTEM] Voice input started...")
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            appendHistory("[SYSTEM] 语音识别不可用")
+            return
+        }
+
+        appendHistory("[SYSTEM] 🎤 请说话...")
+
+        val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+        }
+
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(error: Int) {
+                appendHistory("[ERROR] 语音识别错误: $error")
+                speechRecognizer.destroy()
+            }
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull()
+                if (!text.isNullOrEmpty()) {
+                    inputEditText.setText(text)
+                    sendMessage()
+                }
+                speechRecognizer.destroy()
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+
+        speechRecognizer.startListening(recognizerIntent)
     }
     
     /**
