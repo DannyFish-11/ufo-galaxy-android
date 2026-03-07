@@ -147,4 +147,21 @@ class ServerConfigTest {
         val url = ServerConfig.buildWebRtcEndpointUrl("https://secure-gw.example.com")
         assertEquals("https://secure-gw.example.com/api/v1/webrtc/endpoint", url)
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // DEFAULT_STUN_URL
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `DEFAULT_STUN_URL uses stun scheme`() {
+        assertTrue(
+            "STUN URL should start with stun:",
+            ServerConfig.DEFAULT_STUN_URL.startsWith("stun:")
+        )
+    }
+
+    @Test
+    fun `DEFAULT_STUN_URL is non-empty`() {
+        assertTrue("STUN URL must not be blank", ServerConfig.DEFAULT_STUN_URL.isNotBlank())
+    }
 }

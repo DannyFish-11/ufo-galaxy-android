@@ -87,8 +87,8 @@ dependencies {
     // WebSocket
     implementation("com.neovisionaries:nv-websocket-client:2.14")
     
-    // WebRTC
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    // WebRTC — community-maintained build of libwebrtc hosted on mavenCentral
+    implementation("io.github.webrtc-sdk:android:104.5112.07")
     
     // JSON
     implementation("org.json:json:20231013")
