@@ -609,16 +609,24 @@ class GUIUnderstanding(private val context: Context) {
 
     /**
      * 本地 OCR (ML Kit)
+     *
+     * To enable on-device text recognition, add the following dependency to app/build.gradle:
+     *   implementation 'com.google.mlkit:text-recognition-chinese:16.0.0'
+     *   implementation 'com.google.mlkit:text-recognition:16.0.0'
+     *
+     * Then replace the body of this function with:
+     *   val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+     *   val image = InputImage.fromBitmap(bitmap, 0)
+     *   val result = recognizer.process(image).await()
+     *   return result.textBlocks.map { block ->
+     *       val rect = block.boundingBox ?: Rect()
+     *       TextBlock(block.text, rect.left, rect.top, rect.width(), rect.height(), 0.8f)
+     *   }
+     *
+     * Without ML Kit, this method returns an empty list and the caller falls back to
+     * the remote OCR path or the UI-tree-based analysis.
      */
     private suspend fun performLocalOCR(bitmap: Bitmap): List<TextBlock> {
-        // TODO: 实际 ML Kit 实现
-        // val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-        // val image = InputImage.fromBitmap(bitmap, 0)
-        // val result = recognizer.process(image).await()
-        // return result.textBlocks.map { block ->
-        //     val rect = block.boundingBox ?: Rect()
-        //     TextBlock(block.text, rect.left, rect.top, rect.width(), rect.height(), 0.8f)
-        // }
         return emptyList()
     }
 

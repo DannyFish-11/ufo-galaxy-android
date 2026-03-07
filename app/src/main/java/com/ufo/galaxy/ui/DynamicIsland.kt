@@ -67,6 +67,7 @@ fun DynamicIsland(
     currentTask: String? = null,
     taskProgress: Float? = null,
     onStateChange: (IslandState) -> Unit = {},
+    onSend: (String) -> Unit = {},
     onClose: () -> Unit = {}
 ) {
     var state by remember { mutableStateOf(initialState) }
@@ -170,7 +171,8 @@ fun DynamicIsland(
                     state = IslandState.COMPACT_EXPANDED
                     onStateChange(state)
                 },
-                onClose = onClose
+                onClose = onClose,
+                onSend = onSend
             )
         }
     }
@@ -292,7 +294,8 @@ private fun CompactExpandedContent(
 @Composable
 private fun FullyExpandedContent(
     onCollapse: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onSend: (String) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -330,7 +333,7 @@ private fun FullyExpandedContent(
         }
         
         // 输入区域
-        GeekTerminalInput()
+        GeekTerminalInput(onSend = onSend)
         
         // 状态栏
         GeekTerminalStatusBar()
@@ -389,7 +392,7 @@ private fun GeekTerminalHeader(
  * 极客终端 - 输入区域
  */
 @Composable
-private fun GeekTerminalInput() {
+private fun GeekTerminalInput(onSend: (String) -> Unit = {}) {
     var inputText by remember { mutableStateOf("") }
     
     Column(
@@ -453,7 +456,13 @@ private fun GeekTerminalInput() {
             
             // 发送按钮
             Button(
-                onClick = { /* TODO: 发送消息 */ },
+                onClick = {
+                    val text = inputText.trim()
+                    if (text.isNotEmpty()) {
+                        onSend(text)
+                        inputText = ""
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
                     contentColor = Color.Black

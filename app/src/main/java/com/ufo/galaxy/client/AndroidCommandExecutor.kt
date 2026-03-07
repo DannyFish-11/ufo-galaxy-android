@@ -1,7 +1,13 @@
 package com.ufo.galaxy.client
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.LocationManager
 import android.media.AudioManager
 import android.net.wifi.WifiManager
@@ -9,7 +15,11 @@ import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Android 命令执行器
@@ -222,14 +232,40 @@ class AndroidCommandExecutor(private val context: Context) {
     private fun sendNotification(params: JSONObject): JSONObject {
         val title = params.optString("title", "UFO Galaxy")
         val message = params.optString("message", "")
-        
-        // TODO: 实现通知发送
-        
+        val channelId = "ufo_galaxy_commands"
+        val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // Create notification channel (required on API 26+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "UFO Galaxy Commands",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Notifications sent by UFO³ Galaxy Agent"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(notificationId, notification)
+
         return JSONObject().apply {
             put("status", "success")
             put("data", JSONObject().apply {
                 put("title", title)
                 put("message", message)
+                put("notification_id", notificationId)
             })
         }
     }
@@ -316,17 +352,86 @@ class AndroidCommandExecutor(private val context: Context) {
     
     /**
      * 获取传感器数据
+     *
+     * Lists available sensors for [sensorType] and attempts a one-shot synchronous
+     * read (300 ms timeout) using a CountDownLatch.  If the latch times out (e.g. the
+     * sensor hardware is unavailable or the calling thread has no Looper), the entry
+     * for that sensor is still included but its "values" field is null.
      */
     private fun getSensorData(params: JSONObject): JSONObject {
         val sensorType = params.optString("sensor", "all")
-        
-        // TODO: 实现传感器数据读取
-        
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+
+        val sensorTypeMap = mapOf(
+            "accelerometer" to Sensor.TYPE_ACCELEROMETER,
+            "gyroscope"     to Sensor.TYPE_GYROSCOPE,
+            "light"         to Sensor.TYPE_LIGHT,
+            "pressure"      to Sensor.TYPE_PRESSURE,
+            "magnetic"      to Sensor.TYPE_MAGNETIC_FIELD,
+            "proximity"     to Sensor.TYPE_PROXIMITY
+        )
+
+        val typesToQuery: List<Int> = if (sensorType == "all") {
+            sensorTypeMap.values.toList()
+        } else {
+            listOfNotNull(sensorTypeMap[sensorType])
+        }
+
+        // Collect last sensor event per type with a short blocking wait.
+        // Only wait when at least one sensor is actually available on this device.
+        val latestValues = mutableMapOf<Int, FloatArray>()
+        val availableCount = typesToQuery.count { sensorManager.getDefaultSensor(it) != null }
+        val collectedCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+        if (availableCount > 0) {
+            val latch = CountDownLatch(1)
+
+            val listener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    if (!latestValues.containsKey(event.sensor.type)) {
+                        latestValues[event.sensor.type] = event.values.copyOf()
+                        if (collectedCount.incrementAndGet() >= availableCount) {
+                            latch.countDown()
+                        }
+                    }
+                }
+                override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+            }
+
+            for (sType in typesToQuery) {
+                val sensor = sensorManager.getDefaultSensor(sType) ?: continue
+                sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+
+            latch.await(300, TimeUnit.MILLISECONDS)
+            sensorManager.unregisterListener(listener)
+        }
+
+        val sensorsArray = JSONArray()
+        for (sType in typesToQuery) {
+            val sensor = sensorManager.getDefaultSensor(sType) ?: continue
+            val values = latestValues[sType]
+            sensorsArray.put(JSONObject().apply {
+                put("name", sensor.name)
+                put("vendor", sensor.vendor)
+                put("type", sType)
+                put("max_range", sensor.maximumRange)
+                put("resolution", sensor.resolution)
+                put("power_ma", sensor.power)
+                if (values != null) {
+                    put("values", JSONArray().also { arr -> values.forEach { arr.put(it) } })
+                } else {
+                    put("values", JSONArray())
+                }
+            })
+        }
+
         return JSONObject().apply {
             put("status", "success")
-            put("message", "Sensor data collection requires implementation")
             put("data", JSONObject().apply {
                 put("sensor_type", sensorType)
+                put("sensors", sensorsArray)
+                put("count", sensorsArray.length())
             })
         }
     }
