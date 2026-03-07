@@ -33,6 +33,19 @@ object ServerConfig {
     /** Legacy REST devices prefix – used as a fallback when v1 returns 404. */
     const val REST_LEGACY_PREFIX = "/api/devices"
 
+    /**
+     * WebSocket path for the WebRTC signaling proxy.
+     * `{id}` is replaced with the device identifier at runtime.
+     */
+    const val WEBRTC_WS_PATH = "/ws/webrtc/{id}"
+
+    /**
+     * REST path to discover the WebRTC signaling endpoint from the gateway.
+     * The gateway (Server PR #35) exposes this endpoint to return the active
+     * signaling WS address and any configuration needed by the Android client.
+     */
+    const val WEBRTC_ENDPOINT_REST_PATH = "/api/v1/webrtc/endpoint"
+
     // ──────────────────────────────────────────────────────────────────────────
     // WebSocket URL helpers
     // ──────────────────────────────────────────────────────────────────────────
@@ -81,4 +94,27 @@ object ServerConfig {
      */
     fun wsToHttpBase(wsBase: String): String =
         wsBase.replaceFirst("wss://", "https://").replaceFirst("ws://", "http://")
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // WebRTC URL helpers
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Build the WebRTC signaling WebSocket URL for [baseUrl] and [deviceId].
+     *
+     * Example: `buildWebRtcWsUrl("ws://host:8050", "abc123")`
+     * → `"ws://host:8050/ws/webrtc/abc123"`
+     */
+    fun buildWebRtcWsUrl(baseUrl: String, deviceId: String): String =
+        "$baseUrl${WEBRTC_WS_PATH.replace("{id}", deviceId)}"
+
+    /**
+     * Build the REST URL used to discover the active WebRTC signaling endpoint
+     * from the gateway.
+     *
+     * Example: `buildWebRtcEndpointUrl("http://host:8050")`
+     * → `"http://host:8050/api/v1/webrtc/endpoint"`
+     */
+    fun buildWebRtcEndpointUrl(httpBase: String): String =
+        "$httpBase$WEBRTC_ENDPOINT_REST_PATH"
 }

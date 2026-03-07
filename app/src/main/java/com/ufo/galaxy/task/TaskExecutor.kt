@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.ufo.galaxy.webrtc.ScreenCaptureService
+import com.ufo.galaxy.webrtc.WebRTCManager
 import org.json.JSONObject
 
 /**
@@ -40,6 +41,52 @@ class TaskExecutor(private val context: Context) {
                     result.put("data", JSONObject().apply {
                         put("timestamp", System.currentTimeMillis())
                         put("service", "ScreenCaptureService")
+                    })
+                }
+
+                "screen_stream_start" -> {
+                    val resultCode = payload.optInt("result_code", -1)
+                    val dataJson = payload.optJSONObject("data")
+                    val gatewayUrl = payload.optString("gateway_url").takeIf { it.isNotEmpty() }
+                    val deviceId = payload.optString("device_id").takeIf { it.isNotEmpty() }
+
+                    if (resultCode == -1) {
+                        result.put("status", "error")
+                        result.put("message", "screen_stream_start requires 'result_code' in payload")
+                    } else {
+                        val manager = WebRTCManager.getInstance(context)
+                        if (gatewayUrl != null || deviceId != null) {
+                            manager.initialize(
+                                gatewayWsBase = gatewayUrl ?: com.ufo.galaxy.config.ServerConfig.DEFAULT_BASE_URL,
+                                deviceId = deviceId ?: "android_device"
+                            )
+                        }
+                        // Reconstruct a minimal Intent for MediaProjection if data is embedded
+                        val projectionIntent = Intent().apply {
+                            if (dataJson != null) {
+                                // Callers may pass the MediaProjection data as a serialised Intent
+                                // stored under "intent_action" / "intent_type".  For simple cases
+                                // the executor is invoked from within the app where the actual
+                                // Intent object is passed via the companion helper below.
+                                dataJson.optString("intent_action").takeIf { it.isNotEmpty() }
+                                    ?.let { action = it }
+                            }
+                        }
+                        manager.startScreenSharing(resultCode, projectionIntent)
+                        result.put("message", "WebRTC screen stream started")
+                        result.put("data", JSONObject().apply {
+                            put("timestamp", System.currentTimeMillis())
+                            put("streaming", true)
+                        })
+                    }
+                }
+
+                "screen_stream_stop" -> {
+                    WebRTCManager.getInstance(context).stopScreenSharing()
+                    result.put("message", "WebRTC screen stream stopped")
+                    result.put("data", JSONObject().apply {
+                        put("timestamp", System.currentTimeMillis())
+                        put("streaming", false)
                     })
                 }
                 
@@ -98,6 +145,42 @@ class TaskExecutor(private val context: Context) {
         return result
     }
     
+    /**
+     * Convenience overload: start a WebRTC stream when the caller holds the
+     * MediaProjection [Intent] object directly (e.g., from an Activity result).
+     */
+    fun startScreenStream(
+        taskId: String,
+        resultCode: Int,
+        projectionData: Intent,
+        gatewayWsBase: String,
+        deviceId: String
+    ): JSONObject {
+        val payload = JSONObject().apply {
+            put("result_code", resultCode)
+            put("gateway_url", gatewayWsBase)
+            put("device_id", deviceId)
+        }
+        val result = JSONObject()
+        result.put("task_id", taskId)
+        result.put("status", "success")
+        try {
+            val manager = WebRTCManager.getInstance(context)
+            manager.initialize(gatewayWsBase = gatewayWsBase, deviceId = deviceId)
+            manager.startScreenSharing(resultCode, projectionData)
+            result.put("message", "WebRTC screen stream started")
+            result.put("data", JSONObject().apply {
+                put("timestamp", System.currentTimeMillis())
+                put("streaming", true)
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "startScreenStream failed", e)
+            result.put("status", "error")
+            result.put("message", e.message ?: "Unknown error")
+        }
+        return result
+    }
+
     /**
      * 获取系统信息
      */

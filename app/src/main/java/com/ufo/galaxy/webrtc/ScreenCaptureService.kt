@@ -56,7 +56,7 @@ class ScreenCaptureService : Service() {
     private var frameRate = 30
     private var bitRate = 2000000 // 2 Mbps
     
-    companion {
+    companion object {
         const val ACTION_START = "com.ufo.galaxy.webrtc.START_CAPTURE"
         const val ACTION_STOP = "com.ufo.galaxy.webrtc.STOP_CAPTURE"
         const val EXTRA_RESULT_CODE = "result_code"
