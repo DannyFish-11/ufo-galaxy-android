@@ -1,5 +1,6 @@
 package com.ufo.galaxy.api
 
+import com.ufo.galaxy.config.ServerConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import okhttp3.*
@@ -11,13 +12,16 @@ import java.util.concurrent.TimeUnit
 
 /**
  * UFO³ Galaxy API 客户端
- * 
+ *
  * 负责与 Galaxy Gateway 进行通信，支持：
  * - HTTP REST API 调用
  * - WebSocket 实时通信
  * - 节点推送和订阅
  * - 智能路由和负载均衡
- * 
+ *
+ * REST device calls attempt `/api/v1/devices/*` first (current server routes) and
+ * automatically fall back to `/api/devices/*` (legacy) when the server returns 404.
+ *
  * @author Manus AI
  * @date 2026-01-22
  */
@@ -293,7 +297,7 @@ class GalaxyApiClient(
             put("node_id", nodeId)
         }.toString())
     }
-    
+
     /**
      * 取消订阅节点
      */
@@ -303,7 +307,129 @@ class GalaxyApiClient(
             put("node_id", nodeId)
         }.toString())
     }
-    
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Device registration / heartbeat / discovery  (v1 with legacy fallback)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Register a device with the server.
+     *
+     * Tries `POST /api/v1/devices/register` first. On HTTP 404 it retries with
+     * the legacy path `POST /api/devices/register`.
+     */
+    suspend fun registerDevice(deviceInfo: JSONObject): Result<JSONObject> =
+        withContext(Dispatchers.IO) {
+            executeWithV1Fallback("/register", deviceInfo)
+        }
+
+    /**
+     * Send a device heartbeat.
+     *
+     * Tries `POST /api/v1/devices/heartbeat` first; falls back to
+     * `POST /api/devices/heartbeat` on 404.
+     */
+    suspend fun sendDeviceHeartbeat(deviceId: String): Result<JSONObject> =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().apply { put("device_id", deviceId) }
+            executeWithV1Fallback("/heartbeat", body)
+        }
+
+    /**
+     * Discover registered devices.
+     *
+     * Tries `GET /api/v1/devices/discover` first; falls back to
+     * `GET /api/devices/discover` on 404.
+     */
+    suspend fun discoverDevices(): Result<JSONObject> =
+        withContext(Dispatchers.IO) {
+            getWithV1Fallback("/discover")
+        }
+
+    /**
+     * Execute a POST request against a device API sub-path, retrying with the
+     * legacy prefix when the v1 endpoint returns 404.
+     */
+    private fun executeWithV1Fallback(subPath: String, body: JSONObject): Result<JSONObject> {
+        return try {
+            val v1Result = postDeviceApi(subPath, body, v1 = true)
+            if (v1Result.isSuccess) {
+                v1Result
+            } else {
+                // Check if failure was a 404 before falling back
+                val ex = v1Result.exceptionOrNull()
+                if (ex?.message?.contains("404") == true) {
+                    postDeviceApi(subPath, body, v1 = false)
+                } else {
+                    v1Result
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun postDeviceApi(subPath: String, body: JSONObject, v1: Boolean): Result<JSONObject> {
+        return try {
+            val url = ServerConfig.buildRestUrl(baseUrl, subPath, v1)
+            val requestBody = body.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .apply { apiKey?.let { addHeader("Authorization", "Bearer $it") } }
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: "{}"
+            if (response.isSuccessful) {
+                Result.success(JSONObject(responseBody))
+            } else {
+                Result.failure(Exception("HTTP ${response.code}: $responseBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun getWithV1Fallback(subPath: String): Result<JSONObject> {
+        return try {
+            val v1Result = getDeviceApi(subPath, v1 = true)
+            if (v1Result.isSuccess) {
+                v1Result
+            } else {
+                val ex = v1Result.exceptionOrNull()
+                if (ex?.message?.contains("404") == true) {
+                    getDeviceApi(subPath, v1 = false)
+                } else {
+                    v1Result
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun getDeviceApi(subPath: String, v1: Boolean): Result<JSONObject> {
+        return try {
+            val url = ServerConfig.buildRestUrl(baseUrl, subPath, v1)
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .apply { apiKey?.let { addHeader("Authorization", "Bearer $it") } }
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: "{}"
+            if (response.isSuccessful) {
+                Result.success(JSONObject(responseBody))
+            } else {
+                Result.failure(Exception("HTTP ${response.code}: $responseBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /**
      * 关闭客户端
      */

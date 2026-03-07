@@ -1,6 +1,8 @@
 package com.ufo.galaxy.client
 
 import android.util.Log
+import com.ufo.galaxy.config.ServerConfig
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,12 +20,13 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 增强版 AIP 客户端
- * 
+ *
  * 新增功能：
  * 1. 支持微软 Galaxy 的消息格式
- * 2. 自动消息格式转换（AIP/1.0 <-> Microsoft AIP）
- * 3. 增强的能力声明
- * 4. 支持 MCP 工具注册
+ * 2. 通过 [AIPMessageBuilder] 统一消息格式转换（AIP/1.0 <-> Microsoft AIP）
+ * 3. 通过 [ServerConfig] 集中管理 WebSocket 路径，支持按优先级自动回退
+ * 4. 增强的能力声明
+ * 5. 支持 MCP 工具注册
  */
 class EnhancedAIPClient(
     private val deviceId: String,
@@ -40,6 +43,9 @@ class EnhancedAIPClient(
     private var reconnectJob: Job? = null
     private var isRegistered = false
 
+    // Index into ServerConfig.WS_PATHS used for the current connection attempt
+    private var wsPathIndex = 0
+
     // 消息类型映射：我们的格式 -> 微软格式
     private val typeMapping = mapOf(
         "registration" to "REGISTER",
@@ -47,16 +53,6 @@ class EnhancedAIPClient(
         "command_result" to "COMMAND_RESULTS",
         "status_update" to "TASK_END",
         "heartbeat" to "HEARTBEAT"
-    )
-
-    // 消息类型映射：微软格式 -> 我们的格式
-    private val reversTypeMapping = mapOf(
-        "REGISTER" to "registration",
-        "TASK" to "command",
-        "COMMAND" to "command",
-        "COMMAND_RESULTS" to "command_result",
-        "TASK_END" to "status_update",
-        "HEARTBEAT" to "heartbeat"
     )
 
     private val wsListener = object : WebSocketListener() {
@@ -79,9 +75,11 @@ class EnhancedAIPClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.e(TAG, "Connection failed: ${t.message}", t)
+            Log.e(TAG, "Connection failed (path index $wsPathIndex): ${t.message}", t)
             this@EnhancedAIPClient.webSocket = null
             isRegistered = false
+            // Advance to the next candidate path before reconnecting
+            wsPathIndex = (wsPathIndex + 1) % ServerConfig.WS_PATHS.size
             startReconnectLoop()
         }
 
@@ -94,7 +92,7 @@ class EnhancedAIPClient(
     }
 
     fun connect() {
-        val wsUrl = "$galaxyUrl/ws/device/$deviceId"
+        val wsUrl = ServerConfig.buildWsUrl(galaxyUrl, deviceId, wsPathIndex)
         val request = Request.Builder().url(wsUrl).build()
         Log.i(TAG, "Connecting to Microsoft Galaxy at $wsUrl...")
         client.newWebSocket(request, wsListener)
@@ -109,7 +107,7 @@ class EnhancedAIPClient(
 
     private fun startReconnectLoop() {
         if (reconnectJob?.isActive == true) return
-        
+
         reconnectJob = scope.launch {
             while (isActive) {
                 Log.i(TAG, "Attempting to reconnect in 5 seconds...")
@@ -174,7 +172,7 @@ class EnhancedAIPClient(
      */
     private fun convertToMicrosoftAIP(ourMessage: JSONObject): JSONObject {
         val messageType = typeMapping[ourMessage.getString("type")] ?: "TASK"
-        
+
         return JSONObject().apply {
             put("message_type", messageType)
             put("agent_id", ourMessage.optString("source_node", deviceId))
@@ -184,32 +182,16 @@ class EnhancedAIPClient(
     }
 
     /**
-     * 将微软 AIP 消息转换为我们的 AIP/1.0 格式
-     */
-    private fun convertFromMicrosoftAIP(microsoftMessage: JSONObject): JSONObject {
-        val messageType = reversTypeMapping[microsoftMessage.getString("message_type")] ?: "command"
-        
-        return JSONObject().apply {
-            put("protocol", "AIP/1.0")
-            put("type", messageType)
-            put("source_node", microsoftMessage.optString("agent_id", "Galaxy"))
-            put("target_node", deviceId)
-            put("timestamp", microsoftMessage.optLong("session_id", System.currentTimeMillis()) / 1000)
-            put("payload", microsoftMessage.getJSONObject("payload"))
-        }
-    }
-
-    /**
-     * 处理来自微软 Galaxy 的消息
+     * 处理来自微软 Galaxy 的消息（使用 [AIPMessageBuilder] 统一解析）
      */
     private fun handleMicrosoftAIPMessage(text: String) {
         try {
-            val microsoftMessage = JSONObject(text)
-            
-            // 转换为我们的格式
-            val ourMessage = convertFromMicrosoftAIP(microsoftMessage)
-            
-            // 处理消息
+            // Normalise to AIP/1.0 field names via the shared builder/parser
+            val ourMessage = AIPMessageBuilder.parse(text) ?: run {
+                Log.w(TAG, "Failed to parse inbound message")
+                return
+            }
+
             val msgType = ourMessage.getString("type")
             val payload = ourMessage.getJSONObject("payload")
 
@@ -218,15 +200,11 @@ class EnhancedAIPClient(
                     val command = payload.optString("command", payload.optString("action"))
                     val params = payload.optJSONObject("params") ?: JSONObject()
                     Log.i(TAG, "Executing command from Galaxy: $command")
-                    
-                    // 执行命令
+
                     val result = executeAndroidCommand(command, params)
-                    
-                    // 发送结果（转换为微软格式）
                     sendCommandResult(command, result)
                 }
                 "heartbeat" -> {
-                    // 响应心跳
                     sendHeartbeat()
                 }
                 else -> Log.w(TAG, "Unhandled message type: $msgType")
@@ -244,21 +222,17 @@ class EnhancedAIPClient(
     }
 
     /**
-     * 发送命令执行结果
+     * 发送命令执行结果（通过 [AIPMessageBuilder] 构建 AIP/1.0 消息后转换为微软格式）
      */
     private fun sendCommandResult(command: String, result: JSONObject) {
-        val ourMessage = JSONObject().apply {
-            put("protocol", "AIP/1.0")
-            put("type", "command_result")
-            put("source_node", deviceId)
-            put("target_node", "Galaxy")
-            put("timestamp", System.currentTimeMillis() / 1000)
-            put("payload", result)
-        }
-        
-        // 转换为微软格式
+        val ourMessage = AIPMessageBuilder.build(
+            messageType = "command_result",
+            sourceNodeId = deviceId,
+            targetNodeId = "Galaxy",
+            payload = result
+        )
+
         val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        
         webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Result not sent.")
     }
 
@@ -275,26 +249,22 @@ class EnhancedAIPClient(
                 put("timestamp", System.currentTimeMillis() / 1000)
             })
         }.toString()
-        
+
         webSocket?.send(microsoftMessage) ?: Log.e(TAG, "WebSocket is null. Heartbeat not sent.")
     }
 
     /**
-     * 发送自定义消息（自动转换格式）
+     * 发送自定义消息（通过 [AIPMessageBuilder] 构建后自动转换为微软格式）
      */
     fun sendMessage(messageType: String, payload: JSONObject) {
-        val ourMessage = JSONObject().apply {
-            put("protocol", "AIP/1.0")
-            put("type", messageType)
-            put("source_node", deviceId)
-            put("target_node", "Galaxy")
-            put("timestamp", System.currentTimeMillis() / 1000)
-            put("payload", payload)
-        }
-        
-        // 转换为微软格式
+        val ourMessage = AIPMessageBuilder.build(
+            messageType = messageType,
+            sourceNodeId = deviceId,
+            targetNodeId = "Galaxy",
+            payload = payload
+        )
+
         val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        
         webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Message not sent.")
     }
 }
