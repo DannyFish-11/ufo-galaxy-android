@@ -28,6 +28,7 @@ class AIPClient(
         .build()
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
+    private var heartbeatJob: Job? = null
 
     // Index into ServerConfig.WS_PATHS used for the current connection attempt
     private var wsPathIndex = 0
@@ -38,6 +39,7 @@ class AIPClient(
             this@AIPClient.webSocket = webSocket
             reconnectJob?.cancel()
             sendRegistration()
+            startHeartbeatLoop()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -47,11 +49,13 @@ class AIPClient(
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             Log.w(TAG, "Connection closing: $code / $reason")
+            heartbeatJob?.cancel()
             this@AIPClient.webSocket = null
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             Log.e(TAG, "Connection failed (path index $wsPathIndex): ${t.message}", t)
+            heartbeatJob?.cancel()
             this@AIPClient.webSocket = null
             // Advance to the next candidate path before reconnecting
             wsPathIndex = (wsPathIndex + 1) % ServerConfig.WS_PATHS.size
@@ -60,6 +64,7 @@ class AIPClient(
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             Log.i(TAG, "Connection closed: $code / $reason")
+            heartbeatJob?.cancel()
             this@AIPClient.webSocket = null
             startReconnectLoop()
         }
@@ -73,6 +78,7 @@ class AIPClient(
     }
 
     fun disconnect() {
+        heartbeatJob?.cancel()
         reconnectJob?.cancel()
         webSocket?.close(1000, "Client disconnect requested")
         webSocket = null
@@ -103,6 +109,28 @@ class AIPClient(
         ).toString()
 
         webSocket?.send(message) ?: Log.e(TAG, "WebSocket is null. Message not sent: $messageType")
+    }
+
+    private fun sendHeartbeat() {
+        val payload = JSONObject().apply {
+            put("status", "online")
+        }
+        sendAIPMessage("heartbeat", payload)
+    }
+
+    private fun startHeartbeatLoop() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                delay(30_000)
+                if (webSocket != null) {
+                    sendHeartbeat()
+                    Log.d(TAG, "Heartbeat sent.")
+                } else {
+                    break
+                }
+            }
+        }
     }
 
     private fun sendRegistration() {
