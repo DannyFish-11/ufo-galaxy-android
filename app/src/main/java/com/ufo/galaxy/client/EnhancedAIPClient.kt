@@ -41,6 +41,7 @@ class EnhancedAIPClient(
         .build()
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var isRegistered = false
 
     // Index into ServerConfig.WS_PATHS used for the current connection attempt
@@ -61,6 +62,7 @@ class EnhancedAIPClient(
             this@EnhancedAIPClient.webSocket = webSocket
             reconnectJob?.cancel()
             sendEnhancedRegistration()
+            startHeartbeatLoop()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -70,12 +72,14 @@ class EnhancedAIPClient(
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             Log.w(TAG, "Connection closing: $code / $reason")
+            heartbeatJob?.cancel()
             this@EnhancedAIPClient.webSocket = null
             isRegistered = false
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             Log.e(TAG, "Connection failed (path index $wsPathIndex): ${t.message}", t)
+            heartbeatJob?.cancel()
             this@EnhancedAIPClient.webSocket = null
             isRegistered = false
             // Advance to the next candidate path before reconnecting
@@ -85,6 +89,7 @@ class EnhancedAIPClient(
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             Log.i(TAG, "Connection closed: $code / $reason")
+            heartbeatJob?.cancel()
             this@EnhancedAIPClient.webSocket = null
             isRegistered = false
             startReconnectLoop()
@@ -99,6 +104,7 @@ class EnhancedAIPClient(
     }
 
     fun disconnect() {
+        heartbeatJob?.cancel()
         reconnectJob?.cancel()
         webSocket?.close(1000, "Client disconnect requested")
         webSocket = null
@@ -114,6 +120,21 @@ class EnhancedAIPClient(
                 delay(5000)
                 if (webSocket == null) {
                     connect()
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
+    private fun startHeartbeatLoop() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                delay(30_000)
+                if (webSocket != null) {
+                    sendHeartbeat()
+                    Log.d(TAG, "Heartbeat sent.")
                 } else {
                     break
                 }
