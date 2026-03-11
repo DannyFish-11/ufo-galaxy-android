@@ -55,26 +55,29 @@ class AgentMessageHandler(
             Log.d(TAG, "处理消息类型: $messageType")
             
             when (messageType) {
+                // ── 统一 API 入口 (Dashboard/Windows UI) ──
+                "unified_request" -> handleUnifiedRequest(message)
+
                 // 任务执行相关
                 "task_execute" -> handleTaskExecute(message)
                 "task_cancel" -> handleTaskCancel(message)
                 "task_status_query" -> handleTaskStatusQuery(message)
-                
+
                 // Agent 控制相关
                 "agent_ping" -> handleAgentPing(message)
                 "agent_config_update" -> handleAgentConfigUpdate(message)
                 "agent_restart" -> handleAgentRestart(message)
-                
+
                 // UI 自动化相关
                 "ui_tree_request" -> handleUITreeRequest(message)
                 "action_execute" -> handleActionExecute(message)
                 "action_sequence_execute" -> handleActionSequenceExecute(message)
-                
+
                 // 系统控制相关
                 "app_start" -> handleAppStart(message)
                 "app_stop" -> handleAppStop(message)
                 "system_command" -> handleSystemCommand(message)
-                
+
                 else -> {
                     Log.w(TAG, "未知消息类型: $messageType")
                     sendErrorResponse(message, "不支持的消息类型: $messageType")
@@ -87,6 +90,30 @@ class AgentMessageHandler(
         }
     }
     
+    /**
+     * 处理统一 API 请求 — Dashboard/Windows UI 通过 WebSocket 发来的请求
+     *
+     * 消息格式:
+     * {
+     *   "type": "unified_request",
+     *   "action": "chat|create_agent|agent_chat|team_task|...",
+     *   "message_id": "xxx",
+     *   ... (action-specific fields)
+     * }
+     */
+    private fun handleUnifiedRequest(message: JSONObject) {
+        scope.launch {
+            try {
+                val agentCore = com.ufo.galaxy.core.AgentCore.getInstance(context)
+                val result = agentCore.handleUnifiedRequest(message)
+                sendResponse(message, result)
+            } catch (e: Exception) {
+                Log.e(TAG, "统一请求处理失败", e)
+                sendErrorResponse(message, "统一请求处理失败: ${e.message}")
+            }
+        }
+    }
+
     /**
      * 处理任务执行请求
      */
