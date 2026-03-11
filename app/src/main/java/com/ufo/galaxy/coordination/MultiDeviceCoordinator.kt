@@ -427,7 +427,7 @@ class MultiDeviceCoordinator(private val context: Context) {
         return try {
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             if (apiKey.isNotEmpty()) {
                 connection.setRequestProperty("Authorization", "Bearer $apiKey")
             }
@@ -436,11 +436,11 @@ class MultiDeviceCoordinator(private val context: Context) {
             connection.readTimeout = 30000
             
             connection.outputStream.use { os ->
-                os.write(body.toString().toByteArray())
+                os.write(body.toString().toByteArray(Charsets.UTF_8))
             }
             
             if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().readText()
+                val response = connection.inputStream.bufferedReader(Charsets.UTF_8).readText()
                 JSONObject(response)
             } else {
                 Log.e(TAG, "Request failed: ${connection.responseCode}")
@@ -472,7 +472,7 @@ data class DeviceInfo(
 ) {
     val name: String get() = deviceName
     val type: String get() = deviceType
-} {
+
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("device_id", deviceId)

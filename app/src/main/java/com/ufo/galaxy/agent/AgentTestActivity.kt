@@ -97,7 +97,7 @@ fun AgentTestScreen(galaxyAgent: GalaxyAgent) {
             Button(
                 onClick = {
                     scope.launch {
-                        val gatewayUrl = "ws://192.168.1.100:8000/ws/agent"
+                        val gatewayUrl = "ws://192.168.1.100:8050/ws/agent"
                         galaxyAgent.initialize(gatewayUrl)
                         statusText = "Agent 已初始化\nGateway: $gatewayUrl"
                     }

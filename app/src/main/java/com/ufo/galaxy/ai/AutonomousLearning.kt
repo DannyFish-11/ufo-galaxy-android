@@ -256,7 +256,7 @@ class AutonomousLearning(private val context: Context) {
             })
         }
         
-        skillFile.writeText(json.toString())
+        skillFile.writeText(json.toString(), Charsets.UTF_8)
         Log.d(TAG, "Saved skill: $name with ${steps.size} steps")
     }
     
@@ -268,7 +268,7 @@ class AutonomousLearning(private val context: Context) {
         if (!skillFile.exists()) return null
         
         return try {
-            val json = JSONObject(skillFile.readText())
+            val json = JSONObject(skillFile.readText(Charsets.UTF_8))
             val stepsArray = json.getJSONArray("steps")
             
             (0 until stepsArray.length()).map { i ->
@@ -320,7 +320,7 @@ class AutonomousLearning(private val context: Context) {
                 put("lastSaved", System.currentTimeMillis())
             }
             
-            learningDataFile.writeText(json.toString())
+            learningDataFile.writeText(json.toString(), Charsets.UTF_8)
             Log.d(TAG, "Saved learning data")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save learning data: ${e.message}")
@@ -334,7 +334,7 @@ class AutonomousLearning(private val context: Context) {
         try {
             if (!learningDataFile.exists()) return
             
-            val json = JSONObject(learningDataFile.readText())
+            val json = JSONObject(learningDataFile.readText(Charsets.UTF_8))
             
             // 加载模式
             json.optJSONArray("patterns")?.let { patterns ->

@@ -1014,7 +1014,7 @@ class GUIUnderstanding(private val context: Context) {
         return try {
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             if (apiKey.isNotEmpty()) {
                 connection.setRequestProperty("Authorization", "Bearer $apiKey")
             }
@@ -1023,11 +1023,11 @@ class GUIUnderstanding(private val context: Context) {
             connection.readTimeout = 60000
 
             connection.outputStream.use { os ->
-                os.write(body.toString().toByteArray())
+                os.write(body.toString().toByteArray(Charsets.UTF_8))
             }
 
             if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().readText()
+                val response = connection.inputStream.bufferedReader(Charsets.UTF_8).readText()
                 JSONObject(response)
             } else {
                 Log.e(TAG, "Request failed: ${connection.responseCode}")
@@ -1045,21 +1045,21 @@ class GUIUnderstanding(private val context: Context) {
         return try {
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             connection.setRequestProperty("Authorization", "Bearer $authKey")
             connection.doOutput = true
             connection.connectTimeout = 30000
             connection.readTimeout = 60000
 
             connection.outputStream.use { os ->
-                os.write(body.toString().toByteArray())
+                os.write(body.toString().toByteArray(Charsets.UTF_8))
             }
 
             if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().readText()
+                val response = connection.inputStream.bufferedReader(Charsets.UTF_8).readText()
                 JSONObject(response)
             } else {
-                val errorStream = connection.errorStream?.bufferedReader()?.readText() ?: ""
+                val errorStream = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.readText() ?: ""
                 Log.e(TAG, "API error [${connection.responseCode}]: $errorStream")
                 null
             }

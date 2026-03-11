@@ -39,7 +39,7 @@ class GalaxyAgent private constructor(private val context: Context) {
     private lateinit var messageHandler: AgentMessageHandler
     
     // 配置
-    private var gatewayUrl = "ws://192.168.1.100:8000/ws/agent" // 默认值，需要配置
+    private var gatewayUrl = "ws://192.168.1.100:8050/ws/agent" // 默认值，需要配置
     
     // 状态
     @Volatile
