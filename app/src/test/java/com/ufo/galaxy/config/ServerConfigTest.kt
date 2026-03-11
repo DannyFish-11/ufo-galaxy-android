@@ -14,25 +14,39 @@ class ServerConfigTest {
     private val baseUrl = "ws://192.168.1.100:8050"
     private val deviceId = "android_test_device"
 
+    @Test
+    fun `ANDROID_BRIDGE_WS_PATH constant matches index 0 path`() {
+        val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 0)
+        assertTrue("Primary path should contain ANDROID_BRIDGE_WS_PATH template",
+            url.contains("/ws/android/"))
+        assertEquals(url, "$baseUrl${ServerConfig.ANDROID_BRIDGE_WS_PATH.replace("{id}", deviceId)}")
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // buildWsUrl
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `buildWsUrl index 0 uses preferred device path`() {
+    fun `buildWsUrl index 0 uses AndroidBridge primary path`() {
         val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 0)
+        assertEquals("$baseUrl/ws/android/$deviceId", url)
+    }
+
+    @Test
+    fun `buildWsUrl index 1 uses device-specific fallback path`() {
+        val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 1)
         assertEquals("$baseUrl/ws/device/$deviceId", url)
     }
 
     @Test
-    fun `buildWsUrl index 1 uses android path`() {
-        val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 1)
+    fun `buildWsUrl index 2 uses generic android path`() {
+        val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 2)
         assertEquals("$baseUrl/ws/android", url)
     }
 
     @Test
-    fun `buildWsUrl index 2 uses legacy ufo3 path`() {
-        val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 2)
+    fun `buildWsUrl index 3 uses legacy ufo3 path`() {
+        val url = ServerConfig.buildWsUrl(baseUrl, deviceId, 3)
         assertEquals("$baseUrl/ws/ufo3/$deviceId", url)
     }
 
@@ -60,9 +74,9 @@ class ServerConfigTest {
     }
 
     @Test
-    fun `allWsUrls first entry equals preferred device path`() {
+    fun `allWsUrls first entry equals AndroidBridge primary path`() {
         val urls = ServerConfig.allWsUrls(baseUrl, deviceId)
-        assertEquals("$baseUrl/ws/device/$deviceId", urls[0])
+        assertEquals("$baseUrl/ws/android/$deviceId", urls[0])
     }
 
     // ──────────────────────────────────────────────────────────────────────

@@ -111,7 +111,7 @@ client.addToGroup("development")
 |------|------|------|
 | `protocol` | 协议标识 | `"AIP/1.0"` |
 | `version` | v3 版本号 | `"3.0"` |
-| `type` | 消息类型 | `"register"` / `"heartbeat"` / `"command"` |
+| `type` | 消息类型（v3 名称） | `"device_register"` / `"heartbeat"` / `"capability_report"` |
 | `source_node` | 发送方设备 ID | `"android_abc12345"` |
 | `target_node` | 目标节点 | `"server"` |
 | `device_id` | 设备唯一标识 (v3) | `"android_abc12345"` |
@@ -126,14 +126,13 @@ client.addToGroup("development")
 {
     "protocol": "AIP/1.0",
     "version": "3.0",
-    "type": "register",
+    "type": "device_register",
     "source_node": "android_abc12345",
     "target_node": "server",
     "device_id": "android_abc12345",
     "device_type": "Android_Agent",
     "message_id": "a1b2c3d4",
     "timestamp": 1700000000,
-    "action": "device_register",
     "payload": {
         "device_id": "android_abc12345",
         "device_type": "android",
@@ -144,6 +143,27 @@ client.addToGroup("development")
         "capabilities": ["screen", "touch", "camera", "ui_automation", "..."],
         "groups": ["mobile", "android"],
         "tags": ["android", "mobile", "auto-registered"]
+    }
+}
+```
+
+### 能力上报消息（注册后立即发送）
+
+```json
+{
+    "protocol": "AIP/1.0",
+    "version": "3.0",
+    "type": "capability_report",
+    "source_node": "android_abc12345",
+    "target_node": "server",
+    "device_id": "android_abc12345",
+    "device_type": "Android_Agent",
+    "message_id": "b2c3d4e5",
+    "timestamp": 1700000001,
+    "payload": {
+        "platform": "android",
+        "supported_actions": ["app_control", "camera", "screen_capture", "touch", "ui_automation"],
+        "version": "2.5.0"
     }
 }
 ```

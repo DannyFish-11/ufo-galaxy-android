@@ -115,7 +115,7 @@ class AIPClient(
         val payload = JSONObject().apply {
             put("status", "online")
         }
-        sendAIPMessage("heartbeat", payload)
+        sendAIPMessage(AIPMessageBuilder.MessageType.HEARTBEAT, payload)
     }
 
     private fun startHeartbeatLoop() {
@@ -138,8 +138,23 @@ class AIPClient(
             put("device_type", "Android_Agent")
             put("capabilities", listOf("location", "camera", "sensor_data", "automation"))
         }
-        sendAIPMessage("registration", payload)
+        sendAIPMessage(AIPMessageBuilder.MessageType.DEVICE_REGISTER, payload)
         Log.i(TAG, "Registration message sent.")
+        // Send capability report immediately after registration
+        sendCapabilityReport()
+    }
+
+    private fun sendCapabilityReport() {
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", org.json.JSONArray().apply {
+                put("location"); put("camera"); put("sensor_data"); put("automation")
+                put("screen_capture"); put("ui_automation")
+            })
+            put("version", "2.5.0")
+        }
+        sendAIPMessage(AIPMessageBuilder.MessageType.CAPABILITY_REPORT, payload)
+        Log.i(TAG, "Capability report sent.")
     }
 
     private fun handleAIPMessage(text: String) {
@@ -152,8 +167,8 @@ class AIPClient(
             val payload = data.getJSONObject("payload")
 
             when (msgType) {
-                "command" -> {
-                    val command = payload.getString("command")
+                "command", AIPMessageBuilder.MessageType.TASK_ASSIGN -> {
+                    val command = payload.optString("command", payload.optString("action"))
                     val params = payload.optJSONObject("params") ?: JSONObject()
                     Log.i(TAG, "Executing command: $command with params: $params")
 
@@ -163,7 +178,7 @@ class AIPClient(
                         put("details", "Command $command executed on Android.")
                     }
 
-                    sendAIPMessage("command_result", resultPayload)
+                    sendAIPMessage(AIPMessageBuilder.MessageType.COMMAND_RESULT, resultPayload)
                 }
                 "status_request" -> {
                     val statusPayload = JSONObject().apply {

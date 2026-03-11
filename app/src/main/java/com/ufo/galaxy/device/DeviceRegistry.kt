@@ -207,22 +207,50 @@ class DeviceRegistry(private val context: Context) {
      * Built via [AIPMessageBuilder] so that AIP/1.0 + v3 envelope fields
      * (`protocol`, `version`, `device_id`, `device_type`, `message_id`,
      * `timestamp`) are always present and consistent.  The payload reuses
-     * [DeviceInfo.toJson] to avoid duplicating field assignments.  The `action`
-     * field is appended afterwards for server-side routing.
+     * [DeviceInfo.toJson] to avoid duplicating field assignments.
+     *
+     * The outbound `type` is [AIPMessageBuilder.MessageType.DEVICE_REGISTER]
+     * to match the server AndroidBridge's expected message type.
      */
     fun createRegisterMessage(): JSONObject {
         val info = _deviceInfo.value ?: initialize()
 
         return AIPMessageBuilder.build(
-            messageType = "register",
+            messageType = AIPMessageBuilder.MessageType.DEVICE_REGISTER,
             sourceNodeId = info.deviceId,
             targetNodeId = "server",
             payload = info.toJson(),
             deviceType = "Android_Agent"
-        ).apply {
-            // `action` is an extra routing hint consumed by the server
-            put("action", "device_register")
+        )
+    }
+
+    /**
+     * 创建能力上报消息
+     *
+     * Must be sent immediately after receiving a registration ACK so that the
+     * server's CapabilityRegistry can record the device's full capability set.
+     *
+     * Required payload fields:
+     * - `platform`          – OS platform string (`"android"`)
+     * - `supported_actions` – array of capability names
+     * - `version`           – client/app version string
+     */
+    fun createCapabilityReportMessage(): JSONObject {
+        val info = _deviceInfo.value ?: initialize()
+
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", JSONArray(_capabilities.value))
+            put("version", info.appVersion)
         }
+
+        return AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.CAPABILITY_REPORT,
+            sourceNodeId = info.deviceId,
+            targetNodeId = "server",
+            payload = payload,
+            deviceType = "Android_Agent"
+        )
     }
 
     /**
@@ -239,7 +267,7 @@ class DeviceRegistry(private val context: Context) {
         }
 
         return AIPMessageBuilder.build(
-            messageType = "heartbeat",
+            messageType = AIPMessageBuilder.MessageType.HEARTBEAT,
             sourceNodeId = info.deviceId,
             targetNodeId = "server",
             payload = payload,

@@ -147,6 +147,9 @@ class Node50Client(
      *
      * Built via [AIPMessageBuilder] for a consistent AIP v3 envelope with
      * `device_id`, `device_type`, `message_id`, and `timestamp`.
+     *
+     * The outbound `type` is [AIPMessageBuilder.MessageType.DEVICE_REGISTER]
+     * to match the server AndroidBridge's expected message type.
      */
     private fun registerToNode50() {
         Log.i(TAG, "📝 正在向 Node 50 注册...")
@@ -158,7 +161,7 @@ class Node50Client(
             put("capabilities", AIPProtocol.getCapabilities())
         }
         val registerMessage = AIPMessageBuilder.build(
-            messageType = AIPProtocol.MessageType.REGISTER,
+            messageType = AIPMessageBuilder.MessageType.DEVICE_REGISTER,
             sourceNodeId = AIPProtocol.CLIENT_ID,
             targetNodeId = AIPProtocol.NODE_50_ID,
             payload = payload

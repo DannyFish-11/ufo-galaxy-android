@@ -47,13 +47,13 @@ class EnhancedAIPClient(
     // Index into ServerConfig.WS_PATHS used for the current connection attempt
     private var wsPathIndex = 0
 
-    // 消息类型映射：我们的格式 -> 微软格式
+    // 消息类型映射：我们的格式 -> 微软格式（仅用于 Microsoft Galaxy 兼容层）
     private val typeMapping = mapOf(
-        "registration" to "REGISTER",
-        "command" to "TASK",
-        "command_result" to "COMMAND_RESULTS",
-        "status_update" to "TASK_END",
-        "heartbeat" to "HEARTBEAT"
+        AIPMessageBuilder.MessageType.DEVICE_REGISTER to "REGISTER",
+        AIPMessageBuilder.MessageType.TASK_ASSIGN     to "TASK",
+        AIPMessageBuilder.MessageType.COMMAND_RESULT  to "COMMAND_RESULTS",
+        "status_update"                               to "TASK_END",
+        AIPMessageBuilder.MessageType.HEARTBEAT       to "HEARTBEAT"
     )
 
     private val wsListener = object : WebSocketListener() {
@@ -185,7 +185,7 @@ class EnhancedAIPClient(
         }
 
         val aipMessage = AIPMessageBuilder.build(
-            messageType = "registration",
+            messageType = AIPMessageBuilder.MessageType.DEVICE_REGISTER,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = registrationPayload
@@ -194,6 +194,36 @@ class EnhancedAIPClient(
         val microsoftMessage = convertToMicrosoftAIP(aipMessage)
         webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Registration failed.")
         Log.i(TAG, "Enhanced registration message sent to Microsoft Galaxy.")
+        // Send capability report after registration
+        sendCapabilityReport()
+    }
+
+    /**
+     * 发送能力上报（通过 [AIPMessageBuilder] 构建 capability_report 后转换为微软格式）
+     *
+     * Sent immediately after registration so the server CapabilityRegistry can
+     * record the device's supported actions.  Payload includes `platform`,
+     * `supported_actions`, and `version` as required by the AndroidBridge.
+     */
+    private fun sendCapabilityReport() {
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", JSONArray().apply {
+                put("location"); put("camera"); put("sensor_data"); put("automation")
+                put("notification"); put("sms"); put("phone_call"); put("contacts")
+                put("calendar"); put("voice_input"); put("screen_capture"); put("app_control")
+            })
+            put("version", "2.5.0")
+        }
+        val ourMessage = AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.CAPABILITY_REPORT,
+            sourceNodeId = deviceId,
+            targetNodeId = "Galaxy",
+            payload = payload
+        )
+        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
+        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Capability report not sent.")
+        Log.i(TAG, "Capability report sent.")
     }
 
     /**

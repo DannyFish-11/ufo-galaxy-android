@@ -102,9 +102,10 @@ rest.base.url=http://100.x.x.x:8000
 
 | 优先级 | 路径 | 说明 |
 |--------|------|------|
-| 1 (最高) | `/ws/device/{id}` | 推荐路径，含设备 ID |
-| 2 | `/ws/android` | 通用 Android 路径 |
-| 3 | `/ws/ufo3/{id}` | 传统 UFO³ 路径（兼容旧版服务器） |
+| 1 (最高) | `/ws/android/{id}` | **AndroidBridge 主路径**（realization-v2 标准路由） |
+| 2 | `/ws/device/{id}` | 含设备 ID 的通用回退路径 |
+| 3 | `/ws/android` | 通用 Android 路径 |
+| 4 | `/ws/ufo3/{id}` | 传统 UFO³ 路径（兼容旧版服务器） |
 
 连接失败时，`AIPClient` 和 `EnhancedAIPClient` 会自动尝试下一个路径。
 
@@ -125,7 +126,7 @@ rest.base.url=http://100.x.x.x:8000
 ```json
 {
   "protocol": "AIP/1.0",
-  "type": "registration",
+  "type": "device_register",
   "source_node": "android_abc12345",
   "target_node": "server",
   "timestamp": 1700000000,
@@ -137,12 +138,34 @@ rest.base.url=http://100.x.x.x:8000
 }
 ```
 
+#### 出站消息类型（AIPMessageBuilder.MessageType 常量）
+
+| 常量 | 消息 `type` 值 | 说明 |
+|------|----------------|------|
+| `MessageType.DEVICE_REGISTER` | `device_register` | 设备注册（连接建立时发送） |
+| `MessageType.HEARTBEAT` | `heartbeat` | 每 30 秒心跳 |
+| `MessageType.CAPABILITY_REPORT` | `capability_report` | 注册后立即发送，上报设备能力 |
+| `MessageType.TASK_ASSIGN` | `task_assign` | 服务端下发任务（入站） |
+| `MessageType.COMMAND_RESULT` | `command_result` | 任务执行结果（出站） |
+
+#### Legacy 消息类型映射
+
+旧代码使用 `"registration"` / `"register"` 等字符串，已通过 `AIPMessageBuilder.LEGACY_TYPE_MAP` 映射为 v3 类型名。**新代码必须直接使用 `MessageType` 常量**。
+
+| Legacy 字符串 | v3 等价 |
+|---|---|
+| `registration` | `device_register` |
+| `register` | `device_register` |
+| `command` | `task_assign` |
+
 关键字段说明：
 - `message_id` – 每条消息的唯一标识，由 `AIPMessageBuilder` 自动生成（8位UUID）
 - `device_id` – 设备唯一标识（格式：`android_xxxxxxxx`），同时出现在顶层和 `payload` 中
 - `device_type` – AIP 智能体类型标识（顶层 `"Android_Agent"`；`payload.device_type` 为 OS 类型 `"android"`）
 - `capabilities` – 设备能力列表，由 `DeviceRegistry` 自动收集
 - `timestamp` – Unix 时间戳（秒）
+
+`capability_report` payload 必须包含 `platform`、`supported_actions`、`version` 三个字段，用于服务端 `CapabilityRegistry` 同步。
 
 入站消息由 `AIPMessageBuilder.parse()` 统一解析，支持三种格式：AIP/1.0 原生、Microsoft Galaxy 格式以及 v3 格式。
 
@@ -183,10 +206,15 @@ Node50Client  (legacy Node 50 连接)
 - **主仓库**: [ufo-galaxy-realization-v2](https://github.com/DannyFish-11/ufo-galaxy-realization-v2)
 - **Android 客户端**: [ufo-galaxy-android](https://github.com/DannyFish-11/ufo-galaxy-android)
 
+### 📚 文档
+
+- [Android ↔ Server 集成指南](docs/ANDROID_BRIDGE_INTEGRATION.md) – WS 路径、消息类型、注册/能力上报流程、NL 调度链路
+
 ### 📊 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|----------|
+| v2.5.3 | 2026-03-11 | Android↔realization-v2 系统性对接对齐：ServerConfig.WS_PATHS 主路径切换至 `/ws/android/{id}`（AndroidBridge 标准路由）；AIPMessageBuilder 新增 MessageType 常量（device_register/heartbeat/capability_report/task_assign/command_result）及 LEGACY_TYPE_MAP；AIPClient/EnhancedAIPClient/Node50Client 注册消息统一使用 device_register；DeviceRegistry 新增 createCapabilityReportMessage()；DeviceCommunication/AIPClient/EnhancedAIPClient 注册后自动发送 capability_report；新增 docs/ANDROID_BRIDGE_INTEGRATION.md |
 | v2.5.2 | 2026-03-07 | AIP v3 全栈系统性对齐：DeviceCommunication 入站消息通过 AIPMessageBuilder.parse() 统一规范化；EnhancedAIPClient 注册消息通过 AIPMessageBuilder.build() 构建 v3 信封后转换；Node50Client 切换 ServerConfig.buildWsUrl() + AIPMessageBuilder；GalaxyAgentV2/TaskExecutor 切换 AIPMessageBuilder；AIPProtocol 废弃标注 |
 | v2.5.1 | 2026-03-07 | AIP v3 系统性对齐：message_id 统一、DeviceCommunication 使用 ServerConfig 路径回退、DeviceRegistry 消息通过 AIPMessageBuilder 构建 |
 | v2.5.0 | 2026-02-21 | 合并两个仓库优点，系统性升级 |
