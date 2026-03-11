@@ -352,8 +352,11 @@ class DeviceCommunication(
                         listener?.onMessage(message)
                     }
                     
-                    // 命令消息
-                    "command" -> {
+                    // 命令消息 (type="command") and AIP v3 task assignment (type="task_assign").
+                    // Both are routed through the same handler dispatch path so that actions
+                    // like screenshot/click/swipe execute correctly regardless of which wire
+                    // format the server uses.
+                    "command", "task_assign" -> {
                         val command = CommandMessage(
                             action = action,
                             payload = payload,
@@ -368,6 +371,14 @@ class DeviceCommunication(
                             val result = handler(payload)
                             
                             if (result != null) {
+                                // For task_assign messages, prefer task_id for correlation so
+                                // the server can match the response to the originating task.
+                                // Fall back to message_id when task_id is absent.
+                                val effectiveCorrelationId = if (type == "task_assign") {
+                                    json.optString("task_id").takeIf { it.isNotEmpty() } ?: messageId
+                                } else {
+                                    messageId
+                                }
                                 // 发送响应 - built via AIPMessageBuilder for consistent fields
                                 val response = AIPMessageBuilder.build(
                                     messageType = "response",
@@ -376,7 +387,7 @@ class DeviceCommunication(
                                     payload = result
                                 ).apply {
                                     put("action", action)
-                                    put("correlation_id", messageId)
+                                    put("correlation_id", effectiveCorrelationId)
                                 }
                                 send(response)
                             }
