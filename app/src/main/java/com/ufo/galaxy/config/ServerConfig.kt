@@ -25,13 +25,27 @@ object ServerConfig {
     const val DEFAULT_STUN_URL = "stun:stun.l.google.com:19302"
 
     /**
+     * Primary WebSocket path for the AndroidBridge (server realization-v2).
+     * `{id}` is substituted with the device identifier at runtime.
+     *
+     * This is the canonical route exposed by `galaxy_gateway/android_bridge.py`
+     * in ufo-galaxy-realization-v2.  All new connections should prefer this path.
+     */
+    const val ANDROID_BRIDGE_WS_PATH = "/ws/android/{id}"
+
+    /**
      * WebSocket paths in descending priority order.
+     *
+     * Index 0 ([ANDROID_BRIDGE_WS_PATH]) is the canonical AndroidBridge route
+     * and is always tried first.  The remaining entries are fallback candidates
+     * used when the preferred path is unavailable (e.g. older server deployments).
      * `{id}` is substituted with the actual device identifier at runtime.
      */
     val WS_PATHS: List<String> = listOf(
-        "/ws/device/{id}",   // preferred
-        "/ws/android",        // generic Android path
-        "/ws/ufo3/{id}"       // legacy UFO³ path
+        ANDROID_BRIDGE_WS_PATH, // preferred: AndroidBridge route (realization-v2)
+        "/ws/device/{id}",       // device-specific fallback
+        "/ws/android",            // generic Android fallback
+        "/ws/ufo3/{id}"           // legacy UFO³ path
     )
 
     /** Current v1 REST devices prefix (active server routes). */

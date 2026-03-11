@@ -22,6 +22,62 @@ object AIPMessageBuilder {
     const val PROTOCOL_V3 = "3.0"
 
     // ──────────────────────────────────────────────────────────────────────────
+    // v3 message type constants (authoritative names expected by AndroidBridge)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * AIP v3 message type names as expected by the server AndroidBridge.
+     *
+     * All new outbound messages should use these constants so that the wire
+     * `type` field matches the server's routing logic exactly.
+     *
+     * Legacy callers that previously used `"registration"` or `"register"` must
+     * migrate to [DEVICE_REGISTER].  [LEGACY_TYPE_MAP] documents the mapping
+     * for reference and is used by [toLegacyType] / [toV3Type] utilities.
+     */
+    object MessageType {
+        /** Device registers itself with the AndroidBridge. */
+        const val DEVICE_REGISTER = "device_register"
+
+        /** Periodic keep-alive sent to the server. */
+        const val HEARTBEAT = "heartbeat"
+
+        /**
+         * Sent immediately after a successful registration ACK to report the
+         * device's full capability set.  Payload must contain `platform`,
+         * `supported_actions`, and `version`.
+         */
+        const val CAPABILITY_REPORT = "capability_report"
+
+        /** Server assigns a task or command to this device. */
+        const val TASK_ASSIGN = "task_assign"
+
+        /** Device reports the result of an executed command or task. */
+        const val COMMAND_RESULT = "command_result"
+    }
+
+    /**
+     * Mapping from legacy outbound type names → authoritative v3 names.
+     *
+     * This map is provided for reference and migration tooling only.  New
+     * code must use [MessageType] constants directly rather than legacy strings.
+     */
+    val LEGACY_TYPE_MAP: Map<String, String> = mapOf(
+        "registration" to MessageType.DEVICE_REGISTER,
+        "register"     to MessageType.DEVICE_REGISTER,
+        "heartbeat"    to MessageType.HEARTBEAT,
+        "command"      to MessageType.TASK_ASSIGN,
+        "command_result" to MessageType.COMMAND_RESULT
+    )
+
+    /**
+     * Convert a legacy type string to its authoritative v3 equivalent.
+     *
+     * Returns the input unchanged when it is already a v3 name or unknown.
+     */
+    fun toV3Type(legacyType: String): String = LEGACY_TYPE_MAP[legacyType] ?: legacyType
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Outbound message building
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -35,7 +91,8 @@ object AIPMessageBuilder {
      * - Optional **v3-compatible** fields (`version`, `device_id`, `device_type`)
      *   that maximise server compatibility when [includeV3] is `true` (the default).
      *
-     * @param messageType   AIP/1.0 `type` value (e.g. `"registration"`, `"command"`).
+     * @param messageType   v3 `type` value – prefer [MessageType] constants
+     *                      (e.g. [MessageType.DEVICE_REGISTER], [MessageType.HEARTBEAT]).
      * @param sourceNodeId  Sending device / node identifier.
      * @param targetNodeId  Destination node identifier.
      * @param payload       Arbitrary payload [JSONObject].

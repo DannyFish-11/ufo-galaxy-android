@@ -192,12 +192,27 @@ class DeviceCommunication(
     }
     
     /**
-     * 发送设备注册消息
+     * 发送设备注册消息，并在成功后立即发送能力上报
      */
     private fun sendDeviceRegister() {
         val message = deviceRegistry.createRegisterMessage()
         send(message)
         Log.i(TAG, "发送设备注册")
+        // Capability report follows registration immediately; the server
+        // AndroidBridge expects it to populate the CapabilityRegistry.
+        sendCapabilityReport()
+    }
+
+    /**
+     * 发送能力上报消息
+     *
+     * Sends a [AIPMessageBuilder.MessageType.CAPABILITY_REPORT] payload so the
+     * server's CapabilityRegistry records this device's supported actions.
+     */
+    private fun sendCapabilityReport() {
+        val message = deviceRegistry.createCapabilityReportMessage()
+        send(message)
+        Log.i(TAG, "发送能力上报")
     }
     
     /**
@@ -313,8 +328,9 @@ class DeviceCommunication(
                     // 确认消息
                     "ack" -> {
                         Log.d(TAG, "收到确认: $action")
-                        
-                        if (action == "handshake" || action == "register") {
+
+                        if (action == "handshake" || action == "register"
+                            || action == AIPMessageBuilder.MessageType.DEVICE_REGISTER) {
                             Log.i(TAG, "设备注册成功")
                         }
                     }

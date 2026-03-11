@@ -293,14 +293,14 @@ class AIPMessageBuilderTest {
             put("capabilities", capabilities)
         }
         val msg = AIPMessageBuilder.build(
-            messageType = "register",
+            messageType = AIPMessageBuilder.MessageType.DEVICE_REGISTER,
             sourceNodeId = "android_test123",
             targetNodeId = "server",
             payload = payload,
             deviceType = "Android_Agent"
         )
 
-        assertEquals("register", msg.getString("type"))
+        assertEquals(AIPMessageBuilder.MessageType.DEVICE_REGISTER, msg.getString("type"))
         assertEquals("android_test123", msg.getString("device_id"))
         assertEquals("Android_Agent", msg.getString("device_type"))
         assertTrue("message_id should be present", msg.has("message_id"))
@@ -308,5 +308,82 @@ class AIPMessageBuilderTest {
         assertEquals("3.0", msg.getString("version"))
         val msgPayload = msg.getJSONObject("payload")
         assertEquals("android_test123", msgPayload.getString("device_id"))
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // MessageType constants
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `MessageType DEVICE_REGISTER equals device_register`() {
+        assertEquals("device_register", AIPMessageBuilder.MessageType.DEVICE_REGISTER)
+    }
+
+    @Test
+    fun `MessageType HEARTBEAT equals heartbeat`() {
+        assertEquals("heartbeat", AIPMessageBuilder.MessageType.HEARTBEAT)
+    }
+
+    @Test
+    fun `MessageType CAPABILITY_REPORT equals capability_report`() {
+        assertEquals("capability_report", AIPMessageBuilder.MessageType.CAPABILITY_REPORT)
+    }
+
+    @Test
+    fun `MessageType TASK_ASSIGN equals task_assign`() {
+        assertEquals("task_assign", AIPMessageBuilder.MessageType.TASK_ASSIGN)
+    }
+
+    @Test
+    fun `MessageType COMMAND_RESULT equals command_result`() {
+        assertEquals("command_result", AIPMessageBuilder.MessageType.COMMAND_RESULT)
+    }
+
+    @Test
+    fun `toV3Type maps legacy registration to device_register`() {
+        assertEquals(
+            AIPMessageBuilder.MessageType.DEVICE_REGISTER,
+            AIPMessageBuilder.toV3Type("registration")
+        )
+    }
+
+    @Test
+    fun `toV3Type maps legacy register to device_register`() {
+        assertEquals(
+            AIPMessageBuilder.MessageType.DEVICE_REGISTER,
+            AIPMessageBuilder.toV3Type("register")
+        )
+    }
+
+    @Test
+    fun `toV3Type returns input unchanged for unknown types`() {
+        assertEquals("custom_type", AIPMessageBuilder.toV3Type("custom_type"))
+    }
+
+    @Test
+    fun `build capability_report message includes required v3 payload fields`() {
+        val capabilities = org.json.JSONArray().apply {
+            put("screen_capture"); put("ui_automation"); put("touch")
+        }
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", capabilities)
+            put("version", "2.5.0")
+        }
+        val msg = AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.CAPABILITY_REPORT,
+            sourceNodeId = "android_abc123",
+            targetNodeId = "server",
+            payload = payload,
+            deviceType = "Android_Agent"
+        )
+
+        assertEquals(AIPMessageBuilder.MessageType.CAPABILITY_REPORT, msg.getString("type"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals("android_abc123", msg.getString("device_id"))
+        val p = msg.getJSONObject("payload")
+        assertEquals("android", p.getString("platform"))
+        assertEquals("2.5.0", p.getString("version"))
+        assertTrue("supported_actions should be present", p.has("supported_actions"))
     }
 }
