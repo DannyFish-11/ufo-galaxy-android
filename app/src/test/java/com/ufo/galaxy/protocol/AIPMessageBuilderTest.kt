@@ -360,6 +360,112 @@ class AIPMessageBuilderTest {
         assertEquals("custom_type", AIPMessageBuilder.toV3Type("custom_type"))
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // task_assign routing – DeviceCommunication scenarios
+    // These tests validate that task_assign messages are parsed correctly so
+    // that DeviceCommunication.handleMessage can route them to the command
+    // handler path and build the right correlation_id in the response.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `parse accepts native task_assign message and preserves type`() {
+        val msg = JSONObject().apply {
+            put("protocol", "AIP/1.0")
+            put("type", "task_assign")
+            put("action", "screenshot")
+            put("message_id", "msg_task_001")
+            put("task_id", "task_abc")
+            put("timestamp", 1700003000L)
+            put("payload", JSONObject().apply { put("format", "png") })
+        }
+        val parsed = AIPMessageBuilder.parse(msg.toString())
+
+        assertNotNull(parsed)
+        assertEquals("task_assign", parsed!!.getString("type"))
+        assertEquals("screenshot", parsed.optString("action"))
+        assertEquals("msg_task_001", parsed.getString("message_id"))
+        assertEquals("task_abc", parsed.optString("task_id"))
+    }
+
+    @Test
+    fun `task_assign message without task_id falls back to message_id for correlation`() {
+        // Simulate what DeviceCommunication does: use task_id when present,
+        // message_id otherwise.
+        val withTaskId = JSONObject().apply {
+            put("type", "task_assign")
+            put("message_id", "msg_002")
+            put("task_id", "t_xyz")
+            put("payload", JSONObject())
+        }
+        val withoutTaskId = JSONObject().apply {
+            put("type", "task_assign")
+            put("message_id", "msg_003")
+            put("payload", JSONObject())
+        }
+
+        // With task_id present: correlation_id should be the task_id
+        val corrWithTask = withTaskId.optString("task_id").takeIf { it.isNotEmpty() }
+            ?: withTaskId.optString("message_id")
+        assertEquals("t_xyz", corrWithTask)
+
+        // Without task_id: correlation_id falls back to message_id
+        val corrWithoutTask = withoutTaskId.optString("task_id").takeIf { it.isNotEmpty() }
+            ?: withoutTaskId.optString("message_id")
+        assertEquals("msg_003", corrWithoutTask)
+    }
+
+    @Test
+    fun `parse normalises v3 task_assign wire format to AIP-1-0`() {
+        // A v3 task_assign message arriving from the AndroidBridge.
+        val v3Task = JSONObject().apply {
+            put("version", "3.0")
+            put("msg_type", "task_assign")
+            put("device_id", "server_node")
+            put("message_id", "msg_v3_004")
+            put("task_id", "t_v3_001")
+            put("timestamp", 1700004000L)
+            put("payload", JSONObject().apply {
+                put("action", "click")
+                put("x", 50)
+                put("y", 100)
+            })
+        }
+        val parsed = AIPMessageBuilder.parse(v3Task.toString())
+
+        assertNotNull(parsed)
+        assertEquals("task_assign", parsed!!.getString("type"))
+        val payload = parsed.getJSONObject("payload")
+        assertEquals("click", payload.getString("action"))
+    }
+
+    @Test
+    fun `MessageType TASK_ASSIGN constant matches expected wire value`() {
+        assertEquals("task_assign", AIPMessageBuilder.MessageType.TASK_ASSIGN)
+    }
+
+    @Test
+    fun `parse returns task_assign type unchanged for AIP-1-0 format`() {
+        val aip10Task = JSONObject().apply {
+            put("protocol", "AIP/1.0")
+            put("type", AIPMessageBuilder.MessageType.TASK_ASSIGN)
+            put("action", "swipe")
+            put("message_id", "msg_swipe_005")
+            put("timestamp", 1700005000L)
+            put("payload", JSONObject().apply {
+                put("startX", 0)
+                put("startY", 500)
+                put("endX", 0)
+                put("endY", 100)
+            })
+        }
+        val parsed = AIPMessageBuilder.parse(aip10Task.toString())
+
+        assertNotNull(parsed)
+        assertEquals(AIPMessageBuilder.MessageType.TASK_ASSIGN, parsed!!.getString("type"))
+        assertEquals("swipe", parsed.optString("action"))
+        assertEquals("msg_swipe_005", parsed.getString("message_id"))
+    }
+
     @Test
     fun `build capability_report message includes required v3 payload fields`() {
         val capabilities = org.json.JSONArray().apply {
