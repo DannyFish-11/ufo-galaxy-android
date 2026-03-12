@@ -2,6 +2,7 @@ package com.ufo.galaxy.service
 
 import android.animation.ValueAnimator
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -9,11 +10,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -51,6 +54,7 @@ class EnhancedFloatingService : Service() {
     companion object {
         private const val TAG = "EnhancedFloatingService"
         private const val NOTIFICATION_ID = 1003
+        private const val OVERLAY_PROMPT_NOTIFICATION_ID = 1005
         
         // 灵动岛尺寸
         private const val ISLAND_COLLAPSED_WIDTH = 120
@@ -275,6 +279,11 @@ class EnhancedFloatingService : Service() {
      * 显示悬浮视图
      */
     private fun showFloatingView() {
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Overlay permission not granted; cannot show enhanced floating window")
+            showOverlayPermissionPrompt()
+            return
+        }
         try {
             floatingView?.let {
                 if (it.parent == null) {
@@ -285,6 +294,35 @@ class EnhancedFloatingService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "显示悬浮窗失败", e)
         }
+    }
+
+    /**
+     * Shows a persistent notification prompting the user to grant the overlay permission.
+     */
+    private fun showOverlayPermissionPrompt() {
+        val settingsIntent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        ).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            settingsIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, UFOGalaxyApplication.CHANNEL_ALERTS)
+            .setContentTitle("UFO Galaxy 需要悬浮窗权限")
+            .setContentText("点击此通知前往设置，启用"显示在其他应用上层"权限以使用灵动岛功能。")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(OVERLAY_PROMPT_NOTIFICATION_ID, notification)
+        Log.i(TAG, "Overlay permission prompt notification shown")
     }
     
     /**

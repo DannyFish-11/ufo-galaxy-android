@@ -23,6 +23,8 @@ import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
+import com.ufo.galaxy.service.ReadinessChecker
+import com.ufo.galaxy.service.ReadinessState
 
 /**
  * UFO Galaxy Android Application
@@ -85,6 +87,19 @@ class UFOGalaxyApplication : Application() {
         // 持久化应用设置（跨设备开关及能力标志）
         lateinit var appSettings: AppSettings
             private set
+
+        /**
+         * Latest readiness snapshot. Reflects the last call to [ReadinessChecker.checkAll].
+         * Initialised to all-false on startup; updated after [initModelAssetManager] and
+         * again by [GalaxyConnectionService] after models are loaded.
+         */
+        @Volatile
+        var readinessState: ReadinessState = ReadinessState(
+            modelReady = false,
+            accessibilityReady = false,
+            overlayReady = false
+        )
+            private set
     }
     
     override fun onCreate() {
@@ -101,6 +116,9 @@ class UFOGalaxyApplication : Application() {
         
         // 创建通知渠道
         createNotificationChannels()
+        
+        // Run capability readiness self-checks (non-blocking; results stored in appSettings).
+        runReadinessChecks()
         
         // 初始化推理服务
         initInferenceServices()
@@ -142,6 +160,34 @@ class UFOGalaxyApplication : Application() {
             scaledMaxEdge = BuildConfig.SCALED_MAX_EDGE
         )
         Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl} crossDevice=${appSettings.crossDeviceEnabled}")
+    }
+
+    /**
+     * Runs the three capability readiness self-checks at startup.
+     *
+     * Results are stored in [appSettings] and in [readinessState] so the UI and
+     * [GalaxyWebSocketClient] capability_report can reflect the current state.
+     * If any check fails, [AppSettings.degradedMode] will be true and the UI will
+     * show a non-blocking status indicator; autonomous execution is still attempted
+     * but may produce limited results.
+     */
+    private fun runReadinessChecks() {
+        readinessState = ReadinessChecker.checkAll(this)
+        Log.i(
+            TAG,
+            "Readiness: model=${readinessState.modelReady} " +
+                "accessibility=${readinessState.accessibilityReady} " +
+                "overlay=${readinessState.overlayReady} " +
+                "degraded=${readinessState.degradedMode}"
+        )
+    }
+
+    /**
+     * Re-runs readiness checks and refreshes [readinessState].
+     * Call from any component after a permission grant or service state change.
+     */
+    fun refreshReadiness() {
+        runReadinessChecks()
     }
 
     /**

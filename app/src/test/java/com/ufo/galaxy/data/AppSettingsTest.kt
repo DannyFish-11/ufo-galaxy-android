@@ -48,6 +48,50 @@ class AppSettingsTest {
         assertEquals(SharedPrefsAppSettings.DEFAULT_DEVICE_ROLE, settings.deviceRole)
     }
 
+    @Test
+    fun `default modelReady is false`() {
+        val settings = InMemoryAppSettings()
+        assertFalse(settings.modelReady)
+    }
+
+    @Test
+    fun `default accessibilityReady is false`() {
+        val settings = InMemoryAppSettings()
+        assertFalse(settings.accessibilityReady)
+    }
+
+    @Test
+    fun `default overlayReady is false`() {
+        val settings = InMemoryAppSettings()
+        assertFalse(settings.overlayReady)
+    }
+
+    @Test
+    fun `degradedMode is true when all readiness flags are false`() {
+        val settings = InMemoryAppSettings()
+        assertTrue(settings.degradedMode)
+    }
+
+    @Test
+    fun `degradedMode is false when all readiness flags are true`() {
+        val settings = InMemoryAppSettings(
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = true
+        )
+        assertFalse(settings.degradedMode)
+    }
+
+    @Test
+    fun `degradedMode is true when only one readiness flag is false`() {
+        val settings = InMemoryAppSettings(
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = false
+        )
+        assertTrue(settings.degradedMode)
+    }
+
     // ── Toggle persistence ────────────────────────────────────────────────────
 
     @Test
@@ -93,22 +137,28 @@ class AppSettingsTest {
     // ── toMetadataMap ─────────────────────────────────────────────────────────
 
     @Test
-    fun `toMetadataMap includes all five required capability report keys`() {
+    fun `toMetadataMap includes all eight required capability report keys`() {
         val settings = InMemoryAppSettings(
             crossDeviceEnabled = true,
             goalExecutionEnabled = true,
             localModelEnabled = true,
             parallelExecutionEnabled = true,
-            deviceRole = "tablet"
+            deviceRole = "tablet",
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = true
         )
         val map = settings.toMetadataMap()
 
-        assertEquals(5, map.size)
+        assertEquals(8, map.size)
         assertEquals(true, map["cross_device_enabled"])
         assertEquals(true, map["goal_execution_enabled"])
         assertEquals(true, map["local_model_enabled"])
         assertEquals(true, map["parallel_execution_enabled"])
         assertEquals("tablet", map["device_role"])
+        assertEquals(true, map["model_ready"])
+        assertEquals(true, map["accessibility_ready"])
+        assertEquals(true, map["overlay_ready"])
     }
 
     @Test
@@ -121,6 +171,9 @@ class AppSettingsTest {
         assertEquals(false, map["local_model_enabled"])
         assertEquals(false, map["parallel_execution_enabled"])
         assertEquals("phone", map["device_role"])
+        assertEquals(false, map["model_ready"])
+        assertEquals(false, map["accessibility_ready"])
+        assertEquals(false, map["overlay_ready"])
     }
 
     @Test
@@ -141,6 +194,9 @@ class AppSettingsTest {
         assertEquals("local_model_enabled", SharedPrefsAppSettings.KEY_LOCAL_MODEL_ENABLED)
         assertEquals("parallel_execution_enabled", SharedPrefsAppSettings.KEY_PARALLEL_EXECUTION_ENABLED)
         assertEquals("device_role", SharedPrefsAppSettings.KEY_DEVICE_ROLE)
+        assertEquals("model_ready", SharedPrefsAppSettings.KEY_MODEL_READY)
+        assertEquals("accessibility_ready", SharedPrefsAppSettings.KEY_ACCESSIBILITY_READY)
+        assertEquals("overlay_ready", SharedPrefsAppSettings.KEY_OVERLAY_READY)
     }
 
     @Test

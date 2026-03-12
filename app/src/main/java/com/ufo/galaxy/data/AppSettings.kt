@@ -37,23 +37,40 @@ interface AppSettings {
      */
     var deviceRole: String
 
+    // ── Readiness flags (updated by ReadinessChecker) ────────────────────────
+
+    /** True when all required local model files are present and verified. */
+    var modelReady: Boolean
+
+    /** True when the HardwareKeyListener accessibility service is enabled. */
+    var accessibilityReady: Boolean
+
+    /** True when the SYSTEM_ALERT_WINDOW (overlay) permission is granted. */
+    var overlayReady: Boolean
+
+    /**
+     * True when any readiness check has failed.
+     * Autonomous execution and the floating window may be limited in this state.
+     */
+    val degradedMode: Boolean
+        get() = !modelReady || !accessibilityReady || !overlayReady
+
     /**
      * Returns all settings as a [Map] suitable for inclusion in a
      * [CapabilityReport.metadata] payload sent to the gateway.
      *
-     * Keys match the field names expected by the server:
-     * `goal_execution_enabled`, `local_model_enabled`, `cross_device_enabled`,
-     * `parallel_execution_enabled`, `device_role`.
-     *
-     * Gateways that do not understand these extra fields will ignore them,
-     * preserving backward compatibility.
+     * Keys match the field names expected by the server. Gateways that do not
+     * understand extra fields will ignore them, preserving backward compatibility.
      */
     fun toMetadataMap(): Map<String, Any> = mapOf(
         "goal_execution_enabled" to goalExecutionEnabled,
         "local_model_enabled" to localModelEnabled,
         "cross_device_enabled" to crossDeviceEnabled,
         "parallel_execution_enabled" to parallelExecutionEnabled,
-        "device_role" to deviceRole
+        "device_role" to deviceRole,
+        "model_ready" to modelReady,
+        "accessibility_ready" to accessibilityReady,
+        "overlay_ready" to overlayReady
     )
 }
 
@@ -68,7 +85,10 @@ class InMemoryAppSettings(
     override var goalExecutionEnabled: Boolean = false,
     override var localModelEnabled: Boolean = false,
     override var parallelExecutionEnabled: Boolean = false,
-    override var deviceRole: String = SharedPrefsAppSettings.DEFAULT_DEVICE_ROLE
+    override var deviceRole: String = SharedPrefsAppSettings.DEFAULT_DEVICE_ROLE,
+    override var modelReady: Boolean = false,
+    override var accessibilityReady: Boolean = false,
+    override var overlayReady: Boolean = false
 ) : AppSettings
 
 /**
@@ -85,6 +105,9 @@ class InMemoryAppSettings(
  *   both MobileVLM and SeeClick models are successfully loaded.
  * - [parallelExecutionEnabled]: `false`
  * - [deviceRole]: [DEFAULT_DEVICE_ROLE] ("phone")
+ * - [modelReady]: `false` — updated by [ReadinessChecker] at startup and before autonomous execution.
+ * - [accessibilityReady]: `false` — updated by [ReadinessChecker].
+ * - [overlayReady]: `false` — updated by [ReadinessChecker].
  */
 class SharedPrefsAppSettings(context: Context) : AppSettings {
 
@@ -110,6 +133,18 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getString(KEY_DEVICE_ROLE, DEFAULT_DEVICE_ROLE) ?: DEFAULT_DEVICE_ROLE
         set(value) { prefs.edit().putString(KEY_DEVICE_ROLE, value).apply() }
 
+    override var modelReady: Boolean
+        get() = prefs.getBoolean(KEY_MODEL_READY, false)
+        set(value) { prefs.edit().putBoolean(KEY_MODEL_READY, value).apply() }
+
+    override var accessibilityReady: Boolean
+        get() = prefs.getBoolean(KEY_ACCESSIBILITY_READY, false)
+        set(value) { prefs.edit().putBoolean(KEY_ACCESSIBILITY_READY, value).apply() }
+
+    override var overlayReady: Boolean
+        get() = prefs.getBoolean(KEY_OVERLAY_READY, false)
+        set(value) { prefs.edit().putBoolean(KEY_OVERLAY_READY, value).apply() }
+
     companion object {
         /** SharedPreferences file name. */
         const val PREFS_NAME = "ufo_galaxy_settings"
@@ -119,6 +154,9 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_LOCAL_MODEL_ENABLED = "local_model_enabled"
         const val KEY_PARALLEL_EXECUTION_ENABLED = "parallel_execution_enabled"
         const val KEY_DEVICE_ROLE = "device_role"
+        const val KEY_MODEL_READY = "model_ready"
+        const val KEY_ACCESSIBILITY_READY = "accessibility_ready"
+        const val KEY_OVERLAY_READY = "overlay_ready"
 
         /** Default device role sent in capability reports. */
         const val DEFAULT_DEVICE_ROLE = "phone"

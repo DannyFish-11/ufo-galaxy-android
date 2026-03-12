@@ -17,8 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ufo.galaxy.R
 import com.ufo.galaxy.service.FloatingWindowService
@@ -167,6 +167,44 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
+ * Non-blocking readiness status banner shown in degraded mode.
+ *
+ * Displays which capabilities are unavailable so the user can take corrective action
+ * (e.g. enable the accessibility service or grant overlay permission). The banner does
+ * not block interaction; all chat and task features remain accessible.
+ */
+@Composable
+private fun ReadinessBanner(
+    modelReady: Boolean,
+    accessibilityReady: Boolean,
+    overlayReady: Boolean
+) {
+    val issues = buildList {
+        if (!modelReady) add("本地模型未就绪")
+        if (!accessibilityReady) add("无障碍服务未启用")
+        if (!overlayReady) add("悬浮窗权限未授予")
+    }
+    if (issues.isEmpty()) return
+
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "⚠ 降级模式：${issues.joinToString("、")}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+/**
  * 主屏幕 Composable
  *
  * The [TopAppBar] includes a cross-device toggle that persists the setting via
@@ -209,22 +247,33 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // 书法卷轴容器
-            ScrollPaperContainer(
-                isExpanded = uiState.isScrollExpanded,
-                onExpandChange = { viewModel.toggleScroll() },
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // 聊天界面
-                ChatScreen(
-                    messages = uiState.messages,
-                    inputText = uiState.inputText,
-                    isLoading = uiState.isLoading,
-                    onInputChange = { viewModel.updateInput(it) },
-                    onSend = { viewModel.sendMessage() },
-                    onVoiceInput = { viewModel.startVoiceInput() },
-                    modifier = Modifier.fillMaxSize()
-                )
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Show a non-blocking readiness status banner when in degraded mode.
+                if (uiState.degradedMode) {
+                    ReadinessBanner(
+                        modelReady = uiState.modelReady,
+                        accessibilityReady = uiState.accessibilityReady,
+                        overlayReady = uiState.overlayReady
+                    )
+                }
+
+                // 书法卷轴容器
+                ScrollPaperContainer(
+                    isExpanded = uiState.isScrollExpanded,
+                    onExpandChange = { viewModel.toggleScroll() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // 聊天界面
+                    ChatScreen(
+                        messages = uiState.messages,
+                        inputText = uiState.inputText,
+                        isLoading = uiState.isLoading,
+                        onInputChange = { viewModel.updateInput(it) },
+                        onSend = { viewModel.sendMessage() },
+                        onVoiceInput = { viewModel.startVoiceInput() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }

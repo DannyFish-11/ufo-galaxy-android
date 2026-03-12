@@ -20,6 +20,7 @@ import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.protocol.TaskResultPayload
+import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -124,6 +125,9 @@ class GalaxyConnectionService : Service() {
             ensureModels()
             prewarmServices()
             loadModels()
+            // Re-run all readiness checks after models are loaded so the UI and
+            // capability_report reflect the final state (including overlay/accessibility).
+            UFOGalaxyApplication.instance.refreshReadiness()
         }
         
         return START_STICKY
@@ -362,7 +366,10 @@ class GalaxyConnectionService : Service() {
         webSocketClient.setModelCapabilities(lowLevelCaps)
 
         // Persist actual model state and update metadata from AppSettings as the source
-        // of truth, overriding only the dynamic local_model_enabled field.
+        // of truth. `local_model_enabled` reflects whether the inference servers have loaded
+        // the models. `model_ready` (file-level readiness) is set by ReadinessChecker.checkAll()
+        // called in the onStartCommand coroutine after this method returns; we do not set it
+        // here to avoid a two-sources-of-truth conflict.
         val localModelEnabled = plannerLoaded && groundingLoaded
         val settings = UFOGalaxyApplication.appSettings
         settings.localModelEnabled = localModelEnabled
@@ -382,10 +389,13 @@ class GalaxyConnectionService : Service() {
                 "local_model_enabled" to localModelEnabled,
                 "cross_device_enabled" to settings.crossDeviceEnabled,
                 "parallel_execution_enabled" to settings.parallelExecutionEnabled,
-                "device_role" to settings.deviceRole
+                "device_role" to settings.deviceRole,
+                "model_ready" to settings.modelReady,
+                "accessibility_ready" to settings.accessibilityReady,
+                "overlay_ready" to settings.overlayReady
             )
         )
-        Log.i(TAG, "已更新模型能力: lowLevel=$lowLevelCaps localModelEnabled=$localModelEnabled")
+        Log.i(TAG, "已更新模型能力: lowLevel=$lowLevelCaps localModelEnabled=$localModelEnabled modelReady=${settings.modelReady}")
     }
 
     /**
