@@ -188,6 +188,7 @@ class MobileVlmPlanner(
             add("messages", messages)
             addProperty("max_tokens", maxTokens)
             addProperty("temperature", temperature)
+            if (modelPath.isNotEmpty()) addProperty("model_path", modelPath)
         }
 
         return gson.toJson(request)

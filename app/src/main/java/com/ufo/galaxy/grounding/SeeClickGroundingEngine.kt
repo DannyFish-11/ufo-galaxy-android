@@ -111,6 +111,8 @@ class SeeClickGroundingEngine(
         addProperty("intent", intent)
         addProperty("width", width)
         addProperty("height", height)
+        if (modelParamPath.isNotEmpty()) addProperty("model_param_path", modelParamPath)
+        if (modelBinPath.isNotEmpty()) addProperty("model_bin_path", modelBinPath)
     })
 
     private fun httpPost(requestJson: String): String {
