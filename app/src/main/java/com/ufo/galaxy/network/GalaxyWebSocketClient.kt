@@ -8,6 +8,7 @@ import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import kotlinx.coroutines.*
 import okhttp3.*
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 /**
@@ -62,7 +63,7 @@ class GalaxyWebSocketClient(
     
     private val gson = Gson()
     private var webSocket: WebSocket? = null
-    private var listener: Listener? = null
+    private val listeners: CopyOnWriteArrayList<Listener> = CopyOnWriteArrayList()
     private var isConnected = false
     private var reconnectAttempts = 0
     private var heartbeatJob: Job? = null
@@ -75,10 +76,26 @@ class GalaxyWebSocketClient(
     private var modelCapabilities: List<String> = emptyList()
     
     /**
-     * 设置监听器
+     * 设置监听器（向后兼容；清除已有监听器后添加新的）
      */
     fun setListener(listener: Listener) {
-        this.listener = listener
+        listeners.clear()
+        listeners.add(listener)
+    }
+
+    /**
+     * Adds [listener] to the set of active listeners.
+     * Multiple listeners may be registered simultaneously; each receives every event.
+     */
+    fun addListener(listener: Listener) {
+        listeners.add(listener)
+    }
+
+    /**
+     * Removes a previously registered [listener]. No-op if not present.
+     */
+    fun removeListener(listener: Listener) {
+        listeners.remove(listener)
     }
 
     /**
@@ -119,7 +136,7 @@ class GalaxyWebSocketClient(
                 Log.i(TAG, "WebSocket 已打开")
                 isConnected = true
                 reconnectAttempts = 0
-                listener?.onConnected()
+                listeners.forEach { it.onConnected() }
                 startHeartbeat()
                 
                 // 发送握手消息
@@ -140,7 +157,7 @@ class GalaxyWebSocketClient(
                 Log.i(TAG, "WebSocket 已关闭: $code - $reason")
                 isConnected = false
                 stopHeartbeat()
-                listener?.onDisconnected()
+                listeners.forEach { it.onDisconnected() }
                 
                 // 尝试重连
                 if (code != 1000) {
@@ -152,7 +169,7 @@ class GalaxyWebSocketClient(
                 Log.e(TAG, "WebSocket 失败: ${t.message}", t)
                 isConnected = false
                 stopHeartbeat()
-                listener?.onError(t.message ?: "连接失败")
+                listeners.forEach { it.onError(t.message ?: "连接失败") }
                 
                 // 尝试重连
                 scheduleReconnect()
@@ -203,6 +220,22 @@ class GalaxyWebSocketClient(
         return webSocket?.send(json) ?: false
     }
     
+    /**
+     * Sends a pre-serialized JSON string directly over the WebSocket.
+     * Used for AIP v3 protocol messages ([com.ufo.galaxy.protocol.AipMessage]) that
+     * use the strong-typed model classes rather than the legacy [AIPMessage] envelope.
+     *
+     * @return true if the message was enqueued; false if not connected or socket unavailable.
+     */
+    fun sendJson(json: String): Boolean {
+        if (!isConnected) {
+            Log.w(TAG, "未连接，无法发送 JSON")
+            return false
+        }
+        Log.d(TAG, "发送 JSON: ${json.take(100)}...")
+        return webSocket?.send(json) ?: false
+    }
+
     /**
      * 发送 AIP v3.0 能力上报（握手消息）
      * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距。
@@ -289,28 +322,28 @@ class GalaxyWebSocketClient(
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
                     val payloadJson = payloadObj?.toString() ?: "{}"
                     Log.i(TAG, "收到 task_assign task_id=$taskId")
-                    listener?.onTaskAssign(taskId, payloadJson)
+                    listeners.forEach { it.onTaskAssign(taskId, payloadJson) }
                 }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")
                         ?.get("content")?.asString ?: text
-                    listener?.onMessage(content)
+                    listeners.forEach { it.onMessage(content) }
                 }
                 "error" -> {
                     val error = json.get("message")?.asString ?: "未知错误"
-                    listener?.onError(error)
+                    listeners.forEach { it.onError(error) }
                 }
                 else -> {
                     // 默认作为文本消息处理
                     val content = json.getAsJsonObject("payload")
                         ?.get("content")?.asString ?: text
-                    listener?.onMessage(content)
+                    listeners.forEach { it.onMessage(content) }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "解析消息失败", e)
             // 作为纯文本处理
-            listener?.onMessage(text)
+            listeners.forEach { it.onMessage(text) }
         }
     }
     
@@ -352,7 +385,7 @@ class GalaxyWebSocketClient(
     private fun scheduleReconnect() {
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
             Log.w(TAG, "达到最大重连次数")
-            listener?.onError("无法连接到服务器")
+            listeners.forEach { it.onError("无法连接到服务器") }
             return
         }
         

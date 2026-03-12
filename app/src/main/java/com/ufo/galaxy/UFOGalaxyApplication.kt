@@ -6,8 +6,15 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.data.AppConfig
+import com.ufo.galaxy.grounding.SeeClickGroundingEngine
+import com.ufo.galaxy.inference.LocalGroundingService
+import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.planner.MobileVlmPlanner
+import com.ufo.galaxy.service.AccessibilityActionExecutor
+import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 
 /**
  * UFO Galaxy Android Application
@@ -31,6 +38,18 @@ class UFOGalaxyApplication : Application() {
         lateinit var webSocketClient: GalaxyWebSocketClient
             private set
         
+        // 本地推理服务：MobileVLM 1.7B 规划器
+        lateinit var plannerService: LocalPlannerService
+            private set
+
+        // 本地推理服务：SeeClick grounding 引擎
+        lateinit var groundingService: LocalGroundingService
+            private set
+
+        // EdgeExecutor（本地 AIP v3 任务执行编排器）
+        lateinit var edgeExecutor: EdgeExecutor
+            private set
+        
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
@@ -48,6 +67,9 @@ class UFOGalaxyApplication : Application() {
         // 创建通知渠道
         createNotificationChannels()
         
+        // 初始化推理服务
+        initInferenceServices()
+        
         // 初始化 WebSocket 客户端
         initWebSocketClient()
         
@@ -61,9 +83,10 @@ class UFOGalaxyApplication : Application() {
         appConfig = AppConfig(
             serverUrl = BuildConfig.GALAXY_SERVER_URL,
             apiVersion = BuildConfig.API_VERSION,
-            isDebug = BuildConfig.DEBUG
+            isDebug = BuildConfig.DEBUG,
+            crossDeviceEnabled = BuildConfig.CROSS_DEVICE_ENABLED
         )
-        Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl}")
+        Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl} crossDevice=${appConfig.crossDeviceEnabled}")
     }
     
     /**
@@ -116,8 +139,27 @@ class UFOGalaxyApplication : Application() {
      * 初始化 WebSocket 客户端
      */
     private fun initWebSocketClient() {
-        webSocketClient = GalaxyWebSocketClient(appConfig.serverUrl)
+        webSocketClient = GalaxyWebSocketClient(
+            serverUrl = appConfig.serverUrl,
+            crossDeviceEnabled = appConfig.crossDeviceEnabled
+        )
         Log.d(TAG, "WebSocket 客户端已初始化")
+    }
+
+    /**
+     * 初始化本地推理服务和 EdgeExecutor
+     * 模型加载由 GalaxyConnectionService 在服务启动时触发。
+     */
+    private fun initInferenceServices() {
+        plannerService = MobileVlmPlanner()
+        groundingService = SeeClickGroundingEngine()
+        edgeExecutor = EdgeExecutor(
+            screenshotProvider = AccessibilityScreenshotProvider(),
+            plannerService = plannerService,
+            groundingService = groundingService,
+            accessibilityExecutor = AccessibilityActionExecutor()
+        )
+        Log.d(TAG, "推理服务已初始化")
     }
     
     /**

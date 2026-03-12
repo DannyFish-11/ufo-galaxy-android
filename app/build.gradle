@@ -24,6 +24,7 @@ android {
         // 构建配置字段
         buildConfigField "String", "GALAXY_SERVER_URL", '"ws://192.168.1.100:8765"'
         buildConfigField "String", "API_VERSION", '"v2.0"'
+        buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "true"
     }
 
     buildTypes {

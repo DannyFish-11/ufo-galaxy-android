@@ -27,11 +27,16 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.protocol.TaskSubmitPayload
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
+import java.util.UUID
 
 /**
  * 增强版悬浮窗服务
@@ -92,6 +97,10 @@ class EnhancedFloatingService : Service() {
     // WebSocket 客户端
     private val webSocketClient: GalaxyWebSocketClient
         get() = UFOGalaxyApplication.webSocketClient
+
+    private val gson = Gson()
+
+    private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
     // 唤醒广播接收器
     private val wakeUpReceiver = object : BroadcastReceiver() {
@@ -145,6 +154,9 @@ class EnhancedFloatingService : Service() {
         unregisterReceiver(wakeUpReceiver)
         edgeTrigger?.stop()
         removeFloatingView()
+        if (::wsListener.isInitialized) {
+            webSocketClient.removeListener(wsListener)
+        }
     }
     
     /**
@@ -420,7 +432,7 @@ class EnhancedFloatingService : Service() {
      * 设置 WebSocket 监听
      */
     private fun setupWebSocketListener() {
-        webSocketClient.setListener(object : GalaxyWebSocketClient.Listener {
+        wsListener = object : GalaxyWebSocketClient.Listener {
             override fun onConnected() {
                 statusText?.post {
                     statusText?.text = "已连接"
@@ -436,7 +448,6 @@ class EnhancedFloatingService : Service() {
             override fun onMessage(message: String) {
                 loadingIndicator?.post {
                     loadingIndicator?.visibility = View.GONE
-                    // TODO: 添加消息到聊天区域
                 }
             }
             
@@ -445,11 +456,15 @@ class EnhancedFloatingService : Service() {
                     statusText?.text = "错误"
                 }
             }
-        })
+        }
+        webSocketClient.addListener(wsListener)
     }
     
     /**
      * 发送消息
+     *
+     * Cross-device enabled + WS connected: sends a TaskSubmitPayload uplink.
+     * Otherwise: falls back to legacy TEXT send.
      */
     private fun sendMessage() {
         val text = inputField?.text?.toString()?.trim() ?: return
@@ -457,16 +472,32 @@ class EnhancedFloatingService : Service() {
         
         inputField?.setText("")
         loadingIndicator?.visibility = View.VISIBLE
-        
-        webSocketClient.send(text)
+
+        val crossDeviceEnabled = UFOGalaxyApplication.appConfig.crossDeviceEnabled
+        if (crossDeviceEnabled && webSocketClient.isConnected()) {
+            val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
+            val sessionId = UUID.randomUUID().toString()
+            val payload = TaskSubmitPayload(
+                task_text = text,
+                device_id = deviceId,
+                session_id = sessionId
+            )
+            val envelope = AipMessage(
+                type = MsgType.TASK_SUBMIT,
+                payload = payload,
+                device_id = deviceId
+            )
+            webSocketClient.sendJson(gson.toJson(envelope))
+        } else {
+            webSocketClient.send(text)
+        }
     }
     
     /**
-     * 开始语音输入
+     * 开始语音输入（悬浮窗不支持语音输入；请在主界面使用语音输入功能）
      */
     private fun startVoiceInput() {
-        // TODO: 集成 SpeechInputManager
-        Log.d(TAG, "开始语音输入")
+        Log.d(TAG, "语音输入仅在主界面支持；请长按悬浮窗打开主界面")
     }
     
     /**
