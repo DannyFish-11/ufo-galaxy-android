@@ -10,6 +10,8 @@ import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.LocalCollaborationAgent
 import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.data.AppConfig
+import com.ufo.galaxy.data.AppSettings
+import com.ufo.galaxy.data.SharedPrefsAppSettings
 import com.ufo.galaxy.grounding.SeeClickGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
@@ -74,6 +76,10 @@ class UFOGalaxyApplication : Application() {
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
+
+        // 持久化应用设置（跨设备开关及能力标志）
+        lateinit var appSettings: AppSettings
+            private set
     }
     
     override fun onCreate() {
@@ -111,20 +117,26 @@ class UFOGalaxyApplication : Application() {
     
     /**
      * 初始化配置
+     *
+     * [appSettings] is initialised first so that the persisted [AppSettings.crossDeviceEnabled]
+     * value (default: false) can be used to populate [AppConfig] and the WebSocket client.
+     * Build-time [BuildConfig.CROSS_DEVICE_ENABLED] serves only as a compile-time default;
+     * the runtime toggle stored in [SharedPrefsAppSettings] takes precedence.
      */
     private fun initConfig() {
+        appSettings = SharedPrefsAppSettings(this)
         appConfig = AppConfig(
             serverUrl = BuildConfig.GALAXY_SERVER_URL,
             apiVersion = BuildConfig.API_VERSION,
             isDebug = BuildConfig.DEBUG,
-            crossDeviceEnabled = BuildConfig.CROSS_DEVICE_ENABLED,
+            crossDeviceEnabled = appSettings.crossDeviceEnabled,
             plannerMaxTokens = BuildConfig.PLANNER_MAX_TOKENS,
             plannerTemperature = BuildConfig.PLANNER_TEMPERATURE,
             plannerTimeoutMs = BuildConfig.PLANNER_TIMEOUT_MS,
             groundingTimeoutMs = BuildConfig.GROUNDING_TIMEOUT_MS,
             scaledMaxEdge = BuildConfig.SCALED_MAX_EDGE
         )
-        Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl} crossDevice=${appConfig.crossDeviceEnabled}")
+        Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl} crossDevice=${appSettings.crossDeviceEnabled}")
     }
 
     /**
@@ -186,12 +198,19 @@ class UFOGalaxyApplication : Application() {
     
     /**
      * 初始化 WebSocket 客户端
+     *
+     * The client is initialised with [AppSettings.crossDeviceEnabled] so the persisted
+     * toggle state is respected from the very first connection attempt.
+     * Initial capability metadata is pre-populated from [appSettings] so that the
+     * handshake sent on [onOpen] already carries the correct flags even before
+     * [GalaxyConnectionService.loadModels] runs.
      */
     private fun initWebSocketClient() {
         webSocketClient = GalaxyWebSocketClient(
             serverUrl = appConfig.serverUrl,
-            crossDeviceEnabled = appConfig.crossDeviceEnabled
+            crossDeviceEnabled = appSettings.crossDeviceEnabled
         )
+        webSocketClient.setDeviceMetadata(appSettings.toMetadataMap())
         Log.d(TAG, "WebSocket 客户端已初始化")
     }
 

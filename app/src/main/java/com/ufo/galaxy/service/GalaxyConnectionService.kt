@@ -333,6 +333,9 @@ class GalaxyConnectionService : Service() {
      * 加载 MobileVLM 规划器和 SeeClick grounding 模型。
      * 加载结果通过 setModelCapabilities 通知 gateway。
      * Only advertises capabilities when both models are loaded.
+     *
+     * Persists [localModelEnabled] to [AppSettings] and updates [GalaxyWebSocketClient]
+     * device metadata so the capability_report reflects the real model state.
      */
     private fun loadModels() {
         Log.i(TAG, "开始加载本地模型...")
@@ -352,8 +355,12 @@ class GalaxyConnectionService : Service() {
         if (groundingLoaded) lowLevelCaps.add("local_grounding")
         webSocketClient.setModelCapabilities(lowLevelCaps)
 
-        // Update high-level capability flags based on model readiness.
+        // Persist actual model state and update metadata from AppSettings as the source
+        // of truth, overriding only the dynamic local_model_enabled field.
         val localModelEnabled = plannerLoaded && groundingLoaded
+        val settings = UFOGalaxyApplication.appSettings
+        settings.localModelEnabled = localModelEnabled
+
         webSocketClient.setHighLevelCapabilities(
             listOf(
                 "autonomous_goal_execution",
@@ -365,11 +372,11 @@ class GalaxyConnectionService : Service() {
         )
         webSocketClient.setDeviceMetadata(
             mapOf(
-                "goal_execution_enabled" to true,
+                "goal_execution_enabled" to settings.goalExecutionEnabled,
                 "local_model_enabled" to localModelEnabled,
-                "cross_device_enabled" to webSocketClient.crossDeviceEnabled,
-                "parallel_execution_enabled" to true,
-                "device_role" to "phone"
+                "cross_device_enabled" to settings.crossDeviceEnabled,
+                "parallel_execution_enabled" to settings.parallelExecutionEnabled,
+                "device_role" to settings.deviceRole
             )
         )
         Log.i(TAG, "已更新模型能力: lowLevel=$lowLevelCaps localModelEnabled=$localModelEnabled")
