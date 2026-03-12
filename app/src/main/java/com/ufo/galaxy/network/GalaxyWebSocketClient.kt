@@ -221,7 +221,7 @@ class GalaxyWebSocketClient(
     }
     
     /**
-     * Sends a pre-serialised JSON string directly over the WebSocket.
+     * Sends a pre-serialized JSON string directly over the WebSocket.
      * Used for AIP v3 protocol messages ([com.ufo.galaxy.protocol.AipMessage]) that
      * use the strong-typed model classes rather than the legacy [AIPMessage] envelope.
      *

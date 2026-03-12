@@ -36,6 +36,7 @@ import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskSubmitPayload
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
+import java.util.UUID
 
 /**
  * 增强版悬浮窗服务
@@ -474,8 +475,8 @@ class EnhancedFloatingService : Service() {
 
         val crossDeviceEnabled = UFOGalaxyApplication.appConfig.crossDeviceEnabled
         if (crossDeviceEnabled && webSocketClient.isConnected()) {
-            val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
-            val sessionId = java.util.UUID.randomUUID().toString()
+            val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
+            val sessionId = UUID.randomUUID().toString()
             val payload = TaskSubmitPayload(
                 task_text = text,
                 device_id = deviceId,
@@ -493,10 +494,10 @@ class EnhancedFloatingService : Service() {
     }
     
     /**
-     * 开始语音输入（暂不支持，记录日志）
+     * 开始语音输入（悬浮窗不支持语音输入；请在主界面使用语音输入功能）
      */
     private fun startVoiceInput() {
-        Log.d(TAG, "语音输入暂不支持（需在主界面使用）")
+        Log.d(TAG, "语音输入仅在主界面支持；请长按悬浮窗打开主界面")
     }
     
     /**

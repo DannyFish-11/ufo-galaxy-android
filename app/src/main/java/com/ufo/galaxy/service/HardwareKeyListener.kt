@@ -242,8 +242,8 @@ class HardwareKeyListener : AccessibilityService() {
         val (endX, endY) = when (direction) {
             "down"  -> startX to startY - SCROLL_OFFSET_PX   // swipe up to scroll down
             "up"    -> startX to startY + SCROLL_OFFSET_PX   // swipe down to scroll up
-            "left"  -> startX - SCROLL_OFFSET_PX to startY   // swipe left
-            "right" -> startX + SCROLL_OFFSET_PX to startY   // swipe right
+            "left"  -> startX - SCROLL_OFFSET_PX to startY   // swipe left to scroll right
+            "right" -> startX + SCROLL_OFFSET_PX to startY   // swipe right to scroll left
             else    -> startX to startY - SCROLL_OFFSET_PX
         }
         val path = Path().apply { moveTo(startX, startY); lineTo(endX, endY) }

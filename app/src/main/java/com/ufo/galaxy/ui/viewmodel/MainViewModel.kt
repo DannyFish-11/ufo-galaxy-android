@@ -229,8 +229,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Sends a [TaskSubmitPayload] wrapped in an [AipMessage] (type=TASK_SUBMIT) uplink.
      * The gateway will process the goal and return a task_assign via WebSocket.
+     * Falls back to [executeLocally] if the send fails.
      */
-    private fun sendTaskSubmitUplink(goal: String) {
+    private suspend fun sendTaskSubmitUplink(goal: String) {
         val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
         val sessionId = UUID.randomUUID().toString()
         val payload = TaskSubmitPayload(
@@ -246,9 +247,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         if (!sent) {
             Log.w(TAG, "task_submit 发送失败，回退到本地执行")
-            viewModelScope.launch { executeLocally(goal) }
+            executeLocally(goal)
         }
-        // isLoading remains true until task_result arrives via onMessage
+        // When sent successfully, isLoading remains true until task_result arrives via onMessage
     }
 
     /**
