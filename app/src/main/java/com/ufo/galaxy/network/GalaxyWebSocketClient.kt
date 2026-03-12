@@ -7,28 +7,59 @@ import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
+import kotlin.random.Random
 
 /**
  * Galaxy WebSocket 客户端
  * 负责与 Galaxy 服务器的实时通信
  *
+ * **Reconnect strategy** — exponential backoff with jitter:
+ *   base delays 1 s → 2 s → 4 s → 8 s → 16 s → 30 s (capped), plus up to 1 s
+ *   of random jitter.  Attempt counter is reset to 0 on a successful [onOpen].
+ *   Calling [connect] while already connected or connecting is a no-op.
+ *   Calling [connect] after an explicit [disconnect] restarts the attempt counter.
+ *
+ * **Offline task queue** — when [sendJson] is called while disconnected and the
+ *   message type matches [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
+ *   "goal_result"), the payload is enqueued in [offlineQueue] instead of being
+ *   dropped.  The queue is flushed automatically when the connection is (re-)
+ *   established.  Observable via [queueSize].
+ *
+ * **Log tags** — all log lines use the [TAG] constant ("GalaxyWebSocket") which
+ *   is prefixed with a contextual marker:
+ *   - `[WS:CONNECT]`    — connection lifecycle (open / close / disable)
+ *   - `[WS:DISCONNECT]` — explicit disconnect
+ *   - `[WS:RETRY]`      — reconnect scheduling / attempts
+ *
  * @param serverUrl          WebSocket server URL.
  * @param crossDeviceEnabled When false, [connect] is a no-op and no device_register or
  *                           capability_report messages are sent. Defaults to true for
  *                           backward compatibility.
+ * @param offlineQueue       Offline task queue used to buffer outgoing task results
+ *                           while disconnected.  Pass a pre-configured [OfflineTaskQueue]
+ *                           (with [android.content.SharedPreferences]) for persistence;
+ *                           defaults to an in-memory-only queue.
  */
 class GalaxyWebSocketClient(
     private val serverUrl: String,
-    initialCrossDeviceEnabled: Boolean = true
+    initialCrossDeviceEnabled: Boolean = true,
+    val offlineQueue: OfflineTaskQueue = OfflineTaskQueue()
 ) {
     companion object {
         private const val TAG = "GalaxyWebSocket"
-        private const val RECONNECT_DELAY_MS = 5000L
         private const val HEARTBEAT_INTERVAL_MS = 30000L
-        private const val MAX_RECONNECT_ATTEMPTS = 5
+
+        // Exponential backoff base delays (ms); last value is the cap.
+        private val RECONNECT_BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
+        private const val RECONNECT_JITTER_MAX_MS = 1_000L
+        private const val MAX_RECONNECT_ATTEMPTS = 10
     }
     
     /**
@@ -87,9 +118,27 @@ class GalaxyWebSocketClient(
     private var webSocket: WebSocket? = null
     private val listeners: CopyOnWriteArrayList<Listener> = CopyOnWriteArrayList()
     private var isConnected = false
+
+    /** Set to false by [disconnect] to suppress automatic reconnect scheduling. */
+    @Volatile private var shouldReconnect = false
+
     private var reconnectAttempts = 0
+    private var reconnectJob: Job? = null
     private var heartbeatJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // ── Observable state ──────────────────────────────────────────────────────
+
+    private val _reconnectAttemptCount = MutableStateFlow(0)
+    /**
+     * Number of consecutive reconnect attempts since the last successful [onOpen].
+     * Resets to 0 on connect; increments before each scheduled retry.
+     * Useful for debug UI display.
+     */
+    val reconnectAttemptCount: StateFlow<Int> = _reconnectAttemptCount.asStateFlow()
+
+    /** Current depth of the offline task queue (updated reactively). */
+    val queueSize: StateFlow<Int> = offlineQueue.sizeFlow
 
     /**
      * Runtime cross-device collaboration switch.
@@ -111,12 +160,14 @@ class GalaxyWebSocketClient(
      *
      * When toggled to false while connected, the connection stays alive until the
      * caller explicitly calls [disconnect]. When toggled to true the caller should
-     * call [connect] to initiate the connection.
+     * call [connect] to initiate the connection — [MainViewModel.toggleCrossDeviceEnabled]
+     * already does this, which provides the "immediate reconnect on toggle enable"
+     * behaviour required by PR14.
      */
     fun setCrossDeviceEnabled(enabled: Boolean) {
         if (crossDeviceEnabled == enabled) return
         crossDeviceEnabled = enabled
-        Log.i(TAG, "crossDeviceEnabled changed to $enabled")
+        Log.i(TAG, "[WS:CONNECT] crossDeviceEnabled changed to $enabled")
     }
 
     /**
@@ -207,15 +258,18 @@ class GalaxyWebSocketClient(
      */
     fun connect() {
         if (!crossDeviceEnabled) {
-            Log.i(TAG, "Cross-device disabled (crossDeviceEnabled=false); skipping WS connection")
+            Log.i(TAG, "[WS:CONNECT] Cross-device disabled (crossDeviceEnabled=false); skipping WS connection")
             return
         }
         if (isConnected) {
-            Log.d(TAG, "已连接，跳过")
+            Log.d(TAG, "[WS:CONNECT] Already connected, skipping")
             return
         }
-        
-        Log.i(TAG, "连接到服务器: $serverUrl")
+
+        shouldReconnect = true
+        reconnectJob?.cancel()
+
+        Log.i(TAG, "[WS:CONNECT] Connecting to $serverUrl (attempt ${reconnectAttempts + 1})")
         
         val request = Request.Builder()
             .url(serverUrl)
@@ -223,14 +277,18 @@ class GalaxyWebSocketClient(
         
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket 已打开")
+                Log.i(TAG, "[WS:CONNECT] WebSocket open — resetting backoff counter")
                 isConnected = true
                 reconnectAttempts = 0
+                _reconnectAttemptCount.value = 0
                 listeners.forEach { it.onConnected() }
                 startHeartbeat()
                 
                 // 发送握手消息
                 sendHandshake()
+
+                // Flush any messages queued while we were offline
+                flushOfflineQueue()
             }
             
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -239,39 +297,45 @@ class GalaxyWebSocketClient(
             }
             
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "WebSocket 正在关闭: $code - $reason")
+                Log.i(TAG, "[WS:DISCONNECT] WebSocket closing: code=$code reason=$reason")
                 webSocket.close(1000, null)
             }
             
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "WebSocket 已关闭: $code - $reason")
+                Log.i(TAG, "[WS:DISCONNECT] WebSocket closed: code=$code reason=$reason")
                 isConnected = false
                 stopHeartbeat()
                 listeners.forEach { it.onDisconnected() }
                 
-                // 尝试重连
-                if (code != 1000) {
+                // Reconnect unless the close was intentional (code 1000)
+                if (shouldReconnect && code != 1000) {
                     scheduleReconnect()
                 }
             }
             
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket 失败: ${t.message}", t)
+                Log.e(TAG, "[WS:DISCONNECT] WebSocket failure: ${t.message}", t)
                 isConnected = false
                 stopHeartbeat()
                 listeners.forEach { it.onError(t.message ?: "连接失败") }
                 
-                // 尝试重连
-                scheduleReconnect()
+                // Always attempt reconnect on failure
+                if (shouldReconnect) {
+                    scheduleReconnect()
+                }
             }
         })
     }
     
     /**
      * 断开连接
+     * Sets [shouldReconnect] to false so the automatic backoff loop stops.
      */
     fun disconnect() {
-        Log.i(TAG, "断开连接")
+        Log.i(TAG, "[WS:DISCONNECT] Explicit disconnect requested")
+        shouldReconnect = false
+        reconnectJob?.cancel()
+        reconnectJob = null
         stopHeartbeat()
         webSocket?.close(1000, "用户断开")
         webSocket = null
@@ -315,15 +379,36 @@ class GalaxyWebSocketClient(
      * Used for AIP v3 protocol messages ([com.ufo.galaxy.protocol.AipMessage]) that
      * use the strong-typed model classes rather than the legacy [AIPMessage] envelope.
      *
-     * @return true if the message was enqueued; false if not connected or socket unavailable.
+     * **Offline queuing**: if the socket is currently disconnected and the message
+     * `type` field belongs to [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
+     * "goal_result"), the payload is enqueued in [offlineQueue] for delivery on the
+     * next successful reconnect.  The method returns `false` in this case (the message
+     * was not sent *now*) but will not be lost.
+     *
+     * @return true if the message was transmitted immediately; false if disconnected
+     *         (queued or dropped depending on type).
      */
     fun sendJson(json: String): Boolean {
         if (!isConnected) {
-            Log.w(TAG, "未连接，无法发送 JSON")
+            // Attempt to queue queueable message types for later delivery
+            val msgType = tryExtractType(json)
+            if (msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
+                offlineQueue.enqueue(msgType, json)
+                Log.i(TAG, "[WS:OfflineQueue] Queued offline message type=$msgType queue_size=${offlineQueue.size}")
+            } else {
+                Log.w(TAG, "Not connected and message type not queueable (type=$msgType); dropping")
+            }
             return false
         }
         Log.d(TAG, "发送 JSON: ${json.take(100)}...")
         return webSocket?.send(json) ?: false
+    }
+
+    /** Extracts the `type` field from a JSON string without full deserialization. Returns null on error. */
+    private fun tryExtractType(json: String): String? = try {
+        gson.fromJson(json, JsonObject::class.java)?.get("type")?.asString
+    } catch (_: Exception) {
+        null
     }
 
     /**
@@ -499,21 +584,66 @@ class GalaxyWebSocketClient(
     }
     
     /**
-     * 安排重连
+     * 安排重连 — exponential backoff with jitter.
+     *
+     * Delay = RECONNECT_BACKOFF_MS[min(attempt, last)] + random jitter [0, RECONNECT_JITTER_MAX_MS).
      */
     private fun scheduleReconnect() {
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.w(TAG, "达到最大重连次数")
+            Log.w(TAG, "[WS:RETRY] Max reconnect attempts ($MAX_RECONNECT_ATTEMPTS) reached; giving up")
             listeners.forEach { it.onError("无法连接到服务器") }
             return
         }
-        
+
+        val delayIndex = min(reconnectAttempts, RECONNECT_BACKOFF_MS.size - 1)
+        val baseDelay = RECONNECT_BACKOFF_MS[delayIndex]
+        val jitter = Random.nextLong(RECONNECT_JITTER_MAX_MS)
+        val delay = baseDelay + jitter
         reconnectAttempts++
-        Log.i(TAG, "将在 ${RECONNECT_DELAY_MS}ms 后重连 (尝试 $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS)")
-        
-        scope.launch {
-            delay(RECONNECT_DELAY_MS)
-            connect()
+        _reconnectAttemptCount.value = reconnectAttempts
+
+        Log.i(
+            TAG,
+            "[WS:RETRY] Scheduling reconnect attempt $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS " +
+                "in ${delay}ms (base=${baseDelay}ms jitter=${jitter}ms)"
+        )
+
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(delay)
+            if (shouldReconnect && !isConnected) {
+                connect()
+            }
+        }
+    }
+
+    /**
+     * Flushes the [offlineQueue] by sending each queued message over the live socket.
+     * Must only be called after [onOpen] confirms the connection is up.
+     * Messages that fail to send are logged (with count) but not re-enqueued;
+     * the flush is best-effort since re-enqueue on flush failure could cause infinite retry loops.
+     */
+    private fun flushOfflineQueue() {
+        val messages = offlineQueue.drainAll()
+        if (messages.isEmpty()) return
+
+        Log.i(TAG, "[WS:OfflineQueue] Flushing ${messages.size} offline message(s)")
+        var sent = 0
+        var lost = 0
+        for (msg in messages) {
+            val ok = webSocket?.send(msg.json) ?: false
+            if (!ok) {
+                lost++
+                Log.w(TAG, "[WS:OfflineQueue] Flush failed for type=${msg.type}; message lost (total lost: $lost)")
+            } else {
+                sent++
+                Log.d(TAG, "[WS:OfflineQueue] Flushed type=${msg.type}")
+            }
+        }
+        if (lost > 0) {
+            Log.w(TAG, "[WS:OfflineQueue] Flush complete: sent=$sent lost=$lost")
+        } else {
+            Log.i(TAG, "[WS:OfflineQueue] Flush complete: all $sent message(s) sent")
         }
     }
     
@@ -521,6 +651,25 @@ class GalaxyWebSocketClient(
      * 是否已连接
      */
     fun isConnected(): Boolean = isConnected
+
+    /**
+     * Called when network connectivity is restored (e.g. from a
+     * [android.net.ConnectivityManager] broadcast or NetworkCallback).
+     *
+     * Cancels any pending backoff delay and triggers an immediate reconnect attempt
+     * so that the device re-registers as soon as the network comes up.
+     *
+     * No-op if already connected or if [crossDeviceEnabled] is false.
+     */
+    fun notifyNetworkAvailable() {
+        if (isConnected || !crossDeviceEnabled) return
+        Log.i(TAG, "[WS:RETRY] Network available — resetting backoff and reconnecting immediately")
+        reconnectAttempts = 0
+        _reconnectAttemptCount.value = 0
+        reconnectJob?.cancel()
+        shouldReconnect = true
+        scope.launch { connect() }
+    }
 
     /**
      * 获取设备唯一标识

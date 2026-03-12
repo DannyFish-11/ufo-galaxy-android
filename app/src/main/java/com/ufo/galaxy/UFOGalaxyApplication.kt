@@ -19,6 +19,7 @@ import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
@@ -255,14 +256,20 @@ class UFOGalaxyApplication : Application() {
      * Initial capability metadata is pre-populated from [appSettings] so that the
      * handshake sent on [onOpen] already carries the correct flags even before
      * [GalaxyConnectionService.loadModels] runs.
+     *
+     * An [OfflineTaskQueue] backed by SharedPreferences is injected so that queued
+     * task results survive app restarts (messages older than 24 h are discarded on load).
      */
     private fun initWebSocketClient() {
+        val queuePrefs = getSharedPreferences(OfflineTaskQueue.TAG, MODE_PRIVATE)
+        val offlineQueue = OfflineTaskQueue(prefs = queuePrefs)
         webSocketClient = GalaxyWebSocketClient(
             serverUrl = appConfig.serverUrl,
-            crossDeviceEnabled = appSettings.crossDeviceEnabled
+            crossDeviceEnabled = appSettings.crossDeviceEnabled,
+            offlineQueue = offlineQueue
         )
         webSocketClient.setDeviceMetadata(appSettings.toMetadataMap())
-        Log.d(TAG, "WebSocket 客户端已初始化")
+        Log.d(TAG, "WebSocket 客户端已初始化 (offlineQueue restored size=${offlineQueue.size})")
     }
 
     /**

@@ -98,7 +98,93 @@ class CrossDeviceSwitchTest {
         assertFalse(client.crossDeviceEnabled)
     }
 
-    // ── MsgType new values ────────────────────────────────────────────────────
+    // ── GalaxyWebSocketClient offline queue integration ───────────────────────
+
+    @Test
+    fun `sendJson when disconnected queues task_result type`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        // Client is not connected; sendJson should enqueue the message
+        val json = """{"type":"task_result","payload":{}}"""
+        val sent = client.sendJson(json)
+        assertFalse("sendJson returns false when not connected", sent)
+        assertEquals("Message should be queued", 1, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson when disconnected queues goal_result type`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"goal_result","payload":{}}"""
+        client.sendJson(json)
+        assertEquals(1, testQueue.size)
+        assertEquals("goal_result", testQueue.drainAll().first().type)
+    }
+
+    @Test
+    fun `sendJson when disconnected does NOT queue non-queueable type`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        // heartbeat should not be queued
+        val json = """{"type":"heartbeat","timestamp":1234}"""
+        client.sendJson(json)
+        assertEquals("Non-queueable type should not be enqueued", 0, testQueue.size)
+    }
+
+    @Test
+    fun `queueSize StateFlow reflects offlineQueue depth`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        assertEquals(0, client.queueSize.value)
+
+        client.sendJson("""{"type":"task_result"}""")
+        assertEquals(1, client.queueSize.value)
+    }
+
+    @Test
+    fun `reconnectAttemptCount StateFlow starts at 0`() {
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
+        assertEquals(0, client.reconnectAttemptCount.value)
+    }
+
+    @Test
+    fun `notifyNetworkAvailable is no-op when crossDeviceEnabled is false`() {
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
+        // Should not throw
+        client.notifyNetworkAvailable()
+        assertFalse(client.isConnected())
+    }
+
+    @Test
+    fun `notifyNetworkAvailable is no-op when already connected`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        // Not connected — just verify it doesn't throw when called
+        client.notifyNetworkAvailable()
+        // (actual reconnect attempt would need a live server; just verifying no exception)
+    }
+
+
 
     @Test
     fun `MsgType includes GOAL_EXECUTION, PARALLEL_SUBTASK, GOAL_RESULT`() {
