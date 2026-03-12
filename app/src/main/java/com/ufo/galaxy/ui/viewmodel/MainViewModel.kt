@@ -1,7 +1,9 @@
 package com.ufo.galaxy.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.os.Build
+import android.os.PowerManager
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,7 +26,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
+
+/**
+ * A single error entry recorded for the diagnostics panel.
+ *
+ * @param ts     Unix timestamp in milliseconds when the error was observed.
+ * @param reason Human-readable error description.
+ */
+data class ErrorEntry(val ts: Long, val reason: String)
+
+/**
+ * A single task entry recorded for the diagnostics panel.
+ *
+ * @param ts      Unix timestamp in milliseconds when the task was received or completed.
+ * @param taskId  The task identifier.
+ * @param outcome Short outcome string (e.g. "received", "success", "failed", "timeout", "cancelled").
+ */
+data class TaskEntry(val ts: Long, val taskId: String, val outcome: String)
 
 /**
  * 主界面 UI 状态
@@ -58,7 +80,16 @@ data class MainUiState(
     /** Most recent error reason (from WS error or task result error field). */
     val lastErrorReason: String = "",
     /** True while the diagnostics panel is visible. */
-    val showDiagnostics: Boolean = false
+    val showDiagnostics: Boolean = false,
+    // ── Diagnostics UX (PR17) ────────────────────────────────────────────────
+    /** Up to 5 most recent errors recorded in the current session, newest-last. */
+    val recentErrors: List<ErrorEntry> = emptyList(),
+    /** Up to 5 most recent task ids and their outcomes, newest-last. */
+    val recentTaskIds: List<TaskEntry> = emptyList(),
+    /** True when the active network connection appears reachable (WS connected). */
+    val networkOk: Boolean = false,
+    /** True when the OS battery-optimisation exemption has been granted for this app. */
+    val batteryOptimizationsDisabled: Boolean = false
 )
 
 /**
@@ -69,6 +100,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     companion object {
         private const val TAG = "MainViewModel"
+        /** Outcome written when a task_assign/goal_execution is first received. */
+        internal const val OUTCOME_RECEIVED  = "received"
     }
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -87,12 +120,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val wsListener = object : GalaxyWebSocketClient.Listener {
         override fun onConnected() {
             Log.d(TAG, "WebSocket 已连接")
-            _uiState.update { it.copy(isConnected = true, error = null) }
+            _uiState.update { it.copy(isConnected = true, error = null, networkOk = true) }
         }
 
         override fun onDisconnected() {
             Log.d(TAG, "WebSocket 已断开")
-            _uiState.update { it.copy(isConnected = false) }
+            _uiState.update { it.copy(isConnected = false, networkOk = false) }
         }
 
         override fun onMessage(message: String) {
@@ -102,11 +135,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onError(error: String) {
             Log.e(TAG, "WebSocket 错误: $error")
-            _uiState.update { it.copy(error = error, isLoading = false, lastErrorReason = error) }
+            pushError(error)
+            _uiState.update { it.copy(error = error, isLoading = false) }
         }
 
         override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
-            _uiState.update { it.copy(lastTaskId = taskId) }
+            pushTaskId(taskId, OUTCOME_RECEIVED)
         }
     }
     
@@ -317,6 +351,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             UFOGalaxyApplication.edgeExecutor.handleTaskAssign(taskAssign)
         }
 
+        // Record the outcome for the diagnostics panel
+        pushTaskId(taskAssign.task_id, result.status)
+
         val summary = when (result.status) {
             "success" -> "任务完成（${result.steps.size} 步）"
             "cancelled" -> "任务取消: ${result.error ?: ""}"
@@ -456,6 +493,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Refresh readiness flags — overlay/accessibility state may have changed while
         // the app was in the background (e.g. user visited settings to grant permissions).
         refreshReadiness()
+        // Refresh health-check fields for the diagnostics panel.
+        _uiState.update {
+            it.copy(
+                networkOk = webSocketClient.isConnected(),
+                batteryOptimizationsDisabled = checkBatteryOptimizationsDisabled()
+            )
+        }
     }
     
     /**
@@ -487,4 +531,103 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * to an Android share [Intent], or `null` when no log file exists yet.
      */
     fun getLogFile(): java.io.File? = GalaxyLogger.getLogFile()
+
+    // ── Diagnostics UX helpers (PR17) ────────────────────────────────────────
+
+    /**
+     * Appends [reason] to the front of [MainUiState.recentErrors], keeping at most 5 entries.
+     * Also updates [MainUiState.lastErrorReason] for backward compatibility.
+     */
+    private fun pushError(reason: String) {
+        val entry = ErrorEntry(ts = System.currentTimeMillis(), reason = reason)
+        _uiState.update { s ->
+            s.copy(
+                lastErrorReason = reason,
+                recentErrors = (s.recentErrors + entry).takeLast(5)
+            )
+        }
+    }
+
+    /**
+     * Appends a [TaskEntry] to [MainUiState.recentTaskIds], keeping at most 5 entries.
+     * Also updates [MainUiState.lastTaskId] for backward compatibility.
+     */
+    private fun pushTaskId(taskId: String, outcome: String) {
+        val entry = TaskEntry(ts = System.currentTimeMillis(), taskId = taskId, outcome = outcome)
+        _uiState.update { s ->
+            s.copy(
+                lastTaskId = taskId,
+                recentTaskIds = (s.recentTaskIds + entry).takeLast(5)
+            )
+        }
+    }
+
+    /**
+     * Checks whether the OS has exempted this app from battery optimisations.
+     *
+     * Returns `false` on API < 23 (the API did not exist yet) or when the check itself
+     * fails (the method should never throw, but we guard defensively).
+     */
+    internal fun checkBatteryOptimizationsDisabled(): Boolean {
+        return try {
+            val pm = getApplication<Application>()
+                .getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Builds a plain-text diagnostics snapshot suitable for clipboard copy or sharing.
+     *
+     * The snapshot includes connection state, readiness flags, health-check results,
+     * the last 5 errors, and the last 5 task outcomes.
+     */
+    fun buildDiagnosticsText(): String {
+        val s = _uiState.value
+        val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+        return buildString {
+            appendLine("=== UFO Galaxy Diagnostics ===")
+            appendLine("Time: $ts")
+            appendLine()
+            appendLine("-- Connection --")
+            appendLine("State: ${if (s.isConnected) "Connected" else "Disconnected"}")
+            appendLine("Network OK: ${s.networkOk}")
+            appendLine("Reconnect attempts: ${s.reconnectAttempt}")
+            appendLine("Offline queue: ${s.queueSize}")
+            appendLine()
+            appendLine("-- Readiness --")
+            appendLine("Model files: ${if (s.modelReady) "Ready" else "Not ready"}")
+            appendLine("Accessibility: ${if (s.accessibilityReady) "Enabled" else "Disabled"}")
+            appendLine("Overlay (SYSTEM_ALERT_WINDOW): ${if (s.overlayReady) "Granted" else "Denied"}")
+            appendLine("Degraded mode: ${if (s.degradedMode) "Yes" else "No"}")
+            appendLine()
+            appendLine("-- Health Checklist --")
+            appendLine("Network OK: ${s.networkOk}")
+            appendLine("Permissions OK: ${s.accessibilityReady && s.overlayReady}")
+            appendLine("Battery optimizations disabled: ${s.batteryOptimizationsDisabled}")
+            appendLine()
+            appendLine("-- Recent Errors (last ${s.recentErrors.size}) --")
+            if (s.recentErrors.isEmpty()) {
+                appendLine("  (none)")
+            } else {
+                s.recentErrors.forEach { e ->
+                    appendLine("  [${formatDiagTs(e.ts)}] ${e.reason}")
+                }
+            }
+            appendLine()
+            appendLine("-- Recent Tasks (last ${s.recentTaskIds.size}) --")
+            if (s.recentTaskIds.isEmpty()) {
+                appendLine("  (none)")
+            } else {
+                s.recentTaskIds.forEach { t ->
+                    appendLine("  [${formatDiagTs(t.ts)}] ${t.taskId} → ${t.outcome}")
+                }
+            }
+        }.trimEnd()
+    }
+
+    private fun formatDiagTs(ts: Long): String =
+        SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(ts))
 }

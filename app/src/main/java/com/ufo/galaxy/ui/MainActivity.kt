@@ -29,6 +29,7 @@ import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
 import com.ufo.galaxy.ui.components.DiagnosticsScreen
 import com.ufo.galaxy.ui.components.ScrollPaperContainer
+import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
 import com.ufo.galaxy.ui.theme.UFOGalaxyTheme
 import com.ufo.galaxy.ui.viewmodel.MainViewModel
@@ -288,6 +289,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             overlayReady = uiState.overlayReady,
             reconnectAttempt = uiState.reconnectAttempt,
             queueSize = uiState.queueSize,
+            recentErrors = uiState.recentErrors,
+            recentTaskIds = uiState.recentTaskIds,
+            networkOk = uiState.networkOk,
+            batteryOptimizationsDisabled = uiState.batteryOptimizationsDisabled,
             onClose = { viewModel.toggleDiagnostics() },
             onExportLogs = {
                 val file = viewModel.getLogFile()
@@ -296,6 +301,11 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                 } else {
                     Toast.makeText(context, "No logs yet – logs are created after the first connection or task event.", Toast.LENGTH_SHORT).show()
                 }
+            },
+            onCopyDiagnostics = {
+                val text = viewModel.buildDiagnosticsText()
+                copyDiagnostics(context, text)
+                Toast.makeText(context, "Diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
             }
         )
         return
