@@ -10,6 +10,7 @@ import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
@@ -50,7 +51,14 @@ data class MainUiState(
     /** Number of outgoing task results currently queued offline (read-only debug info). */
     val queueSize: Int = 0,
     /** Number of consecutive reconnect attempts since last successful connect (read-only debug info). */
-    val reconnectAttempt: Int = 0
+    val reconnectAttempt: Int = 0,
+    // ── Diagnostics (PR15) ───────────────────────────────────────────────────
+    /** Task id of the most recently received task_assign or goal_execution. */
+    val lastTaskId: String = "",
+    /** Most recent error reason (from WS error or task result error field). */
+    val lastErrorReason: String = "",
+    /** True while the diagnostics panel is visible. */
+    val showDiagnostics: Boolean = false
 )
 
 /**
@@ -94,7 +102,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onError(error: String) {
             Log.e(TAG, "WebSocket 错误: $error")
-            _uiState.update { it.copy(error = error, isLoading = false) }
+            _uiState.update { it.copy(error = error, isLoading = false, lastErrorReason = error) }
+        }
+
+        override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
+            _uiState.update { it.copy(lastTaskId = taskId) }
         }
     }
     
@@ -460,4 +472,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         webSocketClient.removeListener(wsListener)
         speechManager.release()
     }
+
+    // ── Diagnostics (PR15) ───────────────────────────────────────────────────
+
+    /**
+     * Shows or hides the diagnostics panel.
+     */
+    fun toggleDiagnostics() {
+        _uiState.update { it.copy(showDiagnostics = !it.showDiagnostics) }
+    }
+
+    /**
+     * Returns the [GalaxyLogger] log file ([java.io.File]) ready to be attached
+     * to an Android share [Intent], or `null` when no log file exists yet.
+     */
+    fun getLogFile(): java.io.File? = GalaxyLogger.getLogFile()
 }

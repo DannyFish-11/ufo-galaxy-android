@@ -13,10 +13,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -24,7 +27,9 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.service.FloatingWindowService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
+import com.ufo.galaxy.ui.components.DiagnosticsScreen
 import com.ufo.galaxy.ui.components.ScrollPaperContainer
+import com.ufo.galaxy.ui.components.shareLogs
 import com.ufo.galaxy.ui.theme.UFOGalaxyTheme
 import com.ufo.galaxy.ui.viewmodel.MainViewModel
 
@@ -270,7 +275,32 @@ private fun ReadinessBanner(
 @Composable
 fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
-    
+    val context = LocalContext.current
+
+    // Show diagnostics overlay when toggled
+    if (uiState.showDiagnostics) {
+        DiagnosticsScreen(
+            isConnected = uiState.isConnected,
+            lastErrorReason = uiState.lastErrorReason,
+            lastTaskId = uiState.lastTaskId,
+            modelReady = uiState.modelReady,
+            accessibilityReady = uiState.accessibilityReady,
+            overlayReady = uiState.overlayReady,
+            reconnectAttempt = uiState.reconnectAttempt,
+            queueSize = uiState.queueSize,
+            onClose = { viewModel.toggleDiagnostics() },
+            onExportLogs = {
+                val file = viewModel.getLogFile()
+                if (file != null) {
+                    shareLogs(context, file)
+                } else {
+                    Toast.makeText(context, "No logs yet – logs are created after the first connection or task event.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -280,6 +310,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
+                        // Diagnostics button (PR15)
+                        IconButton(onClick = { viewModel.toggleDiagnostics() }) {
+                            Icon(Icons.Default.Info, contentDescription = "Diagnostics")
+                        }
                         Text(
                             text = stringResource(R.string.settings_cross_device),
                             style = MaterialTheme.typography.labelMedium,

@@ -2,6 +2,7 @@ package com.ufo.galaxy.agent
 
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.CommandResultPayload
 import com.ufo.galaxy.protocol.Snapshot
 import com.ufo.galaxy.protocol.StepResult
@@ -109,6 +110,8 @@ class EdgeExecutor(
         }
 
         val accumulatedSteps = mutableListOf<StepResult>()
+
+        GalaxyLogger.log(GalaxyLogger.TAG_TASK_EXEC, mapOf("task_id" to taskAssign.task_id, "max_steps" to taskAssign.max_steps))
 
         // Capture initial screenshot for planning context.
         // Full-resolution bytes are used for planning (and stored as snapshot);
@@ -347,12 +350,20 @@ class EdgeExecutor(
         error: String? = null,
         steps: List<StepResult> = emptyList(),
         snapshot: Snapshot? = null
-    ) = TaskResultPayload(
-        task_id = taskId,
-        correlation_id = taskId,
-        status = status,
-        steps = steps,
-        error = error,
-        snapshot = snapshot
-    )
+    ): TaskResultPayload {
+        GalaxyLogger.log(GalaxyLogger.TAG_TASK_RETURN, mapOf(
+            "task_id" to taskId,
+            "status" to status,
+            "steps" to steps.size,
+            "error" to error
+        ))
+        return TaskResultPayload(
+            task_id = taskId,
+            correlation_id = taskId,
+            status = status,
+            steps = steps,
+            error = error,
+            snapshot = snapshot
+        )
+    }
 }

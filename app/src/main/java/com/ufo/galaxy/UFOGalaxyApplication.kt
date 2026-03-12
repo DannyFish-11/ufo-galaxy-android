@@ -20,6 +20,7 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.OfflineTaskQueue
+import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
@@ -108,6 +109,9 @@ class UFOGalaxyApplication : Application() {
         instance = this
         
         Log.i(TAG, "UFO Galaxy Application 启动")
+
+        // Initialise structured observability logger (must be first, before any log calls).
+        GalaxyLogger.init(this)
         
         // 初始化配置
         initConfig()

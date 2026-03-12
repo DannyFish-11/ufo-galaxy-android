@@ -6,6 +6,7 @@ import com.google.gson.JsonObject
 import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
+import com.ufo.galaxy.observability.GalaxyLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -278,6 +279,7 @@ class GalaxyWebSocketClient(
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "[WS:CONNECT] WebSocket open — resetting backoff counter")
+                GalaxyLogger.log(GalaxyLogger.TAG_CONNECT, mapOf("url" to serverUrl, "attempt" to reconnectAttempts))
                 isConnected = true
                 reconnectAttempts = 0
                 _reconnectAttemptCount.value = 0
@@ -303,6 +305,7 @@ class GalaxyWebSocketClient(
             
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "[WS:DISCONNECT] WebSocket closed: code=$code reason=$reason")
+                GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("code" to code, "reason" to reason, "type" to "closed"))
                 isConnected = false
                 stopHeartbeat()
                 listeners.forEach { it.onDisconnected() }
@@ -315,6 +318,7 @@ class GalaxyWebSocketClient(
             
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "[WS:DISCONNECT] WebSocket failure: ${t.message}", t)
+                GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("type" to "failure", "error" to (t.message ?: "unknown")))
                 isConnected = false
                 stopHeartbeat()
                 listeners.forEach { it.onError(t.message ?: "连接失败") }
@@ -607,6 +611,11 @@ class GalaxyWebSocketClient(
             "[WS:RETRY] Scheduling reconnect attempt $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS " +
                 "in ${delay}ms (base=${baseDelay}ms jitter=${jitter}ms)"
         )
+        GalaxyLogger.log(GalaxyLogger.TAG_RECONNECT, mapOf(
+            "attempt" to reconnectAttempts,
+            "max_attempts" to MAX_RECONNECT_ATTEMPTS,
+            "delay_ms" to delay
+        ))
 
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
