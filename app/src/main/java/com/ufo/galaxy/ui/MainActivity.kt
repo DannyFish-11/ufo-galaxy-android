@@ -11,11 +11,16 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ufo.galaxy.R
 import com.ufo.galaxy.service.FloatingWindowService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
@@ -32,8 +37,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
     }
-    
-    private val viewModel: MainViewModel by lazy { MainViewModel() }
+
+    // Proper ViewModel creation using the activity-level delegate so the Application is
+    // automatically provided to AndroidViewModel.
+    private val mainViewModel: MainViewModel by viewModels()
     
     // 权限请求
     private val permissionLauncher = registerForActivityResult(
@@ -77,7 +84,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(viewModel = viewModel)
+                    MainScreen(viewModel = mainViewModel)
                 }
             }
         }
@@ -85,12 +92,12 @@ class MainActivity : ComponentActivity() {
     
     override fun onResume() {
         super.onResume()
-        viewModel.onResume()
+        mainViewModel.onResume()
     }
     
     override fun onPause() {
         super.onPause()
-        viewModel.onPause()
+        mainViewModel.onPause()
     }
     
     /**
@@ -161,6 +168,10 @@ class MainActivity : ComponentActivity() {
 
 /**
  * 主屏幕 Composable
+ *
+ * The [TopAppBar] includes a cross-device toggle that persists the setting via
+ * [MainViewModel.toggleCrossDeviceEnabled] and reconnects (or disconnects) the
+ * gateway WebSocket accordingly.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -171,6 +182,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
         topBar = {
             TopAppBar(
                 title = { Text("UFO Galaxy") },
+                actions = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_cross_device),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                        Switch(
+                            checked = uiState.crossDeviceEnabled,
+                            onCheckedChange = { viewModel.toggleCrossDeviceEnabled() }
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )

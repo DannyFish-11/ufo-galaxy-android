@@ -36,7 +36,9 @@ data class MainUiState(
     val isConnected: Boolean = false,
     val error: String? = null,
     val isListening: Boolean = false,
-    val partialSpeechResult: String = ""
+    val partialSpeechResult: String = "",
+    /** Mirrors [AppSettings.crossDeviceEnabled]; drives the settings toggle in the UI. */
+    val crossDeviceEnabled: Boolean = false
 )
 
 /**
@@ -89,6 +91,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setupWebSocketListener()
         setupSpeechListener()
         addWelcomeMessage()
+        // Restore persisted cross-device setting into UI state.
+        _uiState.update { it.copy(crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled) }
     }
     
     /**
@@ -208,7 +212,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        val crossDeviceEnabled = UFOGalaxyApplication.appConfig.crossDeviceEnabled
+        val crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
 
         viewModelScope.launch {
             try {
@@ -346,6 +350,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    /**
+     * Toggles the cross-device collaboration setting.
+     *
+     * - Persists the new value via [AppSettings].
+     * - Updates [GalaxyWebSocketClient.crossDeviceEnabled] via [UFOGalaxyApplication.setCrossDeviceEnabled].
+     *   When toggled **off** the active WebSocket connection is torn down.
+     *   When toggled **on** [GalaxyWebSocketClient.connect] is called so the gateway
+     *   session is re-established and the capability_report is sent.
+     * - Updates [MainUiState.crossDeviceEnabled] so the UI toggle reflects the new state
+     *   immediately without waiting for a WS connection event.
+     */
+    fun toggleCrossDeviceEnabled() {
+        val newValue = !_uiState.value.crossDeviceEnabled
+        Log.i(TAG, "toggleCrossDeviceEnabled → $newValue")
+        // Persist
+        UFOGalaxyApplication.appSettings.crossDeviceEnabled = newValue
+        // Update WS client (disconnects if newValue==false and currently connected)
+        UFOGalaxyApplication.instance.setCrossDeviceEnabled(newValue)
+        // Update UI state
+        _uiState.update { it.copy(crossDeviceEnabled = newValue) }
+        // Reconnect when enabling.
+        // Connection failures are surfaced via the wsListener.onError → uiState.error path;
+        // the toggle reflects the user's *intent* (crossDeviceEnabled=true means "user wants
+        // cross-device"), while isConnected tracks the actual live connection state.
+        if (newValue) {
+            viewModelScope.launch { webSocketClient.connect() }
+        }
     }
     
     /**

@@ -473,7 +473,7 @@ class EnhancedFloatingService : Service() {
         inputField?.setText("")
         loadingIndicator?.visibility = View.VISIBLE
 
-        val crossDeviceEnabled = UFOGalaxyApplication.appConfig.crossDeviceEnabled
+        val crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
         if (crossDeviceEnabled && webSocketClient.isConnected()) {
             val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
             val sessionId = UUID.randomUUID().toString()

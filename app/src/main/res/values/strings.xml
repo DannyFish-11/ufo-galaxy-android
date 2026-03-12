@@ -52,4 +52,6 @@
     <string name="settings_trigger_edge_swipe">右侧边缘滑动</string>
     <string name="settings_auto_start">开机自动启动</string>
     <string name="settings_floating_island">启用灵动岛</string>
+    <string name="settings_cross_device">跨设备</string>
+    <string name="settings_cross_device_desc">启用后连接 Galaxy 网关以跨设备协作</string>
 </resources>
