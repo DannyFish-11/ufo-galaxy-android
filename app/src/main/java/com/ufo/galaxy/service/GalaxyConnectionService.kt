@@ -13,6 +13,7 @@ import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
@@ -87,6 +88,7 @@ class GalaxyConnectionService : Service() {
 
             override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
                 Log.i(TAG, "收到 task_assign: task_id=$taskId")
+                GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "task_assign"))
                 serviceScope.launch {
                     handleTaskAssign(taskId, taskAssignPayloadJson)
                 }
@@ -94,6 +96,7 @@ class GalaxyConnectionService : Service() {
 
             override fun onGoalExecution(taskId: String, goalPayloadJson: String) {
                 Log.i(TAG, "收到 goal_execution: task_id=$taskId")
+                GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "goal_execution"))
                 serviceScope.launch {
                     handleGoalExecution(taskId, goalPayloadJson)
                 }

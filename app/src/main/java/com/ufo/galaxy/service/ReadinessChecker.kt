@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityManager
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.model.ModelAssetManager
+import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
  * Snapshot of the three capability readiness checks.
@@ -105,6 +106,19 @@ object ReadinessChecker {
             "readiness: modelReady=$modelReady accessibilityReady=$accessibilityReady " +
                 "overlayReady=$overlayReady degradedMode=${state.degradedMode}"
         )
+        GalaxyLogger.log(GalaxyLogger.TAG_READINESS, mapOf(
+            "model_ready" to modelReady,
+            "accessibility_ready" to accessibilityReady,
+            "overlay_ready" to overlayReady,
+            "degraded_mode" to state.degradedMode
+        ))
+        if (state.degradedMode) {
+            GalaxyLogger.log(GalaxyLogger.TAG_DEGRADED, mapOf(
+                "model_ready" to modelReady,
+                "accessibility_ready" to accessibilityReady,
+                "overlay_ready" to overlayReady
+            ))
+        }
         // Persist to AppSettings so the capability_report and UI can read without re-checking.
         val settings = UFOGalaxyApplication.appSettings
         settings.modelReady = modelReady
