@@ -10,7 +10,8 @@ package com.ufo.galaxy.data
 data class AppConfig(
     val serverUrl: String,
     val apiVersion: String,
-    val isDebug: Boolean
+    val isDebug: Boolean,
+    val crossDeviceEnabled: Boolean = true
 )
 
 /**

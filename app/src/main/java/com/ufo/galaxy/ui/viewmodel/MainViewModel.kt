@@ -1,20 +1,28 @@
 package com.ufo.galaxy.ui.viewmodel
 
 import android.app.Application
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.protocol.TaskAssignPayload
+import com.ufo.galaxy.protocol.TaskSubmitPayload
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -46,10 +54,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private val webSocketClient: GalaxyWebSocketClient
         get() = UFOGalaxyApplication.webSocketClient
+
+    private val gson = Gson()
     
     // 语音输入管理器
     private val speechManager: SpeechInputManager by lazy {
         SpeechInputManager(getApplication<Application>().applicationContext)
+    }
+
+    private val wsListener = object : GalaxyWebSocketClient.Listener {
+        override fun onConnected() {
+            Log.d(TAG, "WebSocket 已连接")
+            _uiState.update { it.copy(isConnected = true, error = null) }
+        }
+
+        override fun onDisconnected() {
+            Log.d(TAG, "WebSocket 已断开")
+            _uiState.update { it.copy(isConnected = false) }
+        }
+
+        override fun onMessage(message: String) {
+            Log.d(TAG, "收到消息: $message")
+            handleServerMessage(message)
+        }
+
+        override fun onError(error: String) {
+            Log.e(TAG, "WebSocket 错误: $error")
+            _uiState.update { it.copy(error = error, isLoading = false) }
+        }
     }
     
     init {
@@ -63,27 +95,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 设置 WebSocket 监听器
      */
     private fun setupWebSocketListener() {
-        webSocketClient.setListener(object : GalaxyWebSocketClient.Listener {
-            override fun onConnected() {
-                Log.d(TAG, "WebSocket 已连接")
-                _uiState.update { it.copy(isConnected = true, error = null) }
-            }
-            
-            override fun onDisconnected() {
-                Log.d(TAG, "WebSocket 已断开")
-                _uiState.update { it.copy(isConnected = false) }
-            }
-            
-            override fun onMessage(message: String) {
-                Log.d(TAG, "收到消息: $message")
-                handleServerMessage(message)
-            }
-            
-            override fun onError(error: String) {
-                Log.e(TAG, "WebSocket 错误: $error")
-                _uiState.update { it.copy(error = error, isLoading = false) }
-            }
-        })
+        webSocketClient.addListener(wsListener)
     }
     
     /**
@@ -169,6 +181,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     /**
      * 发送消息
+     *
+     * Cross-device enabled + WS connected: sends a [TaskSubmitPayload] uplink so the
+     * gateway can plan and return a [task_assign] for local execution.
+     * Local-only (crossDeviceEnabled=false or disconnected): runs [EdgeExecutor] directly.
      */
     fun sendMessage(text: String? = null) {
         val messageText = text ?: _uiState.value.inputText.trim()
@@ -191,15 +207,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isLoading = true
             )
         }
-        
-        // 发送到服务器
+
+        val crossDeviceEnabled = UFOGalaxyApplication.appConfig.crossDeviceEnabled
+
         viewModelScope.launch {
             try {
-                webSocketClient.send(messageText)
+                if (crossDeviceEnabled && webSocketClient.isConnected()) {
+                    // 跨设备模式：发送 task_submit 上行，等待 gateway 返回 task_assign
+                    sendTaskSubmitUplink(messageText)
+                } else {
+                    // 本地模式：直接通过 EdgeExecutor 执行
+                    executeLocally(messageText)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "发送消息失败", e)
                 _uiState.update { it.copy(error = e.message, isLoading = false) }
             }
+        }
+    }
+
+    /**
+     * Sends a [TaskSubmitPayload] wrapped in an [AipMessage] (type=TASK_SUBMIT) uplink.
+     * The gateway will process the goal and return a task_assign via WebSocket.
+     */
+    private fun sendTaskSubmitUplink(goal: String) {
+        val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
+        val sessionId = UUID.randomUUID().toString()
+        val payload = TaskSubmitPayload(
+            task_text = goal,
+            device_id = deviceId,
+            session_id = sessionId
+        )
+        val envelope = AipMessage(
+            type = MsgType.TASK_SUBMIT,
+            payload = payload,
+            device_id = deviceId
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        if (!sent) {
+            Log.w(TAG, "task_submit 发送失败，回退到本地执行")
+            viewModelScope.launch { executeLocally(goal) }
+        }
+        // isLoading remains true until task_result arrives via onMessage
+    }
+
+    /**
+     * Executes [goal] directly via [EdgeExecutor] (local-only path).
+     * Runs on Dispatchers.IO; posts result back to the UI on completion.
+     */
+    private suspend fun executeLocally(goal: String) {
+        val taskAssign = TaskAssignPayload(
+            task_id = UUID.randomUUID().toString(),
+            goal = goal,
+            max_steps = 10,
+            require_local_agent = true
+        )
+        val result = withContext(Dispatchers.IO) {
+            UFOGalaxyApplication.edgeExecutor.handleTaskAssign(taskAssign)
+        }
+
+        val summary = when (result.status) {
+            "success" -> "任务完成（${result.steps.size} 步）"
+            "cancelled" -> "任务取消: ${result.error ?: ""}"
+            else -> "任务失败: ${result.error ?: "未知错误"}"
+        }
+
+        val assistantMessage = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            role = MessageRole.ASSISTANT,
+            content = summary,
+            timestamp = System.currentTimeMillis()
+        )
+        _uiState.update { state ->
+            state.copy(
+                messages = state.messages + assistantMessage,
+                isLoading = false
+            )
         }
     }
     
@@ -285,6 +368,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         Log.d(TAG, "MainViewModel 销毁")
+        webSocketClient.removeListener(wsListener)
         speechManager.release()
     }
 }
