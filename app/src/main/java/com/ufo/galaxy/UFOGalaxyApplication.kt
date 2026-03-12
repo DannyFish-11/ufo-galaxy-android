@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.ufo.galaxy.agent.AutonomousExecutionPipeline
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.LocalCollaborationAgent
 import com.ufo.galaxy.agent.LocalGoalExecutor
@@ -71,6 +72,10 @@ class UFOGalaxyApplication : Application() {
 
         // LocalCollaborationAgent: coordinates parallel_subtask via LocalGoalExecutor
         lateinit var localCollaborationAgent: LocalCollaborationAgent
+            private set
+
+        // AutonomousExecutionPipeline: gates goal_execution/parallel_subtask behind AppSettings flags
+        lateinit var autonomousExecutionPipeline: AutonomousExecutionPipeline
             private set
         
         // 全局配置
@@ -270,6 +275,13 @@ class UFOGalaxyApplication : Application() {
             deviceId = deviceId
         )
         localCollaborationAgent = LocalCollaborationAgent(goalExecutor = localGoalExecutor)
+        autonomousExecutionPipeline = AutonomousExecutionPipeline(
+            settings = appSettings,
+            goalExecutor = localGoalExecutor,
+            collaborationAgent = localCollaborationAgent,
+            deviceId = deviceId,
+            deviceRole = appSettings.deviceRole
+        )
         Log.d(TAG, "推理服务已初始化")
     }
     

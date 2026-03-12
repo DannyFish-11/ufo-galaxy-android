@@ -168,11 +168,14 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * Handles a [MsgType.GOAL_EXECUTION] message by delegating to [LocalGoalExecutor]
-     * and sending the structured [GoalResultPayload] back to the gateway.
+     * Handles a [MsgType.GOAL_EXECUTION] message by delegating to
+     * [AutonomousExecutionPipeline], which gates execution behind
+     * [AppSettings.goalExecutionEnabled] and sends the structured
+     * [GoalResultPayload] back to the gateway.
      *
-     * Runs on [serviceScope] (IO dispatcher); all exceptions inside [LocalGoalExecutor]
-     * are already mapped to ERROR status.
+     * Runs on [serviceScope] (IO dispatcher); all exceptions inside
+     * [AutonomousExecutionPipeline] and [LocalGoalExecutor] are already mapped to
+     * ERROR status.
      */
     private fun handleGoalExecution(taskId: String, payloadJson: String) {
         val payload = try {
@@ -183,17 +186,20 @@ class GalaxyConnectionService : Service() {
             return
         }
 
-        val result = UFOGalaxyApplication.localGoalExecutor.executeGoal(payload)
+        val result = UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
         sendGoalResult(result)
         Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${result.status} latency=${result.latency_ms}ms")
     }
 
     /**
      * Handles a [MsgType.PARALLEL_SUBTASK] message by delegating to
-     * [LocalCollaborationAgent] and sending the structured [GoalResultPayload] back.
+     * [AutonomousExecutionPipeline], which gates execution behind
+     * [AppSettings.parallelExecutionEnabled] and sends the structured
+     * [GoalResultPayload] back.
      *
-     * Runs on [serviceScope] (IO dispatcher); all exceptions inside [LocalGoalExecutor]
-     * are already mapped to ERROR status.
+     * Runs on [serviceScope] (IO dispatcher); all exceptions inside
+     * [AutonomousExecutionPipeline] and [LocalGoalExecutor] are already mapped to
+     * ERROR status.
      */
     private fun handleParallelSubtask(taskId: String, payloadJson: String) {
         val payload = try {
@@ -204,7 +210,7 @@ class GalaxyConnectionService : Service() {
             return
         }
 
-        val result = UFOGalaxyApplication.localCollaborationAgent.handleParallelSubtask(payload)
+        val result = UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
         sendGoalResult(result)
         Log.i(
             TAG,
