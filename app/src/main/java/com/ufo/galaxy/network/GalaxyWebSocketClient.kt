@@ -13,9 +13,15 @@ import java.util.concurrent.TimeUnit
 /**
  * Galaxy WebSocket 客户端
  * 负责与 Galaxy 服务器的实时通信
+ *
+ * @param serverUrl          WebSocket server URL.
+ * @param crossDeviceEnabled When false, [connect] is a no-op and no device_register or
+ *                           capability_report messages are sent. Defaults to true for
+ *                           backward compatibility.
  */
 class GalaxyWebSocketClient(
-    private val serverUrl: String
+    private val serverUrl: String,
+    val crossDeviceEnabled: Boolean = true
 ) {
     companion object {
         private const val TAG = "GalaxyWebSocket"
@@ -32,6 +38,19 @@ class GalaxyWebSocketClient(
         fun onDisconnected()
         fun onMessage(message: String)
         fun onError(error: String)
+
+        /**
+         * Called when a strong-typed task_assign message is received.
+         *
+         * [taskId] is the task_id from the payload and should be used as the
+         * correlation_id when sending the task_result reply.
+         * [taskAssignPayloadJson] is the raw JSON of the payload object, ready for
+         * deserialization into [com.ufo.galaxy.protocol.TaskAssignPayload].
+         *
+         * Default implementation is a no-op to maintain backward compatibility
+         * with existing [Listener] implementations.
+         */
+        fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) = Unit
     }
     
     private val client = OkHttpClient.Builder()
@@ -48,6 +67,12 @@ class GalaxyWebSocketClient(
     private var reconnectAttempts = 0
     private var heartbeatJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /**
+     * Additional action capabilities reported when models are loaded.
+     * Update via [setModelCapabilities] when planner/grounding services become ready.
+     */
+    private var modelCapabilities: List<String> = emptyList()
     
     /**
      * 设置监听器
@@ -55,11 +80,29 @@ class GalaxyWebSocketClient(
     fun setListener(listener: Listener) {
         this.listener = listener
     }
+
+    /**
+     * Updates the model-specific capabilities included in the capability_report.
+     * Call this when [LocalPlannerService] or [LocalGroundingService] become ready
+     * so the gateway receives an accurate list of available on-device actions.
+     *
+     * @param capabilities Additional action names to include (e.g., "local_planning",
+     *                     "local_grounding"). These are appended to the base action list
+     *                     and deduplicated before reporting. Pass an empty list to clear.
+     */
+    fun setModelCapabilities(capabilities: List<String>) {
+        modelCapabilities = capabilities
+    }
     
     /**
      * 连接到服务器
+     * No-op when [crossDeviceEnabled] is false (local-only mode).
      */
     fun connect() {
+        if (!crossDeviceEnabled) {
+            Log.i(TAG, "Cross-device disabled (crossDeviceEnabled=false); skipping WS connection")
+            return
+        }
         if (isConnected) {
             Log.d(TAG, "已连接，跳过")
             return
@@ -162,19 +205,23 @@ class GalaxyWebSocketClient(
     
     /**
      * 发送 AIP v3.0 能力上报（握手消息）
-     * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距
+     * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距。
+     * [modelCapabilities] are merged in to reflect current model/permission readiness.
      */
     private fun sendHandshake() {
         val deviceId = getDeviceId()
 
+        val baseActions = listOf(
+            "location", "camera", "sensor_data", "automation",
+            "notification", "sms", "phone_call", "contacts",
+            "calendar", "voice_input", "screen_capture", "app_control"
+        )
+        val allActions = (baseActions + modelCapabilities).distinct()
+
         val report = CapabilityReport(
             platform = "android",
             device_id = deviceId,
-            supported_actions = listOf(
-                "location", "camera", "sensor_data", "automation",
-                "notification", "sms", "phone_call", "contacts",
-                "calendar", "voice_input", "screen_capture", "app_control"
-            ),
+            supported_actions = allActions,
             version = "3.0"
         )
 
@@ -233,6 +280,16 @@ class GalaxyWebSocketClient(
             when (json.get("type")?.asString) {
                 "heartbeat_ack" -> {
                     Log.d(TAG, "收到心跳响应")
+                }
+                "task_assign" -> {
+                    // Parse strong-typed task_assign; dispatch via onTaskAssign so callers
+                    // can forward to EdgeExecutor without coupling the WS client to Android
+                    // platform classes. correlation_id prefers task_id from payload.
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    Log.i(TAG, "收到 task_assign task_id=$taskId")
+                    listener?.onTaskAssign(taskId, payloadJson)
                 }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")
