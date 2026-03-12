@@ -15,7 +15,11 @@ enum class MsgType(val value: String) {
     HEARTBEAT_ACK("heartbeat_ack"),
     GOAL_EXECUTION("goal_execution"),
     PARALLEL_SUBTASK("parallel_subtask"),
-    GOAL_RESULT("goal_result")
+    GOAL_RESULT("goal_result"),
+    /** Downlink: server requests cancellation of a running task or parallel subtask. */
+    TASK_CANCEL("task_cancel"),
+    /** Uplink: device acknowledges the cancellation request. */
+    CANCEL_RESULT("cancel_result")
 }
 
 /**
@@ -174,6 +178,8 @@ data class CommandResultPayload(
  * @param max_steps     Maximum action steps the local agent may attempt (default 10).
  * @param group_id      Parallel-group identifier; non-null for parallel_subtask.
  * @param subtask_index Zero-based index of this subtask within the group.
+ * @param timeout_ms    Per-task execution timeout in milliseconds. 0 = use default
+ *                      ([DEFAULT_TIMEOUT_MS]). Capped at [MAX_TIMEOUT_MS].
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -181,8 +187,24 @@ data class GoalExecutionPayload(
     val constraints: List<String> = emptyList(),
     val max_steps: Int = 10,
     val group_id: String? = null,
-    val subtask_index: Int? = null
-)
+    val subtask_index: Int? = null,
+    val timeout_ms: Long = 0L
+) {
+    companion object {
+        /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
+        const val DEFAULT_TIMEOUT_MS = 30_000L
+        /** Hard upper cap for any per-task timeout (5 min). */
+        const val MAX_TIMEOUT_MS = 300_000L
+    }
+
+    /**
+     * Effective timeout to use: [timeout_ms] when positive, otherwise [DEFAULT_TIMEOUT_MS].
+     * Always capped at [MAX_TIMEOUT_MS].
+     */
+    val effectiveTimeoutMs: Long
+        get() = if (timeout_ms > 0L) timeout_ms.coerceAtMost(MAX_TIMEOUT_MS)
+                else DEFAULT_TIMEOUT_MS
+}
 
 /**
  * Uplink result for [MsgType.GOAL_EXECUTION] and [MsgType.PARALLEL_SUBTASK].
@@ -215,5 +237,44 @@ data class GoalResultPayload(
     val device_role: String = "",
     val steps: List<StepResult> = emptyList(),
     val outputs: List<String> = emptyList(),
+    val error: String? = null
+)
+
+/**
+ * Downlink payload for [MsgType.TASK_CANCEL].
+ * Sent by the gateway to request cancellation of a running task or parallel subtask.
+ *
+ * @param task_id        Unique task identifier to cancel.
+ * @param group_id       Optional parallel-group identifier; present for parallel_subtask cancels.
+ * @param subtask_index  Optional zero-based subtask index within the group.
+ */
+data class TaskCancelPayload(
+    val task_id: String,
+    val group_id: String? = null,
+    val subtask_index: Int? = null
+)
+
+/**
+ * Uplink acknowledgement for [MsgType.CANCEL_RESULT].
+ * Sent by the device in response to a [MsgType.TASK_CANCEL] request.
+ *
+ * @param task_id        Echoed from [TaskCancelPayload.task_id].
+ * @param correlation_id Set to [task_id] for reply routing.
+ * @param status         "cancelled" if the task was successfully cancelled;
+ *                       "no_op" if the task was not found (already completed or never started).
+ * @param was_running    True when the task was actively executing at the time of the cancel request.
+ * @param group_id       Echoed from [TaskCancelPayload.group_id].
+ * @param subtask_index  Echoed from [TaskCancelPayload.subtask_index].
+ * @param device_id      Reporting device identifier.
+ * @param error          Optional human-readable detail when status is "no_op".
+ */
+data class CancelResultPayload(
+    val task_id: String,
+    val correlation_id: String? = null,
+    val status: String,
+    val was_running: Boolean,
+    val group_id: String? = null,
+    val subtask_index: Int? = null,
+    val device_id: String = "",
     val error: String? = null
 )

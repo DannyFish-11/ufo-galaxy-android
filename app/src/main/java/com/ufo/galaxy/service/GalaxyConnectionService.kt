@@ -12,22 +12,31 @@ import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
+import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.CancelResultPayload
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
+import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.protocol.TaskResultPayload
 import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.coroutineContext
 
 /**
  * Galaxy 连接服务
@@ -52,6 +61,9 @@ class GalaxyConnectionService : Service() {
     private val localDeviceId: String by lazy {
         "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
     }
+
+    /** Tracks active goal_execution / parallel_subtask coroutine jobs for cancel support. */
+    private val taskCancelRegistry = TaskCancelRegistry()
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
@@ -98,6 +110,8 @@ class GalaxyConnectionService : Service() {
                 Log.i(TAG, "收到 goal_execution: task_id=$taskId")
                 GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "goal_execution"))
                 serviceScope.launch {
+                    // Register inside the coroutine to avoid any race between launch and register.
+                    taskCancelRegistry.register(taskId, coroutineContext[Job]!!)
                     handleGoalExecution(taskId, goalPayloadJson)
                 }
             }
@@ -105,7 +119,15 @@ class GalaxyConnectionService : Service() {
             override fun onParallelSubtask(taskId: String, subtaskPayloadJson: String) {
                 Log.i(TAG, "收到 parallel_subtask: task_id=$taskId")
                 serviceScope.launch {
+                    taskCancelRegistry.register(taskId, coroutineContext[Job]!!)
                     handleParallelSubtask(taskId, subtaskPayloadJson)
+                }
+            }
+
+            override fun onTaskCancel(taskId: String, cancelPayloadJson: String) {
+                Log.i(TAG, "收到 task_cancel: task_id=$taskId")
+                serviceScope.launch {
+                    handleTaskCancel(taskId, cancelPayloadJson)
                 }
             }
         }
@@ -180,22 +202,45 @@ class GalaxyConnectionService : Service() {
      * [AppSettings.goalExecutionEnabled] and sends the structured
      * [GoalResultPayload] back to the gateway.
      *
+     * Enforces [GoalExecutionPayload.effectiveTimeoutMs] via [withTimeout]. On timeout
+     * a structured [EdgeExecutor.STATUS_TIMEOUT] result is returned so the server can
+     * still perform correct aggregation. Deregisters the task from [taskCancelRegistry]
+     * in its `finally` block.
+     *
      * Runs on [serviceScope] (IO dispatcher); all exceptions inside
      * [AutonomousExecutionPipeline] and [LocalGoalExecutor] are already mapped to
      * ERROR status.
      */
-    private fun handleGoalExecution(taskId: String, payloadJson: String) {
+    private suspend fun handleGoalExecution(taskId: String, payloadJson: String) {
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
             Log.e(TAG, "goal_execution payload 解析失败: ${e.message}", e)
             sendGoalError(taskId, null, null, "bad_payload: ${e.message}")
+            taskCancelRegistry.deregister(taskId)
             return
         }
 
-        val result = UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
-        sendGoalResult(result)
-        Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${result.status} latency=${result.latency_ms}ms")
+        val timeoutMs = payload.effectiveTimeoutMs
+        try {
+            val result = withTimeout(timeoutMs) {
+                UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
+            }
+            if (isActive) {
+                sendGoalResult(result)
+                Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${result.status} latency=${result.latency_ms}ms")
+            }
+        } catch (e: TimeoutCancellationException) {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_TASK_TIMEOUT,
+                mapOf("task_id" to taskId, "timeout_ms" to timeoutMs, "type" to "goal_execution")
+            )
+            Log.w(TAG, "[TASK:TIMEOUT] goal_execution timed out task_id=$taskId timeout_ms=$timeoutMs")
+            val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
+            sendGoalResult(timeoutResult)
+        } finally {
+            taskCancelRegistry.deregister(taskId)
+        }
     }
 
     /**
@@ -204,27 +249,116 @@ class GalaxyConnectionService : Service() {
      * [AppSettings.parallelExecutionEnabled] and sends the structured
      * [GoalResultPayload] back.
      *
+     * Enforces [GoalExecutionPayload.effectiveTimeoutMs] via [withTimeout]. On timeout
+     * a structured [EdgeExecutor.STATUS_TIMEOUT] result is returned. Deregisters the
+     * task from [taskCancelRegistry] in its `finally` block.
+     *
      * Runs on [serviceScope] (IO dispatcher); all exceptions inside
      * [AutonomousExecutionPipeline] and [LocalGoalExecutor] are already mapped to
      * ERROR status.
      */
-    private fun handleParallelSubtask(taskId: String, payloadJson: String) {
+    private suspend fun handleParallelSubtask(taskId: String, payloadJson: String) {
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
             Log.e(TAG, "parallel_subtask payload 解析失败: ${e.message}", e)
             sendGoalError(taskId, null, null, "bad_payload: ${e.message}")
+            taskCancelRegistry.deregister(taskId)
             return
         }
 
-        val result = UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
-        sendGoalResult(result)
-        Log.i(
-            TAG,
-            "goal_result (parallel) 已回传 task_id=$taskId status=${result.status} " +
-                "group_id=${result.group_id} subtask_index=${result.subtask_index} " +
-                "latency=${result.latency_ms}ms"
+        val timeoutMs = payload.effectiveTimeoutMs
+        try {
+            val result = withTimeout(timeoutMs) {
+                UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
+            }
+            if (isActive) {
+                sendGoalResult(result)
+                Log.i(
+                    TAG,
+                    "goal_result (parallel) 已回传 task_id=$taskId status=${result.status} " +
+                        "group_id=${result.group_id} subtask_index=${result.subtask_index} " +
+                        "latency=${result.latency_ms}ms"
+                )
+            }
+        } catch (e: TimeoutCancellationException) {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_TASK_TIMEOUT,
+                mapOf(
+                    "task_id" to taskId, "timeout_ms" to timeoutMs,
+                    "type" to "parallel_subtask",
+                    "group_id" to payload.group_id, "subtask_index" to payload.subtask_index
+                )
+            )
+            Log.w(
+                TAG,
+                "[TASK:TIMEOUT] parallel_subtask timed out task_id=$taskId " +
+                    "group_id=${payload.group_id} subtask_index=${payload.subtask_index} timeout_ms=$timeoutMs"
+            )
+            val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
+            sendGoalResult(timeoutResult)
+        } finally {
+            taskCancelRegistry.deregister(taskId)
+        }
+    }
+
+    /**
+     * Handles a [MsgType.TASK_CANCEL] request.
+     *
+     * Looks up the task in [taskCancelRegistry]:
+     * - If found: cancels the coroutine and sends a `cancelled` [CancelResultPayload].
+     * - If not found: the task already completed or never existed; sends a `no_op` reply.
+     *
+     * This operation is idempotent — repeated cancel requests for the same task_id will
+     * return `no_op` after the first cancel succeeds.
+     */
+    private fun handleTaskCancel(taskId: String, cancelPayloadJson: String) {
+        val cancelPayload = try {
+            gson.fromJson(cancelPayloadJson, TaskCancelPayload::class.java)
+        } catch (e: Exception) {
+            Log.e(TAG, "task_cancel payload 解析失败: ${e.message}", e)
+            // Best-effort: still try to cancel by taskId
+            TaskCancelPayload(task_id = taskId)
+        }
+
+        val wasRunning = taskCancelRegistry.cancel(taskId)
+
+        if (wasRunning) {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_TASK_CANCEL,
+                mapOf(
+                    "task_id" to taskId,
+                    "group_id" to cancelPayload.group_id,
+                    "subtask_index" to cancelPayload.subtask_index,
+                    "was_running" to true
+                )
+            )
+            Log.i(TAG, "[TASK:CANCEL] 已取消运行中的任务 task_id=$taskId")
+        } else {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_TASK_CANCEL,
+                mapOf("task_id" to taskId, "was_running" to false, "result" to "no_op")
+            )
+            Log.i(TAG, "[TASK:CANCEL] 任务未找到（已完成或未启动）task_id=$taskId")
+        }
+
+        val cancelResult = CancelResultPayload(
+            task_id = taskId,
+            correlation_id = taskId,
+            status = if (wasRunning) EdgeExecutor.STATUS_CANCELLED else "no_op",
+            was_running = wasRunning,
+            group_id = cancelPayload.group_id,
+            subtask_index = cancelPayload.subtask_index,
+            device_id = localDeviceId,
+            error = if (!wasRunning) "task not found or already completed" else null
         )
+        val envelope = AipMessage(
+            type = MsgType.CANCEL_RESULT,
+            payload = cancelResult,
+            correlation_id = taskId,
+            device_id = localDeviceId
+        )
+        webSocketClient.sendJson(gson.toJson(envelope))
     }
 
     /** Sends a [GoalResultPayload] wrapped in an AIP v3 envelope. */
@@ -257,6 +391,26 @@ class GalaxyConnectionService : Service() {
         )
         sendGoalResult(errorResult)
     }
+
+    /**
+     * Builds a standardised timeout [GoalResultPayload].
+     * All required aggregation fields (correlation_id, device_id, group_id,
+     * subtask_index) are populated so the gateway can still converge results.
+     */
+    private fun buildTimeoutGoalResult(
+        taskId: String,
+        payload: GoalExecutionPayload,
+        timeoutMs: Long
+    ) = GoalResultPayload(
+        task_id = taskId,
+        correlation_id = taskId,
+        status = EdgeExecutor.STATUS_TIMEOUT,
+        error = "Task exceeded timeout of ${timeoutMs}ms",
+        group_id = payload.group_id,
+        subtask_index = payload.subtask_index,
+        latency_ms = timeoutMs,
+        device_id = localDeviceId
+    )
 
     /**
      * 回传 task_result 错误（payload 解析失败时使用）。

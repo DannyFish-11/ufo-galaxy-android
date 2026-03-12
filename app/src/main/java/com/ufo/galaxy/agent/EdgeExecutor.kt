@@ -70,6 +70,8 @@ class EdgeExecutor(
         const val STATUS_SUCCESS = "success"
         const val STATUS_ERROR = "error"
         const val STATUS_CANCELLED = "cancelled"
+        /** Returned when the task exceeded its configured [GoalExecutionPayload.effectiveTimeoutMs]. */
+        const val STATUS_TIMEOUT = "timeout"
     }
 
     /**
