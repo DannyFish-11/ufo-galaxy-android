@@ -20,6 +20,7 @@ class LocalCollaborationAgent(private val goalExecutor: LocalGoalExecutor) {
 
     companion object {
         private const val TAG = "LocalCollaborationAgent"
+        private const val MAX_GOAL_LOG_LENGTH = LocalGoalExecutor.MAX_GOAL_LOG_LENGTH
     }
 
     /**
@@ -37,7 +38,7 @@ class LocalCollaborationAgent(private val goalExecutor: LocalGoalExecutor) {
             TAG,
             "handleParallelSubtask task_id=${payload.task_id} " +
                 "group_id=${payload.group_id} subtask_index=${payload.subtask_index} " +
-                "goal='${payload.goal.take(80)}'"
+                "goal='${payload.goal.take(MAX_GOAL_LOG_LENGTH)}'"
         )
         val result = goalExecutor.executeGoal(payload)
         Log.i(

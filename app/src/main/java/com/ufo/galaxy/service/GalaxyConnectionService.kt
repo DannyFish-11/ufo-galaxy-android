@@ -46,6 +46,11 @@ class GalaxyConnectionService : Service() {
     private val gson = Gson()
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    /** Stable device identifier used in all outbound AIP v3 message envelopes. */
+    private val localDeviceId: String by lazy {
+        "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+    }
+
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
     inner class LocalBinder : Binder() {
@@ -156,7 +161,7 @@ class GalaxyConnectionService : Service() {
             type = MsgType.TASK_RESULT,
             payload = result,
             correlation_id = taskId,
-            device_id = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+            device_id = localDeviceId
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} sent=$sent")
@@ -215,9 +220,7 @@ class GalaxyConnectionService : Service() {
             type = MsgType.GOAL_RESULT,
             payload = result,
             correlation_id = result.task_id,
-            device_id = result.device_id.ifEmpty {
-                "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
-            }
+            device_id = result.device_id.ifEmpty { localDeviceId }
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -237,7 +240,7 @@ class GalaxyConnectionService : Service() {
             group_id = groupId,
             subtask_index = subtaskIndex,
             latency_ms = 0L,
-            device_id = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+            device_id = localDeviceId
         )
         sendGoalResult(errorResult)
     }
@@ -256,7 +259,7 @@ class GalaxyConnectionService : Service() {
             type = MsgType.TASK_RESULT,
             payload = errorResult,
             correlation_id = taskId,
-            device_id = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+            device_id = localDeviceId
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }

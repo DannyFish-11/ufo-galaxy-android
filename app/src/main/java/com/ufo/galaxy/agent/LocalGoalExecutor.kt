@@ -25,6 +25,8 @@ class LocalGoalExecutor(
 
     companion object {
         private const val TAG = "LocalGoalExecutor"
+        /** Maximum characters of goal text included in log messages to avoid log flooding. */
+        const val MAX_GOAL_LOG_LENGTH = 80
         /** Timeout for a single goal execution (30 s). Enforced by EdgeExecutor's max_steps budget. */
         private const val DEFAULT_MAX_STEPS = 10
     }
@@ -43,7 +45,7 @@ class LocalGoalExecutor(
         Log.i(
             TAG,
             "executeGoal task_id=${payload.task_id} group_id=${payload.group_id} " +
-                "subtask_index=${payload.subtask_index} goal='${payload.goal.take(80)}'"
+                "subtask_index=${payload.subtask_index} goal='${payload.goal.take(MAX_GOAL_LOG_LENGTH)}'"
         )
 
         val taskAssign = TaskAssignPayload(

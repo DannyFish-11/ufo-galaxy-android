@@ -23,6 +23,8 @@ class LocalTaskPlanner(private val plannerService: LocalPlannerService) {
     companion object {
         private const val TAG = "LocalTaskPlanner"
         private const val NOOP_ACTION = "noop"
+        /** Maximum characters of goal text included in log messages. */
+        private const val MAX_GOAL_LOG_LENGTH = LocalGoalExecutor.MAX_GOAL_LOG_LENGTH
     }
 
     /**
@@ -40,7 +42,7 @@ class LocalTaskPlanner(private val plannerService: LocalPlannerService) {
         goal: String,
         constraints: List<String> = emptyList()
     ): LocalPlannerService.PlanResult {
-        Log.d(TAG, "planGoal goal='${goal.take(80)}'")
+        Log.d(TAG, "planGoal goal='${goal.take(MAX_GOAL_LOG_LENGTH)}'")
 
         if (!plannerService.isModelLoaded()) {
             Log.w(TAG, "Planner model not loaded; returning fallback noop plan")

@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
  */
 class GalaxyWebSocketClient(
     private val serverUrl: String,
-    crossDeviceEnabled: Boolean = true
+    initialCrossDeviceEnabled: Boolean = true
 ) {
     companion object {
         private const val TAG = "GalaxyWebSocket"
@@ -103,7 +103,7 @@ class GalaxyWebSocketClient(
      * first if a live connection should be torn down.
      */
     @Volatile
-    var crossDeviceEnabled: Boolean = crossDeviceEnabled
+    var crossDeviceEnabled: Boolean = initialCrossDeviceEnabled
         private set
 
     /**
