@@ -95,8 +95,11 @@ class GalaxyConnectionService : Service() {
         // 连接到服务器（若 crossDeviceEnabled=false 则为 no-op）
         webSocketClient.connect()
 
-        // 后台加载模型，加载完成后更新能力上报
+        // Pre-warm and then load models in background.
+        // Pre-warming sends a lightweight health ping + optional dry-run to reduce cold start
+        // latency on the first real inference call.
         serviceScope.launch {
+            prewarmServices()
             loadModels()
         }
         
@@ -161,8 +164,21 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
+     * Pre-warms the MobileVLM and SeeClick inference servers before full model loading.
+     * Sends a lightweight health ping to each server to establish a warm TCP connection
+     * and surface any startup failures early.
+     */
+    private fun prewarmServices() {
+        Log.i(TAG, "预热推理服务...")
+        val plannerReady = UFOGalaxyApplication.plannerService.prewarm()
+        val groundingReady = UFOGalaxyApplication.groundingService.prewarm()
+        Log.i(TAG, "预热完成: planner=$plannerReady grounding=$groundingReady")
+    }
+
+    /**
      * 加载 MobileVLM 规划器和 SeeClick grounding 模型。
      * 加载结果通过 setModelCapabilities 通知 gateway。
+     * Only advertises capabilities when both models are loaded.
      */
     private fun loadModels() {
         Log.i(TAG, "开始加载本地模型...")
@@ -170,6 +186,13 @@ class GalaxyConnectionService : Service() {
         val groundingLoaded = UFOGalaxyApplication.groundingService.loadModel()
         Log.i(TAG, "模型加载完成: planner=$plannerLoaded grounding=$groundingLoaded")
 
+        val assetManager = UFOGalaxyApplication.modelAssetManager
+        if (plannerLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
+        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
+        if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
+        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
+
+        // Only advertise capabilities when all models are loaded.
         val capabilities = mutableListOf<String>()
         if (plannerLoaded) capabilities.add("local_planning")
         if (groundingLoaded) capabilities.add("local_grounding")
@@ -183,6 +206,8 @@ class GalaxyConnectionService : Service() {
     private fun unloadModels() {
         UFOGalaxyApplication.plannerService.unloadModel()
         UFOGalaxyApplication.groundingService.unloadModel()
+        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
+        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
         Log.i(TAG, "本地模型已卸载")
     }
     

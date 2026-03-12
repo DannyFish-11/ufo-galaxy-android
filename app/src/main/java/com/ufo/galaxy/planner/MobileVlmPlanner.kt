@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets
  *
  * Model:   mtgv/MobileVLM_V2-1.7B (HuggingFace)
  * Runtime: llama.cpp (GGUF INT4/INT8 quantisation) or MLC-LLM
+ * Model file path exposed via [modelPath] for the local inference server to locate weights.
  *
  * Expected plan JSON from model:
  * ```json
@@ -29,12 +30,19 @@ import java.nio.charset.StandardCharsets
  *
  * All coordinates are excluded from the plan; the grounding engine resolves them.
  *
- * @param endpointUrl Local inference server URL.
- * @param timeoutMs   HTTP connect/read timeout in milliseconds.
- * @param maxRetries  Number of additional attempts after a transient failure.
+ * @param endpointUrl   Local inference server URL.
+ * @param modelPath     Absolute path to the GGUF model file (passed to server at startup).
+ *                      Empty string means the server locates the model itself.
+ * @param maxTokens     Maximum tokens the model may generate per call.
+ * @param temperature   Sampling temperature (lower = more deterministic).
+ * @param timeoutMs     HTTP connect/read timeout in milliseconds.
+ * @param maxRetries    Number of additional attempts after a transient failure.
  */
 class MobileVlmPlanner(
     private val endpointUrl: String = "http://127.0.0.1:8080",
+    val modelPath: String = "",
+    private val maxTokens: Int = 512,
+    private val temperature: Double = 0.1,
     private val timeoutMs: Int = 30_000,
     private val maxRetries: Int = 1
 ) : LocalPlannerService {
@@ -46,8 +54,6 @@ class MobileVlmPlanner(
         private const val COMPLETIONS_PATH = "/v1/chat/completions"
         private const val HEALTH_PATH = "/health"
         private const val MODEL_NAME = "mobilevlm-v2-1.7b"
-        private const val MAX_TOKENS = 512
-        private const val TEMPERATURE = 0.1
 
         private const val SYSTEM_PROMPT =
             "You are a mobile GUI agent. " +
@@ -71,6 +77,24 @@ class MobileVlmPlanner(
     }
 
     override fun isModelLoaded(): Boolean = modelLoaded
+
+    /**
+     * Pre-warms the MobileVLM inference server by pinging /health and sending a minimal
+     * 1-token dry-run completion request to bring the model weights into active memory.
+     * Returns true if the server is reachable and responds to the dry-run.
+     */
+    override fun prewarm(): Boolean {
+        if (!pingEndpoint()) return false
+        return try {
+            val dryRun = buildDryRunRequestJson()
+            httpPost(dryRun)
+            modelLoaded = true
+            true
+        } catch (e: Exception) {
+            modelLoaded = pingEndpoint()
+            modelLoaded
+        }
+    }
 
     override fun plan(
         goal: String,
@@ -162,8 +186,8 @@ class MobileVlmPlanner(
         val request = JsonObject().apply {
             addProperty("model", MODEL_NAME)
             add("messages", messages)
-            addProperty("max_tokens", MAX_TOKENS)
-            addProperty("temperature", TEMPERATURE)
+            addProperty("max_tokens", maxTokens)
+            addProperty("temperature", temperature)
         }
 
         return gson.toJson(request)
@@ -262,5 +286,24 @@ class MobileVlmPlanner(
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * Builds a minimal 1-token completion request for pre-warming the inference server.
+     * The response content is discarded; only the round-trip is needed.
+     */
+    private fun buildDryRunRequestJson(): String {
+        val messages = JsonArray()
+        messages.add(JsonObject().apply {
+            addProperty("role", "user")
+            addProperty("content", "ok")
+        })
+        val request = JsonObject().apply {
+            addProperty("model", MODEL_NAME)
+            add("messages", messages)
+            addProperty("max_tokens", 1)
+            addProperty("temperature", temperature)
+        }
+        return gson.toJson(request)
     }
 }
