@@ -81,9 +81,12 @@ class ModelAssetManager(val modelsDir: File) {
          * Set to a non-empty string to enable automatic download when files are missing.
          * Leave empty to require manual installation of model files.
          */
-        const val MOBILEVLM_DOWNLOAD_URL: String = ""
-        const val SEECLICK_PARAM_DOWNLOAD_URL: String = ""
-        const val SEECLICK_BIN_DOWNLOAD_URL: String = ""
+        const val MOBILEVLM_DOWNLOAD_URL: String =
+            "https://huggingface.co/ZiangWu/MobileVLM_V2-1.7B-GGUF/resolve/main/mobilevlm-v2-1.7b.gguf"
+        const val SEECLICK_PARAM_DOWNLOAD_URL: String =
+            "https://huggingface.co/cckevinn/SeeClick/resolve/main/ncnn/seeclick.ncnn.param"
+        const val SEECLICK_BIN_DOWNLOAD_URL: String =
+            "https://huggingface.co/cckevinn/SeeClick/resolve/main/ncnn/seeclick.ncnn.bin"
     }
 
     private val registry: MutableMap<String, ModelInfo> = mutableMapOf(
