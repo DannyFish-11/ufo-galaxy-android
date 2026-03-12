@@ -167,6 +167,61 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
+ * Read-only status bar showing WebSocket connection state, offline queue depth,
+ * and current reconnect attempt count (PR14 debug UI).
+ *
+ * Only visible when [crossDeviceEnabled] is true.  Displays:
+ * - A green "● 已连接" or red "● 断开" indicator.
+ * - Queue depth when > 0: "队列: N".
+ * - Retry counter when > 0 and disconnected: "重试: N".
+ */
+@Composable
+private fun ConnectionStatusBar(
+    isConnected: Boolean,
+    crossDeviceEnabled: Boolean,
+    queueSize: Int,
+    reconnectAttempt: Int
+) {
+    if (!crossDeviceEnabled) return
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val (dot, label, tint) = if (isConnected) {
+                Triple("●", "已连接", MaterialTheme.colorScheme.primary)
+            } else {
+                Triple("●", "断开", MaterialTheme.colorScheme.error)
+            }
+            Text(
+                text = "$dot $label",
+                style = MaterialTheme.typography.labelSmall,
+                color = tint
+            )
+            if (queueSize > 0) {
+                Text(
+                    text = "队列: $queueSize",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!isConnected && reconnectAttempt > 0) {
+                Text(
+                    text = "重试: $reconnectAttempt",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
  * Non-blocking readiness status banner shown in degraded mode.
  *
  * Displays which capabilities are unavailable so the user can take corrective action
@@ -256,6 +311,14 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         overlayReady = uiState.overlayReady
                     )
                 }
+
+                // Read-only connection state + offline queue status bar (PR14).
+                ConnectionStatusBar(
+                    isConnected = uiState.isConnected,
+                    crossDeviceEnabled = uiState.crossDeviceEnabled,
+                    queueSize = uiState.queueSize,
+                    reconnectAttempt = uiState.reconnectAttempt
+                )
 
                 // 书法卷轴容器
                 ScrollPaperContainer(

@@ -157,3 +157,69 @@ wscat -c ws://localhost:8765 \
 | Toggle reconnect | | | |
 | Offline handling | | | |
 | Protocol contracts (unit tests) | | | |
+
+---
+
+## PR14 — Reconnect + Offline Queue (New Checks)
+
+### 7. Exponential Backoff Reconnect
+
+| # | Check | Pass criteria | Log tag |
+|---|-------|---------------|---------|
+| 7.1 | Reconnect uses exponential backoff | Logcat shows increasing delay: 1 s → 2 s → 4 s → 8 s … | `GalaxyWebSocket [WS:RETRY]` |
+| 7.2 | Jitter is applied | Two consecutive runs show slightly different delays | `GalaxyWebSocket [WS:RETRY]` |
+| 7.3 | Reconnect stops after 10 attempts | `Max reconnect attempts` log appears; no further attempts | `GalaxyWebSocket [WS:RETRY]` |
+| 7.4 | Toggle enable triggers immediate reconnect | After toggle ON, connect attempt logged within < 1 s | `GalaxyWebSocket [WS:CONNECT]` |
+| 7.5 | `notifyNetworkAvailable()` resets backoff | After network restored, connect attempt is immediate (not waiting full backoff) | `GalaxyWebSocket [WS:RETRY]` |
+| 7.6 | Reconnect counter resets to 0 after successful open | After reconnect succeeds, `[WS:CONNECT] resetting backoff counter` appears | `GalaxyWebSocket [WS:CONNECT]` |
+
+**Logcat command:**
+```bash
+adb logcat -s GalaxyWebSocket | grep -E "\[WS:CONNECT\]|\[WS:DISCONNECT\]|\[WS:RETRY\]"
+```
+
+---
+
+### 8. Offline Task Queue
+
+| # | Check | Pass criteria | Log tag |
+|---|-------|---------------|---------|
+| 8.1 | `task_result` queued when disconnected | `[WS:OfflineQueue] Enqueued type=task_result` in logcat when WS is down | `WS:OfflineQueue` |
+| 8.2 | `goal_result` queued when disconnected | `[WS:OfflineQueue] Enqueued type=goal_result` in logcat | `WS:OfflineQueue` |
+| 8.3 | Heartbeat NOT queued when disconnected | No `Enqueued type=heartbeat` entry | `WS:OfflineQueue` |
+| 8.4 | Queue flushed in order on reconnect | `[WS:OfflineQueue] Flushing N offline message(s)` after reconnect; server receives in order | `WS:OfflineQueue` |
+| 8.5 | Queue size shown in UI | Status bar below top bar shows "队列: N" when N > 0 and `crossDeviceEnabled=true` | UI status bar |
+| 8.6 | Queue capped at 50 entries | With > 50 messages offline, `Queue full; dropped oldest` appears; size stays ≤ 50 | `WS:OfflineQueue` |
+| 8.7 | Queue persisted across restart | Close app with queued messages; reopen; `Restored N offline messages from prefs` in logcat | `WS:OfflineQueue` |
+| 8.8 | Stale messages (> 24 h) discarded on load | Manually set old `queuedAt` in prefs; messages not loaded | `WS:OfflineQueue` |
+
+> **Persistence limitation**: Queue persistence uses `SharedPreferences` (JSON). This survives normal app restarts but will be lost if the app data is cleared or the app is uninstalled.  Process kill does *not* lose the queue because SharedPreferences is flushed asynchronously after every mutation.  Messages older than 24 hours are automatically discarded on next launch.
+
+**Logcat command:**
+```bash
+adb logcat -s WS:OfflineQueue
+```
+
+---
+
+### 9. Connection Status UI
+
+| # | Check | Pass criteria | UI path |
+|---|-------|---------------|---------|
+| 9.1 | Status bar shows "● 已连接" when connected | Green dot + label visible below top app bar | `MainActivity` status bar |
+| 9.2 | Status bar shows "● 断开" when disconnected | Red dot + label visible | `MainActivity` status bar |
+| 9.3 | "队列: N" visible when offline messages queued | Label appears with correct count | `MainActivity` status bar |
+| 9.4 | "重试: N" visible during reconnect backoff | Label shows attempt count | `MainActivity` status bar |
+| 9.5 | Status bar hidden when cross-device is OFF | No status bar when toggle is off | `MainActivity` |
+
+---
+
+### PR14 Sign-Off
+
+| Area | Reviewer | Date | Pass / Fail |
+|------|----------|------|-------------|
+| Exponential backoff + jitter | | | |
+| Offline queue enqueue/flush | | | |
+| Queue persistence | | | |
+| Connection status UI | | | |
+| Unit tests pass | | | |

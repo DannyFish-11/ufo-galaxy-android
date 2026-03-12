@@ -46,7 +46,11 @@ data class MainUiState(
     /** True when the SYSTEM_ALERT_WINDOW overlay permission is granted. */
     val overlayReady: Boolean = false,
     /** True when any readiness check has failed; autonomous execution may be limited. */
-    val degradedMode: Boolean = false
+    val degradedMode: Boolean = false,
+    /** Number of outgoing task results currently queued offline (read-only debug info). */
+    val queueSize: Int = 0,
+    /** Number of consecutive reconnect attempts since last successful connect (read-only debug info). */
+    val reconnectAttempt: Int = 0
 )
 
 /**
@@ -109,6 +113,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 overlayReady = settings.overlayReady,
                 degradedMode = settings.degradedMode
             )
+        }
+        // Observe offline queue size and reconnect attempt count from the WS client.
+        // Both flows are collected in viewModelScope, which is tied to the ViewModel's
+        // lifecycle and cancelled automatically in onCleared() — no resource leak.
+        viewModelScope.launch {
+            webSocketClient.queueSize.collect { size ->
+                _uiState.update { it.copy(queueSize = size) }
+            }
+        }
+        viewModelScope.launch {
+            webSocketClient.reconnectAttemptCount.collect { attempts ->
+                _uiState.update { it.copy(reconnectAttempt = attempts) }
+            }
         }
     }
     
