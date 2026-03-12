@@ -16,6 +16,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
+import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.protocol.TaskResultPayload
 import com.ufo.galaxy.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -99,6 +100,7 @@ class GalaxyConnectionService : Service() {
         // Pre-warming sends a lightweight health ping + optional dry-run to reduce cold start
         // latency on the first real inference call.
         serviceScope.launch {
+            ensureModels()
             prewarmServices()
             loadModels()
         }
@@ -161,6 +163,59 @@ class GalaxyConnectionService : Service() {
             device_id = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
         )
         webSocketClient.sendJson(gson.toJson(envelope))
+    }
+
+    /**
+     * Checks whether all required model files are present and, if any are missing or
+     * corrupted, enqueues their downloads via [ModelDownloader].
+     *
+     * Download URLs are configured in [com.ufo.galaxy.model.ModelAssetManager] companion
+     * object constants. When a URL is empty the download is silently skipped and the
+     * caller must install the file manually before inference is possible.
+     *
+     * This method suspends until all enqueued downloads finish. It can also be called
+     * directly from UI code to let the user trigger a re-download on demand.
+     */
+    suspend fun ensureModels() {
+        val assetManager = UFOGalaxyApplication.modelAssetManager
+        val downloader = UFOGalaxyApplication.modelDownloader
+
+        // Re-verify file system state before deciding what to download.
+        assetManager.verifyAll()
+
+        val specs = assetManager.downloadSpecsForMissing()
+        if (specs.isEmpty()) {
+            Log.d(TAG, "ensureModels: all model files present, no download needed")
+            return
+        }
+
+        Log.i(TAG, "ensureModels: downloading ${specs.size} missing/corrupted model file(s)")
+        for (spec in specs) {
+            var lastLoggedPct = -1
+            val ok = downloader.downloadSync(spec) { status ->
+                when (status) {
+                    is ModelDownloader.DownloadStatus.Progress -> {
+                        // Log at most once per 10% to avoid flooding logcat.
+                        if (status.totalBytes > 0) {
+                            val pct = (status.bytesDownloaded * 10 / status.totalBytes).toInt()
+                            if (pct != lastLoggedPct) {
+                                lastLoggedPct = pct
+                                Log.d(TAG, "Downloading ${spec.modelId}: ${pct * 10}%")
+                            }
+                        }
+                    }
+                    is ModelDownloader.DownloadStatus.Success ->
+                        Log.i(TAG, "Downloaded ${spec.modelId} → ${status.file.absolutePath}")
+                    is ModelDownloader.DownloadStatus.Failure ->
+                        Log.e(TAG, "Download failed for ${spec.modelId}: ${status.error}")
+                }
+            }
+            if (!ok) {
+                Log.e(TAG, "ensureModels: failed to download ${spec.modelId}; inference may be unavailable")
+            }
+        }
+        // Refresh status after downloads complete.
+        assetManager.verifyAll()
     }
 
     /**

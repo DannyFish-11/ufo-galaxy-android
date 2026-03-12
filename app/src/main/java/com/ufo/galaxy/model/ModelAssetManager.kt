@@ -74,175 +74,17 @@ class ModelAssetManager(val modelsDir: File) {
          */
         val MOBILEVLM_SHA256: String? = null
         val SEECLICK_SHA256: String? = null
-    }
-
-    private val registry: MutableMap<String, ModelInfo> = mutableMapOf(
-        MODEL_ID_MOBILEVLM to ModelInfo(
-            id = MODEL_ID_MOBILEVLM,
-            fileName = MOBILEVLM_FILE,
-            expectedSha256 = MOBILEVLM_SHA256
-        ),
-        MODEL_ID_SEECLICK to ModelInfo(
-            id = MODEL_ID_SEECLICK,
-            fileName = SEECLICK_PARAM_FILE,
-            expectedSha256 = SEECLICK_SHA256
-        )
-    )
-
-    /** Full absolute path to the MobileVLM GGUF weight file. */
-    val mobileVlmPath: String get() = File(modelsDir, MOBILEVLM_FILE).absolutePath
-
-    /** Full absolute path to the SeeClick NCNN param file. */
-    val seeClickParamPath: String get() = File(modelsDir, SEECLICK_PARAM_FILE).absolutePath
-
-    /** Full absolute path to the SeeClick NCNN bin file. */
-    val seeClickBinPath: String get() = File(modelsDir, SEECLICK_BIN_FILE).absolutePath
-
-    /**
-     * Checks whether [modelId] is present on disk and, if [ModelInfo.expectedSha256] is set,
-     * verifies its checksum. Updates and returns the model's [ModelStatus].
-     *
-     * @param modelId One of [MODEL_ID_MOBILEVLM] or [MODEL_ID_SEECLICK].
-     * @return Current [ModelStatus] after verification.
-     */
-    fun verifyModel(modelId: String): ModelStatus {
-        val info = registry[modelId] ?: run {
-            Log.w(TAG, "verifyModel: unknown model id '$modelId'")
-            return ModelStatus.MISSING
-        }
-        val file = File(modelsDir, info.fileName)
-        if (!file.exists()) {
-            info.status = ModelStatus.MISSING
-            Log.w(TAG, "Model '$modelId' missing: ${file.absolutePath}")
-            return ModelStatus.MISSING
-        }
-        if (info.expectedSha256 != null) {
-            val actual = sha256(file)
-            if (!actual.equals(info.expectedSha256, ignoreCase = true)) {
-                info.status = ModelStatus.CORRUPTED
-                Log.e(TAG, "Model '$modelId' checksum mismatch — expected=${info.expectedSha256} actual=$actual")
-                return ModelStatus.CORRUPTED
-            }
-        }
-        info.status = ModelStatus.READY
-        Log.i(TAG, "Model '$modelId' verified at ${file.absolutePath}")
-        return ModelStatus.READY
-    }
-
-    /**
-     * Verifies all registered models and returns a map of id → [ModelStatus].
-     */
-    fun verifyAll(): Map<String, ModelStatus> =
-        registry.keys.associateWith { verifyModel(it) }
-
-    /**
-     * Marks [modelId] as [ModelStatus.LOADED] after the inference server confirms readiness.
-     */
-    fun markLoaded(modelId: String) {
-        registry[modelId]?.let {
-            it.status = ModelStatus.LOADED
-            Log.i(TAG, "Model '$modelId' marked LOADED")
-        } ?: Log.w(TAG, "markLoaded: unknown model id '$modelId'")
-    }
-
-    /**
-     * Marks [modelId] as unloaded; reverts to [ModelStatus.READY] if the file is still present,
-     * otherwise [ModelStatus.MISSING].
-     */
-    fun markUnloaded(modelId: String) {
-        registry[modelId]?.let {
-            val file = File(modelsDir, it.fileName)
-            it.status = if (file.exists()) ModelStatus.READY else ModelStatus.MISSING
-            Log.i(TAG, "Model '$modelId' marked ${it.status}")
-        } ?: Log.w(TAG, "markUnloaded: unknown model id '$modelId'")
-    }
-
-    /**
-     * Returns the current [ModelStatus] for [modelId] without performing disk I/O.
-     * Call [verifyModel] first to get an accurate result.
-     */
-    fun getStatus(modelId: String): ModelStatus =
-        registry[modelId]?.status ?: ModelStatus.MISSING
-
-    /**
-     * Returns true when both [MODEL_ID_MOBILEVLM] and [MODEL_ID_SEECLICK] are [ModelStatus.LOADED].
-     */
-    fun areAllModelsLoaded(): Boolean =
-        getStatus(MODEL_ID_MOBILEVLM) == ModelStatus.LOADED &&
-            getStatus(MODEL_ID_SEECLICK) == ModelStatus.LOADED
-
-    /**
-     * Returns a human-readable capabilities error when models are not loaded.
-     * Returns null if all models are loaded.
-     */
-    fun readinessError(): String? {
-        if (areAllModelsLoaded()) return null
-        val missing = registry.values
-            .filter { it.status != ModelStatus.LOADED }
-            .joinToString { "'${it.id}' (${it.status})" }
-        return "Local models not ready: $missing"
-    }
-
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { stream ->
-            val buffer = ByteArray(8192)
-            var read: Int
-            while (stream.read(buffer).also { read = it } != -1) {
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-}
-
-
-    enum class ModelStatus {
-        /** Model file not present in local storage. */
-        MISSING,
-        /** Model file present but SHA-256 checksum does not match expected value. */
-        CORRUPTED,
-        /** Model file present and verified (or verification skipped). */
-        READY,
-        /** Model is currently loaded by the inference server (confirmed via loadModel). */
-        LOADED
-    }
-
-    data class ModelInfo(
-        val id: String,
-        val fileName: String,
-        val expectedSha256: String?,
-        var status: ModelStatus = ModelStatus.MISSING
-    )
-
-    companion object {
-        private const val TAG = "ModelAssetManager"
-
-        const val MODEL_ID_MOBILEVLM = "mobilevlm"
-        const val MODEL_ID_SEECLICK = "seeclick"
-
-        /** Sub-directory under [Context.getFilesDir] for all model files. */
-        const val MODELS_DIR = "models"
-
-        /** MobileVLM V2-1.7B GGUF INT4 quantised weight file. */
-        const val MOBILEVLM_FILE = "mobilevlm-v2-1.7b.Q4_K_M.gguf"
-
-        /** SeeClick NCNN model parameter file (companion to [SEECLICK_BIN_FILE]). */
-        const val SEECLICK_PARAM_FILE = "seeclick.ncnn.param"
-
-        /** SeeClick NCNN model binary weight file. */
-        const val SEECLICK_BIN_FILE = "seeclick.ncnn.bin"
+        val SEECLICK_BIN_SHA256: String? = null
 
         /**
-         * Expected SHA-256 checksums for each model file.
-         * Set to null to skip verification (useful during development).
-         * Update these constants when deploying new model weights.
+         * Remote download URLs for each model file.
+         * Set to a non-empty string to enable automatic download when files are missing.
+         * Leave empty to require manual installation of model files.
          */
-        val MOBILEVLM_SHA256: String? = null
-        val SEECLICK_SHA256: String? = null
+        const val MOBILEVLM_DOWNLOAD_URL: String = ""
+        const val SEECLICK_PARAM_DOWNLOAD_URL: String = ""
+        const val SEECLICK_BIN_DOWNLOAD_URL: String = ""
     }
-
-    private val modelsDir: File = File(context.filesDir, MODELS_DIR).also { it.mkdirs() }
 
     private val registry: MutableMap<String, ModelInfo> = mutableMapOf(
         MODEL_ID_MOBILEVLM to ModelInfo(
@@ -265,9 +107,6 @@ class ModelAssetManager(val modelsDir: File) {
 
     /** Full absolute path to the SeeClick NCNN bin file. */
     val seeClickBinPath: String get() = File(modelsDir, SEECLICK_BIN_FILE).absolutePath
-
-    /** Returns the models root directory. */
-    fun getModelsDir(): File = modelsDir
 
     /**
      * Checks whether [modelId] is present on disk and, if [ModelInfo.expectedSha256] is set,
@@ -352,6 +191,55 @@ class ModelAssetManager(val modelsDir: File) {
             .filter { it.status != ModelStatus.LOADED }
             .joinToString { "'${it.id}' (${it.status})" }
         return "Local models not ready: $missing"
+    }
+
+    /**
+     * Returns [ModelDownloader.DownloadSpec] entries for every model file that is currently
+     * [ModelStatus.MISSING] or [ModelStatus.CORRUPTED] **and** has a non-empty download URL
+     * configured in the companion object.
+     *
+     * The returned list may contain up to three entries (one GGUF + two NCNN files).
+     * If no download URLs are configured, the list is empty and no network access will occur.
+     */
+    fun downloadSpecsForMissing(): List<ModelDownloader.DownloadSpec> {
+        val specs = mutableListOf<ModelDownloader.DownloadSpec>()
+        val vlmStatus = getStatus(MODEL_ID_MOBILEVLM)
+        if (vlmStatus == ModelStatus.MISSING || vlmStatus == ModelStatus.CORRUPTED) {
+            if (MOBILEVLM_DOWNLOAD_URL.isNotEmpty()) {
+                specs.add(
+                    ModelDownloader.DownloadSpec(
+                        modelId = MODEL_ID_MOBILEVLM,
+                        url = MOBILEVLM_DOWNLOAD_URL,
+                        fileName = MOBILEVLM_FILE,
+                        expectedSha256 = MOBILEVLM_SHA256
+                    )
+                )
+            }
+        }
+        val scStatus = getStatus(MODEL_ID_SEECLICK)
+        if (scStatus == ModelStatus.MISSING || scStatus == ModelStatus.CORRUPTED) {
+            if (SEECLICK_PARAM_DOWNLOAD_URL.isNotEmpty()) {
+                specs.add(
+                    ModelDownloader.DownloadSpec(
+                        modelId = "${MODEL_ID_SEECLICK}_param",
+                        url = SEECLICK_PARAM_DOWNLOAD_URL,
+                        fileName = SEECLICK_PARAM_FILE,
+                        expectedSha256 = SEECLICK_SHA256
+                    )
+                )
+            }
+            if (SEECLICK_BIN_DOWNLOAD_URL.isNotEmpty()) {
+                specs.add(
+                    ModelDownloader.DownloadSpec(
+                        modelId = "${MODEL_ID_SEECLICK}_bin",
+                        url = SEECLICK_BIN_DOWNLOAD_URL,
+                        fileName = SEECLICK_BIN_FILE,
+                        expectedSha256 = SEECLICK_BIN_SHA256
+                    )
+                )
+            }
+        }
+        return specs
     }
 
     private fun sha256(file: File): String {

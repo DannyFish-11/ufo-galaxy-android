@@ -12,6 +12,7 @@ import com.ufo.galaxy.grounding.SeeClickGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.model.ModelAssetManager
+import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.service.AccessibilityActionExecutor
@@ -42,6 +43,10 @@ class UFOGalaxyApplication : Application() {
         
         // 本地模型资产管理器
         lateinit var modelAssetManager: ModelAssetManager
+            private set
+
+        // 模型下载器：用于在模型文件缺失或损坏时按需下载
+        lateinit var modelDownloader: ModelDownloader
             private set
 
         // 本地推理服务：MobileVLM 1.7B 规划器
@@ -84,6 +89,15 @@ class UFOGalaxyApplication : Application() {
         
         Log.i(TAG, "UFO Galaxy Application 初始化完成")
     }
+
+    override fun onTerminate() {
+        super.onTerminate()
+        // Cancel ModelDownloader coroutine scope to release resources.
+        // Note: onTerminate() is not guaranteed to be called on real devices,
+        // but is called in tests/emulators. Process termination cleans up anyway.
+        modelDownloader.cancel()
+        Log.i(TAG, "UFO Galaxy Application 终止")
+    }
     
     /**
      * 初始化配置
@@ -109,6 +123,7 @@ class UFOGalaxyApplication : Application() {
      */
     private fun initModelAssetManager() {
         modelAssetManager = ModelAssetManager(this)
+        modelDownloader = ModelDownloader(modelAssetManager.modelsDir)
         val statuses = modelAssetManager.verifyAll()
         Log.d(TAG, "模型文件状态: $statuses")
     }
