@@ -12,7 +12,10 @@ enum class MsgType(val value: String) {
     DEVICE_REGISTER("device_register"),
     CAPABILITY_REPORT("capability_report"),
     HEARTBEAT("heartbeat"),
-    HEARTBEAT_ACK("heartbeat_ack")
+    HEARTBEAT_ACK("heartbeat_ack"),
+    GOAL_EXECUTION("goal_execution"),
+    PARALLEL_SUBTASK("parallel_subtask"),
+    GOAL_RESULT("goal_result")
 }
 
 /**
@@ -157,4 +160,56 @@ data class CommandResultPayload(
     val status: String,
     val error: String? = null,
     val snapshot: Snapshot? = null
+)
+
+/**
+ * Downlink payload for a high-level autonomous goal or parallel subtask.
+ * Sent by the gateway when the device has [autonomous_goal_execution] capability.
+ *
+ * For [MsgType.GOAL_EXECUTION] and [MsgType.PARALLEL_SUBTASK].
+ *
+ * @param task_id       Unique task identifier.
+ * @param goal          Natural-language objective for the local agent.
+ * @param constraints   Optional natural-language constraints.
+ * @param max_steps     Maximum action steps the local agent may attempt (default 10).
+ * @param group_id      Parallel-group identifier; non-null for parallel_subtask.
+ * @param subtask_index Zero-based index of this subtask within the group.
+ */
+data class GoalExecutionPayload(
+    val task_id: String,
+    val goal: String,
+    val constraints: List<String> = emptyList(),
+    val max_steps: Int = 10,
+    val group_id: String? = null,
+    val subtask_index: Int? = null
+)
+
+/**
+ * Uplink result for [MsgType.GOAL_EXECUTION] and [MsgType.PARALLEL_SUBTASK].
+ * Includes all fields required for parallel-group convergence on the server side.
+ *
+ * @param task_id        Echoed from [GoalExecutionPayload].
+ * @param correlation_id Set to [task_id] for reply routing.
+ * @param status         Final status ("success" | "error" | "cancelled").
+ * @param result         Human-readable success summary.
+ * @param details        Additional details or error description.
+ * @param group_id       Echoed from [GoalExecutionPayload.group_id].
+ * @param subtask_index  Echoed from [GoalExecutionPayload.subtask_index].
+ * @param latency_ms     Wall-clock execution time in milliseconds.
+ * @param device_id      Reporting device identifier.
+ * @param steps          Step-level results accumulated during execution.
+ * @param error          Human-readable error when status is "error".
+ */
+data class GoalResultPayload(
+    val task_id: String,
+    val correlation_id: String? = null,
+    val status: String,
+    val result: String? = null,
+    val details: String? = null,
+    val group_id: String? = null,
+    val subtask_index: Int? = null,
+    val latency_ms: Long = 0L,
+    val device_id: String = "",
+    val steps: List<StepResult> = emptyList(),
+    val error: String? = null
 )

@@ -74,12 +74,25 @@ data class AIPMessage(
 /**
  * AIP v3.0 能力上报载荷
  * 用于 Loop 3（自动扩展）：服务端依据此信息推断能力差距
+ *
+ * @param platform           Device platform identifier (e.g., "android").
+ * @param device_id          Unique device identifier.
+ * @param supported_actions  Low-level action capabilities (e.g., "screen_capture", "app_control").
+ * @param version            Protocol version; always "3.0".
+ * @param capabilities       High-level autonomous capability names (e.g.,
+ *                           "autonomous_goal_execution", "local_task_planning").
+ *                           Empty list when not applicable.
+ * @param metadata           Key-value metadata flags reported to the gateway, e.g.:
+ *                           goal_execution_enabled, local_model_enabled,
+ *                           cross_device_enabled, parallel_execution_enabled, device_role.
  */
 data class CapabilityReport(
     val platform: String,
     val device_id: String,
     val supported_actions: List<String>,
-    val version: String = "3.0"
+    val version: String = "3.0",
+    val capabilities: List<String> = emptyList(),
+    val metadata: Map<String, Any> = emptyMap()
 )
 
 /**

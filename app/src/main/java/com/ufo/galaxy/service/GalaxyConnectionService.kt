@@ -14,6 +14,8 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.GoalExecutionPayload
+import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.model.ModelDownloader
@@ -43,6 +45,11 @@ class GalaxyConnectionService : Service() {
     private lateinit var webSocketClient: GalaxyWebSocketClient
     private val gson = Gson()
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /** Stable device identifier used in all outbound AIP v3 message envelopes. */
+    private val localDeviceId: String by lazy {
+        "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+    }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
@@ -81,6 +88,20 @@ class GalaxyConnectionService : Service() {
                 Log.i(TAG, "收到 task_assign: task_id=$taskId")
                 serviceScope.launch {
                     handleTaskAssign(taskId, taskAssignPayloadJson)
+                }
+            }
+
+            override fun onGoalExecution(taskId: String, goalPayloadJson: String) {
+                Log.i(TAG, "收到 goal_execution: task_id=$taskId")
+                serviceScope.launch {
+                    handleGoalExecution(taskId, goalPayloadJson)
+                }
+            }
+
+            override fun onParallelSubtask(taskId: String, subtaskPayloadJson: String) {
+                Log.i(TAG, "收到 parallel_subtask: task_id=$taskId")
+                serviceScope.launch {
+                    handleParallelSubtask(taskId, subtaskPayloadJson)
                 }
             }
         }
@@ -140,10 +161,88 @@ class GalaxyConnectionService : Service() {
             type = MsgType.TASK_RESULT,
             payload = result,
             correlation_id = taskId,
-            device_id = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+            device_id = localDeviceId
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} sent=$sent")
+    }
+
+    /**
+     * Handles a [MsgType.GOAL_EXECUTION] message by delegating to [LocalGoalExecutor]
+     * and sending the structured [GoalResultPayload] back to the gateway.
+     *
+     * Runs on [serviceScope] (IO dispatcher); all exceptions inside [LocalGoalExecutor]
+     * are already mapped to ERROR status.
+     */
+    private fun handleGoalExecution(taskId: String, payloadJson: String) {
+        val payload = try {
+            gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
+        } catch (e: Exception) {
+            Log.e(TAG, "goal_execution payload 解析失败: ${e.message}", e)
+            sendGoalError(taskId, null, null, "bad_payload: ${e.message}")
+            return
+        }
+
+        val result = UFOGalaxyApplication.localGoalExecutor.executeGoal(payload)
+        sendGoalResult(result)
+        Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${result.status} latency=${result.latency_ms}ms")
+    }
+
+    /**
+     * Handles a [MsgType.PARALLEL_SUBTASK] message by delegating to
+     * [LocalCollaborationAgent] and sending the structured [GoalResultPayload] back.
+     *
+     * Runs on [serviceScope] (IO dispatcher); all exceptions inside [LocalGoalExecutor]
+     * are already mapped to ERROR status.
+     */
+    private fun handleParallelSubtask(taskId: String, payloadJson: String) {
+        val payload = try {
+            gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
+        } catch (e: Exception) {
+            Log.e(TAG, "parallel_subtask payload 解析失败: ${e.message}", e)
+            sendGoalError(taskId, null, null, "bad_payload: ${e.message}")
+            return
+        }
+
+        val result = UFOGalaxyApplication.localCollaborationAgent.handleParallelSubtask(payload)
+        sendGoalResult(result)
+        Log.i(
+            TAG,
+            "goal_result (parallel) 已回传 task_id=$taskId status=${result.status} " +
+                "group_id=${result.group_id} subtask_index=${result.subtask_index} " +
+                "latency=${result.latency_ms}ms"
+        )
+    }
+
+    /** Sends a [GoalResultPayload] wrapped in an AIP v3 envelope. */
+    private fun sendGoalResult(result: GoalResultPayload) {
+        val envelope = AipMessage(
+            type = MsgType.GOAL_RESULT,
+            payload = result,
+            correlation_id = result.task_id,
+            device_id = result.device_id.ifEmpty { localDeviceId }
+        )
+        webSocketClient.sendJson(gson.toJson(envelope))
+    }
+
+    /** Sends an error [GoalResultPayload] when payload parsing fails. */
+    private fun sendGoalError(
+        taskId: String,
+        groupId: String?,
+        subtaskIndex: Int?,
+        errorMsg: String
+    ) {
+        val errorResult = GoalResultPayload(
+            task_id = taskId,
+            correlation_id = taskId,
+            status = com.ufo.galaxy.agent.EdgeExecutor.STATUS_ERROR,
+            error = errorMsg,
+            group_id = groupId,
+            subtask_index = subtaskIndex,
+            latency_ms = 0L,
+            device_id = localDeviceId
+        )
+        sendGoalResult(errorResult)
     }
 
     /**
@@ -160,7 +259,7 @@ class GalaxyConnectionService : Service() {
             type = MsgType.TASK_RESULT,
             payload = errorResult,
             correlation_id = taskId,
-            device_id = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+            device_id = localDeviceId
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -247,12 +346,33 @@ class GalaxyConnectionService : Service() {
         if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
         else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
 
-        // Only advertise capabilities when all models are loaded.
-        val capabilities = mutableListOf<String>()
-        if (plannerLoaded) capabilities.add("local_planning")
-        if (groundingLoaded) capabilities.add("local_grounding")
-        webSocketClient.setModelCapabilities(capabilities)
-        Log.i(TAG, "已更新模型能力: $capabilities")
+        // Only advertise low-level capabilities when all models are loaded.
+        val lowLevelCaps = mutableListOf<String>()
+        if (plannerLoaded) lowLevelCaps.add("local_planning")
+        if (groundingLoaded) lowLevelCaps.add("local_grounding")
+        webSocketClient.setModelCapabilities(lowLevelCaps)
+
+        // Update high-level capability flags based on model readiness.
+        val localModelEnabled = plannerLoaded && groundingLoaded
+        webSocketClient.setHighLevelCapabilities(
+            listOf(
+                "autonomous_goal_execution",
+                "local_task_planning",
+                "local_ui_reasoning",
+                "cross_device_coordination",
+                "local_model_inference"
+            )
+        )
+        webSocketClient.setDeviceMetadata(
+            mapOf(
+                "goal_execution_enabled" to true,
+                "local_model_enabled" to localModelEnabled,
+                "cross_device_enabled" to webSocketClient.crossDeviceEnabled,
+                "parallel_execution_enabled" to true,
+                "device_role" to "phone"
+            )
+        )
+        Log.i(TAG, "已更新模型能力: lowLevel=$lowLevelCaps localModelEnabled=$localModelEnabled")
     }
 
     /**
