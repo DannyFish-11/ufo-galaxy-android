@@ -6,12 +6,25 @@ package com.ufo.galaxy.data
 
 /**
  * 应用配置
+ *
+ * Performance / resource fields:
+ *  @param plannerMaxTokens   Maximum tokens the MobileVLM planner may generate per call.
+ *  @param plannerTemperature Sampling temperature for MobileVLM (lower = more deterministic).
+ *  @param plannerTimeoutMs   HTTP connect+read timeout for MobileVLM inference calls (ms).
+ *  @param groundingTimeoutMs HTTP connect+read timeout for SeeClick grounding calls (ms).
+ *  @param scaledMaxEdge      Longest edge (px) for screenshot downscaling before grounding.
+ *                            0 = disabled (pass full-resolution image to grounding engine).
  */
 data class AppConfig(
     val serverUrl: String,
     val apiVersion: String,
     val isDebug: Boolean,
-    val crossDeviceEnabled: Boolean = true
+    val crossDeviceEnabled: Boolean = true,
+    val plannerMaxTokens: Int = 512,
+    val plannerTemperature: Double = 0.1,
+    val plannerTimeoutMs: Int = 30_000,
+    val groundingTimeoutMs: Int = 15_000,
+    val scaledMaxEdge: Int = 720
 )
 
 /**

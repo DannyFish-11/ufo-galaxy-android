@@ -31,6 +31,15 @@ interface LocalGroundingService {
         val error: String? = null
     )
 
+    /**
+     * Pre-warms the inference server by performing a health ping and optionally
+     * sending a minimal dry-run request to bring the model into active memory.
+     * Returns true if the server is reachable after pre-warming.
+     *
+     * The default implementation delegates to [loadModel].
+     */
+    fun prewarm(): Boolean = loadModel()
+
     /** Loads the SeeClick model weights into device memory. Returns true on success. */
     fun loadModel(): Boolean
 

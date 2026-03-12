@@ -11,10 +11,12 @@ import com.ufo.galaxy.data.AppConfig
 import com.ufo.galaxy.grounding.SeeClickGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
+import com.ufo.galaxy.service.AndroidBitmapScaler
 
 /**
  * UFO Galaxy Android Application
@@ -38,6 +40,10 @@ class UFOGalaxyApplication : Application() {
         lateinit var webSocketClient: GalaxyWebSocketClient
             private set
         
+        // 本地模型资产管理器
+        lateinit var modelAssetManager: ModelAssetManager
+            private set
+
         // 本地推理服务：MobileVLM 1.7B 规划器
         lateinit var plannerService: LocalPlannerService
             private set
@@ -64,6 +70,9 @@ class UFOGalaxyApplication : Application() {
         // 初始化配置
         initConfig()
         
+        // 初始化模型资产管理器
+        initModelAssetManager()
+        
         // 创建通知渠道
         createNotificationChannels()
         
@@ -84,9 +93,24 @@ class UFOGalaxyApplication : Application() {
             serverUrl = BuildConfig.GALAXY_SERVER_URL,
             apiVersion = BuildConfig.API_VERSION,
             isDebug = BuildConfig.DEBUG,
-            crossDeviceEnabled = BuildConfig.CROSS_DEVICE_ENABLED
+            crossDeviceEnabled = BuildConfig.CROSS_DEVICE_ENABLED,
+            plannerMaxTokens = BuildConfig.PLANNER_MAX_TOKENS,
+            plannerTemperature = BuildConfig.PLANNER_TEMPERATURE,
+            plannerTimeoutMs = BuildConfig.PLANNER_TIMEOUT_MS,
+            groundingTimeoutMs = BuildConfig.GROUNDING_TIMEOUT_MS,
+            scaledMaxEdge = BuildConfig.SCALED_MAX_EDGE
         )
         Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl} crossDevice=${appConfig.crossDeviceEnabled}")
+    }
+
+    /**
+     * 初始化本地模型资产管理器并在应用启动时预检模型文件。
+     * Actual model loading (inference server ping) is deferred to GalaxyConnectionService.
+     */
+    private fun initModelAssetManager() {
+        modelAssetManager = ModelAssetManager(this)
+        val statuses = modelAssetManager.verifyAll()
+        Log.d(TAG, "模型文件状态: $statuses")
     }
     
     /**
@@ -148,16 +172,29 @@ class UFOGalaxyApplication : Application() {
 
     /**
      * 初始化本地推理服务和 EdgeExecutor
-     * 模型加载由 GalaxyConnectionService 在服务启动时触发。
+     * Model loading (server ping / prewarm) is performed by GalaxyConnectionService on start.
+     * Model file paths from ModelAssetManager are passed to each engine so that the
+     * inference server can locate the weight files on first launch.
      */
     private fun initInferenceServices() {
-        plannerService = MobileVlmPlanner()
-        groundingService = SeeClickGroundingEngine()
+        plannerService = MobileVlmPlanner(
+            modelPath = modelAssetManager.mobileVlmPath,
+            maxTokens = appConfig.plannerMaxTokens,
+            temperature = appConfig.plannerTemperature,
+            timeoutMs = appConfig.plannerTimeoutMs
+        )
+        groundingService = SeeClickGroundingEngine(
+            modelParamPath = modelAssetManager.seeClickParamPath,
+            modelBinPath = modelAssetManager.seeClickBinPath,
+            timeoutMs = appConfig.groundingTimeoutMs
+        )
         edgeExecutor = EdgeExecutor(
             screenshotProvider = AccessibilityScreenshotProvider(),
             plannerService = plannerService,
             groundingService = groundingService,
-            accessibilityExecutor = AccessibilityActionExecutor()
+            accessibilityExecutor = AccessibilityActionExecutor(),
+            imageScaler = AndroidBitmapScaler(),
+            scaledMaxEdge = appConfig.scaledMaxEdge
         )
         Log.d(TAG, "推理服务已初始化")
     }

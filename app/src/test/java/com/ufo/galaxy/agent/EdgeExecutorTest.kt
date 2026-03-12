@@ -62,11 +62,11 @@ class EdgeExecutorTest {
         )
     }
 
-    /** Planner that always returns an error result. */
+    /** Planner that always returns an error result (but reports as loaded). */
     private class FailingPlanner(private val errorMsg: String = "planner error") : LocalPlannerService {
-        override fun loadModel(): Boolean = false
+        override fun loadModel(): Boolean = true
         override fun unloadModel() {}
-        override fun isModelLoaded(): Boolean = false
+        override fun isModelLoaded(): Boolean = true
         override fun plan(
             goal: String,
             constraints: List<String>,
@@ -109,11 +109,11 @@ class EdgeExecutorTest {
         )
     }
 
-    /** Grounder that always returns an error result. */
+    /** Grounder that always returns an error result (but reports as loaded). */
     private class FailingGrounder(private val errorMsg: String = "grounding error") : LocalGroundingService {
-        override fun loadModel(): Boolean = false
+        override fun loadModel(): Boolean = true
         override fun unloadModel() {}
-        override fun isModelLoaded(): Boolean = false
+        override fun isModelLoaded(): Boolean = true
         override fun ground(
             intent: String,
             screenshotBase64: String,
@@ -464,5 +464,115 @@ class EdgeExecutorTest {
         override fun isModelLoaded() = false
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
             LocalGroundingService.GroundingResult(0, 0, 0f, "", "noop")
+    }
+
+    // ── Model readiness gating ────────────────────────────────────────────────
+
+    @Test
+    fun `planner not loaded returns error with model not ready message`() {
+        val unloadedPlanner = object : LocalPlannerService {
+            override fun loadModel() = false
+            override fun unloadModel() {}
+            override fun isModelLoaded() = false
+            override fun plan(goal: String, constraints: List<String>, screenshotBase64: String?) =
+                LocalPlannerService.PlanResult(emptyList(), "should not be called")
+            override fun replan(
+                goal: String, constraints: List<String>,
+                failedStep: LocalPlannerService.PlanStep, error: String, screenshotBase64: String?
+            ) = LocalPlannerService.PlanResult(emptyList(), "should not be called")
+        }
+        val edge = EdgeExecutor(
+            screenshotProvider = FakeScreenshotProvider(),
+            plannerService = unloadedPlanner,
+            groundingService = FakeGrounder(),
+            accessibilityExecutor = FakeAccessibilityExecutor()
+        )
+
+        val result = edge.handleTaskAssign(buildTaskAssign())
+
+        assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
+        assertNotNull(result.error)
+        assertTrue("Error must mention planner not loaded",
+            result.error!!.contains("MobileVLM planner is not loaded"))
+    }
+
+    @Test
+    fun `grounding not loaded returns error with model not ready message`() {
+        val unloadedGrounder = object : LocalGroundingService {
+            override fun loadModel() = false
+            override fun unloadModel() {}
+            override fun isModelLoaded() = false
+            override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
+                LocalGroundingService.GroundingResult(0, 0, 0f, "", "should not be called")
+        }
+        val edge = EdgeExecutor(
+            screenshotProvider = FakeScreenshotProvider(),
+            plannerService = SingleStepPlanner(),
+            groundingService = unloadedGrounder,
+            accessibilityExecutor = FakeAccessibilityExecutor()
+        )
+
+        val result = edge.handleTaskAssign(buildTaskAssign())
+
+        assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
+        assertNotNull(result.error)
+        assertTrue("Error must mention grounding engine not loaded",
+            result.error!!.contains("SeeClick grounding engine is not loaded"))
+    }
+
+    // ── Coordinate remapping via ImageScaler ──────────────────────────────────
+
+    @Test
+    fun `coordinates from grounding are remapped to full resolution via image scaler`() {
+        // Grounding returns (270, 480) in a 540x960 scaled frame.
+        // Full screen is 1080x1920 → scale factor 2× → expected full-res (540, 960).
+        val scaler = object : ImageScaler {
+            override fun scaleToMaxEdge(
+                jpegBytes: ByteArray, fullWidth: Int, fullHeight: Int, maxEdge: Int
+            ) = ImageScaler.ScaledResult(
+                scaledJpegBase64 = java.util.Base64.getEncoder().encodeToString(jpegBytes),
+                scaledWidth = 540,
+                scaledHeight = 960
+            )
+        }
+        val grounder = FakeGrounder(x = 270, y = 480)
+        val fakeAccessibility = FakeAccessibilityExecutor()
+
+        val edge = EdgeExecutor(
+            screenshotProvider = FakeScreenshotProvider(width = 1080, height = 1920),
+            plannerService = SingleStepPlanner(actionType = "tap"),
+            groundingService = grounder,
+            accessibilityExecutor = fakeAccessibility,
+            imageScaler = scaler,
+            scaledMaxEdge = 960
+        )
+
+        edge.handleTaskAssign(buildTaskAssign())
+
+        val action = fakeAccessibility.lastAction
+        assertNotNull(action)
+        assertTrue(action is AccessibilityExecutor.AccessibilityAction.Tap)
+        val tap = action as AccessibilityExecutor.AccessibilityAction.Tap
+        assertEquals("Full-res x should be 540 (270 × 1080/540)", 540, tap.x)
+        assertEquals("Full-res y should be 960 (480 × 1920/960)", 960, tap.y)
+    }
+
+    @Test
+    fun `noop scaler preserves original coordinates`() {
+        val fakeAccessibility = FakeAccessibilityExecutor()
+        val edge = EdgeExecutor(
+            screenshotProvider = FakeScreenshotProvider(width = 1080, height = 2340),
+            plannerService = SingleStepPlanner(actionType = "tap"),
+            groundingService = FakeGrounder(x = 300, y = 700),
+            accessibilityExecutor = fakeAccessibility,
+            imageScaler = NoOpImageScaler(),
+            scaledMaxEdge = 720
+        )
+
+        edge.handleTaskAssign(buildTaskAssign())
+
+        val tap = fakeAccessibility.lastAction as AccessibilityExecutor.AccessibilityAction.Tap
+        assertEquals("NoOpScaler should preserve x", 300, tap.x)
+        assertEquals("NoOpScaler should preserve y", 700, tap.y)
     }
 }

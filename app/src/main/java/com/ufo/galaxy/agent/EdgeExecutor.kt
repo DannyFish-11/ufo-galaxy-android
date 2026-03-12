@@ -20,8 +20,13 @@ import java.util.Base64
  *  - All screen coordinates are generated on-device in the grounding stage.
  *    The gateway never supplies x/y values.
  *  - [require_local_agent] == false immediately returns CANCELLED.
+ *  - Model readiness is checked before execution; a structured ERROR is returned
+ *    when [plannerService] or [groundingService] is not loaded (model gating).
  *  - [max_steps] from [TaskAssignPayload] caps the step budget at all times,
  *    including after replanning.
+ *  - Screenshots are optionally downscaled by [imageScaler] before passing to the
+ *    grounding engine; returned coordinates are remapped to full-resolution before
+ *    dispatching to [AccessibilityExecutor]. Snapshots always use full-resolution.
  *  - All exceptional conditions are mapped to ERROR results; this method never throws.
  *  - [correlation_id] in [TaskResultPayload] is always set to [TaskAssignPayload.task_id].
  *
@@ -29,12 +34,17 @@ import java.util.Base64
  * @param plannerService        MobileVLM 1.7B local planner (llama.cpp / MLC-LLM).
  * @param groundingService      SeeClick local grounding engine (NCNN / MNN).
  * @param accessibilityExecutor Executes resolved actions via Android AccessibilityService.
+ * @param imageScaler           Optional scaler for grounding input; defaults to [NoOpImageScaler].
+ * @param scaledMaxEdge         Maximum longest edge (px) for grounding input image.
+ *                              0 = disabled (full-resolution passed to grounding engine).
  */
 class EdgeExecutor(
     private val screenshotProvider: ScreenshotProvider,
     private val plannerService: LocalPlannerService,
     private val groundingService: LocalGroundingService,
-    private val accessibilityExecutor: AccessibilityExecutor
+    private val accessibilityExecutor: AccessibilityExecutor,
+    private val imageScaler: ImageScaler = NoOpImageScaler(),
+    private val scaledMaxEdge: Int = 720
 ) {
 
     /**
@@ -65,6 +75,10 @@ class EdgeExecutor(
      * Handles a [TaskAssignPayload] by executing the full local pipeline and
      * returning a [TaskResultPayload]. Never throws; all errors map to ERROR status.
      *
+     * Model readiness is checked before any work is started: if [plannerService] or
+     * [groundingService] reports [isModelLoaded] == false, an ERROR result is returned
+     * immediately with a clear explanation so the caller can surface the issue.
+     *
      * [TaskResultPayload.correlation_id] is always set to [taskAssign.task_id].
      */
     fun handleTaskAssign(taskAssign: TaskAssignPayload): TaskResultPayload {
@@ -76,18 +90,39 @@ class EdgeExecutor(
             )
         }
 
+        // Model readiness gating: fail fast with a structured error if models are not loaded.
+        if (!plannerService.isModelLoaded()) {
+            return buildResult(
+                taskId = taskAssign.task_id,
+                status = STATUS_ERROR,
+                error = "Model not ready: MobileVLM planner is not loaded. " +
+                    "Ensure the inference server is running and loadModel() succeeded."
+            )
+        }
+        if (!groundingService.isModelLoaded()) {
+            return buildResult(
+                taskId = taskAssign.task_id,
+                status = STATUS_ERROR,
+                error = "Model not ready: SeeClick grounding engine is not loaded. " +
+                    "Ensure the inference server is running and loadModel() succeeded."
+            )
+        }
+
         val accumulatedSteps = mutableListOf<StepResult>()
 
-        // Capture initial screenshot for planning context
-        val initial = captureScreenshot()
+        // Capture initial screenshot for planning context.
+        // Full-resolution bytes are used for planning (and stored as snapshot);
+        // the grounding step will downscale separately per step.
+        val initialCapture = captureScreenshot()
             ?: return buildResult(
                 taskId = taskAssign.task_id,
                 status = STATUS_ERROR,
                 error = "Screenshot capture failed before planning"
             )
-        val (initialBase64, initW, initH) = initial
+        val (initialFullBytes, initW, initH) = initialCapture
+        val initialBase64 = Base64.getEncoder().encodeToString(initialFullBytes)
 
-        // Initial planning
+        // Initial planning uses the full-resolution screenshot for best context.
         val planResult = plannerService.plan(
             goal = taskAssign.goal,
             constraints = taskAssign.constraints,
@@ -117,9 +152,10 @@ class EdgeExecutor(
             val step = planSteps[stepIndex]
             val stepId = (stepsConsumed + 1).toString()
 
-            // Capture screenshot for this step
-            val screenshotTriple = captureScreenshot()
-            if (screenshotTriple == null) {
+            // Capture full-resolution screenshot for this step.
+            // Snapshot always stores the full-resolution image.
+            val stepCapture = captureScreenshot()
+            if (stepCapture == null) {
                 accumulatedSteps.add(
                     StepResult(step_id = stepId, action = step.action_type, success = false,
                         error = "Screenshot capture failed")
@@ -132,49 +168,67 @@ class EdgeExecutor(
                     snapshot = makeSnapshot(lastSnapshotBase64, lastW, lastH)
                 )
             }
-            val (screenshotBase64, screenW, screenH) = screenshotTriple
-            lastSnapshotBase64 = screenshotBase64
+            val (fullJpegBytes, screenW, screenH) = stepCapture
+            val fullBase64 = Base64.getEncoder().encodeToString(fullJpegBytes)
+            lastSnapshotBase64 = fullBase64
             lastW = screenW
             lastH = screenH
 
-            // Grounding: intent + screenshot → on-device coordinates
+            // Downscale the screenshot for the grounding engine to reduce latency / memory.
+            // Coordinates returned by the grounding engine are in the scaled coordinate space
+            // and must be remapped to full-resolution before dispatch to AccessibilityService.
+            val scaledForGrounding = imageScaler.scaleToMaxEdge(
+                jpegBytes = fullJpegBytes,
+                fullWidth = screenW,
+                fullHeight = screenH,
+                maxEdge = scaledMaxEdge
+            )
+
+            // Grounding: intent + (scaled) screenshot → on-device coordinates in scaled space
             val grounding = groundingService.ground(
                 intent = step.intent,
-                screenshotBase64 = screenshotBase64,
-                width = screenW,
-                height = screenH
+                screenshotBase64 = scaledForGrounding.scaledJpegBase64,
+                width = scaledForGrounding.scaledWidth,
+                height = scaledForGrounding.scaledHeight
             )
             if (grounding.error != null) {
                 accumulatedSteps.add(
                     StepResult(step_id = stepId, action = step.action_type, success = false,
                         error = grounding.error,
-                        snapshot = makeSnapshot(screenshotBase64, screenW, screenH))
+                        snapshot = makeSnapshot(fullBase64, screenW, screenH))
                 )
                 return buildResult(
                     taskId = taskAssign.task_id,
                     status = STATUS_ERROR,
                     error = "Grounding failed at step $stepId: ${grounding.error}",
                     steps = accumulatedSteps,
-                    snapshot = makeSnapshot(screenshotBase64, screenW, screenH)
+                    snapshot = makeSnapshot(fullBase64, screenW, screenH)
                 )
             }
 
-            // Execute accessibility action
+            // Remap grounding coordinates from scaled space back to full-resolution.
+            // This ensures AccessibilityService receives pixel-accurate coordinates
+            // regardless of what resolution was passed to the grounding engine.
+            val fullResX = remapCoord(grounding.x, scaledForGrounding.scaledWidth, screenW)
+            val fullResY = remapCoord(grounding.y, scaledForGrounding.scaledHeight, screenH)
+            val remappedGrounding = grounding.copy(x = fullResX, y = fullResY)
+
+            // Execute accessibility action with full-resolution coordinates
             val actionSuccess = try {
-                val action = resolveAction(step, grounding)
+                val action = resolveAction(step, remappedGrounding)
                 accessibilityExecutor.execute(action)
             } catch (e: Exception) {
                 accumulatedSteps.add(
                     StepResult(step_id = stepId, action = step.action_type, success = false,
                         error = "Execution error: ${e.message}",
-                        snapshot = makeSnapshot(screenshotBase64, screenW, screenH))
+                        snapshot = makeSnapshot(fullBase64, screenW, screenH))
                 )
                 return buildResult(
                     taskId = taskAssign.task_id,
                     status = STATUS_ERROR,
                     error = "Execution failed at step $stepId: ${e.message}",
                     steps = accumulatedSteps,
-                    snapshot = makeSnapshot(screenshotBase64, screenW, screenH)
+                    snapshot = makeSnapshot(fullBase64, screenW, screenH)
                 )
             }
 
@@ -183,19 +237,19 @@ class EdgeExecutor(
                     step_id = stepId,
                     action = step.action_type,
                     success = actionSuccess,
-                    snapshot = makeSnapshot(screenshotBase64, screenW, screenH)
+                    snapshot = makeSnapshot(fullBase64, screenW, screenH)
                 )
             )
             stepsConsumed++
 
             if (!actionSuccess) {
-                // Replan on action failure
+                // Replan on action failure; use full-resolution screenshot for context.
                 val replanResult = plannerService.replan(
                     goal = taskAssign.goal,
                     constraints = taskAssign.constraints,
                     failedStep = step,
                     error = "action returned false",
-                    screenshotBase64 = screenshotBase64
+                    screenshotBase64 = fullBase64
                 )
                 if (replanResult.error != null || replanResult.steps.isEmpty()) {
                     return buildResult(
@@ -203,7 +257,7 @@ class EdgeExecutor(
                         status = STATUS_ERROR,
                         error = "Replan failed at step $stepId: ${replanResult.error ?: "no steps produced"}",
                         steps = accumulatedSteps,
-                        snapshot = makeSnapshot(screenshotBase64, screenW, screenH)
+                        snapshot = makeSnapshot(fullBase64, screenW, screenH)
                     )
                 }
                 planSteps = replanResult.steps
@@ -244,14 +298,22 @@ class EdgeExecutor(
         snapshot = makeSnapshot(snapshotBase64, screenWidth, screenHeight)
     )
 
-    private fun captureScreenshot(): Triple<String, Int, Int>? {
+    private fun captureScreenshot(): Triple<ByteArray, Int, Int>? {
         return try {
             val jpegBytes = screenshotProvider.captureJpeg()
-            val base64 = Base64.getEncoder().encodeToString(jpegBytes)
-            Triple(base64, screenshotProvider.screenWidth(), screenshotProvider.screenHeight())
+            Triple(jpegBytes, screenshotProvider.screenWidth(), screenshotProvider.screenHeight())
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Remaps a coordinate from scaled-image space to full-resolution space.
+     * Returns [coordInScaled] unchanged if [scaledDim] is zero (no valid scale available).
+     */
+    private fun remapCoord(coordInScaled: Int, scaledDim: Int, fullDim: Int): Int {
+        if (scaledDim <= 0 || fullDim <= 0) return coordInScaled
+        return Math.round(coordInScaled.toFloat() * fullDim.toFloat() / scaledDim.toFloat())
     }
 
     private fun resolveAction(

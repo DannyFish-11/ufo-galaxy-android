@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets
  *
  * Model:   njucckevin/SeeClick (HuggingFace)
  * Runtime: NCNN (ARM NEON/Vulkan) or MNN
+ * Model file paths exposed via [modelParamPath] / [modelBinPath] for the server to locate.
  *
  * Request format (POST /ground):
  * ```json
@@ -31,11 +32,15 @@ import java.nio.charset.StandardCharsets
  *
  * Coordinates are produced exclusively on-device; the gateway never supplies x/y values.
  *
- * @param endpointUrl Local inference server URL.
- * @param timeoutMs   HTTP connect/read timeout in milliseconds.
+ * @param endpointUrl    Local inference server URL.
+ * @param modelParamPath Absolute path to the NCNN param file (empty = server locates itself).
+ * @param modelBinPath   Absolute path to the NCNN bin file (empty = server locates itself).
+ * @param timeoutMs      HTTP connect/read timeout in milliseconds.
  */
 class SeeClickGroundingEngine(
     private val endpointUrl: String = "http://127.0.0.1:8081",
+    val modelParamPath: String = "",
+    val modelBinPath: String = "",
     private val timeoutMs: Int = 15_000
 ) : LocalGroundingService {
 
@@ -57,6 +62,15 @@ class SeeClickGroundingEngine(
     }
 
     override fun isModelLoaded(): Boolean = modelLoaded
+
+    /**
+     * Pre-warms the SeeClick inference server by pinging /health to verify reachability.
+     * Returns true if the server is available.
+     */
+    override fun prewarm(): Boolean {
+        modelLoaded = pingEndpoint()
+        return modelLoaded
+    }
 
     override fun ground(
         intent: String,

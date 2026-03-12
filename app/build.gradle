@@ -25,6 +25,11 @@ android {
         buildConfigField "String", "GALAXY_SERVER_URL", '"ws://192.168.1.100:8765"'
         buildConfigField "String", "API_VERSION", '"v2.0"'
         buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "true"
+        buildConfigField "int", "PLANNER_MAX_TOKENS", "512"
+        buildConfigField "double", "PLANNER_TEMPERATURE", "0.1"
+        buildConfigField "int", "PLANNER_TIMEOUT_MS", "30000"
+        buildConfigField "int", "GROUNDING_TIMEOUT_MS", "15000"
+        buildConfigField "int", "SCALED_MAX_EDGE", "720"
     }
 
     buildTypes {
