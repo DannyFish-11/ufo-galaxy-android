@@ -602,3 +602,62 @@ http://服务器IP:8080/router
 - **质量优先**: 选择最好的模型
 - **平衡模式**: 综合考虑
 
+
+
+---
+
+## 📋 Android 能力就绪检查 (PR7)
+
+### 概述
+
+应用启动时和自主执行前会自动执行三项能力就绪检查：
+
+| 检查项 | 说明 | 降级影响 |
+|--------|------|----------|
+| **本地模型就绪** | MobileVLM 和 SeeClick 模型文件存在且完整 | 本地推理不可用，降级为纯网络模式 |
+| **无障碍服务** | HardwareKeyListener 无障碍服务已启用 | 无法捕获截图和执行 UI 操作 |
+| **悬浮窗权限** | 已授予 SYSTEM_ALERT_WINDOW 权限 | 灵动岛悬浮窗不显示 |
+
+### 降级模式 UI
+
+任何检查未通过时，主界面顶部会显示橙色状态横幅（非阻断式），列出具体未就绪项。
+所有功能仍可使用，横幅仅作提示。
+
+### 手动验证步骤
+
+**1. 本地模型检查**
+- 在不含模型文件的设备上启动 → 横幅显示"本地模型未就绪"
+- 复制/下载模型文件后重启 → 横幅消失
+
+**2. 无障碍服务检查**
+- 在 设置 → 无障碍 中禁用 UFO Galaxy → 横幅显示"无障碍服务未启用"
+- 重新启用后回到前台 (onResume) → 横幅消失
+
+**3. 悬浮窗权限检查**
+- 在 设置 → 悬浮窗 中撤销权限 → 横幅显示"悬浮窗权限未授予"
+- FloatingWindowService / EnhancedFloatingService 不崩溃，发送通知引导授权
+- 点击通知跳转到悬浮窗权限设置页面
+- 授权后回到前台 → 横幅消失
+
+**4. Capability Report 元数据**
+- 开启跨设备模式，在 WebSocket 消息中检查 `capability_report`
+- 必须包含 `model_ready`、`accessibility_ready`、`overlay_ready` 字段
+
+**5. 前台服务保活**
+- 后台运行 GalaxyConnectionService → 系统杀死进程 → 服务通过 `START_STICKY` 自动重启
+- BootReceiver 在设备重启后自动拉起 GalaxyConnectionService
+
+### 能力报告示例
+
+```json
+{
+  "goal_execution_enabled": true,
+  "local_model_enabled": true,
+  "cross_device_enabled": true,
+  "parallel_execution_enabled": false,
+  "device_role": "phone",
+  "model_ready": true,
+  "accessibility_ready": true,
+  "overlay_ready": true
+}
+```

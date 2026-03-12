@@ -38,7 +38,15 @@ data class MainUiState(
     val isListening: Boolean = false,
     val partialSpeechResult: String = "",
     /** Mirrors [AppSettings.crossDeviceEnabled]; drives the settings toggle in the UI. */
-    val crossDeviceEnabled: Boolean = false
+    val crossDeviceEnabled: Boolean = false,
+    /** True when local model files are present and verified. */
+    val modelReady: Boolean = false,
+    /** True when the HardwareKeyListener accessibility service is enabled. */
+    val accessibilityReady: Boolean = false,
+    /** True when the SYSTEM_ALERT_WINDOW overlay permission is granted. */
+    val overlayReady: Boolean = false,
+    /** True when any readiness check has failed; autonomous execution may be limited. */
+    val degradedMode: Boolean = false
 )
 
 /**
@@ -91,8 +99,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setupWebSocketListener()
         setupSpeechListener()
         addWelcomeMessage()
-        // Restore persisted cross-device setting into UI state.
-        _uiState.update { it.copy(crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled) }
+        // Restore persisted cross-device setting and readiness state into UI state.
+        val settings = UFOGalaxyApplication.appSettings
+        _uiState.update {
+            it.copy(
+                crossDeviceEnabled = settings.crossDeviceEnabled,
+                modelReady = settings.modelReady,
+                accessibilityReady = settings.accessibilityReady,
+                overlayReady = settings.overlayReady,
+                degradedMode = settings.degradedMode
+            )
+        }
     }
     
     /**
@@ -325,6 +342,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
+     * Refreshes readiness flags from [AppSettings] into [MainUiState].
+     *
+     * Should be called after a permission grant, accessibility service state change,
+     * or after [UFOGalaxyApplication.refreshReadiness] has run.
+     */
+    fun refreshReadiness() {
+        val settings = UFOGalaxyApplication.appSettings
+        _uiState.update {
+            it.copy(
+                modelReady = settings.modelReady,
+                accessibilityReady = settings.accessibilityReady,
+                overlayReady = settings.overlayReady,
+                degradedMode = settings.degradedMode
+            )
+        }
+    }
+
+    /**
      * 切换卷轴展开状态
      */
     fun toggleScroll() {
@@ -389,6 +424,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             webSocketClient.connect()
         }
+        // Refresh readiness flags — overlay/accessibility state may have changed while
+        // the app was in the background (e.g. user visited settings to grant permissions).
+        refreshReadiness()
     }
     
     /**
