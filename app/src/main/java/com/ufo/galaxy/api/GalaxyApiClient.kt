@@ -163,12 +163,18 @@ class GalaxyApiClient(
     }
     
     /**
-     * 发送聊天消息
+     * 发送聊天消息 — 统一走 /api/v1/chat (MultiLLMRouter)，fallback 到 /api/llm/chat
+     *
+     * @param message  用户消息
+     * @param model    模型名称，"auto" 表示由 MultiLLMRouter 自动选择
+     * @param provider 指定 Provider（可选），如 "openai"/"anthropic"/"deepseek"/"groq"/"ollama"/"oneapi"
+     * @param taskType 任务类型提示（可选），帮助路由器选择最优模型
      */
     suspend fun sendChatMessage(
         message: String,
         model: String = "auto",
-        provider: String? = null
+        provider: String? = null,
+        taskType: String? = null
     ): Result<ChatResponse> = withContext(Dispatchers.IO) {
         try {
             val json = JSONObject().apply {
@@ -180,22 +186,43 @@ class GalaxyApiClient(
                 })
                 put("model", model)
                 provider?.let { put("provider", it) }
+                taskType?.let { put("task_type", it) }
             }
-            
+
             val requestBody = json.toString()
                 .toRequestBody("application/json".toMediaType())
-            
-            val request = Request.Builder()
-                .url("$baseUrl/api/llm/chat")
+
+            // 首选: /api/v1/chat (MultiLLMRouter)
+            val v1Request = Request.Builder()
+                .url("$baseUrl/api/v1/chat")
                 .post(requestBody)
                 .apply {
                     apiKey?.let { addHeader("Authorization", "Bearer $it") }
                 }
                 .build()
-            
-            val response = httpClient.newCall(request).execute()
+
+            val v1Response = httpClient.newCall(v1Request).execute()
+
+            val response = if (v1Response.isSuccessful) {
+                v1Response
+            } else if (v1Response.code == 404) {
+                // Fallback: /api/llm/chat (旧路径)
+                val legacyRequestBody = json.toString()
+                    .toRequestBody("application/json".toMediaType())
+                val legacyRequest = Request.Builder()
+                    .url("$baseUrl/api/llm/chat")
+                    .post(legacyRequestBody)
+                    .apply {
+                        apiKey?.let { addHeader("Authorization", "Bearer $it") }
+                    }
+                    .build()
+                httpClient.newCall(legacyRequest).execute()
+            } else {
+                v1Response
+            }
+
             val responseBody = response.body?.string() ?: ""
-            
+
             if (response.isSuccessful) {
                 val responseJson = JSONObject(responseBody)
                 val choices = responseJson.getJSONArray("choices")
@@ -203,14 +230,41 @@ class GalaxyApiClient(
                 val messageObj = firstChoice.getJSONObject("message")
                 val content = messageObj.getString("content")
                 val usedProvider = responseJson.optString("provider", "unknown")
-                
+                val usedModel = responseJson.optString("model", model)
+
                 Result.success(ChatResponse(
                     content = content,
                     provider = usedProvider,
-                    model = model
+                    model = usedModel
                 ))
             } else {
                 Result.failure(Exception("API 调用失败: ${response.code} - $responseBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 获取 LLM 路由器统计信息 — 从服务端 MultiLLMRouter 获取
+     */
+    suspend fun getLLMStats(): Result<JSONObject> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/llm/stats")
+                .get()
+                .apply {
+                    apiKey?.let { addHeader("Authorization", "Bearer $it") }
+                }
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: "{}"
+
+            if (response.isSuccessful) {
+                Result.success(JSONObject(responseBody))
+            } else {
+                Result.failure(Exception("Stats unavailable: ${response.code}"))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -476,4 +530,24 @@ data class HealthStatus(
     val version: String,
     val uptime: Long,
     val providers: Map<String, String>
+)
+
+/**
+ * 多模型路由统计
+ */
+data class LLMRouterStats(
+    val providers: Map<String, ProviderStatus>,
+    val totalRequests: Long,
+    val taskTypeDistribution: Map<String, Long>
+)
+
+/**
+ * Provider 状态
+ */
+data class ProviderStatus(
+    val name: String,
+    val status: String,
+    val circuitState: String,
+    val avgLatencyMs: Long,
+    val errorCount: Long
 )

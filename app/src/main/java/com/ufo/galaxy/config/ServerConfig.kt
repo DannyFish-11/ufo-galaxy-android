@@ -54,6 +54,20 @@ object ServerConfig {
     /** Legacy REST devices prefix – used as a fallback when v1 returns 404. */
     const val REST_LEGACY_PREFIX = "/api/devices"
 
+    // ── 统一 LLM 路由端点 (MultiLLMRouter) ──
+
+    /** Unified chat endpoint — routes through MultiLLMRouter to optimal Provider/OneAPI. */
+    const val LLM_CHAT_V1 = "/api/v1/chat"
+
+    /** Legacy chat endpoint — fallback when v1 is unavailable. */
+    const val LLM_CHAT_LEGACY = "/api/llm/chat"
+
+    /** LLM router stats — provider status, latency, circuit breaker states. */
+    const val LLM_STATS = "/api/v1/llm/stats"
+
+    /** Health endpoint — includes provider availability map. */
+    const val HEALTH = "/health"
+
     /**
      * WebSocket path for the WebRTC signaling proxy.
      * `{id}` is replaced with the device identifier at runtime.
