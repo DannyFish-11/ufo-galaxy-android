@@ -7,6 +7,8 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.LocalCollaborationAgent
+import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.data.AppConfig
 import com.ufo.galaxy.grounding.SeeClickGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
@@ -59,6 +61,14 @@ class UFOGalaxyApplication : Application() {
 
         // EdgeExecutor（本地 AIP v3 任务执行编排器）
         lateinit var edgeExecutor: EdgeExecutor
+            private set
+
+        // LocalGoalExecutor: handles goal_execution and parallel_subtask locally
+        lateinit var localGoalExecutor: LocalGoalExecutor
+            private set
+
+        // LocalCollaborationAgent: coordinates parallel_subtask via LocalGoalExecutor
+        lateinit var localCollaborationAgent: LocalCollaborationAgent
             private set
         
         // 全局配置
@@ -186,6 +196,30 @@ class UFOGalaxyApplication : Application() {
     }
 
     /**
+     * Toggles the cross-device collaboration switch at runtime.
+     *
+     * When [enabled] is false:
+     *  - [GalaxyWebSocketClient.crossDeviceEnabled] is set to false.
+     *  - Any active WS connection is disconnected.
+     *  - No further registration or capability_report messages will be sent.
+     *
+     * When [enabled] is true:
+     *  - [GalaxyWebSocketClient.crossDeviceEnabled] is set to true.
+     *  - The caller should start (or restart) [GalaxyConnectionService] to
+     *    establish the connection and send the initial capability_report.
+     *
+     * Thread-safe: delegates to [GalaxyWebSocketClient.setCrossDeviceEnabled] which is
+     * annotated with [@Volatile].
+     */
+    fun setCrossDeviceEnabled(enabled: Boolean) {
+        Log.i(TAG, "setCrossDeviceEnabled $enabled")
+        webSocketClient.setCrossDeviceEnabled(enabled)
+        if (!enabled && webSocketClient.isConnected()) {
+            webSocketClient.disconnect()
+        }
+    }
+
+    /**
      * 初始化本地推理服务和 EdgeExecutor
      * Model loading (server ping / prewarm) is performed by GalaxyConnectionService on start.
      * Model file paths from ModelAssetManager are passed to each engine so that the
@@ -211,6 +245,12 @@ class UFOGalaxyApplication : Application() {
             imageScaler = AndroidBitmapScaler(),
             scaledMaxEdge = appConfig.scaledMaxEdge
         )
+        val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        localGoalExecutor = LocalGoalExecutor(
+            edgeExecutor = edgeExecutor,
+            deviceId = deviceId
+        )
+        localCollaborationAgent = LocalCollaborationAgent(goalExecutor = localGoalExecutor)
         Log.d(TAG, "推理服务已初始化")
     }
     

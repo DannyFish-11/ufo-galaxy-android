@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
  */
 class GalaxyWebSocketClient(
     private val serverUrl: String,
-    val crossDeviceEnabled: Boolean = true
+    crossDeviceEnabled: Boolean = true
 ) {
     companion object {
         private const val TAG = "GalaxyWebSocket"
@@ -52,6 +52,28 @@ class GalaxyWebSocketClient(
          * with existing [Listener] implementations.
          */
         fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION] message is received.
+         *
+         * [taskId] is the task_id from the payload.
+         * [goalPayloadJson] is the raw JSON of the payload, ready for deserialization
+         * into [com.ufo.galaxy.protocol.GoalExecutionPayload].
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onGoalExecution(taskId: String, goalPayloadJson: String) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK] message is received.
+         *
+         * [taskId] is the task_id from the payload.
+         * [subtaskPayloadJson] is the raw JSON of the payload, ready for deserialization
+         * into [com.ufo.galaxy.protocol.GoalExecutionPayload].
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onParallelSubtask(taskId: String, subtaskPayloadJson: String) = Unit
     }
     
     private val client = OkHttpClient.Builder()
@@ -70,10 +92,56 @@ class GalaxyWebSocketClient(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     /**
+     * Runtime cross-device collaboration switch.
+     *
+     * When set to [false] the client operates in local-only mode: any subsequent
+     * [connect] call is a no-op and no registration/capability_report messages are
+     * emitted. Changing this to [true] will enable connections; call [connect] to
+     * actually establish the WebSocket.
+     *
+     * NOTE: Toggling while already connected does NOT disconnect; call [disconnect]
+     * first if a live connection should be torn down.
+     */
+    @Volatile
+    var crossDeviceEnabled: Boolean = crossDeviceEnabled
+        private set
+
+    /**
+     * Updates [crossDeviceEnabled] at runtime.
+     *
+     * When toggled to false while connected, the connection stays alive until the
+     * caller explicitly calls [disconnect]. When toggled to true the caller should
+     * call [connect] to initiate the connection.
+     */
+    fun setCrossDeviceEnabled(enabled: Boolean) {
+        if (crossDeviceEnabled == enabled) return
+        crossDeviceEnabled = enabled
+        Log.i(TAG, "crossDeviceEnabled changed to $enabled")
+    }
+
+    /**
      * Additional action capabilities reported when models are loaded.
      * Update via [setModelCapabilities] when planner/grounding services become ready.
      */
     private var modelCapabilities: List<String> = emptyList()
+
+    /**
+     * High-level autonomous capability names included in the capability_report.
+     * Updated via [setHighLevelCapabilities] when the device role is determined.
+     */
+    private var highLevelCapabilities: List<String> = emptyList()
+
+    /**
+     * Device metadata flags included in the capability_report.
+     * Updated via [setDeviceMetadata].
+     */
+    private var deviceMetadata: Map<String, Any> = mapOf(
+        "goal_execution_enabled" to false,
+        "local_model_enabled" to false,
+        "cross_device_enabled" to crossDeviceEnabled,
+        "parallel_execution_enabled" to false,
+        "device_role" to "phone"
+    )
     
     /**
      * 设置监听器（向后兼容；清除已有监听器后添加新的）
@@ -109,6 +177,28 @@ class GalaxyWebSocketClient(
      */
     fun setModelCapabilities(capabilities: List<String>) {
         modelCapabilities = capabilities
+    }
+
+    /**
+     * Updates the high-level autonomous capabilities advertised in the capability_report.
+     *
+     * @param capabilities High-level capability names, e.g.:
+     *   "autonomous_goal_execution", "local_task_planning", "local_ui_reasoning",
+     *   "cross_device_coordination", "local_model_inference".
+     */
+    fun setHighLevelCapabilities(capabilities: List<String>) {
+        highLevelCapabilities = capabilities
+    }
+
+    /**
+     * Updates the device metadata reported in the capability_report.
+     *
+     * Expected keys: goal_execution_enabled, local_model_enabled, cross_device_enabled,
+     * parallel_execution_enabled, device_role.
+     * Unrecognised keys are forwarded as-is to the gateway.
+     */
+    fun setDeviceMetadata(metadata: Map<String, Any>) {
+        deviceMetadata = metadata
     }
     
     /**
@@ -239,7 +329,8 @@ class GalaxyWebSocketClient(
     /**
      * 发送 AIP v3.0 能力上报（握手消息）
      * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距。
-     * [modelCapabilities] are merged in to reflect current model/permission readiness.
+     * [modelCapabilities] and [highLevelCapabilities] are merged in to reflect current
+     * model/permission readiness. [deviceMetadata] is included for autonomous capability flags.
      */
     private fun sendHandshake() {
         val deviceId = getDeviceId()
@@ -255,7 +346,19 @@ class GalaxyWebSocketClient(
             platform = "android",
             device_id = deviceId,
             supported_actions = allActions,
-            version = "3.0"
+            version = "3.0",
+            capabilities = highLevelCapabilities.ifEmpty {
+                listOf(
+                    "autonomous_goal_execution",
+                    "local_task_planning",
+                    "local_ui_reasoning",
+                    "cross_device_coordination",
+                    "local_model_inference"
+                )
+            },
+            metadata = deviceMetadata.toMutableMap().also { m ->
+                m["cross_device_enabled"] = crossDeviceEnabled
+            }
         )
 
         val handshake = JsonObject().apply {
@@ -264,6 +367,8 @@ class GalaxyWebSocketClient(
             addProperty("platform", report.platform)
             addProperty("device_id", report.device_id)
             add("supported_actions", gson.toJsonTree(report.supported_actions))
+            add("capabilities", gson.toJsonTree(report.capabilities))
+            add("metadata", gson.toJsonTree(report.metadata))
         }
 
         webSocket?.send(gson.toJson(handshake))
@@ -323,6 +428,20 @@ class GalaxyWebSocketClient(
                     val payloadJson = payloadObj?.toString() ?: "{}"
                     Log.i(TAG, "收到 task_assign task_id=$taskId")
                     listeners.forEach { it.onTaskAssign(taskId, payloadJson) }
+                }
+                "goal_execution" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    Log.i(TAG, "收到 goal_execution task_id=$taskId")
+                    listeners.forEach { it.onGoalExecution(taskId, payloadJson) }
+                }
+                "parallel_subtask" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    Log.i(TAG, "收到 parallel_subtask task_id=$taskId")
+                    listeners.forEach { it.onParallelSubtask(taskId, payloadJson) }
                 }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")
