@@ -106,6 +106,17 @@ class GalaxyWebSocketClient(
          * Default implementation is a no-op for backward compatibility.
          */
         fun onParallelSubtask(taskId: String, subtaskPayloadJson: String) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.TASK_CANCEL] message is received.
+         *
+         * [taskId] is the task_id from the cancel payload.
+         * [cancelPayloadJson] is the raw JSON of the payload, ready for deserialization
+         * into [com.ufo.galaxy.protocol.TaskCancelPayload].
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onTaskCancel(taskId: String, cancelPayloadJson: String) = Unit
     }
     
     private val client = OkHttpClient.Builder()
@@ -531,6 +542,13 @@ class GalaxyWebSocketClient(
                     val payloadJson = payloadObj?.toString() ?: "{}"
                     Log.i(TAG, "收到 parallel_subtask task_id=$taskId")
                     listeners.forEach { it.onParallelSubtask(taskId, payloadJson) }
+                }
+                "task_cancel" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    Log.i(TAG, "收到 task_cancel task_id=$taskId")
+                    listeners.forEach { it.onTaskCancel(taskId, payloadJson) }
                 }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")

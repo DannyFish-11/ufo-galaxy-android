@@ -41,6 +41,12 @@ class AutonomousExecutionPipeline(
          * the gateway can differentiate "device refused" from "device tried and failed".
          */
         const val STATUS_DISABLED = "disabled"
+
+        /**
+         * Status value returned when a task exceeds its configured timeout budget.
+         * Mirrors [EdgeExecutor.STATUS_TIMEOUT] for consistent server-side handling.
+         */
+        const val STATUS_TIMEOUT = EdgeExecutor.STATUS_TIMEOUT
     }
 
     /**

@@ -20,16 +20,18 @@ import kotlin.concurrent.withLock
  *
  * ## Stable log tags
  *
- * | Tag                  | Meaning                                                     |
- * |----------------------|-------------------------------------------------------------|
- * | `GALAXY:CONNECT`     | WebSocket connection established                            |
- * | `GALAXY:DISCONNECT`  | WebSocket disconnected (with reason / close code)           |
- * | `GALAXY:RECONNECT`   | Reconnect attempt scheduled or in progress                  |
- * | `GALAXY:TASK:RECV`   | `task_assign` or `goal_execution` message received          |
- * | `GALAXY:TASK:EXEC`   | Task execution started by EdgeExecutor                      |
- * | `GALAXY:TASK:RETURN` | Task result returned (status + task_id)                     |
- * | `GALAXY:READINESS`   | Readiness self-check completed                              |
- * | `GALAXY:DEGRADED`    | Device entered or exited degraded mode                      |
+ * | Tag                    | Meaning                                                     |
+ * |------------------------|-------------------------------------------------------------|
+ * | `GALAXY:CONNECT`       | WebSocket connection established                            |
+ * | `GALAXY:DISCONNECT`    | WebSocket disconnected (with reason / close code)           |
+ * | `GALAXY:RECONNECT`     | Reconnect attempt scheduled or in progress                  |
+ * | `GALAXY:TASK:RECV`     | `task_assign` or `goal_execution` message received          |
+ * | `GALAXY:TASK:EXEC`     | Task execution started by EdgeExecutor                      |
+ * | `GALAXY:TASK:RETURN`   | Task result returned (status + task_id)                     |
+ * | `GALAXY:READINESS`     | Readiness self-check completed                              |
+ * | `GALAXY:DEGRADED`      | Device entered or exited degraded mode                      |
+ * | `GALAXY:TASK:TIMEOUT`  | Running task exceeded configured timeout budget             |
+ * | `GALAXY:TASK:CANCEL`   | task_cancel instruction received and processed              |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -57,6 +59,10 @@ object GalaxyLogger {
     const val TAG_TASK_RETURN = "GALAXY:TASK:RETURN"
     const val TAG_READINESS  = "GALAXY:READINESS"
     const val TAG_DEGRADED   = "GALAXY:DEGRADED"
+    /** Fired when a running task exceeds its configured timeout budget. */
+    const val TAG_TASK_TIMEOUT = "GALAXY:TASK:TIMEOUT"
+    /** Fired when a task_cancel instruction is received and processed. */
+    const val TAG_TASK_CANCEL  = "GALAXY:TASK:CANCEL"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
