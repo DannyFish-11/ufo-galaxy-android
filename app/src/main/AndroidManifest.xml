@@ -78,6 +78,24 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- 增强版悬浮窗服务（跨设备开关 + 输入 + 状态）-->
+        <service
+            android:name=".service.EnhancedFloatingService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- 语音识别后台服务 -->
+        <service
+            android:name=".service.VoiceRecognitionService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- 灵动岛 Activity（最小实现，防止 Manifest 注册缺类崩溃） -->
+        <activity
+            android:name=".ui.FloatingIslandActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UFO3Galaxy" />
     </application>
 
 </manifest>

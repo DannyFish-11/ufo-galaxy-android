@@ -1,13 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  悬浮窗布局（floating_widget）
+  被 client.FloatingWindowService 使用；包含语音、展开/收起、文本输入和发送等控件。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
-    android:layout_height="wrap_content">
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#CC000000"
+    android:padding="8dp">
 
-    <ImageView
-        android:id="@+id/mic_button"
-        android:layout_width="60dp"
-        android:layout_height="60dp"
-        android:src="@android:drawable/ic_btn_speak_now"
-        android:contentDescription="@string/mic_button_desc" />
+    <!-- 折叠状态行：麦克风 + 展开按钮 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-</RelativeLayout>
+        <ImageView
+            android:id="@+id/mic_button"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@android:drawable/ic_btn_speak_now"
+            android:contentDescription="@string/mic_button_desc" />
+
+        <ImageView
+            android:id="@+id/expand_button"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@android:drawable/arrow_down_float"
+            android:contentDescription="@string/expand_button_desc"
+            android:layout_marginStart="4dp" />
+
+    </LinearLayout>
+
+    <!-- 展开后显示的输入区域 -->
+    <LinearLayout
+        android:id="@+id/text_input_layout"
+        android:layout_width="240dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="gone"
+        android:layout_marginTop="6dp">
+
+        <EditText
+            android:id="@+id/text_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/input_hint"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#888888"
+            android:background="@android:drawable/edit_text"
+            android:imeOptions="actionSend"
+            android:inputType="text" />
+
+        <ImageView
+            android:id="@+id/send_button"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_send"
+            android:contentDescription="@string/send_button_desc"
+            android:layout_marginStart="4dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

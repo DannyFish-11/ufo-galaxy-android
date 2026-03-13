@@ -47,6 +47,8 @@ class NaturalLanguageInputManager(private val context: Context) {
     private val inputHistory = mutableListOf<InputRecord>()
     
     // 输入回调
+    // ⚠️ 重要：此回调由调用方（MainActivity 或 EnhancedFloatingService）设置，
+    // 回调处理器必须通过 MessageRouter 路由，而不是直接发送消息。
     var onInputReceived: ((String) -> Unit)? = null
     
     /**
