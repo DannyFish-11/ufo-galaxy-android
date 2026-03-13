@@ -15,7 +15,7 @@ package com.ufo.galaxy.config
 object ServerConfig {
 
     /** Default WebSocket base URL (no trailing slash). Override via config.properties. */
-    const val DEFAULT_BASE_URL = "ws://100.123.215.126:8050"
+    const val DEFAULT_BASE_URL = "ws://100.123.215.126:8765"
 
     /**
      * Default STUN server URL used for ICE candidate gathering in the WebRTC
@@ -123,8 +123,8 @@ object ServerConfig {
     /**
      * Build the WebRTC signaling WebSocket URL for [baseUrl] and [deviceId].
      *
-     * Example: `buildWebRtcWsUrl("ws://host:8050", "abc123")`
-     * → `"ws://host:8050/ws/webrtc/abc123"`
+     * Example: `buildWebRtcWsUrl("ws://host:8765", "abc123")`
+     * → `"ws://host:8765/ws/webrtc/abc123"`
      */
     fun buildWebRtcWsUrl(baseUrl: String, deviceId: String): String =
         "$baseUrl${WEBRTC_WS_PATH.replace("{id}", deviceId)}"
@@ -133,8 +133,8 @@ object ServerConfig {
      * Build the REST URL used to discover the active WebRTC signaling endpoint
      * from the gateway.
      *
-     * Example: `buildWebRtcEndpointUrl("http://host:8050")`
-     * → `"http://host:8050/api/v1/webrtc/endpoint"`
+     * Example: `buildWebRtcEndpointUrl("http://host:8765")`
+     * → `"http://host:8765/api/v1/webrtc/endpoint"`
      */
     fun buildWebRtcEndpointUrl(httpBase: String): String =
         "$httpBase$WEBRTC_ENDPOINT_REST_PATH"

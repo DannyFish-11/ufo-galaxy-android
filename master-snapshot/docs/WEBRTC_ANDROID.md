@@ -120,7 +120,7 @@ Use `ServerConfig.buildWebRtcEndpointUrl(httpBase)` to construct this URL.
 
 **Response JSON** (when available):
 ```json
-{ "ws_url": "ws://host:8050/ws/webrtc/android_abc123" }
+{ "ws_url": "ws://host:8765/ws/webrtc/android_abc123" }
 ```
 
 `WebRTCManager` queries this endpoint on `startScreenSharing()` and falls back to the default path when the endpoint is unreachable or returns a non-2xx response.
@@ -162,14 +162,15 @@ All messages are JSON objects with a `type` field:
 
 | Key | Location | Description |
 |-----|----------|-------------|
-| `DEFAULT_BASE_URL` | `ServerConfig` | Default WS base, e.g. `ws://100.123.215.126:8050` |
+| `DEFAULT_BASE_URL` | `ServerConfig` | Default WS base, e.g. `ws://100.123.215.126:8765` |
 | `DEFAULT_STUN_URL` | `ServerConfig` | Default STUN server, e.g. `stun:stun.l.google.com:19302` |
 | `WEBRTC_WS_PATH` | `ServerConfig` | `/ws/webrtc/{id}` – signaling WS path template |
 | `WEBRTC_ENDPOINT_REST_PATH` | `ServerConfig` | `/api/v1/webrtc/endpoint` – discovery REST path |
 
 Override `DEFAULT_BASE_URL` via `app/src/main/assets/config.properties`:
 ```properties
-gateway.base_url=ws://your-gateway-host:8050
+# WS, REST and WebRTC all run on the same port (8765) in the same Galaxy Gateway process.
+galaxy.gateway.url=ws://your-gateway-host:8765
 ```
 
 ---
@@ -186,7 +187,7 @@ Start a WebRTC streaming session.
 ```json
 {
   "result_code": 42,
-  "gateway_url": "ws://host:8050",
+  "gateway_url": "ws://host:8765",
   "device_id": "android_abc123"
 }
 ```

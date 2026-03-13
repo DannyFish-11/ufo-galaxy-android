@@ -26,30 +26,42 @@ if [ -z "$DEVICE_ID" ]; then
     echo "[提示] 使用默认设备 ID: $DEVICE_ID"
 fi
 
-# 构建完整的 WebSocket URL
-WS_URL="ws://${WINDOWS_IP}:8050/ws/ufo3/${DEVICE_ID}"
+# 端口统一为 8765（WS、REST 与 WebRTC 同一 Galaxy Gateway 进程同端口）
+PORT=8765
+WS_URL="ws://${WINDOWS_IP}:${PORT}"
+HTTP_URL="http://${WINDOWS_IP}:${PORT}"
 
 echo ""
 echo "配置信息:"
 echo "  Windows IP: $WINDOWS_IP"
 echo "  设备 ID: $DEVICE_ID"
-echo "  WebSocket URL: $WS_URL"
+echo "  Gateway URL: $WS_URL  (WS/REST/WebRTC 同端口)"
 echo ""
 echo "按任意键继续，或 Ctrl+C 取消..."
 read -n 1 -s
 
-# 备份原始文件
-AIPCLIENT_FILE="app/src/main/java/com/ufo/galaxy/client/AIPClient.kt"
-if [ ! -f "${AIPCLIENT_FILE}.backup" ]; then
-    cp "$AIPCLIENT_FILE" "${AIPCLIENT_FILE}.backup"
+# 配置文件路径（标准方式，无需修改 Kotlin 源码）
+CONFIG_FILE="app/src/main/assets/config.properties"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "[错误] 未找到 $CONFIG_FILE"
+    exit 1
+fi
+
+# 备份原始配置文件
+if [ ! -f "${CONFIG_FILE}.backup" ]; then
+    cp "$CONFIG_FILE" "${CONFIG_FILE}.backup"
     echo "[✓] 已备份原始配置文件"
 fi
 
 # 修改配置
 echo "[1/3] 正在修改配置..."
-sed -i.tmp "s|private val NODE50_URL = .*|private val NODE50_URL = \"$WS_URL\"|g" "$AIPCLIENT_FILE"
-rm -f "${AIPCLIENT_FILE}.tmp"
-echo "[✓] 配置已更新"
+sed -i.tmp "s|galaxy\.gateway\.url=.*|galaxy.gateway.url=$WS_URL|g" "$CONFIG_FILE"
+sed -i.tmp "s|rest\.base\.url=.*|rest.base.url=$HTTP_URL|g" "$CONFIG_FILE"
+# 若存在 agent.id 为空则写入设备 ID
+sed -i.tmp "s|^agent\.id=$|agent.id=$DEVICE_ID|g" "$CONFIG_FILE"
+rm -f "${CONFIG_FILE}.tmp"
+echo "[✓] 配置已更新 (端口 $PORT)"
 
 # 清理旧的构建
 echo ""
@@ -91,6 +103,6 @@ echo "是否恢复原始配置文件? (y/n)"
 read -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    mv "${AIPCLIENT_FILE}.backup" "$AIPCLIENT_FILE"
+    mv "${CONFIG_FILE}.backup" "$CONFIG_FILE"
     echo "[✓] 已恢复原始配置"
 fi
