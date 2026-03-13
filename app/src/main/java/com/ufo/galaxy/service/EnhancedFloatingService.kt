@@ -27,8 +27,8 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.Switch
 import android.widget.TextView
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.NotificationCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
@@ -74,8 +74,7 @@ class EnhancedFloatingService : Service() {
     private var sendButton: ImageButton? = null
     private var voiceButton: ImageButton? = null
     private var loadingIndicator: ProgressBar? = null
-    @Suppress("DEPRECATION")
-    private var crossDeviceSwitch: Switch? = null
+    private var crossDeviceSwitch: SwitchCompat? = null
     
     // 布局参数
     private val layoutParams: WindowManager.LayoutParams by lazy {
@@ -267,8 +266,7 @@ class EnhancedFloatingService : Service() {
                 ))
 
                 // 跨设备开关
-                @Suppress("DEPRECATION")
-                crossDeviceSwitch = Switch(context).apply {
+                crossDeviceSwitch = SwitchCompat(context).apply {
                     text = "跨设备"
                     setTextColor(0xFFFFFFFF.toInt())
                     isChecked = UFOGalaxyApplication.appSettings.crossDeviceEnabled
