@@ -58,9 +58,9 @@ class FloatingWindowService : Service() {
             val composeView = ComposeView(context).apply {
                 setContent {
                     GeekThemePremium {
+                        // DynamicIslandPremium 不接受 onVoiceInput / onTextInput 参数；
+                        // 语音和文本输入逻辑通过广播与 MainActivity 通信（handleVoiceInput/handleTextInput）。
                         DynamicIslandPremium(
-                            onVoiceInput = { handleVoiceInput() },
-                            onTextInput = { text -> handleTextInput(text) },
                             onClose = { stopSelf() }
                         )
                     }
