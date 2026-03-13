@@ -26,7 +26,7 @@ class LegacyEntryActivity : AppCompatActivity() {
         AppConfig.loadConfig(this)
         val configUrl = AppConfig.getString("galaxy.gateway.url", "").trimEnd('/')
         val gatewayUrl = if (configUrl.isNotEmpty()) "$configUrl/ws/agent"
-                         else "ws://192.168.1.100:8000/ws/agent"
+                         else "ws://192.168.1.100:8765/ws/agent"
         
         galaxyAgent.initialize(gatewayUrl)
         galaxyAgent.start()

@@ -15,7 +15,7 @@ This document describes the **complete integration** between the Android client
 | Path template | `/ws/android/{device_id}` |
 | `ServerConfig` constant | `ServerConfig.ANDROID_BRIDGE_WS_PATH` |
 | `WS_PATHS` index | **0** (highest priority) |
-| Port | `8050` (default, override via `config.properties`) |
+| Port | `8765` (default, override via `config.properties`) |
 
 The AndroidBridge exposes each device on a **per-device WebSocket endpoint**.
 The `{device_id}` segment must be the same ID sent in the `device_register`
@@ -24,7 +24,7 @@ message payload.
 ### Connection Procedure
 
 ```
-1. Client opens WS to  ws://<host>:8050/ws/android/<device_id>
+1. Client opens WS to  ws://<host>:8765/ws/android/<device_id>
 2. On open → send  device_register  message
 3. On open → send  capability_report  message  (immediately after registration)
 4. On open → start heartbeat loop (every 30 s)
@@ -230,10 +230,11 @@ User → /api/v1/chat (NL input)
 
 ```properties
 # WebSocket base (host + port only, no path)
-gateway.base_url=ws://100.x.x.x:8050
+# WS, REST and WebRTC all run in the same Galaxy Gateway process on port 8765.
+galaxy.gateway.url=ws://100.x.x.x:8765
 
-# HTTP base for REST endpoints
-rest.base.url=http://100.x.x.x:8050
+# HTTP base for REST endpoints (same port as WebSocket)
+rest.base.url=http://100.x.x.x:8765
 ```
 
 ### Key Constants
@@ -241,7 +242,7 @@ rest.base.url=http://100.x.x.x:8050
 | Constant | Location | Value |
 |---|---|---|
 | `ANDROID_BRIDGE_WS_PATH` | `ServerConfig` | `/ws/android/{id}` |
-| `DEFAULT_BASE_URL` | `ServerConfig` | `ws://100.123.215.126:8050` |
+| `DEFAULT_BASE_URL` | `ServerConfig` | `ws://100.123.215.126:8765` |
 | `MessageType.DEVICE_REGISTER` | `AIPMessageBuilder.MessageType` | `device_register` |
 | `MessageType.CAPABILITY_REPORT` | `AIPMessageBuilder.MessageType` | `capability_report` |
 | `MessageType.HEARTBEAT` | `AIPMessageBuilder.MessageType` | `heartbeat` |

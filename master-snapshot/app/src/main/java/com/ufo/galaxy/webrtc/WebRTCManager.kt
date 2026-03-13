@@ -72,7 +72,7 @@ class WebRTCManager(private val context: Context) {
      * Initialise the manager with the gateway base URL and device identifier,
      * and set up the [PeerConnectionFactory] with hardware codec support.
      *
-     * @param gatewayWsBase WebSocket base URL, e.g. `"ws://100.123.215.126:8050"`.
+     * @param gatewayWsBase WebSocket base URL, e.g. `"ws://100.123.215.126:8765"`.
      * @param deviceId      Identifier for this device; substituted into the WS path.
      */
     fun initialize(gatewayWsBase: String = ServerConfig.DEFAULT_BASE_URL, deviceId: String = "android_device") {

@@ -11,9 +11,11 @@
 本文档将指导您如何部署和配置 UFO Galaxy Android Agent，使其成为您 Galaxy 系统的一个强大移动端节点。
 
 客户端遵循 **AIP v3 规范**：
-- WebSocket 优先路径：`/ws/device/{id}`（含设备 ID）
+- WebSocket 首选路径：`/ws/android/{id}`（AndroidBridge 主路径，realization-v2 标准路由）
+- 回退路径依次为：`/ws/device/{id}`、`/ws/android`、`/ws/ufo3/{id}`
 - REST API：`/api/v1/devices/*`（优先），自动回退到 `/api/devices/*`（旧版）
 - 所有出站消息由 `AIPMessageBuilder` 统一构建，包含 `protocol`、`version`、`device_id`、`device_type`、`message_id`、`timestamp` 字段
+- WS、REST 与 WebRTC 均运行于同一进程、同一端口（**8765**），无端口冲突
 
 ## 2. 准备工作
 
@@ -39,17 +41,20 @@
     将 IP 地址修改为您服务端的地址（仅填写主机+端口，**不要**附加路径）：
     ```properties
     # WebSocket 基础地址（仅主机 + 端口，客户端自动拼接路径）
-    galaxy.gateway.url=ws://<YOUR_SERVER_IP>:8000
+    galaxy.gateway.url=ws://<YOUR_SERVER_IP>:8765
 
-    # REST HTTP 基础地址
-    rest.base.url=http://<YOUR_SERVER_IP>:8000
+    # REST HTTP 基础地址（与 WebSocket 同端口，由 Galaxy Gateway 同一进程提供服务）
+    rest.base.url=http://<YOUR_SERVER_IP>:8765
     ```
 
     > ⚠️ **注意**：`galaxy.gateway.url` 只填写主机+端口，不含路径。
     > 客户端会按优先级自动尝试以下 WebSocket 路径：
-    > 1. `/ws/device/{id}` （推荐路径，含设备 ID）
-    > 2. `/ws/android` （通用 Android 路径）
-    > 3. `/ws/ufo3/{id}` （旧版兼容路径）
+    > 1. `/ws/android/{id}` （首选路径，AndroidBridge 主路径，realization-v2 标准路由）
+    > 2. `/ws/device/{id}` （含设备 ID 的通用回退路径）
+    > 3. `/ws/android` （通用 Android 路径）
+    > 4. `/ws/ufo3/{id}` （传统兼容路径）
+    >
+    > WS、REST 与 WebRTC 均运行于同一进程、同一端口（**8765**），无端口冲突。
 
 4.  **构建 APK**
     - 在 Android Studio 中，点击 `Build` -> `Build Bundle(s) / APK(s)` -> `Build APK(s)`。
@@ -75,7 +80,7 @@
 1.  **查看 Galaxy Gateway 日志**
     您应该能看到类似以下的日志：
     ```
-    INFO:     100.x.x.x:xxxxx - "GET /ws/device/android_xxxxxxxx HTTP/1.1" 101 Switching Protocols
+    INFO:     100.x.x.x:xxxxx - "GET /ws/android/android_xxxxxxxx HTTP/1.1" 101 Switching Protocols
     INFO:     Device 'android_xxxxxxxx' registered successfully.
     ```
 
@@ -97,12 +102,15 @@
 
 | 类型 | 路径/端点 | 优先级 | 说明 |
 |------|-----------|--------|------|
-| WebSocket | `/ws/device/{id}` | 最高 | 推荐，含设备 ID |
+| WebSocket | `/ws/android/{id}` | 最高（首选） | AndroidBridge 主路径，realization-v2 标准路由 |
+| WebSocket | `/ws/device/{id}` | 次高 | 含设备 ID 的通用回退路径 |
 | WebSocket | `/ws/android` | 中 | 通用 Android 路径 |
-| WebSocket | `/ws/ufo3/{id}` | 最低 | 旧版兼容 |
+| WebSocket | `/ws/ufo3/{id}` | 最低 | 传统 UFO³ 路径（兼容旧版服务器） |
 | REST 注册 | `POST /api/v1/devices/register` | 优先 | 自动回退到 `/api/devices/register` |
 | REST 心跳 | `POST /api/v1/devices/heartbeat` | 优先 | 自动回退到 `/api/devices/heartbeat` |
 | REST 发现 | `GET /api/v1/devices/discover` | 优先 | 自动回退到 `/api/devices/discover` |
+
+> **端口说明**：WS、REST 与 WebRTC 均由 Galaxy Gateway 在同一进程中监听端口 **8765**，无需分配多个端口。
 
 ---
 

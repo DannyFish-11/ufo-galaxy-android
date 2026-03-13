@@ -1,7 +1,7 @@
 @echo off
 REM UFO³ Galaxy Android 客户端自动配置构建脚本 (Windows 版本)
-REM 版本: 1.0
-REM 日期: 2026-01-22
+REM 版本: 2.0
+REM 日期: 2026-03-13
 
 echo ========================================
 echo    UFO³ Galaxy Android 自动构建
@@ -28,29 +28,39 @@ if "%DEVICE_ID%"=="" (
     echo [提示] 使用默认设备 ID: %DEVICE_ID%
 )
 
-REM 构建完整的 WebSocket URL
-set WS_URL=ws://%WINDOWS_IP%:8050/ws/ufo3/%DEVICE_ID%
+REM 端口统一为 8765（WS、REST 与 WebRTC 同一 Galaxy Gateway 进程同端口）
+set PORT=8765
+set WS_URL=ws://%WINDOWS_IP%:%PORT%
+set HTTP_URL=http://%WINDOWS_IP%:%PORT%
 
 echo.
 echo 配置信息:
 echo   Windows IP: %WINDOWS_IP%
 echo   设备 ID: %DEVICE_ID%
-echo   WebSocket URL: %WS_URL%
+echo   Gateway URL: %WS_URL%  (WS/REST/WebRTC 同端口)
 echo.
 echo 按任意键继续，或 Ctrl+C 取消...
 pause >nul
 
-REM 备份原始文件
-set AIPCLIENT_FILE=app\src\main\java\com\ufo\galaxy\client\AIPClient.kt
-if not exist "%AIPCLIENT_FILE%.backup" (
-    copy "%AIPCLIENT_FILE%" "%AIPCLIENT_FILE%.backup" >nul
+REM 配置文件路径（标准方式，无需修改 Kotlin 源码）
+set CONFIG_FILE=app\src\main\assets\config.properties
+
+if not exist "%CONFIG_FILE%" (
+    echo [错误] 未找到 %CONFIG_FILE%
+    pause
+    exit /b 1
+)
+
+REM 备份原始配置文件
+if not exist "%CONFIG_FILE%.backup" (
+    copy "%CONFIG_FILE%" "%CONFIG_FILE%.backup" >nul
     echo [✓] 已备份原始配置文件
 )
 
 REM 修改配置
 echo [1/3] 正在修改配置...
-powershell -Command "(Get-Content '%AIPCLIENT_FILE%') -replace 'private val NODE50_URL = .*', 'private val NODE50_URL = \"%WS_URL%\"' | Set-Content '%AIPCLIENT_FILE%'"
-echo [✓] 配置已更新
+powershell -Command "(Get-Content '%CONFIG_FILE%') -replace 'galaxy\.gateway\.url=.*', 'galaxy.gateway.url=%WS_URL%' -replace 'rest\.base\.url=.*', 'rest.base.url=%HTTP_URL%' | Set-Content '%CONFIG_FILE%'"
+echo [✓] 配置已更新 (端口 %PORT%)
 
 REM 清理旧的构建
 echo.
@@ -100,10 +110,10 @@ REM 恢复原始配置（可选）
 echo.
 set /p RESTORE="是否恢复原始配置文件? (Y/N): "
 if /i "%RESTORE%"=="Y" (
-    move /y "%AIPCLIENT_FILE%.backup" "%AIPCLIENT_FILE%" >nul
+    move /y "%CONFIG_FILE%.backup" "%CONFIG_FILE%" >nul
     echo [✓] 已恢复原始配置
 ) else (
-    echo [提示] 原始配置已保存为 %AIPCLIENT_FILE%.backup
+    echo [提示] 原始配置已保存为 %CONFIG_FILE%.backup
 )
 
 echo.

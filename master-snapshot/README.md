@@ -102,10 +102,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ```properties
 # WebSocket 基础地址（仅主机 + 端口）
-galaxy.gateway.url=ws://100.x.x.x:8000
+galaxy.gateway.url=ws://100.x.x.x:8765
 
-# REST HTTP 基础地址
-rest.base.url=http://100.x.x.x:8000
+# REST HTTP 基础地址（与 WebSocket 同端口，由 Galaxy Gateway 同一进程提供服务）
+rest.base.url=http://100.x.x.x:8765
 ```
 
 ### WebSocket 路径回退顺序

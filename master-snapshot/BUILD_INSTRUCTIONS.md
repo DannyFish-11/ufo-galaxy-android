@@ -10,12 +10,14 @@
    - 导航到 `ufo-galaxy-android` 目录
 
 2. **配置连接地址**
-   - 打开 `app/src/main/java/com/ufo/galaxy/client/AIPClient.kt`
-   - 修改 `NODE50_URL` 为您的 Windows PC 的 Tailscale IP:
-     ```kotlin
-     private val NODE50_URL = "ws://100.123.215.126:8050/ws/ufo3/android-device"
+   - 打开 `app/src/main/assets/config.properties`
+   - 修改 `galaxy.gateway.url` 与 `rest.base.url` 为您的 Windows PC 的 Tailscale IP:
+     ```properties
+     galaxy.gateway.url=ws://100.123.215.126:8765
+     rest.base.url=http://100.123.215.126:8765
      ```
    - 将 `100.123.215.126` 替换为您实际的 IP 地址
+   - 端口固定为 **8765**（WS、REST 与 WebRTC 在同一进程同端口运行，无需分配多个端口）
 
 3. **构建 APK**
    - 点击菜单: **Build** → **Build Bundle(s) / APK(s)** → **Build APK(s)**
@@ -43,11 +45,12 @@ cd ufo-galaxy-android
 
 ### 1. 修改连接地址
 
-在 `app/src/main/java/com/ufo/galaxy/client/AIPClient.kt` 中:
+在 `app/src/main/assets/config.properties` 中:
 
-```kotlin
-// 将此 IP 改为您的 Windows PC 的 Tailscale IP
-private val NODE50_URL = "ws://YOUR_WINDOWS_IP:8050/ws/ufo3/YOUR_DEVICE_ID"
+```properties
+# 将此 IP 改为您的 Windows PC 的 Tailscale IP
+galaxy.gateway.url=ws://YOUR_WINDOWS_IP:8765
+rest.base.url=http://YOUR_WINDOWS_IP:8765
 ```
 
 **如何获取 Windows IP:**
@@ -55,14 +58,17 @@ private val NODE50_URL = "ws://YOUR_WINDOWS_IP:8050/ws/ufo3/YOUR_DEVICE_ID"
 - 运行: `tailscale ip -4`
 - 复制显示的 IP 地址（例如: 100.123.215.126）
 
+> **端口说明**：WS、REST 与 WebRTC 均运行于同一 Galaxy Gateway 进程，统一使用端口 **8765**，无需分配多个端口。
+
 ### 2. 修改设备 ID（可选）
 
-如果您有多个 Android 设备，建议为每个设备设置不同的 ID:
+如果您有多个 Android 设备，建议在 `config.properties` 中设置不同的 `agent.id` 以便区分：
 
-```kotlin
-private val NODE50_URL = "ws://100.123.215.126:8050/ws/ufo3/android-xiaomi-14"
-// 或
-private val NODE50_URL = "ws://100.123.215.126:8050/ws/ufo3/android-oppo-tablet"
+```properties
+# 留空则自动生成唯一 ID
+agent.id=android-xiaomi-14
+# 或
+agent.id=android-oppo-tablet
 ```
 
 ## 权限说明
@@ -94,19 +100,19 @@ private val NODE50_URL = "ws://100.123.215.126:8050/ws/ufo3/android-oppo-tablet"
 ./gradlew assembleDebug
 ```
 
-### 无法连接到 Node 50
+### 无法连接到服务器
 
 **问题**: 应用显示"连接失败"
 **检查清单**:
-1. ✓ Windows PC 上的 Podman 容器是否正在运行?
+1. ✓ Windows PC 上的 Galaxy Gateway 进程是否正在运行（端口 8765）?
 2. ✓ Tailscale 在 Android 设备上是否已登录?
 3. ✓ Android 设备和 Windows PC 是否在同一个 Tailscale 网络中?
-4. ✓ `NODE50_URL` 中的 IP 地址是否正确?
+4. ✓ `config.properties` 中的 IP 地址是否正确?
 
 **测试连接**:
 ```bash
 # 在 Android 设备的 Termux 中测试
-curl http://100.123.215.126:8050/health
+curl http://100.123.215.126:8765/health
 ```
 
 ### 悬浮窗不显示
@@ -130,4 +136,4 @@ nano build_configured_apk.sh
 ./build_configured_apk.sh
 ```
 
-这将生成一个已配置好连接地址的 APK，可以直接分发给其他设备使用。
+脚本会自动更新 `config.properties` 中的 IP 地址（端口固定为 **8765**），并生成已配置好连接地址的 APK，可以直接分发给其他设备使用。
