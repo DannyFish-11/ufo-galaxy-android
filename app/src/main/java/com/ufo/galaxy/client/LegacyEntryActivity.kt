@@ -5,17 +5,18 @@ import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.ufo.galaxy.agent.GalaxyAgent
+import com.ufo.galaxy.client.FloatingWindowService
 import com.ufo.galaxy.config.AppConfig
 
-class MainActivity : AppCompatActivity() {
+class LegacyEntryActivity : AppCompatActivity() {
     
-    private val TAG = "MainActivity"
+    private val TAG = "LegacyEntryActivity"
     private lateinit var galaxyAgent: GalaxyAgent
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        Log.i(TAG, "🚀 UFO³ Galaxy Android Agent 启动中...")
+        Log.i(TAG, "🚀 UFO³ Galaxy Android Agent (Legacy) 启动中...")
         
         // 初始化 Galaxy Agent
         galaxyAgent = GalaxyAgent.getInstance(this)
