@@ -19,7 +19,6 @@ import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -28,18 +27,15 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.Switch
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.network.GalaxyWebSocketClient
-import com.ufo.galaxy.protocol.AipMessage
-import com.ufo.galaxy.protocol.MsgType
-import com.ufo.galaxy.protocol.TaskSubmitPayload
+import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
-import java.util.UUID
 
 /**
  * 增强版悬浮窗服务
@@ -78,6 +74,8 @@ class EnhancedFloatingService : Service() {
     private var sendButton: ImageButton? = null
     private var voiceButton: ImageButton? = null
     private var loadingIndicator: ProgressBar? = null
+    @Suppress("DEPRECATION")
+    private var crossDeviceSwitch: Switch? = null
     
     // 布局参数
     private val layoutParams: WindowManager.LayoutParams by lazy {
@@ -102,7 +100,19 @@ class EnhancedFloatingService : Service() {
     private val webSocketClient: GalaxyWebSocketClient
         get() = UFOGalaxyApplication.webSocketClient
 
-    private val gson = Gson()
+    /**
+     * Unified message router: cross-device path → WS TaskSubmit; local path → legacy WS send.
+     * Instantiated lazily after [UFOGalaxyApplication] singletons are ready.
+     */
+    private val messageRouter: MessageRouter by lazy {
+        MessageRouter(
+            settings = UFOGalaxyApplication.appSettings,
+            webSocketClient = webSocketClient
+        ) { text ->
+            // Local fallback for floating window: legacy best-effort send
+            webSocketClient.send(text)
+        }
+    }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
@@ -252,6 +262,26 @@ class EnhancedFloatingService : Service() {
                     ))
                 }
                 addView(inputArea, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+
+                // 跨设备开关
+                @Suppress("DEPRECATION")
+                crossDeviceSwitch = Switch(context).apply {
+                    text = "跨设备"
+                    setTextColor(0xFFFFFFFF.toInt())
+                    isChecked = UFOGalaxyApplication.appSettings.crossDeviceEnabled
+                    setOnCheckedChangeListener { _, isChecked ->
+                        val app = UFOGalaxyApplication.appSettings
+                        app.crossDeviceEnabled = isChecked
+                        UFOGalaxyApplication.instance.setCrossDeviceEnabled(isChecked)
+                        if (isChecked) {
+                            webSocketClient.connect()
+                        }
+                    }
+                }
+                addView(crossDeviceSwitch, LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ))
@@ -501,34 +531,16 @@ class EnhancedFloatingService : Service() {
     /**
      * 发送消息
      *
-     * Cross-device enabled + WS connected: sends a TaskSubmitPayload uplink.
-     * Otherwise: falls back to legacy TEXT send.
+     * Delegates to [MessageRouter]: cross-device enabled + WS connected → WS TaskSubmit;
+     * otherwise → legacy local send.
      */
     private fun sendMessage() {
         val text = inputField?.text?.toString()?.trim() ?: return
         if (text.isEmpty()) return
-        
+
         inputField?.setText("")
         loadingIndicator?.visibility = View.VISIBLE
-
-        val crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
-        if (crossDeviceEnabled && webSocketClient.isConnected()) {
-            val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
-            val sessionId = UUID.randomUUID().toString()
-            val payload = TaskSubmitPayload(
-                task_text = text,
-                device_id = deviceId,
-                session_id = sessionId
-            )
-            val envelope = AipMessage(
-                type = MsgType.TASK_SUBMIT,
-                payload = payload,
-                device_id = deviceId
-            )
-            webSocketClient.sendJson(gson.toJson(envelope))
-        } else {
-            webSocketClient.send(text)
-        }
+        messageRouter.route(text)
     }
     
     /**

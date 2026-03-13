@@ -1,6 +1,7 @@
 package com.ufo.galaxy.data
 
 import android.content.Context
+import java.util.Properties
 
 /**
  * Abstraction over persistent application settings.
@@ -11,6 +12,10 @@ import android.content.Context
  * All five keys required by the capability_report metadata payload are covered:
  * [goalExecutionEnabled], [localModelEnabled], [crossDeviceEnabled],
  * [parallelExecutionEnabled], and [deviceRole].
+ *
+ * Runtime connection URLs ([galaxyGatewayUrl], [restBaseUrl]) default to the values in
+ * `assets/config.properties` so that the gateway address can be changed at runtime
+ * without a recompile (P0 requirement: avoid hardcoded URLs in GalaxyWebSocketClient).
  */
 interface AppSettings {
     /**
@@ -21,6 +26,20 @@ interface AppSettings {
      * When [true] the client proceeds normally.
      */
     var crossDeviceEnabled: Boolean
+
+    /**
+     * WebSocket URL of the Galaxy gateway server.
+     * Default is read from `assets/config.properties` key `galaxy_gateway_url`.
+     * Persisted in SharedPreferences so the user can override it at runtime.
+     */
+    var galaxyGatewayUrl: String
+
+    /**
+     * REST base URL of the Galaxy gateway server.
+     * Default is read from `assets/config.properties` key `rest_base_url`.
+     * Persisted in SharedPreferences so the user can override it at runtime.
+     */
+    var restBaseUrl: String
 
     /** Whether autonomous goal execution is advertised in the capability report. */
     var goalExecutionEnabled: Boolean
@@ -82,6 +101,8 @@ interface AppSettings {
  */
 class InMemoryAppSettings(
     override var crossDeviceEnabled: Boolean = false,
+    override var galaxyGatewayUrl: String = SharedPrefsAppSettings.DEFAULT_GATEWAY_URL,
+    override var restBaseUrl: String = SharedPrefsAppSettings.DEFAULT_REST_BASE_URL,
     override var goalExecutionEnabled: Boolean = false,
     override var localModelEnabled: Boolean = false,
     override var parallelExecutionEnabled: Boolean = false,
@@ -97,7 +118,11 @@ class InMemoryAppSettings(
  * All writes are applied asynchronously via [apply] so they never block the
  * calling thread. The preference file is stored as a private file named [PREFS_NAME].
  *
- * Default values:
+ * Default values for [galaxyGatewayUrl] and [restBaseUrl] are read once from
+ * `assets/config.properties` (keys `galaxy_gateway_url` / `rest_base_url`) on first
+ * construction, so the gateway address can be adjusted without a recompile.
+ *
+ * Default values for other settings:
  * - [crossDeviceEnabled]: `false` — device starts in local-only mode until the user
  *   explicitly enables cross-device collaboration via the settings toggle.
  * - [goalExecutionEnabled]: `false`
@@ -113,9 +138,27 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    // Defaults loaded once from assets/config.properties; fall back to compile-time constants.
+    private val defaultGatewayUrl: String
+    private val defaultRestBaseUrl: String
+
+    init {
+        val props = loadConfigProperties(context)
+        defaultGatewayUrl = props.getProperty("galaxy_gateway_url", DEFAULT_GATEWAY_URL)
+        defaultRestBaseUrl = props.getProperty("rest_base_url", DEFAULT_REST_BASE_URL)
+    }
+
     override var crossDeviceEnabled: Boolean
         get() = prefs.getBoolean(KEY_CROSS_DEVICE_ENABLED, false)
         set(value) { prefs.edit().putBoolean(KEY_CROSS_DEVICE_ENABLED, value).apply() }
+
+    override var galaxyGatewayUrl: String
+        get() = prefs.getString(KEY_GALAXY_GATEWAY_URL, defaultGatewayUrl) ?: defaultGatewayUrl
+        set(value) { prefs.edit().putString(KEY_GALAXY_GATEWAY_URL, value).apply() }
+
+    override var restBaseUrl: String
+        get() = prefs.getString(KEY_REST_BASE_URL, defaultRestBaseUrl) ?: defaultRestBaseUrl
+        set(value) { prefs.edit().putString(KEY_REST_BASE_URL, value).apply() }
 
     override var goalExecutionEnabled: Boolean
         get() = prefs.getBoolean(KEY_GOAL_EXECUTION_ENABLED, false)
@@ -150,6 +193,8 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val PREFS_NAME = "ufo_galaxy_settings"
 
         const val KEY_CROSS_DEVICE_ENABLED = "cross_device_enabled"
+        const val KEY_GALAXY_GATEWAY_URL = "galaxy_gateway_url"
+        const val KEY_REST_BASE_URL = "rest_base_url"
         const val KEY_GOAL_EXECUTION_ENABLED = "goal_execution_enabled"
         const val KEY_LOCAL_MODEL_ENABLED = "local_model_enabled"
         const val KEY_PARALLEL_EXECUTION_ENABLED = "parallel_execution_enabled"
@@ -160,5 +205,25 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
         /** Default device role sent in capability reports. */
         const val DEFAULT_DEVICE_ROLE = "phone"
+
+        /** Compile-time fallback gateway URL (used when assets/config.properties is absent). */
+        const val DEFAULT_GATEWAY_URL = "ws://100.x.x.x:8765"
+
+        /** Compile-time fallback REST base URL. */
+        const val DEFAULT_REST_BASE_URL = "http://100.x.x.x:8765"
+
+        /**
+         * Loads `assets/config.properties` and returns the parsed [Properties].
+         * Returns an empty [Properties] if the file is absent or unreadable.
+         */
+        fun loadConfigProperties(context: Context): Properties {
+            val props = Properties()
+            try {
+                context.assets.open("config.properties").use { props.load(it) }
+            } catch (_: Exception) {
+                // File absent or unreadable — callers fall back to compile-time defaults.
+            }
+            return props
+        }
     }
 }

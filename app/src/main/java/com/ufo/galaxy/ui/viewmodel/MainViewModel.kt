@@ -2,21 +2,17 @@ package com.ufo.galaxy.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.os.Build
 import android.os.PowerManager
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.gson.Gson
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.observability.GalaxyLogger
-import com.ufo.galaxy.protocol.AipMessage
-import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
-import com.ufo.galaxy.protocol.TaskSubmitPayload
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
 import kotlinx.coroutines.Dispatchers
@@ -110,7 +106,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val webSocketClient: GalaxyWebSocketClient
         get() = UFOGalaxyApplication.webSocketClient
 
-    private val gson = Gson()
+    /**
+     * Unified input router shared by this ViewModel and [EnhancedFloatingService].
+     * Cross-device enabled + WS connected → WS TaskSubmit uplink.
+     * Otherwise → [executeLocally] via a new coroutine in [viewModelScope].
+     */
+    private val messageRouter: MessageRouter by lazy {
+        MessageRouter(
+            settings = UFOGalaxyApplication.appSettings,
+            webSocketClient = webSocketClient
+        ) { text ->
+            viewModelScope.launch {
+                try {
+                    executeLocally(text)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Local execution error", e)
+                    _uiState.update { it.copy(error = e.message, isLoading = false) }
+                }
+            }
+        }
+    }
     
     // 语音输入管理器
     private val speechManager: SpeechInputManager by lazy {
@@ -273,9 +288,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(text: String? = null) {
         val messageText = text ?: _uiState.value.inputText.trim()
         if (messageText.isEmpty()) return
-        
+
         Log.d(TAG, "发送消息: $messageText")
-        
+
         // 添加用户消息
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
@@ -283,7 +298,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             content = messageText,
             timestamp = System.currentTimeMillis()
         )
-        
+
         _uiState.update { state ->
             state.copy(
                 messages = state.messages + userMessage,
@@ -292,48 +307,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        val crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
-
-        viewModelScope.launch {
-            try {
-                if (crossDeviceEnabled && webSocketClient.isConnected()) {
-                    // 跨设备模式：发送 task_submit 上行，等待 gateway 返回 task_assign
-                    sendTaskSubmitUplink(messageText)
-                } else {
-                    // 本地模式：直接通过 EdgeExecutor 执行
-                    executeLocally(messageText)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "发送消息失败", e)
-                _uiState.update { it.copy(error = e.message, isLoading = false) }
-            }
-        }
-    }
-
-    /**
-     * Sends a [TaskSubmitPayload] wrapped in an [AipMessage] (type=TASK_SUBMIT) uplink.
-     * The gateway will process the goal and return a task_assign via WebSocket.
-     * Falls back to [executeLocally] if the send fails.
-     */
-    private suspend fun sendTaskSubmitUplink(goal: String) {
-        val deviceId = "${Build.MANUFACTURER}_${Build.MODEL}"
-        val sessionId = UUID.randomUUID().toString()
-        val payload = TaskSubmitPayload(
-            task_text = goal,
-            device_id = deviceId,
-            session_id = sessionId
-        )
-        val envelope = AipMessage(
-            type = MsgType.TASK_SUBMIT,
-            payload = payload,
-            device_id = deviceId
-        )
-        val sent = webSocketClient.sendJson(gson.toJson(envelope))
-        if (!sent) {
-            Log.w(TAG, "task_submit 发送失败，回退到本地执行")
-            executeLocally(goal)
-        }
-        // When sent successfully, isLoading remains true until task_result arrives via onMessage
+        // Delegate to unified MessageRouter; local fallback runs via viewModelScope (see field).
+        messageRouter.route(messageText)
     }
 
     /**
