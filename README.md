@@ -80,6 +80,18 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 - 配置服务器地址 (如: http://192.168.1.100:8080)
 - 点击连接
 
+### 📐 应用 Namespace 与入口 Activity
+
+| 项目 | 值 |
+|------|----|
+| **Gradle namespace** | `com.ufo.galaxy` |
+| **applicationId** | `com.ufo.galaxy` |
+| **Launcher Activity** | `com.ufo.galaxy.MainActivity` |
+| **Build script** | `app/build.gradle` (Groovy DSL) |
+
+启动器入口为 `com.ufo.galaxy.MainActivity`（Jetpack Compose 界面）。  
+`com.ufo.galaxy.client` 包下保留的 `LegacyEntryActivity` 为历史遗留入口，不再作为启动器。
+
 ---
 
 ## 🔌 服务器 URL 配置与端点回退
