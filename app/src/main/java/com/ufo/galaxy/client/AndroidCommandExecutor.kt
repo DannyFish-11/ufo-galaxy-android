@@ -23,12 +23,16 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Android 命令执行器
- * 
- * 负责执行来自 Galaxy 主控的各种 Android 操作命令
+ *
+ * 负责执行来自 Galaxy 主控的各种 Android 操作命令。
+ *
+ * WiFi / Bluetooth toggling is delegated to [SystemControlHelper] so that
+ * the same implementation is used here and in AutonomyManager / TaskExecutor.
  */
 class AndroidCommandExecutor(private val context: Context) {
-    
+
     private val TAG = "AndroidCommandExecutor"
+    private val systemControl = SystemControlHelper(context)
     
     /**
      * 执行命令
@@ -52,7 +56,10 @@ class AndroidCommandExecutor(private val context: Context) {
                 
                 // WiFi 控制
                 "get_wifi_status" -> getWifiStatus()
-                "toggle_wifi" -> toggleWifi()
+                "toggle_wifi" -> toggleWifi(params)
+                
+                // 蓝牙控制
+                "toggle_bluetooth" -> toggleBluetooth(params)
                 
                 // 通知
                 "send_notification" -> sendNotification(params)
@@ -218,12 +225,28 @@ class AndroidCommandExecutor(private val context: Context) {
     
     /**
      * 切换 WiFi
+     *
+     * On Android 10+ (API 29+) direct toggling via WifiManager is restricted
+     * for non-system apps. [SystemControlHelper.toggleWifi] opens the system
+     * WiFi Settings Panel so the user can confirm the action manually.
+     * The response will contain `manual_required = true` in that case.
      */
-    private fun toggleWifi(): JSONObject {
-        return JSONObject().apply {
-            put("status", "error")
-            put("message", "WiFi toggle requires system permission (Android 10+)")
-        }
+    private fun toggleWifi(params: JSONObject): JSONObject {
+        val enable = params.optBoolean("enable", true)
+        Log.i(TAG, "[CMD] toggle_wifi enable=$enable")
+        return systemControl.toggleWifi(enable)
+    }
+
+    /**
+     * 切换蓝牙
+     *
+     * Requires BLUETOOTH_CONNECT permission on Android 12+ (API 31+).
+     * Returns a structured error with `permission_required` when missing.
+     */
+    private fun toggleBluetooth(params: JSONObject): JSONObject {
+        val enable = params.optBoolean("enable", true)
+        Log.i(TAG, "[CMD] toggle_bluetooth enable=$enable")
+        return systemControl.toggleBluetooth(enable)
     }
     
     /**
@@ -289,17 +312,31 @@ class AndroidCommandExecutor(private val context: Context) {
     
     /**
      * 设置亮度
+     *
+     * Delegates to [SystemControlHelper.setBrightness].
+     * Requires WRITE_SETTINGS permission (user must grant via
+     * Settings → Apps → Special app access → Modify system settings).
      */
     private fun setBrightness(params: JSONObject): JSONObject {
         val brightness = params.optInt("brightness", 50)
-        
-        // 注意：修改系统亮度需要 WRITE_SETTINGS 权限
-        return JSONObject().apply {
-            put("status", "success")
-            put("message", "Brightness control requires WRITE_SETTINGS permission")
-            put("data", JSONObject().apply {
-                put("brightness", brightness)
-            })
+        val success = systemControl.setBrightness(brightness)
+        return if (success) {
+            JSONObject().apply {
+                put("status", "success")
+                put("data", JSONObject().apply {
+                    put("brightness", brightness)
+                })
+            }
+        } else {
+            JSONObject().apply {
+                put("status", "error")
+                put("message",
+                    "Brightness control requires WRITE_SETTINGS permission. " +
+                    "Grant it via Settings → Apps → Special app access → Modify system settings.")
+                put("data", JSONObject().apply {
+                    put("brightness", brightness)
+                })
+            }
         }
     }
     

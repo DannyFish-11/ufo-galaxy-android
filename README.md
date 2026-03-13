@@ -200,6 +200,22 @@ Node50Client  (legacy Node 50 连接)
 | 网络 | 与服务器通信 |
 | 麦克风 | 语音输入 (可选) |
 | 相机 | 视频通话 (可选) |
+| `BLUETOOTH` + `BLUETOOTH_ADMIN` (API ≤ 30) | 蓝牙开关控制（Android 11 及以下） |
+| `BLUETOOTH_CONNECT` (API 31+) | 蓝牙开关控制（Android 12+，需在运行时授予） |
+| `CHANGE_WIFI_STATE` | WiFi 开关（仅 Android 9 及以下有效；Android 10+ 通过系统设置面板操作） |
+| `WRITE_SETTINGS` | 屏幕亮度调节（需用户在"修改系统设置"中手动授权） |
+
+#### ⚠️ WiFi 开关限制（Android 10+）
+
+从 Android 10 (API 29) 起，非系统应用无法通过 `WifiManager.setWifiEnabled()` 直接控制 WiFi。  
+本应用的处理方式：
+- **Android 10+**: 自动打开系统 WiFi 设置面板 (`Settings.Panel.ACTION_WIFI`)，由用户手动确认开关。命令返回 `{ "status": "pending_user_action", "manual_required": true }`。
+- **Android 9 及以下**: 直接通过 `WifiManager` 切换。
+
+#### ⚠️ 蓝牙开关限制（Android 12+）
+
+从 Android 12 (API 31) 起，蓝牙开关需要运行时权限 `BLUETOOTH_CONNECT`。  
+如果权限未授予，命令返回 `{ "status": "error", "permission_required": "android.permission.BLUETOOTH_CONNECT" }`。
 
 ### 🔗 相关仓库
 
@@ -214,6 +230,7 @@ Node50Client  (legacy Node 50 连接)
 
 | 版本 | 日期 | 更新内容 |
 |------|------|----------|
+| v2.5.4 | 2026-03-13 | 跨设备开关修复：新增 `SystemControlHelper`（WiFi/蓝牙/音量/亮度统一实现）；`AndroidCommandExecutor.toggleWifi` 改为 Android 10+ 系统面板回退；新增 `toggle_bluetooth` 命令；`AutonomyManager` 补全所有 `TaskExecutor` 调用的缺失方法（setWiFi/setBluetooth/setVolume/setBrightness/captureUITree/performHome/performBack/performRecent/openApp/closeApp/switchToApp/clickByText/clickByResourceId/swipe/scroll/getCurrentApp/getDeviceStatus）；修复 `GalaxyApiClient` 悬空引用及重复 `cleanup()` 方法；新增蓝牙/WiFi/WRITE_SETTINGS 权限声明 |
 | v2.5.3 | 2026-03-11 | Android↔realization-v2 系统性对接对齐：ServerConfig.WS_PATHS 主路径切换至 `/ws/android/{id}`（AndroidBridge 标准路由）；AIPMessageBuilder 新增 MessageType 常量（device_register/heartbeat/capability_report/task_assign/command_result）及 LEGACY_TYPE_MAP；AIPClient/EnhancedAIPClient/Node50Client 注册消息统一使用 device_register；DeviceRegistry 新增 createCapabilityReportMessage()；DeviceCommunication/AIPClient/EnhancedAIPClient 注册后自动发送 capability_report；新增 docs/ANDROID_BRIDGE_INTEGRATION.md |
 | v2.5.2 | 2026-03-07 | AIP v3 全栈系统性对齐：DeviceCommunication 入站消息通过 AIPMessageBuilder.parse() 统一规范化；EnhancedAIPClient 注册消息通过 AIPMessageBuilder.build() 构建 v3 信封后转换；Node50Client 切换 ServerConfig.buildWsUrl() + AIPMessageBuilder；GalaxyAgentV2/TaskExecutor 切换 AIPMessageBuilder；AIPProtocol 废弃标注 |
 | v2.5.1 | 2026-03-07 | AIP v3 系统性对齐：message_id 统一、DeviceCommunication 使用 ServerConfig 路径回退、DeviceRegistry 消息通过 AIPMessageBuilder 构建 |
