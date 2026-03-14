@@ -245,6 +245,44 @@ class MultiDeviceCoordinator(private val context: Context) {
         
         results
     }
+
+    /**
+     * 并行分发任务到多个指定设备（多设备并发）
+     *
+     * 所有目标设备的 task_submit 并发发起，所有结果汇聚后返回 [ParallelGroupResult]。
+     * 每个子任务复用同一 [task] 的字段，但 taskId 附加 `_<index>` 后缀以保证唯一性。
+     *
+     * @param task            要并发执行的协调任务模板
+     * @param targetDeviceIds 目标设备 ID 列表（去重后使用）
+     * @return [ParallelGroupResult] 包含 groupId 及每台设备的 [TaskResult]
+     */
+    suspend fun dispatchParallel(
+        task: CoordinationTask,
+        targetDeviceIds: List<String>
+    ): ParallelGroupResult = withContext(Dispatchers.IO) {
+        val groupId = "grp_${task.taskId}"
+        val uniqueTargets = targetDeviceIds.distinct()
+
+        val deferreds = uniqueTargets.mapIndexed { index, deviceId ->
+            val subtask = task.copy(taskId = "${task.taskId}_$index")
+            async {
+                deviceId to dispatchTask(deviceId, subtask)
+            }
+        }
+
+        val resultMap = deferreds.awaitAll().toMap()
+        val allSucceeded = resultMap.values.all {
+            it.status == TaskStatus.DISPATCHED || it.status == TaskStatus.COMPLETED
+        }
+
+        Log.d(TAG, "dispatchParallel groupId=$groupId devices=${uniqueTargets.size} allOk=$allSucceeded")
+        ParallelGroupResult(
+            groupId = groupId,
+            taskId = task.taskId,
+            deviceResults = resultMap,
+            allSucceeded = allSucceeded
+        )
+    }
     
     /**
      * 查询任务状态
@@ -391,14 +429,6 @@ class MultiDeviceCoordinator(private val context: Context) {
     }
     
     /**
-     * 发现设备（简化版）
-     */
-    suspend fun discoverDevices(): Int {
-        val devices = discoverDevicesList()
-        return devices.size
-    }
-    
-    /**
      * 发现设备列表
      */
     suspend fun discoverDevicesList(): List<DeviceInfo> = withContext(Dispatchers.IO) {
@@ -472,7 +502,7 @@ data class DeviceInfo(
 ) {
     val name: String get() = deviceName
     val type: String get() = deviceType
-} {
+
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("device_id", deviceId)
@@ -560,4 +590,31 @@ data class CommandResult(
     val result: String = "",
     val error: String = ""
 )
+
+/**
+ * 并行任务组结果（多设备并发）
+ *
+ * @property groupId      任务组唯一标识（由 dispatchParallel 生成）
+ * @property taskId       原始任务 ID
+ * @property deviceResults 每台目标设备的执行结果，key = deviceId
+ * @property allSucceeded 所有设备均成功时为 true
+ */
+data class ParallelGroupResult(
+    val groupId: String,
+    val taskId: String,
+    val deviceResults: Map<String, TaskResult>,
+    val allSucceeded: Boolean
+) {
+    /** 仅包含成功结果的子集 */
+    val succeeded: Map<String, TaskResult>
+        get() = deviceResults.filter {
+            it.value.status == TaskStatus.DISPATCHED || it.value.status == TaskStatus.COMPLETED
+        }
+
+    /** 仅包含失败结果的子集 */
+    val failed: Map<String, TaskResult>
+        get() = deviceResults.filter {
+            it.value.status != TaskStatus.DISPATCHED && it.value.status != TaskStatus.COMPLETED
+        }
+}
 
