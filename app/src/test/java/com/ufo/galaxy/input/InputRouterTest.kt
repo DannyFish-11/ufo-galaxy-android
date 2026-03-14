@@ -12,7 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.loop.LoopResult
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
-import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.network.GatewayClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,19 +29,46 @@ import org.junit.rules.TemporaryFolder
  * Tests cover:
  *  - LOCAL routing when cross-device is disabled.
  *  - ERROR routing when cross-device is enabled but WS is not connected.
+ *  - CROSS_DEVICE routing when cross-device is enabled, WS connected, and sendJson succeeds.
+ *  - ERROR routing when cross-device is enabled, WS connected, but sendJson fails.
  *  - [LoopController.execute] is invoked (via the coroutineScope) in LOCAL mode.
  *  - [onLocalResult] callback delivers the [LoopResult] on completion.
  *  - Blank/whitespace-only input is silently ignored.
  *  - [onError] is invoked when WS is unavailable in cross-device mode; no silent local fallback.
+ *  - AtomicBoolean double-submit guard drops concurrent route() calls gracefully.
  *
- * All dependencies use lightweight JVM-only fakes; no Android framework required.
+ * All dependencies use lightweight JVM-only fakes; no Android framework or network required.
  */
 class InputRouterTest {
 
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
-    // ── Fake dependencies ─────────────────────────────────────────────────────
+    // ── Fake GatewayClient ────────────────────────────────────────────────────
+
+    /**
+     * Configurable fake [GatewayClient] for deterministic routing tests.
+     *
+     * [connected] controls [isConnected]; [sendResult] controls [sendJson] return value.
+     * [sentMessages] records every JSON string passed to [sendJson].
+     */
+    private class FakeGatewayClient(
+        var connected: Boolean = false,
+        var sendResult: Boolean = true
+    ) : GatewayClient {
+        val sentMessages = mutableListOf<String>()
+
+        override fun isConnected(): Boolean = connected
+        override fun sendJson(json: String): Boolean {
+            if (connected && sendResult) {
+                sentMessages.add(json)
+                return true
+            }
+            return false
+        }
+    }
+
+    // ── Fake LoopController dependencies ─────────────────────────────────────
 
     /** Planner that always returns a single tap step. */
     private class SingleStepPlanner : LocalPlannerService {
@@ -97,16 +124,16 @@ class InputRouterTest {
 
     private fun buildRouter(
         crossDeviceEnabled: Boolean = false,
+        gatewayClient: FakeGatewayClient = FakeGatewayClient(connected = false),
         loopController: LoopController = buildLoopController(),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob()),
         onLocalResult: ((LoopResult) -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ): InputRouter {
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
-        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = crossDeviceEnabled)
         return InputRouter(
             settings = settings,
-            webSocketClient = client,
+            webSocketClient = gatewayClient,
             loopController = loopController,
             coroutineScope = scope,
             onLocalResult = onLocalResult,
@@ -125,11 +152,17 @@ class InputRouterTest {
 
     @Test
     fun `route OFF mode never calls WS uplink`() {
+        val gateway = FakeGatewayClient(connected = true) // WS is up, but cross-device is OFF
         var errorCalled = false
-        val router = buildRouter(crossDeviceEnabled = false, onError = { errorCalled = true })
+        val router = buildRouter(
+            crossDeviceEnabled = false,
+            gatewayClient = gateway,
+            onError = { errorCalled = true }
+        )
         val result = router.route("do something")
         assertNotEquals("OFF mode must never produce CROSS_DEVICE", InputRouter.RouteMode.CROSS_DEVICE, result)
         assertFalse("onError must not be called in OFF mode", errorCalled)
+        assertTrue("No messages should be sent to gateway in OFF mode", gateway.sentMessages.isEmpty())
     }
 
     @Test
@@ -183,6 +216,72 @@ class InputRouterTest {
         assertEquals(LoopController.STOP_BLOCKED_BY_REMOTE, receivedResult!!.stopReason)
     }
 
+    // ── ON mode + WS connected → CROSS_DEVICE success ─────────────────────────
+
+    @Test
+    fun `route returns CROSS_DEVICE when crossDeviceEnabled and WS connected`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        val result = router.route("open WeChat")
+
+        assertEquals("Must return CROSS_DEVICE when WS is connected", InputRouter.RouteMode.CROSS_DEVICE, result)
+    }
+
+    @Test
+    fun `route CROSS_DEVICE sends exactly one JSON message to gateway`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        router.route("book a taxi for 3pm")
+
+        assertEquals("Exactly one message must be sent to gateway", 1, gateway.sentMessages.size)
+    }
+
+    @Test
+    fun `route CROSS_DEVICE message contains task_submit type and input text`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        router.route("book a taxi for 3pm")
+
+        val sent = gateway.sentMessages.first()
+        assertTrue("Sent JSON must contain task_submit type", sent.contains("task_submit"))
+        assertTrue("Sent JSON must contain the user input text", sent.contains("book a taxi for 3pm"))
+    }
+
+    @Test
+    fun `route returns ERROR when crossDeviceEnabled WS connected but sendJson fails`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = false)
+        var errorCalled = false
+        val router = buildRouter(
+            crossDeviceEnabled = true,
+            gatewayClient = gateway,
+            onError = { errorCalled = true }
+        )
+
+        val result = router.route("some important task")
+
+        assertEquals("Must return ERROR when sendJson fails", InputRouter.RouteMode.ERROR, result)
+        assertTrue("onError must be called when sendJson fails", errorCalled)
+    }
+
+    @Test
+    fun `route CROSS_DEVICE does not call onLocalResult`() = runBlocking {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        var localResultCalled = false
+        val router = buildRouter(
+            crossDeviceEnabled = true,
+            gatewayClient = gateway,
+            onLocalResult = { localResultCalled = true }
+        )
+
+        router.route("send a message to Alice")
+        delay(100) // give any stray coroutine time to run
+
+        assertFalse("onLocalResult must NOT be called in CROSS_DEVICE mode", localResultCalled)
+    }
+
     // ── ON mode + WS unavailable → explicit error, no silent fallback ──────────
 
     @Test
@@ -191,6 +290,7 @@ class InputRouterTest {
         var errorCalled = false
         val router = buildRouter(
             crossDeviceEnabled = true,
+            gatewayClient = FakeGatewayClient(connected = false),
             onLocalResult = { localResultCalled = true },
             onError = { errorCalled = true }
         )
@@ -209,6 +309,7 @@ class InputRouterTest {
         var errorReason: String? = null
         val router = buildRouter(
             crossDeviceEnabled = true,
+            gatewayClient = FakeGatewayClient(connected = false),
             onError = { errorReason = it }
         )
         router.route("some task")
@@ -238,6 +339,7 @@ class InputRouterTest {
         var localResultCalled = false
         val router = buildRouter(
             crossDeviceEnabled = true,
+            gatewayClient = FakeGatewayClient(connected = true),
             onLocalResult = { localResultCalled = true },
             onError = { errorCalled = true }
         )
@@ -254,6 +356,7 @@ class InputRouterTest {
     fun `route does not crash when onError is null and WS unavailable in cross-device mode`() {
         val router = buildRouter(
             crossDeviceEnabled = true,
+            gatewayClient = FakeGatewayClient(connected = false),
             onError = null
         )
         // Should not throw
@@ -264,7 +367,7 @@ class InputRouterTest {
     // ── Integration: InputRouter and RuntimeController share LoopController ────
 
     @Test
-    fun `InputRouter LOCAL is blocked when RuntimeController.onRemoteTaskStarted is called`() = runBlocking {
+    fun `InputRouter LOCAL is blocked when RuntimeController onRemoteTaskStarted is called`() = runBlocking {
         val loopController = buildLoopController()
         var receivedResult: LoopResult? = null
         val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
@@ -272,7 +375,7 @@ class InputRouterTest {
         val settings = InMemoryAppSettings(crossDeviceEnabled = false)
         val router = InputRouter(
             settings = settings,
-            webSocketClient = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999"),
+            webSocketClient = FakeGatewayClient(connected = false),
             loopController = loopController,
             coroutineScope = scope,
             onLocalResult = { receivedResult = it }
@@ -294,7 +397,7 @@ class InputRouterTest {
         var secondResult: LoopResult? = null
         val router2 = InputRouter(
             settings = settings,
-            webSocketClient = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999"),
+            webSocketClient = FakeGatewayClient(connected = false),
             loopController = loopController,
             coroutineScope = scope,
             onLocalResult = { secondResult = it }

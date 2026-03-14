@@ -6,7 +6,7 @@ import com.google.gson.Gson
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.loop.LoopResult
-import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Unified input router used by both [com.ufo.galaxy.ui.viewmodel.MainViewModel] and
@@ -26,7 +27,7 @@ import java.util.UUID
  *    result delivered to [onLocalResult]. Task-submit uplink is strictly forbidden.
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS connected →
  *    wraps [text] in a [TaskSubmitPayload] AIP v3 envelope and sends it uplink via
- *    [GalaxyWebSocketClient]. Result arrives later via the WS task_assign/goal_result flow.
+ *    [GatewayClient]. Result arrives later via the WS task_assign/goal_result flow.
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS NOT connected →
  *    [onError] is invoked with a human-readable reason; does NOT silently fall back to local.
  *
@@ -34,7 +35,9 @@ import java.util.UUID
  * to guarantee consistent behaviour and avoid duplicate remote-handoff logic.
  *
  * @param settings        Persistent settings; [AppSettings.crossDeviceEnabled] gates the WS path.
- * @param webSocketClient Live WebSocket client; used to check connectivity and send messages.
+ * @param webSocketClient Live gateway client; used to check connectivity and send messages.
+ *                        [com.ufo.galaxy.network.GalaxyWebSocketClient] implements this interface;
+ *                        tests inject a lightweight fake.
  * @param loopController  Local closed-loop automation controller; invoked when cross-device is OFF.
  * @param coroutineScope  Scope in which local [LoopController.execute] is launched (e.g. viewModelScope).
  * @param onLocalResult   Called on the IO thread when a local task completes or fails.
@@ -44,13 +47,27 @@ import java.util.UUID
  */
 class InputRouter(
     private val settings: AppSettings,
-    private val webSocketClient: GalaxyWebSocketClient,
+    private val webSocketClient: GatewayClient,
     private val loopController: LoopController,
     private val coroutineScope: CoroutineScope,
     private val onLocalResult: ((LoopResult) -> Unit)? = null,
     private val onError: ((reason: String) -> Unit)? = null
 ) {
     private val gson = Gson()
+
+    /**
+     * Thread-safety / double-submit guard.
+     *
+     * [route] uses [AtomicBoolean.compareAndSet] so that a concurrent or re-entrant call
+     * while a synchronous routing decision is in progress is detected and dropped immediately
+     * rather than racing on [AppSettings.crossDeviceEnabled] or [GatewayClient.sendJson].
+     *
+     * The guard is held only for the duration of the synchronous routing logic; the async
+     * [LoopController.execute] coroutine launched for LOCAL paths runs outside the guard so it
+     * does not prevent the callers' own in-flight check (e.g. [MainViewModel] `isLoading`)
+     * from working correctly.
+     */
+    private val _isRouting = AtomicBoolean(false)
 
     /**
      * Describes which routing path was taken by [route].
@@ -87,6 +104,21 @@ class InputRouter(
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return RouteMode.LOCAL
 
+        // Thread-safe double-submit guard: if a concurrent synchronous routing call is already
+        // in progress on another thread, drop the duplicate immediately instead of racing.
+        if (!_isRouting.compareAndSet(false, true)) {
+            Log.d(TAG, "[ROUTE] Concurrent route() call dropped (double-submit guard)")
+            return RouteMode.LOCAL
+        }
+
+        return try {
+            routeInternal(trimmed, deviceId)
+        } finally {
+            _isRouting.set(false)
+        }
+    }
+
+    private fun routeInternal(trimmed: String, deviceId: String): RouteMode {
         val taskId = UUID.randomUUID().toString()
         val crossDevice = settings.crossDeviceEnabled
         val wsConnected = webSocketClient.isConnected()
