@@ -32,10 +32,16 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.NotificationCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
+import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * 增强版悬浮窗服务
@@ -72,6 +78,9 @@ class EnhancedFloatingService : Service() {
     private lateinit var windowManager: WindowManager
     private var floatingView: View? = null
     private var edgeTrigger: EdgeTriggerDetector? = null
+
+    /** Coroutine scope for local LoopController sessions. Cancelled in [onDestroy]. */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
     // UI 组件
     private var statusText: TextView? = null
@@ -113,7 +122,8 @@ class EnhancedFloatingService : Service() {
     private var taskStatus: String = STATUS_IDLE   // STATUS_IDLE | STATUS_RUNNING | STATUS_SUCCESS | STATUS_ERROR
 
     /**
-     * Unified message router: cross-device enabled → WS TaskSubmit uplink; local → legacy send.
+     * Unified message router: cross-device enabled → WS TaskSubmit uplink;
+     * local (cross-device OFF) → [LoopController] closed-loop pipeline.
      * onError surfaces WS-unavailable errors directly in the floating status label.
      */
     private val messageRouter: MessageRouter by lazy {
@@ -127,8 +137,28 @@ class EnhancedFloatingService : Service() {
                 loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
             }
         ) { text ->
-            // Local fallback for floating window: best-effort legacy send
-            webSocketClient.send(text)
+            // Local path: route through LoopController (cross-device is OFF).
+            serviceScope.launch {
+                taskStatus = STATUS_RUNNING
+                updateStatusLabel()
+                loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.VISIBLE }
+                try {
+                    val result = UFOGalaxyApplication.loopController.execute(text)
+                    lastTaskId = result.sessionId.take(8)
+                    taskStatus = if (result.status == LoopController.STATUS_SUCCESS) {
+                        STATUS_SUCCESS
+                    } else {
+                        STATUS_ERROR
+                    }
+                    Log.i(TAG, "[FLOAT] local loop done status=${result.status} steps=${result.steps.size}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "[FLOAT] local loop error", e)
+                    taskStatus = STATUS_ERROR
+                } finally {
+                    updateStatusLabel()
+                    loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
+                }
+            }
         }
     }
 
@@ -182,7 +212,7 @@ class EnhancedFloatingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "增强版悬浮窗服务销毁")
-        
+        serviceScope.cancel()
         unregisterReceiver(wakeUpReceiver)
         edgeTrigger?.stop()
         removeFloatingView()
