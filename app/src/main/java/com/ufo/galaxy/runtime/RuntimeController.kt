@@ -241,9 +241,9 @@ class RuntimeController(
                 GalaxyLogger.log(TAG, mapOf("event" to "ws_error", "error" to error))
             }
 
-            override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
-                onRemoteTaskStarted()
-            }
+            // NOTE: onTaskAssign is intentionally NOT overridden here.
+            // GalaxyConnectionService.handleTaskAssign already calls onRemoteTaskStarted()
+            // directly, so adding it here would cause a double-pause race condition.
         }
         wsListener = listener
         webSocketClient.addListener(listener)

@@ -82,6 +82,14 @@ class LoopController(
     /**
      * When set to `true` the currently-running [execute] call will exit its step loop after
      * the current step completes, transitioning to [LoopStatus.Paused]. Set via [pause].
+     *
+     * **Note**: [AtomicBoolean] provides individual-field atomicity but does not prevent
+     * all race conditions between [pause] and the execution loop. In particular, if [pause]
+     * is called in the very last step of an [execute] call (after the loop checkpoint but
+     * before the job completes), the pause flag may be consumed by the *next* [execute]
+     * call rather than the current one. For the remote-handoff use case this is acceptable
+     * because [RuntimeController.onRemoteTaskStarted] transitions state to REMOTE_EXECUTING
+     * so new local sessions cannot start while a remote task is active.
      */
     private val pauseRequested = AtomicBoolean(false)
 

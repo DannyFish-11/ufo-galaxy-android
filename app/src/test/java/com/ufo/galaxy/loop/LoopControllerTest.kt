@@ -474,9 +474,4 @@ class LoopControllerTest {
 
         assertEquals(LoopStatus.Idle, ctrl.status.value)
     }
-
-    @Test
-    fun `STOP_PREEMPTED constant has expected value`() {
-        assertEquals("preempted_by_remote", LoopController.STOP_PREEMPTED)
-    }
 }

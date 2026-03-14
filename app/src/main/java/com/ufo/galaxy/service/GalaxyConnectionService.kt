@@ -228,19 +228,23 @@ class GalaxyConnectionService : Service() {
 
         // Store result in OpenClawd memory backflow (cross_device route).
         serviceScope.launch {
-            val entry = MemoryEntry(
-                task_id = taskId,
-                goal = payload.goal,
-                status = result.status,
-                summary = result.error ?: result.status,
-                steps = result.steps.map { step -> "${step.action}: ${if (step.success) "ok" else step.error ?: "fail"}" },
-                route_mode = "cross_device"
-            )
-            val stored = memoryBackflow.store(entry)
-            GalaxyLogger.log(
-                TAG,
-                mapOf("event" to "memory_store", "task_id" to taskId, "ok" to stored, "route_mode" to "cross_device")
-            )
+            try {
+                val entry = MemoryEntry(
+                    task_id = taskId,
+                    goal = payload.goal,
+                    status = result.status,
+                    summary = result.error ?: result.status,
+                    steps = result.steps.map { step -> "${step.action}: ${if (step.success) "ok" else step.error ?: "fail"}" },
+                    route_mode = "cross_device"
+                )
+                val stored = memoryBackflow.store(entry)
+                GalaxyLogger.log(
+                    TAG,
+                    mapOf("event" to "memory_store", "task_id" to taskId, "ok" to stored, "route_mode" to "cross_device")
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "memory_store failed for task_id=$taskId: ${e.message}", e)
+            }
         }
     }
 
@@ -303,19 +307,23 @@ class GalaxyConnectionService : Service() {
 
         // Store result in OpenClawd memory backflow (cross_device route).
         goalResult?.let { result ->
-            val entry = MemoryEntry(
-                task_id = taskId,
-                goal = payload.goal,
-                status = result.status,
-                summary = result.error ?: result.result ?: result.status,
-                steps = result.steps.map { step -> "${step.action}: ${if (step.success) "ok" else step.error ?: "fail"}" },
-                route_mode = "cross_device"
-            )
-            val stored = memoryBackflow.store(entry)
-            GalaxyLogger.log(
-                TAG,
-                mapOf("event" to "memory_store", "task_id" to taskId, "ok" to stored, "route_mode" to "cross_device")
-            )
+            try {
+                val entry = MemoryEntry(
+                    task_id = taskId,
+                    goal = payload.goal,
+                    status = result.status,
+                    summary = result.error ?: result.result ?: result.status,
+                    steps = result.steps.map { step -> "${step.action}: ${if (step.success) "ok" else step.error ?: "fail"}" },
+                    route_mode = "cross_device"
+                )
+                val stored = memoryBackflow.store(entry)
+                GalaxyLogger.log(
+                    TAG,
+                    mapOf("event" to "memory_store", "task_id" to taskId, "ok" to stored, "route_mode" to "cross_device")
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "memory_store failed for goal task_id=$taskId: ${e.message}", e)
+            }
         }
     }
 
