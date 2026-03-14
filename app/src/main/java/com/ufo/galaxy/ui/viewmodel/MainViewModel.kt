@@ -108,13 +108,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Unified input router shared by this ViewModel and [EnhancedFloatingService].
-     * Cross-device enabled + WS connected → WS TaskSubmit uplink.
-     * Otherwise → [executeLocally] via a new coroutine in [viewModelScope].
+     * - crossDeviceEnabled=false → local only via [executeLocally].
+     * - crossDeviceEnabled=true + WS connected → WS TaskSubmit uplink.
+     * - crossDeviceEnabled=true + WS NOT connected → explicit error surfaced to UI; no local fallback.
      */
     private val messageRouter: MessageRouter by lazy {
         MessageRouter(
             settings = UFOGalaxyApplication.appSettings,
-            webSocketClient = webSocketClient
+            webSocketClient = webSocketClient,
+            onError = { reason ->
+                Log.e(TAG, "MessageRouter error: $reason")
+                pushError(reason)
+                _uiState.update { it.copy(error = reason, isLoading = false) }
+            }
         ) { text ->
             viewModelScope.launch {
                 try {
@@ -307,8 +313,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // Delegate to unified MessageRouter; local fallback runs via viewModelScope (see field).
-        messageRouter.route(messageText)
+        // Delegate to unified MessageRouter.
+        // LOCAL  → localFallback lambda resets isLoading on completion.
+        // CROSS_DEVICE → server reply resets isLoading via handleServerMessage / wsListener.
+        // ERROR  → onError callback already set isLoading=false; nothing more to do here.
+        val routeMode = messageRouter.route(messageText)
+        if (routeMode == com.ufo.galaxy.network.MessageRouter.RouteMode.CROSS_DEVICE) {
+            Log.i(TAG, "sendMessage: route_mode=cross_device")
+        }
     }
 
     /**

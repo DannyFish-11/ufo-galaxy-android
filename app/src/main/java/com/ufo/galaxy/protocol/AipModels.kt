@@ -113,18 +113,22 @@ data class TaskAssignPayload(
  * Step-level result accumulated by [EdgeExecutor] during task execution.
  * Mirrors the server-side StepResult structure exactly.
  *
- * @param step_id  1-based step index as a string.
- * @param action   Symbolic action name executed (e.g., "tap", "scroll").
- * @param success  Whether the action completed without error.
- * @param error    Human-readable error description when [success] is false.
- * @param snapshot Optional on-device screenshot captured after this step.
+ * @param step_id       1-based step index as a string.
+ * @param action        Symbolic action name executed (e.g., "tap", "scroll").
+ * @param success       Whether the action completed without error.
+ * @param error         Human-readable error description when [success] is false.
+ * @param snapshot      Optional on-device screenshot captured after this step.
+ * @param latency_ms    Wall-clock execution time for this step in milliseconds.
+ * @param snapshot_ref  Optional reference identifier for the snapshot (e.g., file path or hash).
  */
 data class StepResult(
     val step_id: String,
     val action: String,
     val success: Boolean,
     val error: String? = null,
-    val snapshot: Snapshot? = null
+    val snapshot: Snapshot? = null,
+    val latency_ms: Long = 0L,
+    val snapshot_ref: String? = null
 )
 
 /**

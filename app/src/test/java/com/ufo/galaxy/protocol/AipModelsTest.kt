@@ -249,6 +249,26 @@ class AipModelsTest {
         assertNull(result.snapshot)
     }
 
+    @Test
+    fun `StepResult latency_ms defaults to 0 and snapshot_ref defaults to null`() {
+        val result = StepResult(step_id = "1", action = "tap", success = true)
+        assertEquals(0L, result.latency_ms)
+        assertNull(result.snapshot_ref)
+    }
+
+    @Test
+    fun `StepResult accepts latency_ms and snapshot_ref`() {
+        val result = StepResult(
+            step_id = "3",
+            action = "tap",
+            success = true,
+            latency_ms = 250L,
+            snapshot_ref = "step3_abcd1234"
+        )
+        assertEquals(250L, result.latency_ms)
+        assertEquals("step3_abcd1234", result.snapshot_ref)
+    }
+
     // ── TaskResultPayload ─────────────────────────────────────────────────────
 
     @Test

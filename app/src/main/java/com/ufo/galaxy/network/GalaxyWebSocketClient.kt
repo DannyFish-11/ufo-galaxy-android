@@ -415,13 +415,37 @@ class GalaxyWebSocketClient(
             }
             return false
         }
-        Log.d(TAG, "发送 JSON: ${json.take(100)}...")
+        // Log key fields for full-chain traceability
+        val msgType = tryExtractType(json)
+        if (msgType in listOf("task_submit", "task_result", "goal_result", "cancel_result")) {
+            val correlationId = tryExtractField(json, "correlation_id")
+            val taskId = tryExtractField(json, "task_id") ?: tryExtractFieldNested(json, "payload", "task_id")
+            val deviceId = tryExtractField(json, "device_id")
+            Log.i(TAG, "[WS:UPLINK] type=$msgType task_id=$taskId correlation_id=$correlationId device_id=$deviceId")
+        } else {
+            Log.d(TAG, "发送 JSON: ${json.take(100)}...")
+        }
         return webSocket?.send(json) ?: false
     }
 
     /** Extracts the `type` field from a JSON string without full deserialization. Returns null on error. */
     private fun tryExtractType(json: String): String? = try {
         gson.fromJson(json, JsonObject::class.java)?.get("type")?.asString
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Extracts a top-level string field from a JSON string. Returns null on error. */
+    private fun tryExtractField(json: String, field: String): String? = try {
+        gson.fromJson(json, JsonObject::class.java)?.get(field)?.asString
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Extracts a nested string field from a JSON string (e.g., payload.task_id). Returns null on error. */
+    private fun tryExtractFieldNested(json: String, outerField: String, innerField: String): String? = try {
+        gson.fromJson(json, JsonObject::class.java)
+            ?.getAsJsonObject(outerField)?.get(innerField)?.asString
     } catch (_: Exception) {
         null
     }
@@ -471,7 +495,11 @@ class GalaxyWebSocketClient(
             add("metadata", gson.toJsonTree(report.metadata))
         }
 
-        webSocket?.send(gson.toJson(handshake))
+        val handshakeJson = gson.toJson(handshake)
+        webSocket?.send(handshakeJson)
+        Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
+                " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
+                " cross_device_enabled=$crossDeviceEnabled")
     }
 
     /**
@@ -517,7 +545,7 @@ class GalaxyWebSocketClient(
             
             when (json.get("type")?.asString) {
                 "heartbeat_ack" -> {
-                    Log.d(TAG, "收到心跳响应")
+                    Log.d(TAG, "[WS:HEARTBEAT_ACK] ts=${System.currentTimeMillis()}")
                 }
                 "task_assign" -> {
                     // Parse strong-typed task_assign; dispatch via onTaskAssign so callers
@@ -525,29 +553,35 @@ class GalaxyWebSocketClient(
                     // platform classes. correlation_id prefers task_id from payload.
                     val payloadObj = json.getAsJsonObject("payload")
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val correlationId = json.get("correlation_id")?.asString ?: taskId
+                    val deviceId = json.get("device_id")?.asString ?: ""
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "收到 task_assign task_id=$taskId")
+                    Log.i(TAG, "[WS:DOWNLINK] type=task_assign task_id=$taskId correlation_id=$correlationId device_id=$deviceId")
                     listeners.forEach { it.onTaskAssign(taskId, payloadJson) }
                 }
                 "goal_execution" -> {
                     val payloadObj = json.getAsJsonObject("payload")
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val correlationId = json.get("correlation_id")?.asString ?: taskId
+                    val groupId = payloadObj?.get("group_id")?.asString ?: ""
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "收到 goal_execution task_id=$taskId")
+                    Log.i(TAG, "[WS:DOWNLINK] type=goal_execution task_id=$taskId correlation_id=$correlationId group_id=$groupId")
                     listeners.forEach { it.onGoalExecution(taskId, payloadJson) }
                 }
                 "parallel_subtask" -> {
                     val payloadObj = json.getAsJsonObject("payload")
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val groupId = payloadObj?.get("group_id")?.asString ?: ""
+                    val subtaskIndex = payloadObj?.get("subtask_index")?.asString ?: ""
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "收到 parallel_subtask task_id=$taskId")
+                    Log.i(TAG, "[WS:DOWNLINK] type=parallel_subtask task_id=$taskId group_id=$groupId subtask_index=$subtaskIndex")
                     listeners.forEach { it.onParallelSubtask(taskId, payloadJson) }
                 }
                 "task_cancel" -> {
                     val payloadObj = json.getAsJsonObject("payload")
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "收到 task_cancel task_id=$taskId")
+                    Log.i(TAG, "[WS:DOWNLINK] type=task_cancel task_id=$taskId")
                     listeners.forEach { it.onTaskCancel(taskId, payloadJson) }
                 }
                 "response" -> {
@@ -594,15 +628,19 @@ class GalaxyWebSocketClient(
     }
     
     /**
-     * 发送心跳
+     * 发送心跳，附带 device_id 与重连次数用于联调追踪。
      */
     private fun sendHeartbeat() {
+        val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
         val heartbeat = JsonObject().apply {
             addProperty("type", "heartbeat")
             addProperty("timestamp", System.currentTimeMillis())
+            addProperty("device_id", deviceId)
+            addProperty("reconnect_attempts", reconnectAttempts)
         }
-        
-        webSocket?.send(gson.toJson(heartbeat))
+        val json = gson.toJson(heartbeat)
+        webSocket?.send(json)
+        Log.d(TAG, "[WS:HEARTBEAT] device_id=$deviceId reconnect_attempts=$reconnectAttempts")
     }
     
     /**
