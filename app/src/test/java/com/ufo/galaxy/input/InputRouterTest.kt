@@ -1,0 +1,312 @@
+package com.ufo.galaxy.input
+
+import com.ufo.galaxy.agent.AccessibilityExecutor
+import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.NoOpImageScaler
+import com.ufo.galaxy.data.InMemoryAppSettings
+import com.ufo.galaxy.inference.LocalGroundingService
+import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.loop.ExecutorBridge
+import com.ufo.galaxy.loop.LocalPlanner
+import com.ufo.galaxy.loop.LoopController
+import com.ufo.galaxy.loop.LoopResult
+import com.ufo.galaxy.model.ModelAssetManager
+import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+
+/**
+ * Unit tests for [InputRouter] (P2 strong-consistency routing).
+ *
+ * Tests cover:
+ *  - LOCAL routing when cross-device is disabled.
+ *  - ERROR routing when cross-device is enabled but WS is not connected.
+ *  - [LoopController.execute] is invoked (via the coroutineScope) in LOCAL mode.
+ *  - [onLocalResult] callback delivers the [LoopResult] on completion.
+ *  - Blank/whitespace-only input is silently ignored.
+ *  - [onError] is invoked when WS is unavailable in cross-device mode; no silent local fallback.
+ *
+ * All dependencies use lightweight JVM-only fakes; no Android framework required.
+ */
+class InputRouterTest {
+
+    @get:Rule
+    val tmpFolder = TemporaryFolder()
+
+    // ── Fake dependencies ─────────────────────────────────────────────────────
+
+    /** Planner that always returns a single tap step. */
+    private class SingleStepPlanner : LocalPlannerService {
+        override fun loadModel() = true
+        override fun unloadModel() {}
+        override fun isModelLoaded() = true
+        override fun plan(goal: String, constraints: List<String>, screenshotBase64: String?) =
+            LocalPlannerService.PlanResult(
+                steps = listOf(LocalPlannerService.PlanStep("tap", "tap the button"))
+            )
+        override fun replan(
+            goal: String, constraints: List<String>,
+            failedStep: LocalPlannerService.PlanStep,
+            error: String, screenshotBase64: String?
+        ) = LocalPlannerService.PlanResult(steps = emptyList(), error = "no replan")
+    }
+
+    private class FakeGrounder : LocalGroundingService {
+        override fun loadModel() = true
+        override fun unloadModel() {}
+        override fun isModelLoaded() = true
+        override fun ground(
+            intent: String, screenshotBase64: String, width: Int, height: Int
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+    }
+
+    private class FakeAccessibilityExecutor : AccessibilityExecutor {
+        override fun execute(action: AccessibilityExecutor.AccessibilityAction) = true
+    }
+
+    private class FakeScreenshotProvider : EdgeExecutor.ScreenshotProvider {
+        override fun captureJpeg() = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())
+        override fun screenWidth() = 1080
+        override fun screenHeight() = 2340
+    }
+
+    // ── Builder helpers ───────────────────────────────────────────────────────
+
+    private fun buildLoopController(): LoopController {
+        val modelsDir = tmpFolder.newFolder("models")
+        return LoopController(
+            localPlanner = LocalPlanner(SingleStepPlanner()),
+            executorBridge = ExecutorBridge(
+                groundingService = FakeGrounder(),
+                accessibilityExecutor = FakeAccessibilityExecutor(),
+                imageScaler = NoOpImageScaler()
+            ),
+            screenshotProvider = FakeScreenshotProvider(),
+            modelAssetManager = ModelAssetManager(modelsDir),
+            modelDownloader = ModelDownloader(modelsDir)
+        )
+    }
+
+    private fun buildRouter(
+        crossDeviceEnabled: Boolean = false,
+        loopController: LoopController = buildLoopController(),
+        scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob()),
+        onLocalResult: ((LoopResult) -> Unit)? = null,
+        onError: ((String) -> Unit)? = null
+    ): InputRouter {
+        val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = crossDeviceEnabled)
+        return InputRouter(
+            settings = settings,
+            webSocketClient = client,
+            loopController = loopController,
+            coroutineScope = scope,
+            onLocalResult = onLocalResult,
+            onError = onError
+        )
+    }
+
+    // ── OFF mode (crossDeviceEnabled=false) ────────────────────────────────────
+
+    @Test
+    fun `route returns LOCAL when crossDeviceEnabled is false`() {
+        val router = buildRouter(crossDeviceEnabled = false)
+        val result = router.route("open WeChat")
+        assertEquals("Should take LOCAL path when crossDeviceEnabled=false", InputRouter.RouteMode.LOCAL, result)
+    }
+
+    @Test
+    fun `route OFF mode never calls WS uplink`() {
+        var errorCalled = false
+        val router = buildRouter(crossDeviceEnabled = false, onError = { errorCalled = true })
+        val result = router.route("do something")
+        assertNotEquals("OFF mode must never produce CROSS_DEVICE", InputRouter.RouteMode.CROSS_DEVICE, result)
+        assertFalse("onError must not be called in OFF mode", errorCalled)
+    }
+
+    @Test
+    fun `route LOCAL invokes LoopController execute and delivers result to onLocalResult`() = runBlocking {
+        var receivedResult: LoopResult? = null
+        val loopController = buildLoopController()
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+
+        val router = buildRouter(
+            crossDeviceEnabled = false,
+            loopController = loopController,
+            scope = scope,
+            onLocalResult = { receivedResult = it }
+        )
+
+        router.route("tap the button")
+        // Dispatchers.Unconfined executes coroutines eagerly; give it a moment to complete.
+        delay(200)
+
+        assertNotNull("onLocalResult must be called with the LoopResult", receivedResult)
+        assertEquals(
+            "LoopController should succeed with single-step planner",
+            LoopController.STATUS_SUCCESS,
+            receivedResult!!.status
+        )
+    }
+
+    @Test
+    fun `route LOCAL with blocked LoopController delivers CANCELLED result to onLocalResult`() = runBlocking {
+        var receivedResult: LoopResult? = null
+        val loopController = buildLoopController()
+        loopController.cancelForRemoteTask() // simulate remote task active → loop is blocked
+
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        val router = buildRouter(
+            crossDeviceEnabled = false,
+            loopController = loopController,
+            scope = scope,
+            onLocalResult = { receivedResult = it }
+        )
+
+        router.route("open the camera")
+        delay(100)
+
+        assertNotNull("onLocalResult must be called even when loop is blocked", receivedResult)
+        assertEquals(
+            "LoopController must return CANCELLED when remote task is active",
+            LoopController.STATUS_CANCELLED,
+            receivedResult!!.status
+        )
+        assertEquals(LoopController.STOP_BLOCKED_BY_REMOTE, receivedResult!!.stopReason)
+    }
+
+    // ── ON mode + WS unavailable → explicit error, no silent fallback ──────────
+
+    @Test
+    fun `route returns ERROR when crossDeviceEnabled is true but WS disconnected`() {
+        var localResultCalled = false
+        var errorCalled = false
+        val router = buildRouter(
+            crossDeviceEnabled = true,
+            onLocalResult = { localResultCalled = true },
+            onError = { errorCalled = true }
+        )
+        val result = router.route("open WeChat")
+
+        assertEquals("Must return ERROR when WS unavailable", InputRouter.RouteMode.ERROR, result)
+        assertFalse(
+            "onLocalResult (LoopController) must NOT be called when WS is unavailable in cross-device mode",
+            localResultCalled
+        )
+        assertTrue("onError callback must be invoked when WS unavailable", errorCalled)
+    }
+
+    @Test
+    fun `route ERROR surfaced to onError with non-empty reason`() {
+        var errorReason: String? = null
+        val router = buildRouter(
+            crossDeviceEnabled = true,
+            onError = { errorReason = it }
+        )
+        router.route("some task")
+
+        assertNotNull("Error reason must not be null", errorReason)
+        assertTrue("Error reason must be non-empty", errorReason!!.isNotEmpty())
+    }
+
+    // ── Blank/whitespace input ─────────────────────────────────────────────────
+
+    @Test
+    fun `route ignores blank text and returns LOCAL without launching coroutine`() {
+        var localResultCalled = false
+        val router = buildRouter(
+            crossDeviceEnabled = false,
+            onLocalResult = { localResultCalled = true }
+        )
+        val result = router.route("   ")
+
+        assertEquals("Blank input should return LOCAL (no-op)", InputRouter.RouteMode.LOCAL, result)
+        assertFalse("onLocalResult must not be called for blank input", localResultCalled)
+    }
+
+    @Test
+    fun `route ignores empty string and returns LOCAL without launching coroutine`() {
+        var errorCalled = false
+        var localResultCalled = false
+        val router = buildRouter(
+            crossDeviceEnabled = true,
+            onLocalResult = { localResultCalled = true },
+            onError = { errorCalled = true }
+        )
+        val result = router.route("")
+
+        assertEquals("Empty input should return LOCAL (no-op)", InputRouter.RouteMode.LOCAL, result)
+        assertFalse("onLocalResult must not be called for empty input", localResultCalled)
+        assertFalse("onError must not be called for empty input", errorCalled)
+    }
+
+    // ── onError is optional ────────────────────────────────────────────────────
+
+    @Test
+    fun `route does not crash when onError is null and WS unavailable in cross-device mode`() {
+        val router = buildRouter(
+            crossDeviceEnabled = true,
+            onError = null
+        )
+        // Should not throw
+        val result = router.route("test message")
+        assertEquals(InputRouter.RouteMode.ERROR, result)
+    }
+
+    // ── Integration: InputRouter and RuntimeController share LoopController ────
+
+    @Test
+    fun `InputRouter LOCAL is blocked when RuntimeController.onRemoteTaskStarted is called`() = runBlocking {
+        val loopController = buildLoopController()
+        var receivedResult: LoopResult? = null
+        val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+
+        val settings = InMemoryAppSettings(crossDeviceEnabled = false)
+        val router = InputRouter(
+            settings = settings,
+            webSocketClient = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999"),
+            loopController = loopController,
+            coroutineScope = scope,
+            onLocalResult = { receivedResult = it }
+        )
+
+        // Simulate Gateway assigning a task → local loop must be blocked.
+        loopController.cancelForRemoteTask()
+
+        router.route("tap the screen")
+        delay(100)
+
+        assertNotNull("onLocalResult must still be called (with CANCELLED)", receivedResult)
+        assertEquals(LoopController.STATUS_CANCELLED, receivedResult!!.status)
+        assertEquals(LoopController.STOP_BLOCKED_BY_REMOTE, receivedResult!!.stopReason)
+
+        // After remote task completes, local loop is unblocked.
+        loopController.clearRemoteTaskBlock()
+
+        var secondResult: LoopResult? = null
+        val router2 = InputRouter(
+            settings = settings,
+            webSocketClient = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999"),
+            loopController = loopController,
+            coroutineScope = scope,
+            onLocalResult = { secondResult = it }
+        )
+        router2.route("tap the screen again")
+        delay(200)
+
+        assertNotNull("Second route must produce a result", secondResult)
+        assertEquals(
+            "Local loop must succeed after remote task block is cleared",
+            LoopController.STATUS_SUCCESS,
+            secondResult!!.status
+        )
+    }
+}

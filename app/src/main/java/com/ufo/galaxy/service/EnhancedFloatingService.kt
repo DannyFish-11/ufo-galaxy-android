@@ -32,9 +32,9 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.NotificationCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
+import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
-import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
 import kotlinx.coroutines.CoroutineScope
@@ -122,44 +122,35 @@ class EnhancedFloatingService : Service() {
     private var taskStatus: String = STATUS_IDLE   // STATUS_IDLE | STATUS_RUNNING | STATUS_SUCCESS | STATUS_ERROR
 
     /**
-     * Unified message router: cross-device enabled → WS TaskSubmit uplink;
-     * local (cross-device OFF) → [LoopController] closed-loop pipeline.
-     * onError surfaces WS-unavailable errors directly in the floating status label.
+     * Unified input router: cross-device enabled + WS connected → AIP v3 task_submit uplink;
+     * local (cross-device OFF) → [LoopController] closed-loop pipeline launched in [serviceScope].
+     * [onError] surfaces WS-unavailable errors directly in the floating status label.
+     * [onLocalResult] updates status and hides the loading indicator on task completion.
      */
-    private val messageRouter: MessageRouter by lazy {
-        MessageRouter(
+    private val inputRouter: InputRouter by lazy {
+        InputRouter(
             settings = UFOGalaxyApplication.appSettings,
             webSocketClient = webSocketClient,
+            loopController = UFOGalaxyApplication.loopController,
+            coroutineScope = serviceScope,
+            onLocalResult = { result ->
+                lastTaskId = result.sessionId.take(8)
+                taskStatus = if (result.status == LoopController.STATUS_SUCCESS) {
+                    STATUS_SUCCESS
+                } else {
+                    STATUS_ERROR
+                }
+                Log.i(TAG, "[FLOAT] local loop done status=${result.status} steps=${result.steps.size}")
+                updateStatusLabel()
+                loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
+            },
             onError = { reason ->
-                Log.e(TAG, "Route error: $reason")
+                Log.e(TAG, "[FLOAT] Route error: $reason")
                 taskStatus = STATUS_ERROR
                 updateStatusLabel()
                 loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
             }
-        ) { text ->
-            // Local path: route through LoopController (cross-device is OFF).
-            serviceScope.launch {
-                taskStatus = STATUS_RUNNING
-                updateStatusLabel()
-                loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.VISIBLE }
-                try {
-                    val result = UFOGalaxyApplication.loopController.execute(text)
-                    lastTaskId = result.sessionId.take(8)
-                    taskStatus = if (result.status == LoopController.STATUS_SUCCESS) {
-                        STATUS_SUCCESS
-                    } else {
-                        STATUS_ERROR
-                    }
-                    Log.i(TAG, "[FLOAT] local loop done status=${result.status} steps=${result.steps.size}")
-                } catch (e: Exception) {
-                    Log.e(TAG, "[FLOAT] local loop error", e)
-                    taskStatus = STATUS_ERROR
-                } finally {
-                    updateStatusLabel()
-                    loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
-                }
-            }
-        }
+        )
     }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
@@ -712,8 +703,10 @@ class EnhancedFloatingService : Service() {
     /**
      * 发送消息
      *
-     * Delegates to [MessageRouter]: cross-device enabled + WS connected → WS TaskSubmit;
-     * otherwise → legacy local send.
+     * Delegates to [InputRouter]: cross-device enabled + WS connected → AIP v3 task_submit;
+     * otherwise → local [LoopController] execution. Loading indicator is shown before routing;
+     * it is hidden in [InputRouter.onLocalResult] or [InputRouter.onError] callbacks.
+     * For cross-device, status is updated when task_assign/goal_result arrives via [wsListener].
      */
     private fun sendMessage() {
         val text = inputField?.text?.toString()?.trim() ?: return
@@ -723,13 +716,8 @@ class EnhancedFloatingService : Service() {
         taskStatus = STATUS_RUNNING
         updateStatusLabel()
         loadingIndicator?.visibility = View.VISIBLE
-        val routeMode = messageRouter.route(text)
+        val routeMode = inputRouter.route(text)
         Log.i(TAG, "[FLOAT] sendMessage route_mode=$routeMode")
-        // For local mode the task has been dispatched; hide the loading indicator.
-        // For cross_device, status will be updated when task_assign/goal_result arrives via wsListener.
-        if (routeMode == com.ufo.galaxy.network.MessageRouter.RouteMode.LOCAL) {
-            loadingIndicator?.visibility = View.GONE
-        }
     }
     
     /**

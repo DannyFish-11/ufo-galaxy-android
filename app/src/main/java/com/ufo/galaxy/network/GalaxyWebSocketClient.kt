@@ -50,7 +50,7 @@ import kotlin.random.Random
  */
 class GalaxyWebSocketClient(
     private val serverUrl: String,
-    initialCrossDeviceEnabled: Boolean = true,
+    crossDeviceEnabled: Boolean = true,
     val offlineQueue: OfflineTaskQueue = OfflineTaskQueue()
 ) {
     companion object {
@@ -164,8 +164,13 @@ class GalaxyWebSocketClient(
      * first if a live connection should be torn down.
      */
     @Volatile
-    var crossDeviceEnabled: Boolean = initialCrossDeviceEnabled
+    var crossDeviceEnabled: Boolean
         private set
+
+    init {
+        // Use `this.crossDeviceEnabled` explicitly to avoid ambiguity with the constructor param.
+        this.crossDeviceEnabled = crossDeviceEnabled
+    }
 
     /**
      * Updates [crossDeviceEnabled] at runtime.
