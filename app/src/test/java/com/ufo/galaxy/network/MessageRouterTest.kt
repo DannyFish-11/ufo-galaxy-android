@@ -5,43 +5,85 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * Unit tests for [MessageRouter].
+ * Unit tests for [MessageRouter] (P2 strong-consistency routing).
+ *
+ * P2 routing rules:
+ *  - crossDeviceEnabled=false → always LOCAL; task_submit uplink forbidden.
+ *  - crossDeviceEnabled=true + WS connected → CROSS_DEVICE (WS uplink).
+ *  - crossDeviceEnabled=true + WS NOT connected → ERROR; no silent local fallback.
  *
  * These are pure JVM tests; no Android framework required.
  */
 class MessageRouterTest {
 
-    // ── Local fallback path ───────────────────────────────────────────────────
+    // ── OFF mode (crossDeviceEnabled=false) ────────────────────────────────────
 
     @Test
-    fun `route calls localFallback when crossDeviceEnabled is false`() {
+    fun `route returns LOCAL and calls localFallback when crossDeviceEnabled is false`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = false)
         val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
         var localCalled = false
+        var errorCalled = false
 
-        val router = MessageRouter(settings, client) { _ -> localCalled = true }
+        val router = MessageRouter(settings, client, onError = { errorCalled = true }) { _ -> localCalled = true }
         val result = router.route("open WeChat")
 
-        assertFalse("WS path should not be used", result)
-        assertTrue("Local fallback must be called", localCalled)
+        assertEquals("Should take LOCAL path when crossDeviceEnabled=false", MessageRouter.RouteMode.LOCAL, result)
+        assertTrue("Local fallback must be called in OFF mode", localCalled)
+        assertFalse("onError must NOT be called in OFF mode", errorCalled)
     }
 
     @Test
-    fun `route calls localFallback when crossDeviceEnabled is true but WS disconnected`() {
+    fun `route OFF mode never calls task_submit uplink`() {
+        val settings = InMemoryAppSettings(crossDeviceEnabled = false)
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
+        var crossDeviceCalled = false
+
+        val router = MessageRouter(settings, client) { _ -> }
+        val result = router.route("do something")
+
+        assertNotEquals("OFF mode must never produce CROSS_DEVICE", MessageRouter.RouteMode.CROSS_DEVICE, result)
+    }
+
+    // ── ON mode + WS unavailable → explicit error, no silent fallback ─────────
+
+    @Test
+    fun `route returns ERROR when crossDeviceEnabled is true but WS disconnected`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
-        // client crossDeviceEnabled=false so it won't connect → isConnected() = false
+        // client is not connected (never called connect())
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = true)
+        var localCalled = false
+        var errorCalled = false
+
+        val router = MessageRouter(settings, client, onError = { errorCalled = true }) { _ -> localCalled = true }
+        val result = router.route("open WeChat")
+
+        assertEquals("Must return ERROR when WS unavailable in cross-device mode",
+            MessageRouter.RouteMode.ERROR, result)
+        assertFalse("Local fallback must NOT be called silently when WS unavailable", localCalled)
+        assertTrue("onError callback must be invoked when WS unavailable", errorCalled)
+    }
+
+    @Test
+    fun `route returns ERROR when crossDeviceEnabled true and client crossDeviceEnabled false`() {
+        val settings = InMemoryAppSettings(crossDeviceEnabled = true)
+        // WS client with crossDeviceEnabled=false won't have a connection
         val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
         var localCalled = false
+        var errorCalled = false
 
-        val router = MessageRouter(settings, client) { _ -> localCalled = true }
+        val router = MessageRouter(settings, client, onError = { errorCalled = true }) { _ -> localCalled = true }
         val result = router.route("open WeChat")
 
-        assertFalse(result)
-        assertTrue(localCalled)
+        assertEquals(MessageRouter.RouteMode.ERROR, result)
+        assertFalse("No silent local fallback", localCalled)
+        assertTrue("Error must be surfaced", errorCalled)
     }
 
+    // ── Empty input ────────────────────────────────────────────────────────────
+
     @Test
-    fun `route ignores empty text and returns false`() {
+    fun `route ignores empty text and returns LOCAL without calling fallback`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = false)
         val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
         var localCalled = false
@@ -49,12 +91,12 @@ class MessageRouterTest {
         val router = MessageRouter(settings, client) { _ -> localCalled = true }
         val result = router.route("   ")
 
-        assertFalse(result)
-        assertFalse("Local fallback must not be called for empty input", localCalled)
+        assertEquals(MessageRouter.RouteMode.LOCAL, result)
+        assertFalse("Local fallback must not be called for whitespace-only input", localCalled)
     }
 
     @Test
-    fun `route ignores blank string and returns false`() {
+    fun `route ignores blank string and returns LOCAL without calling fallback`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
         val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
         var localCalled = false
@@ -62,33 +104,20 @@ class MessageRouterTest {
         val router = MessageRouter(settings, client) { _ -> localCalled = true }
         val result = router.route("")
 
-        assertFalse(result)
+        assertEquals(MessageRouter.RouteMode.LOCAL, result)
         assertFalse(localCalled)
     }
 
-    // ── WS path (sendJson returns false when not connected → falls back) ──────
+    // ── onError is optional ────────────────────────────────────────────────────
 
     @Test
-    fun `route calls localFallback when WS sendJson fails`() {
+    fun `route with no onError callback still returns ERROR mode without crashing`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
-        // Client with crossDeviceEnabled=true but no server → sendJson returns false
-        val testQueue = OfflineTaskQueue(prefs = null)
-        val client = GalaxyWebSocketClient(
-            serverUrl = "ws://localhost:9999",
-            crossDeviceEnabled = true,
-            offlineQueue = testQueue
-        )
-        // Simulate that crossDeviceEnabled is set but not connected
-        settings.crossDeviceEnabled = true
-        client.setCrossDeviceEnabled(true)
-        // isConnected() is false because we never called connect() successfully
-
-        var localCalled = false
-        val router = MessageRouter(settings, client) { _ -> localCalled = true }
-        // WS is not connected → should fall back to local
-        router.route("say hello")
-        // localFallback should have been called (either crossDevice+disconnected → local,
-        // or crossDevice+connected→sendFails→local)
-        assertTrue("Local fallback must be invoked when WS is unavailable", localCalled)
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = true)
+        // No onError provided (default null)
+        val router = MessageRouter(settings, client) { _ -> }
+        // Should not throw even though WS is disconnected
+        val result = router.route("test message")
+        assertEquals(MessageRouter.RouteMode.ERROR, result)
     }
 }

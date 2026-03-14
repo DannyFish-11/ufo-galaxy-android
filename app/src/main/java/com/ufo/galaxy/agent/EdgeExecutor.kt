@@ -156,6 +156,7 @@ class EdgeExecutor(
         while (stepIndex < planSteps.size && stepsConsumed < taskAssign.max_steps) {
             val step = planSteps[stepIndex]
             val stepId = (stepsConsumed + 1).toString()
+            val stepStart = System.currentTimeMillis()
 
             // Capture full-resolution screenshot for this step.
             // Snapshot always stores the full-resolution image.
@@ -242,7 +243,9 @@ class EdgeExecutor(
                     step_id = stepId,
                     action = step.action_type,
                     success = actionSuccess,
-                    snapshot = makeSnapshot(fullBase64, screenW, screenH)
+                    snapshot = makeSnapshot(fullBase64, screenW, screenH),
+                    latency_ms = System.currentTimeMillis() - stepStart,
+                    snapshot_ref = "step${stepId}_${taskAssign.task_id.take(8)}"
                 )
             )
             stepsConsumed++

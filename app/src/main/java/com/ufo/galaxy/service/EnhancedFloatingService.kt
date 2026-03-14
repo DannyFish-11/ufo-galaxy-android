@@ -57,7 +57,13 @@ class EnhancedFloatingService : Service() {
         private const val ISLAND_COLLAPSED_HEIGHT = 36
         private const val ISLAND_EXPANDED_WIDTH = 320
         private const val ISLAND_EXPANDED_HEIGHT = 400
-        
+
+        // 任务状态常量
+        internal const val STATUS_IDLE = "idle"
+        internal const val STATUS_RUNNING = "running"
+        internal const val STATUS_SUCCESS = "success"
+        internal const val STATUS_ERROR = "error"
+
         // 状态
         var isExpanded = false
             private set
@@ -100,15 +106,28 @@ class EnhancedFloatingService : Service() {
         get() = UFOGalaxyApplication.webSocketClient
 
     /**
-     * Unified message router: cross-device path → WS TaskSubmit; local path → legacy WS send.
-     * Instantiated lazily after [UFOGalaxyApplication] singletons are ready.
+     * Tracks the task_id and status for the floating-window task summary.
+     * Updated from the WS listener (task received) and send completion.
+     */
+    private var lastTaskId: String = ""
+    private var taskStatus: String = STATUS_IDLE   // STATUS_IDLE | STATUS_RUNNING | STATUS_SUCCESS | STATUS_ERROR
+
+    /**
+     * Unified message router: cross-device enabled → WS TaskSubmit uplink; local → legacy send.
+     * onError surfaces WS-unavailable errors directly in the floating status label.
      */
     private val messageRouter: MessageRouter by lazy {
         MessageRouter(
             settings = UFOGalaxyApplication.appSettings,
-            webSocketClient = webSocketClient
+            webSocketClient = webSocketClient,
+            onError = { reason ->
+                Log.e(TAG, "Route error: $reason")
+                taskStatus = STATUS_ERROR
+                updateStatusLabel()
+                loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
+            }
         ) { text ->
-            // Local fallback for floating window: legacy best-effort send
+            // Local fallback for floating window: best-effort legacy send
             webSocketClient.send(text)
         }
     }
@@ -183,9 +202,9 @@ class EnhancedFloatingService : Service() {
             
             // 状态文本（收起时显示）
             statusText = TextView(context).apply {
-                text = "UFO Galaxy"
+                text = buildStatusLabel()
                 setTextColor(0xFFFFFFFF.toInt())
-                textSize = 14f
+                textSize = 12f
                 gravity = android.view.Gravity.CENTER
             }
             addView(statusText, LinearLayout.LayoutParams(
@@ -274,6 +293,8 @@ class EnhancedFloatingService : Service() {
                         val app = UFOGalaxyApplication.appSettings
                         app.crossDeviceEnabled = isChecked
                         UFOGalaxyApplication.instance.setCrossDeviceEnabled(isChecked)
+                        taskStatus = STATUS_IDLE
+                        updateStatusLabel()
                         if (isChecked) {
                             webSocketClient.connect()
                         }
@@ -495,37 +516,71 @@ class EnhancedFloatingService : Service() {
     }
     
     /**
-     * 设置 WebSocket 监听
+     * 设置 WebSocket 监听：更新悬浮窗状态标签和任务简报。
      */
     private fun setupWebSocketListener() {
         wsListener = object : GalaxyWebSocketClient.Listener {
             override fun onConnected() {
-                statusText?.post {
-                    statusText?.text = "已连接"
-                }
+                statusText?.post { updateStatusLabel() }
             }
-            
+
             override fun onDisconnected() {
-                statusText?.post {
-                    statusText?.text = "未连接"
-                }
+                statusText?.post { updateStatusLabel() }
             }
-            
+
             override fun onMessage(message: String) {
                 loadingIndicator?.post {
                     loadingIndicator?.visibility = View.GONE
                 }
             }
-            
+
             override fun onError(error: String) {
-                statusText?.post {
-                    statusText?.text = "错误"
-                }
+                taskStatus = STATUS_ERROR
+                statusText?.post { updateStatusLabel() }
+            }
+
+            override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
+                lastTaskId = taskId
+                taskStatus = STATUS_RUNNING
+                statusText?.post { updateStatusLabel() }
+                loadingIndicator?.post { loadingIndicator?.visibility = View.VISIBLE }
+                Log.i(TAG, "[FLOAT] task_assign task_id=$taskId")
+            }
+
+            override fun onGoalExecution(taskId: String, goalPayloadJson: String) {
+                lastTaskId = taskId
+                taskStatus = STATUS_RUNNING
+                statusText?.post { updateStatusLabel() }
+                loadingIndicator?.post { loadingIndicator?.visibility = View.VISIBLE }
+                Log.i(TAG, "[FLOAT] goal_execution task_id=$taskId")
             }
         }
         webSocketClient.addListener(wsListener)
     }
-    
+
+    /**
+     * Builds the status-label text for the collapsed/expanded floating island.
+     * Format: "[mode] | [task_id_short] | [status]"
+     */
+    private fun buildStatusLabel(): String {
+        val mode = if (UFOGalaxyApplication.appSettings.crossDeviceEnabled) "跨设备" else "本地"
+        val idPart = if (lastTaskId.isNotEmpty()) lastTaskId.take(8) else "—"
+        val statusLabel = when (taskStatus) {
+            STATUS_RUNNING -> "执行中"
+            STATUS_SUCCESS -> "成功"
+            STATUS_ERROR   -> "错误"
+            else           -> if (webSocketClient.isConnected()) "已连接" else "未连接"
+        }
+        return "$mode | $idPart | $statusLabel"
+    }
+
+    /**
+     * Posts a status-label update to the UI thread.
+     */
+    private fun updateStatusLabel() {
+        statusText?.post { statusText?.text = buildStatusLabel() }
+    }
+
     /**
      * 发送消息
      *
@@ -537,15 +592,28 @@ class EnhancedFloatingService : Service() {
         if (text.isEmpty()) return
 
         inputField?.setText("")
+        taskStatus = STATUS_RUNNING
+        updateStatusLabel()
         loadingIndicator?.visibility = View.VISIBLE
-        messageRouter.route(text)
+        val routeMode = messageRouter.route(text)
+        Log.i(TAG, "[FLOAT] sendMessage route_mode=$routeMode")
+        // For local mode the task has been dispatched; hide the loading indicator.
+        // For cross_device, status will be updated when task_assign/goal_result arrives via wsListener.
+        if (routeMode == com.ufo.galaxy.network.MessageRouter.RouteMode.LOCAL) {
+            loadingIndicator?.visibility = View.GONE
+        }
     }
     
     /**
-     * 开始语音输入（悬浮窗不支持语音输入；请在主界面使用语音输入功能）
+     * 开始语音输入：悬浮窗暂不支持内嵌语音识别，提示用户长按悬浮窗打开主界面。
      */
     private fun startVoiceInput() {
-        Log.d(TAG, "语音输入仅在主界面支持；请长按悬浮窗打开主界面")
+        Log.d(TAG, "语音输入仅在主界面支持；提示用户打开主界面")
+        android.widget.Toast.makeText(
+            this,
+            "请长按悬浮窗打开主界面以使用语音输入",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
     
     /**

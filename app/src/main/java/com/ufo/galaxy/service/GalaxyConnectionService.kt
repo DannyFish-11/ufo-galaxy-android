@@ -136,10 +136,20 @@ class GalaxyConnectionService : Service() {
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "服务启动")
-        
-        // 启动前台服务
-        startForeground(NOTIFICATION_ID, createNotification("正在连接..."))
-        
+
+        // 恢复持久化的 crossDeviceEnabled 状态，确保进程重启后路由行为一致
+        val settings = UFOGalaxyApplication.appSettings
+        val savedCrossDevice = settings.crossDeviceEnabled
+        if (webSocketClient.crossDeviceEnabled != savedCrossDevice) {
+            webSocketClient.setCrossDeviceEnabled(savedCrossDevice)
+            Log.i(TAG, "服务重启：恢复 crossDeviceEnabled=$savedCrossDevice")
+        }
+
+        // 启动前台服务（常驻通知，防止后台进程被系统回收）
+        startForeground(NOTIFICATION_ID, createNotification(
+            if (savedCrossDevice) "跨设备模式已启用" else "本地模式"
+        ))
+
         // 连接到服务器（若 crossDeviceEnabled=false 则为 no-op）
         webSocketClient.connect()
 
@@ -184,6 +194,7 @@ class GalaxyConnectionService : Service() {
             return
         }
 
+        updateNotification("执行任务 ${taskId.take(8)}…")
         val result = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
 
         val envelope = AipMessage(
@@ -193,7 +204,8 @@ class GalaxyConnectionService : Service() {
             device_id = localDeviceId
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
-        Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} sent=$sent")
+        Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} steps=${result.steps.size} sent=$sent")
+        updateNotification("任务 ${taskId.take(8)}: ${result.status}")
     }
 
     /**
