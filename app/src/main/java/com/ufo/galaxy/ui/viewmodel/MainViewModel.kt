@@ -9,14 +9,13 @@ import androidx.lifecycle.viewModelScope
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
+import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
-import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,7 +23,6 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -116,30 +114,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         get() = UFOGalaxyApplication.webSocketClient
 
     /**
-     * Unified input router shared by this ViewModel and [EnhancedFloatingService].
-     * - crossDeviceEnabled=false → local only via [executeLocally].
-     * - crossDeviceEnabled=true + WS connected → WS TaskSubmit uplink.
-     * - crossDeviceEnabled=true + WS NOT connected → explicit error surfaced to UI; no local fallback.
+     * Unified input router shared by this ViewModel and [com.ufo.galaxy.service.EnhancedFloatingService].
+     *  - crossDeviceEnabled=false → local; [LoopController.execute] runs in [viewModelScope] and
+     *    [onLocalResult] updates the chat and clears isLoading.
+     *  - crossDeviceEnabled=true + WS connected → AIP v3 task_submit uplink; isLoading cleared
+     *    later by [handleServerMessage] / [wsListener].
+     *  - crossDeviceEnabled=true + WS NOT connected → [onError] surfaces the reason; isLoading
+     *    is cleared immediately.
      */
-    private val messageRouter: MessageRouter by lazy {
-        MessageRouter(
+    private val inputRouter: InputRouter by lazy {
+        InputRouter(
             settings = UFOGalaxyApplication.appSettings,
             webSocketClient = webSocketClient,
+            loopController = UFOGalaxyApplication.loopController,
+            coroutineScope = viewModelScope,
+            onLocalResult = { result ->
+                // Record the outcome for the diagnostics panel.
+                pushTaskId(result.sessionId, result.status)
+
+                val summary = when (result.status) {
+                    LoopController.STATUS_SUCCESS ->
+                        "任务完成（${result.steps.size} 步）"
+                    LoopController.STATUS_CANCELLED ->
+                        "任务取消: ${result.error ?: ""}"
+                    else ->
+                        "任务失败: ${result.error ?: result.stopReason ?: "未知错误"}"
+                }
+
+                val assistantMessage = ChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    role = MessageRole.ASSISTANT,
+                    content = summary,
+                    timestamp = System.currentTimeMillis()
+                )
+                _uiState.update { state ->
+                    state.copy(
+                        messages = state.messages + assistantMessage,
+                        isLoading = false
+                    )
+                }
+            },
             onError = { reason ->
-                Log.e(TAG, "MessageRouter error: $reason")
+                Log.e(TAG, "InputRouter error: $reason")
                 pushError(reason)
                 _uiState.update { it.copy(error = reason, isLoading = false) }
             }
-        ) { text ->
-            viewModelScope.launch {
-                try {
-                    executeLocally(text)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Local execution error", e)
-                    _uiState.update { it.copy(error = e.message, isLoading = false) }
-                }
-            }
-        }
+        )
     }
     
     // 语音输入管理器
@@ -331,12 +351,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // Delegate to unified MessageRouter.
-        // LOCAL  → localFallback lambda resets isLoading on completion.
+        // Delegate to unified InputRouter.
+        // LOCAL  → onLocalResult callback resets isLoading on completion.
         // CROSS_DEVICE → server reply resets isLoading via handleServerMessage / wsListener.
-        // ERROR  → onError callback already set isLoading=false; nothing more to do here.
-        val routeMode = messageRouter.route(messageText)
-        if (routeMode == com.ufo.galaxy.network.MessageRouter.RouteMode.CROSS_DEVICE) {
+        // ERROR  → onError callback already cleared isLoading; nothing more to do here.
+        val routeMode = inputRouter.route(messageText)
+        if (routeMode == InputRouter.RouteMode.CROSS_DEVICE) {
             Log.i(TAG, "sendMessage: route_mode=cross_device")
         }
     }
@@ -344,9 +364,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Executes [goal] directly via [LoopController] (local-only path).
      *
-     * Runs on Dispatchers.IO via LoopController.execute(); posts result back to the
-     * UI on completion. Cross-device path is kept intact in [sendMessage] via
-     * [MessageRouter]; this function is only reached when cross-device is OFF.
+     * Retained for edge cases where direct [LoopController] access is needed outside of
+     * [inputRouter]. Normal code paths use [inputRouter.route] which launches
+     * [LoopController.execute] internally and delivers the result via [onLocalResult].
      */
     private suspend fun executeLocally(goal: String) {
         val result = UFOGalaxyApplication.loopController.execute(goal)
