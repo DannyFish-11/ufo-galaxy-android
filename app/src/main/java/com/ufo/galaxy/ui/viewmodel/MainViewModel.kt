@@ -13,12 +13,15 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,7 +88,13 @@ data class MainUiState(
     /** True when the active network connection appears reachable (WS connected). */
     val networkOk: Boolean = false,
     /** True when the OS battery-optimisation exemption has been granted for this app. */
-    val batteryOptimizationsDisabled: Boolean = false
+    val batteryOptimizationsDisabled: Boolean = false,
+    /**
+     * Non-null when the cross-device runtime failed to register (network error or timeout).
+     * The value is the human-readable failure reason. Set back to null via
+     * [MainViewModel.clearRegistrationFailure] after the user dismisses the dialog.
+     */
+    val registrationFailure: String? = null
 )
 
 /**
@@ -194,6 +203,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(reconnectAttempt = attempts) }
             }
         }
+        // Observe RuntimeController registration failures and surface them as dialogs.
+        // SharedFlow: each emission is a one-time event (failure reason string).
+        UFOGalaxyApplication.runtimeController.registrationError
+            .onEach { reason ->
+                Log.w(TAG, "RuntimeController registration failure: $reason")
+                pushError(reason)
+                _uiState.update { it.copy(registrationFailure = reason, crossDeviceEnabled = false) }
+            }
+            .launchIn(viewModelScope)
     }
     
     /**
@@ -441,30 +459,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Toggles the cross-device collaboration setting.
      *
-     * - Persists the new value via [AppSettings].
-     * - Updates [GalaxyWebSocketClient.crossDeviceEnabled] via [UFOGalaxyApplication.setCrossDeviceEnabled].
-     *   When toggled **off** the active WebSocket connection is torn down.
-     *   When toggled **on** [GalaxyWebSocketClient.connect] is called so the gateway
-     *   session is re-established and the capability_report is sent.
-     * - Updates [MainUiState.crossDeviceEnabled] so the UI toggle reflects the new state
-     *   immediately without waiting for a WS connection event.
+     * - When toggling **on**: delegates to [RuntimeController.startWithTimeout] which
+     *   connects the WebSocket, sends the device_register / capability_report handshake,
+     *   and transitions to [RuntimeController.RuntimeState.Active]. If the registration
+     *   fails or times out, [RuntimeController] automatically falls back to local-only
+     *   mode and emits a failure event via [RuntimeController.registrationError], which
+     *   is observed in [init] and surfaced via [MainUiState.registrationFailure] for
+     *   dialog display in [com.ufo.galaxy.ui.MainActivity].
+     * - When toggling **off**: delegates to [RuntimeController.stop] which disconnects
+     *   the WebSocket and transitions to [RuntimeController.RuntimeState.LocalOnly].
+     * - Persists the new value via [AppSettings] and updates [MainUiState.crossDeviceEnabled]
+     *   immediately so the toggle reflects user intent.
      */
     fun toggleCrossDeviceEnabled() {
         val newValue = !_uiState.value.crossDeviceEnabled
         Log.i(TAG, "toggleCrossDeviceEnabled → $newValue")
-        // Persist
-        UFOGalaxyApplication.appSettings.crossDeviceEnabled = newValue
-        // Update WS client (disconnects if newValue==false and currently connected)
-        UFOGalaxyApplication.instance.setCrossDeviceEnabled(newValue)
-        // Update UI state
+        // Update UI state immediately to reflect user's intent.
         _uiState.update { it.copy(crossDeviceEnabled = newValue) }
-        // Reconnect when enabling.
-        // Connection failures are surfaced via the wsListener.onError → uiState.error path;
-        // the toggle reflects the user's *intent* (crossDeviceEnabled=true means "user wants
-        // cross-device"), while isConnected tracks the actual live connection state.
         if (newValue) {
-            viewModelScope.launch { webSocketClient.connect() }
+            // Persist intent; RuntimeController will revert if registration fails.
+            UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
+            viewModelScope.launch {
+                val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                if (!ok) {
+                    // Registration failed — registrationError observer will update UI.
+                    _uiState.update { it.copy(crossDeviceEnabled = false) }
+                }
+            }
+        } else {
+            UFOGalaxyApplication.appSettings.crossDeviceEnabled = false
+            UFOGalaxyApplication.runtimeController.stop()
         }
+    }
+
+    /**
+     * Clears [MainUiState.registrationFailure] after the user has dismissed the dialog.
+     */
+    fun clearRegistrationFailure() {
+        _uiState.update { it.copy(registrationFailure = null) }
     }
     
     /**

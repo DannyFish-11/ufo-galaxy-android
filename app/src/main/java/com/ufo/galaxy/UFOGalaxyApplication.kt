@@ -25,11 +25,16 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.planner.MobileVlmPlanner
+import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
 import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.service.ReadinessState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * UFO Galaxy Android Application
@@ -89,6 +94,10 @@ class UFOGalaxyApplication : Application() {
         lateinit var loopController: LoopController
             private set
 
+        // RuntimeController: manages cross-device ON/OFF lifecycle, registration, and fallback
+        lateinit var runtimeController: RuntimeController
+            private set
+
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
@@ -137,6 +146,16 @@ class UFOGalaxyApplication : Application() {
         
         // 初始化 WebSocket 客户端
         initWebSocketClient()
+
+        // Initialise RuntimeController (requires webSocketClient, appSettings, loopController).
+        initRuntimeController()
+
+        // Ensure model files are present at startup so that local loop and cross-device
+        // runtime are both ready regardless of whether GalaxyConnectionService has started.
+        // Runs in a background scope; failures are logged but never block the app.
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            ensureModelsAtStartup()
+        }
         
         Log.i(TAG, "UFO Galaxy Application 初始化完成")
     }
@@ -147,6 +166,7 @@ class UFOGalaxyApplication : Application() {
         // Note: onTerminate() is not guaranteed to be called on real devices,
         // but is called in tests/emulators. Process termination cleans up anyway.
         modelDownloader.cancel()
+        runtimeController.cancel()
         Log.i(TAG, "UFO Galaxy Application 终止")
     }
     
@@ -359,6 +379,60 @@ class UFOGalaxyApplication : Application() {
             modelDownloader = modelDownloader
         )
         Log.d(TAG, "推理服务已初始化")
+    }
+
+    /**
+     * Initialises [RuntimeController], which manages the cross-device ON/OFF lifecycle.
+     *
+     * Must be called after [initInferenceServices] and [initWebSocketClient] because both
+     * [loopController] and [webSocketClient] must be available.
+     */
+    private fun initRuntimeController() {
+        runtimeController = RuntimeController(
+            webSocketClient = webSocketClient,
+            settings = appSettings,
+            loopController = loopController
+        )
+        Log.d(TAG, "RuntimeController 已初始化")
+    }
+
+    /**
+     * Verifies local model files at startup and downloads any that are missing or corrupted.
+     *
+     * This ensures that both the local [LoopController] and the cross-device runtime
+     * have access to local models as soon as the app starts — regardless of whether
+     * [com.ufo.galaxy.service.GalaxyConnectionService] has been started yet.
+     *
+     * Download failures are logged but never block app startup.
+     */
+    private suspend fun ensureModelsAtStartup() {
+        Log.i(TAG, "ensureModelsAtStartup: verifying local model files")
+        try {
+            val statuses = modelAssetManager.verifyAll()
+            val allPresent = statuses.values.none {
+                it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING ||
+                    it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.CORRUPTED
+            }
+            if (allPresent) {
+                Log.d(TAG, "ensureModelsAtStartup: all model files present")
+                return
+            }
+            val specs = modelAssetManager.downloadSpecsForMissing()
+            if (specs.isEmpty()) {
+                Log.d(TAG, "ensureModelsAtStartup: no download URLs configured; skipping")
+                return
+            }
+            Log.i(TAG, "ensureModelsAtStartup: downloading ${specs.size} model file(s)")
+            for (spec in specs) {
+                val ok = modelDownloader.downloadSync(spec) {}
+                Log.i(TAG, "ensureModelsAtStartup: ${spec.modelId} ok=$ok")
+            }
+            modelAssetManager.verifyAll()
+            // Re-run readiness checks so UI/capability_report reflect updated model state.
+            refreshReadiness()
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureModelsAtStartup failed: ${e.message}", e)
+        }
     }
     
     /**

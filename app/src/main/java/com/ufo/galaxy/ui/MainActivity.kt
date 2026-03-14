@@ -278,6 +278,20 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
+    // Show registration failure dialog when cross-device registration fails.
+    uiState.registrationFailure?.let { reason ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearRegistrationFailure() },
+            title = { Text("跨设备注册失败") },
+            text = { Text(reason) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearRegistrationFailure() }) {
+                    Text("确定")
+                }
+            }
+        )
+    }
+
     // Show diagnostics overlay when toggled
     if (uiState.showDiagnostics) {
         DiagnosticsScreen(

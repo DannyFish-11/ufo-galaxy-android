@@ -65,6 +65,49 @@ class LoopController(
         const val STOP_PLAN_FAILED = "plan_failed"
         const val STOP_REPLAN_FAILED = "replan_failed"
         const val STOP_STEP_EXHAUSTED = "step_retries_exhausted"
+        const val STOP_CANCELLED_BY_REMOTE = "cancelled_by_remote_task"
+        const val STOP_BLOCKED_BY_REMOTE = "blocked_by_remote_task"
+    }
+
+    /**
+     * Set to `true` by [cancelForRemoteTask] when the Gateway assigns a remote task so
+     * that any currently-running [execute] session terminates gracefully at the next
+     * step boundary. Reset automatically at the start of [execute].
+     */
+    @Volatile private var cancelRequested: Boolean = false
+
+    /**
+     * When `true`, a remote (Gateway-assigned) task is executing and local [execute]
+     * calls will return immediately with [STATUS_CANCELLED] / [STOP_BLOCKED_BY_REMOTE]
+     * rather than starting a new local session.
+     *
+     * Set by [cancelForRemoteTask]; cleared by [clearRemoteTaskBlock].
+     */
+    @Volatile var isRemoteTaskActive: Boolean = false
+        private set
+
+    /**
+     * Cancels any currently-running [execute] session and blocks new local sessions
+     * until [clearRemoteTaskBlock] is called.
+     *
+     * Called by [com.ufo.galaxy.runtime.RuntimeController.onRemoteTaskStarted] when the
+     * Gateway assigns a `task_assign` or `goal_execution` to this device.
+     */
+    fun cancelForRemoteTask() {
+        cancelRequested = true
+        isRemoteTaskActive = true
+    }
+
+    /**
+     * Clears the remote-task block set by [cancelForRemoteTask].
+     *
+     * Called by [com.ufo.galaxy.runtime.RuntimeController.onRemoteTaskFinished] after the
+     * device has sent back `task_result` / `goal_result` to the Gateway. After this call,
+     * local [execute] sessions may start normally again.
+     */
+    fun clearRemoteTaskBlock() {
+        cancelRequested = false
+        isRemoteTaskActive = false
     }
 
     private val _status = MutableStateFlow<LoopStatus>(LoopStatus.Idle)
@@ -86,6 +129,26 @@ class LoopController(
      */
     suspend fun execute(instruction: String): LoopResult = withContext(Dispatchers.IO) {
         val sessionId = UUID.randomUUID().toString()
+
+        // Block new local sessions while a remote (Gateway) task is active.
+        if (isRemoteTaskActive) {
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "session_blocked",
+                "session_id" to sessionId,
+                "reason" to STOP_BLOCKED_BY_REMOTE
+            ))
+            _status.value = LoopStatus.Idle
+            return@withContext LoopResult(
+                sessionId = sessionId,
+                instruction = instruction,
+                status = STATUS_CANCELLED,
+                stopReason = STOP_BLOCKED_BY_REMOTE,
+                error = "Local execution blocked while remote task is active"
+            )
+        }
+
+        // Reset cancel flag at the start of each new session.
+        cancelRequested = false
 
         GalaxyLogger.log(
             TAG, mapOf(
@@ -136,6 +199,25 @@ class LoopController(
         // stepsConsumed tracks total dispatched steps across the initial plan and any replans.
         // maxSteps caps the total budget regardless of how many times replanning occurs.
         while (stepIndex < planSteps.size && stepsConsumed < maxSteps) {
+            // Check for remote-task cancellation at each step boundary.
+            if (cancelRequested) {
+                GalaxyLogger.log(TAG, mapOf(
+                    "event" to "session_cancelled",
+                    "session_id" to sessionId,
+                    "step_index" to stepsConsumed,
+                    "reason" to STOP_CANCELLED_BY_REMOTE
+                ))
+                _status.value = LoopStatus.Idle
+                return@withContext LoopResult(
+                    sessionId = sessionId,
+                    instruction = instruction,
+                    status = STATUS_CANCELLED,
+                    steps = executedSteps,
+                    stopReason = STOP_CANCELLED_BY_REMOTE,
+                    error = "Cancelled by remote task assignment"
+                )
+            }
+
             val step = planSteps[stepIndex]
             val displayIndex = stepsConsumed + 1
 

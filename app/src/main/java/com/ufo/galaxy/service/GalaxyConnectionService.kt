@@ -24,8 +24,9 @@ import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.memory.MemoryEntry
+import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
 import com.ufo.galaxy.protocol.TaskResultPayload
-import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -184,6 +185,14 @@ class GalaxyConnectionService : Service() {
     /**
      * 处理 task_assign：反序列化 payload、执行本地 EdgeExecutor、回传 task_result。
      * 在 IO 线程中执行；EdgeExecutor 内部所有异常均已捕获并映射为 ERROR 结果。
+     *
+     * When a task_assign arrives:
+     * 1. Notifies [RuntimeController.onRemoteTaskStarted] to cancel any running local
+     *    [com.ufo.galaxy.loop.LoopController] session.
+     * 2. Executes the task via [EdgeExecutor].
+     * 3. Sends back the AIP v3 task_result envelope.
+     * 4. Notifies [RuntimeController.onRemoteTaskFinished] to unblock local execution.
+     * 5. Persists the result to OpenClawd memory (route_mode="cross_device").
      */
     private fun handleTaskAssign(taskId: String, payloadJson: String) {
         val payload = try {
@@ -193,6 +202,9 @@ class GalaxyConnectionService : Service() {
             sendTaskError(taskId, "bad_payload: ${e.message}")
             return
         }
+
+        // Pause any running local LoopController session.
+        UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
         updateNotification("执行任务 ${taskId.take(8)}…")
         val result = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
@@ -206,6 +218,21 @@ class GalaxyConnectionService : Service() {
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} steps=${result.steps.size} sent=$sent")
         updateNotification("任务 ${taskId.take(8)}: ${result.status}")
+
+        // Unblock local loop now that the remote task is complete.
+        UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+
+        // Persist result to OpenClawd memory (route_mode = "cross_device").
+        serviceScope.launch(Dispatchers.IO) {
+            storeMemoryEntry(
+                taskId = taskId,
+                goal = payload.goal,
+                status = result.status,
+                summary = "task_assign: ${result.steps.size} step(s) executed",
+                steps = result.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
+                routeMode = "cross_device"
+            )
+        }
     }
 
     /**
@@ -233,13 +260,18 @@ class GalaxyConnectionService : Service() {
             return
         }
 
+        // Pause any running local LoopController session.
+        UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+
         val timeoutMs = payload.effectiveTimeoutMs
+        var finalResult: GoalResultPayload? = null
         try {
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
             }
             if (isActive) {
                 sendGoalResult(result)
+                finalResult = result
                 Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${result.status} latency=${result.latency_ms}ms")
             }
         } catch (e: TimeoutCancellationException) {
@@ -250,8 +282,25 @@ class GalaxyConnectionService : Service() {
             Log.w(TAG, "[TASK:TIMEOUT] goal_execution timed out task_id=$taskId timeout_ms=$timeoutMs")
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
             sendGoalResult(timeoutResult)
+            finalResult = timeoutResult
         } finally {
             taskCancelRegistry.deregister(taskId)
+            // Unblock local loop.
+            UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+        }
+
+        // Persist to OpenClawd memory outside the try/finally to avoid blocking the finally.
+        finalResult?.let { r ->
+            serviceScope.launch(Dispatchers.IO) {
+                storeMemoryEntry(
+                    taskId = taskId,
+                    goal = payload.goal,
+                    status = r.status,
+                    summary = "goal_execution: latency=${r.latency_ms}ms",
+                    steps = r.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
+                    routeMode = "cross_device"
+                )
+            }
         }
     }
 
@@ -279,13 +328,18 @@ class GalaxyConnectionService : Service() {
             return
         }
 
+        // Pause any running local LoopController session.
+        UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+
         val timeoutMs = payload.effectiveTimeoutMs
+        var finalResult: GoalResultPayload? = null
         try {
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
             }
             if (isActive) {
                 sendGoalResult(result)
+                finalResult = result
                 Log.i(
                     TAG,
                     "goal_result (parallel) 已回传 task_id=$taskId status=${result.status} " +
@@ -309,8 +363,25 @@ class GalaxyConnectionService : Service() {
             )
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
             sendGoalResult(timeoutResult)
+            finalResult = timeoutResult
         } finally {
             taskCancelRegistry.deregister(taskId)
+            // Unblock local loop.
+            UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+        }
+
+        // Persist to OpenClawd memory.
+        finalResult?.let { r ->
+            serviceScope.launch(Dispatchers.IO) {
+                storeMemoryEntry(
+                    taskId = taskId,
+                    goal = payload.goal,
+                    status = r.status,
+                    summary = "parallel_subtask idx=${payload.subtask_index}: latency=${r.latency_ms}ms",
+                    steps = r.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
+                    routeMode = "cross_device"
+                )
+            }
         }
     }
 
@@ -612,4 +683,40 @@ class GalaxyConnectionService : Service() {
      * 获取连接状态
      */
     fun isConnected(): Boolean = webSocketClient.isConnected()
+
+    /**
+     * Persists a task result to the OpenClawd memory store via [OpenClawdMemoryBackflow].
+     *
+     * This is a best-effort, fire-and-forget operation: errors are logged but never
+     * re-thrown. All cross-device task results (task_assign, goal_execution,
+     * parallel_subtask) are stored with [routeMode] = "cross_device".
+     *
+     * The [route_mode] field lets the gateway and memory indexer distinguish between
+     * locally-executed tasks and tasks dispatched via the AIP v3 cross-device pipeline.
+     */
+    private fun storeMemoryEntry(
+        taskId: String,
+        goal: String,
+        status: String,
+        summary: String,
+        steps: List<String> = emptyList(),
+        routeMode: String = "cross_device"
+    ) {
+        try {
+            val restBaseUrl = UFOGalaxyApplication.appSettings.restBaseUrl
+            val backflow = OpenClawdMemoryBackflow(restBaseUrl = restBaseUrl)
+            val entry = MemoryEntry(
+                task_id = taskId,
+                goal = goal,
+                status = status,
+                summary = summary,
+                steps = steps,
+                route_mode = routeMode
+            )
+            val ok = backflow.store(entry)
+            Log.d(TAG, "[MEMORY] storeMemoryEntry task_id=$taskId status=$status ok=$ok")
+        } catch (e: Exception) {
+            Log.w(TAG, "[MEMORY] storeMemoryEntry failed task_id=$taskId: ${e.message}")
+        }
+    }
 }
