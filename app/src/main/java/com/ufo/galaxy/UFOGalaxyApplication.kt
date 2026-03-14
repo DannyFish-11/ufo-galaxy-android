@@ -16,6 +16,9 @@ import com.ufo.galaxy.data.SharedPrefsAppSettings
 import com.ufo.galaxy.grounding.SeeClickGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.loop.ExecutorBridge
+import com.ufo.galaxy.loop.LocalPlanner
+import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
@@ -81,7 +84,11 @@ class UFOGalaxyApplication : Application() {
         // AutonomousExecutionPipeline: gates goal_execution/parallel_subtask behind AppSettings flags
         lateinit var autonomousExecutionPipeline: AutonomousExecutionPipeline
             private set
-        
+
+        // LoopController: local closed-loop automation pipeline (natural language → loop)
+        lateinit var loopController: LoopController
+            private set
+
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
@@ -338,6 +345,18 @@ class UFOGalaxyApplication : Application() {
             collaborationAgent = localCollaborationAgent,
             deviceId = deviceId,
             deviceRole = appSettings.deviceRole
+        )
+        loopController = LoopController(
+            localPlanner = LocalPlanner(plannerService = plannerService),
+            executorBridge = ExecutorBridge(
+                groundingService = groundingService,
+                accessibilityExecutor = AccessibilityActionExecutor(),
+                imageScaler = AndroidBitmapScaler(),
+                scaledMaxEdge = appConfig.scaledMaxEdge
+            ),
+            screenshotProvider = AccessibilityScreenshotProvider(),
+            modelAssetManager = modelAssetManager,
+            modelDownloader = modelDownloader
         )
         Log.d(TAG, "推理服务已初始化")
     }

@@ -9,10 +9,10 @@ import androidx.lifecycle.viewModelScope
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
+import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.observability.GalaxyLogger
-import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
 import kotlinx.coroutines.Dispatchers
@@ -324,27 +324,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Executes [goal] directly via [EdgeExecutor] (local-only path).
-     * Runs on Dispatchers.IO; posts result back to the UI on completion.
+     * Executes [goal] directly via [LoopController] (local-only path).
+     *
+     * Runs on Dispatchers.IO via LoopController.execute(); posts result back to the
+     * UI on completion. Cross-device path is kept intact in [sendMessage] via
+     * [MessageRouter]; this function is only reached when cross-device is OFF.
      */
     private suspend fun executeLocally(goal: String) {
-        val taskAssign = TaskAssignPayload(
-            task_id = UUID.randomUUID().toString(),
-            goal = goal,
-            max_steps = 10,
-            require_local_agent = true
-        )
-        val result = withContext(Dispatchers.IO) {
-            UFOGalaxyApplication.edgeExecutor.handleTaskAssign(taskAssign)
-        }
+        val result = UFOGalaxyApplication.loopController.execute(goal)
 
-        // Record the outcome for the diagnostics panel
-        pushTaskId(taskAssign.task_id, result.status)
+        // Record the outcome for the diagnostics panel.
+        pushTaskId(result.sessionId, result.status)
 
         val summary = when (result.status) {
-            "success" -> "任务完成（${result.steps.size} 步）"
-            "cancelled" -> "任务取消: ${result.error ?: ""}"
-            else -> "任务失败: ${result.error ?: "未知错误"}"
+            LoopController.STATUS_SUCCESS ->
+                "任务完成（${result.steps.size} 步）"
+            LoopController.STATUS_CANCELLED ->
+                "任务取消: ${result.error ?: ""}"
+            else ->
+                "任务失败: ${result.error ?: result.stopReason ?: "未知错误"}"
         }
 
         val assistantMessage = ChatMessage(
