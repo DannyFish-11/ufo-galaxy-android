@@ -52,7 +52,7 @@ class GalaxyWebSocketClient(
     private val serverUrl: String,
     crossDeviceEnabled: Boolean = true,
     val offlineQueue: OfflineTaskQueue = OfflineTaskQueue()
-) {
+) : GatewayClient {
     companion object {
         private const val TAG = "GalaxyWebSocket"
         private const val HEARTBEAT_INTERVAL_MS = 30000L
@@ -408,7 +408,7 @@ class GalaxyWebSocketClient(
      * @return true if the message was transmitted immediately; false if disconnected
      *         (queued or dropped depending on type).
      */
-    fun sendJson(json: String): Boolean {
+    override fun sendJson(json: String): Boolean {
         if (!isConnected) {
             // Attempt to queue queueable message types for later delivery
             val msgType = tryExtractType(json)
@@ -720,7 +720,7 @@ class GalaxyWebSocketClient(
     /**
      * 是否已连接
      */
-    fun isConnected(): Boolean = isConnected
+    override fun isConnected(): Boolean = isConnected
 
     /**
      * Called when network connectivity is restored (e.g. from a
