@@ -268,7 +268,7 @@ class UFOGalaxyApplication : Application() {
         val queuePrefs = getSharedPreferences(OfflineTaskQueue.TAG, MODE_PRIVATE)
         val offlineQueue = OfflineTaskQueue(prefs = queuePrefs)
         webSocketClient = GalaxyWebSocketClient(
-            serverUrl = appConfig.serverUrl,
+            serverUrl = appSettings.galaxyGatewayUrl,
             crossDeviceEnabled = appSettings.crossDeviceEnabled,
             offlineQueue = offlineQueue
         )

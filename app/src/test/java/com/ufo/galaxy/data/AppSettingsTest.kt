@@ -208,4 +208,38 @@ class AppSettingsTest {
     fun `SharedPrefsAppSettings PREFS_NAME is stable`() {
         assertEquals("ufo_galaxy_settings", SharedPrefsAppSettings.PREFS_NAME)
     }
+
+    // ── URL fields (P0: avoid hardcoded URLs) ─────────────────────────────────
+
+    @Test
+    fun `default galaxyGatewayUrl falls back to compile-time default`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_GATEWAY_URL, settings.galaxyGatewayUrl)
+    }
+
+    @Test
+    fun `default restBaseUrl falls back to compile-time default`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_REST_BASE_URL, settings.restBaseUrl)
+    }
+
+    @Test
+    fun `galaxyGatewayUrl can be overridden`() {
+        val settings = InMemoryAppSettings()
+        settings.galaxyGatewayUrl = "ws://192.168.1.42:8765"
+        assertEquals("ws://192.168.1.42:8765", settings.galaxyGatewayUrl)
+    }
+
+    @Test
+    fun `restBaseUrl can be overridden`() {
+        val settings = InMemoryAppSettings()
+        settings.restBaseUrl = "http://192.168.1.42:8765"
+        assertEquals("http://192.168.1.42:8765", settings.restBaseUrl)
+    }
+
+    @Test
+    fun `SharedPrefsAppSettings URL key constants are stable`() {
+        assertEquals("galaxy_gateway_url", SharedPrefsAppSettings.KEY_GALAXY_GATEWAY_URL)
+        assertEquals("rest_base_url", SharedPrefsAppSettings.KEY_REST_BASE_URL)
+    }
 }
