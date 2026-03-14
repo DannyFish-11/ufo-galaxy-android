@@ -285,8 +285,13 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             title = { Text("跨设备注册失败") },
             text = { Text(reason) },
             confirmButton = {
+                TextButton(onClick = { viewModel.retryRegistration() }) {
+                    Text("重试")
+                }
+            },
+            dismissButton = {
                 TextButton(onClick = { viewModel.clearRegistrationFailure() }) {
-                    Text("确定")
+                    Text("关闭跨设备")
                 }
             }
         )

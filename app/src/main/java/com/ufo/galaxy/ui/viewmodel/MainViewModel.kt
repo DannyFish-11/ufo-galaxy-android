@@ -332,6 +332,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(text: String? = null) {
         val messageText = text ?: _uiState.value.inputText.trim()
         if (messageText.isEmpty()) return
+        // Double-submit guard: ignore if a task is already in-flight.
+        if (_uiState.value.isLoading) {
+            Log.d(TAG, "sendMessage: already loading, ignoring duplicate submit")
+            return
+        }
 
         Log.d(TAG, "发送消息: $messageText")
 
@@ -517,6 +522,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun clearRegistrationFailure() {
         _uiState.update { it.copy(registrationFailure = null) }
+    }
+
+    /**
+     * Retries cross-device registration after a failure.
+     *
+     * Clears the failure dialog and immediately attempts to re-enable cross-device
+     * collaboration by toggling [toggleCrossDeviceEnabled]. This is equivalent to the
+     * user manually flipping the toggle back on after it was automatically disabled by
+     * [RuntimeController.handleFailure].
+     *
+     * Called from the "Retry" button in the registration failure dialog displayed in
+     * [com.ufo.galaxy.ui.MainActivity].
+     */
+    fun retryRegistration() {
+        _uiState.update { it.copy(registrationFailure = null) }
+        // crossDeviceEnabled was set to false when the failure occurred; toggling now
+        // will set it to true and attempt a new startWithTimeout().
+        toggleCrossDeviceEnabled()
     }
     
     /**

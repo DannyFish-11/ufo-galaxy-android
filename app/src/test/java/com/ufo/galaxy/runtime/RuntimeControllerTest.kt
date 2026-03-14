@@ -175,6 +175,47 @@ class RuntimeControllerTest {
         )
     }
 
+    /**
+     * Verifies that the [RuntimeController.registrationError] SharedFlow delivers the
+     * failure reason to **multiple simultaneous consumers** — simulating how both
+     * [com.ufo.galaxy.ui.viewmodel.MainViewModel] (dialog) and
+     * [com.ufo.galaxy.service.EnhancedFloatingService] (overlay) would both receive
+     * the error when cross-device registration fails.
+     *
+     * This is the "notifier wiring" test: it proves the shared-notification contract
+     * without requiring the Android framework surfaces (Activity / Service) themselves.
+     */
+    @Test
+    fun `registrationError delivers to multiple consumers (wiring test for both UI surfaces)`() = runBlocking {
+        val (controller, _) = buildController(timeoutMs = 200L)
+
+        var errorForMainViewModel: String? = null
+        var errorForFloatingService: String? = null
+
+        // Both consumers must be subscribed *before* the emission.
+        val job1 = launch { errorForMainViewModel = controller.registrationError.first() }
+        val job2 = launch { errorForFloatingService = controller.registrationError.first() }
+
+        controller.startWithTimeout()
+
+        job1.join()
+        job2.join()
+
+        assertNotNull(
+            "MainViewModel consumer (job1) should receive the registration error",
+            errorForMainViewModel
+        )
+        assertNotNull(
+            "EnhancedFloatingService consumer (job2) should receive the registration error",
+            errorForFloatingService
+        )
+        assertEquals(
+            "Both consumers should receive the same error message",
+            errorForMainViewModel,
+            errorForFloatingService
+        )
+    }
+
     @Test
     fun `startWithTimeout falls back to LocalOnly and disables cross-device in settings`() = runBlocking {
         val settings = InMemoryAppSettings()

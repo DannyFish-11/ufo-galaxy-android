@@ -681,11 +681,36 @@ class EnhancedFloatingService : Service() {
 
         // Dismiss button: removes the dialog view from the WindowManager.
         dialogView.addView(android.widget.Button(context).apply {
-            text = "确定"
+            text = "关闭跨设备"
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFF455A64.toInt())
+            setOnClickListener {
+                try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+            }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).also { it.bottomMargin = dpToPx(8) })
+
+        // Retry button: re-attempts cross-device registration.
+        dialogView.addView(android.widget.Button(context).apply {
+            text = "重试"
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0xFF1976D2.toInt())
             setOnClickListener {
                 try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+                serviceScope.launch {
+                    val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                    crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = ok }
+                    if (!ok) {
+                        // Notify the user that the retry also failed.
+                        android.widget.Toast.makeText(
+                            context,
+                            "重试失败，请检查网络或 Gateway 配置后再试。",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -711,6 +736,11 @@ class EnhancedFloatingService : Service() {
     private fun sendMessage() {
         val text = inputField?.text?.toString()?.trim() ?: return
         if (text.isEmpty()) return
+        // Double-submit guard: ignore if a task is already in-flight.
+        if (taskStatus == STATUS_RUNNING) {
+            Log.d(TAG, "[FLOAT] sendMessage: already running, ignoring duplicate submit")
+            return
+        }
 
         inputField?.setText("")
         taskStatus = STATUS_RUNNING
