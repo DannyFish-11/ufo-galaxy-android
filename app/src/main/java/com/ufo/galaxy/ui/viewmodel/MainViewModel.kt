@@ -441,30 +441,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Toggles the cross-device collaboration setting.
      *
-     * - Persists the new value via [AppSettings].
-     * - Updates [GalaxyWebSocketClient.crossDeviceEnabled] via [UFOGalaxyApplication.setCrossDeviceEnabled].
-     *   When toggled **off** the active WebSocket connection is torn down.
-     *   When toggled **on** [GalaxyWebSocketClient.connect] is called so the gateway
-     *   session is re-established and the capability_report is sent.
-     * - Updates [MainUiState.crossDeviceEnabled] so the UI toggle reflects the new state
-     *   immediately without waiting for a WS connection event.
+     * Delegates to [RuntimeController.enable] / [RuntimeController.disable] which handle the
+     * full lifecycle: persisting the setting, WS connect/disconnect, and local/remote handoff.
+     * Updates [MainUiState.crossDeviceEnabled] immediately so the UI reflects the user's intent.
      */
     fun toggleCrossDeviceEnabled() {
         val newValue = !_uiState.value.crossDeviceEnabled
         Log.i(TAG, "toggleCrossDeviceEnabled → $newValue")
-        // Persist
-        UFOGalaxyApplication.appSettings.crossDeviceEnabled = newValue
-        // Update WS client (disconnects if newValue==false and currently connected)
-        UFOGalaxyApplication.instance.setCrossDeviceEnabled(newValue)
-        // Update UI state
-        _uiState.update { it.copy(crossDeviceEnabled = newValue) }
-        // Reconnect when enabling.
-        // Connection failures are surfaced via the wsListener.onError → uiState.error path;
-        // the toggle reflects the user's *intent* (crossDeviceEnabled=true means "user wants
-        // cross-device"), while isConnected tracks the actual live connection state.
+        // Delegate to RuntimeController for full lifecycle management.
         if (newValue) {
-            viewModelScope.launch { webSocketClient.connect() }
+            UFOGalaxyApplication.runtimeController.enable()
+        } else {
+            UFOGalaxyApplication.runtimeController.disable()
         }
+        // Update UI state immediately to reflect the user's intent.
+        _uiState.update { it.copy(crossDeviceEnabled = newValue) }
     }
     
     /**

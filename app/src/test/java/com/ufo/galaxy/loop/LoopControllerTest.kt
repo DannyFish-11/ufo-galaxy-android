@@ -447,4 +447,36 @@ class LoopControllerTest {
         assertEquals(StepStatus.FAILED, result.status)
         assertNotNull(result.failureReason)
     }
+
+    // ── LoopController pause / resume ─────────────────────────────────────────
+
+    @Test
+    fun `pause and resume do not throw when no session is active`() {
+        val ctrl = buildController()
+        ctrl.pause()   // sets flag on idle controller
+        ctrl.resume()  // clears flag; status stays Idle
+        assertEquals(LoopStatus.Idle, ctrl.status.value)
+    }
+
+    @Test
+    fun `resume clears pause flag and status remains Idle when not executing`() {
+        val ctrl = buildController()
+        ctrl.pause()
+        ctrl.resume()
+
+        assertEquals(LoopStatus.Idle, ctrl.status.value)
+    }
+
+    @Test
+    fun `cancelAndReset returns status to Idle`() {
+        val ctrl = buildController()
+        ctrl.cancelAndReset()
+
+        assertEquals(LoopStatus.Idle, ctrl.status.value)
+    }
+
+    @Test
+    fun `STOP_PREEMPTED constant has expected value`() {
+        assertEquals("preempted_by_remote", LoopController.STOP_PREEMPTED)
+    }
 }

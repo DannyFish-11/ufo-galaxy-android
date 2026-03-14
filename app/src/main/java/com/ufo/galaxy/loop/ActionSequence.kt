@@ -118,4 +118,16 @@ sealed class LoopStatus {
         val reason: String,
         val stepIndex: Int
     ) : LoopStatus()
+
+    /**
+     * A session has been paused (e.g., because a remote task_assign was received and
+     * the remote execution should take priority). The session can be resumed or cancelled.
+     *
+     * @param sessionId Session identifier that was paused.
+     * @param stepIndex 1-based index of the step at which execution was suspended.
+     */
+    data class Paused(
+        val sessionId: String,
+        val stepIndex: Int
+    ) : LoopStatus()
 }

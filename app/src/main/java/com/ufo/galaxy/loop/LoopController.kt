@@ -5,12 +5,15 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.observability.GalaxyLogger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Orchestrates the full local closed-loop automation pipeline:
@@ -65,6 +68,7 @@ class LoopController(
         const val STOP_PLAN_FAILED = "plan_failed"
         const val STOP_REPLAN_FAILED = "replan_failed"
         const val STOP_STEP_EXHAUSTED = "step_retries_exhausted"
+        const val STOP_PREEMPTED = "preempted_by_remote"
     }
 
     private val _status = MutableStateFlow<LoopStatus>(LoopStatus.Idle)
@@ -76,6 +80,56 @@ class LoopController(
     val status: StateFlow<LoopStatus> = _status.asStateFlow()
 
     /**
+     * When set to `true` the currently-running [execute] call will exit its step loop after
+     * the current step completes, transitioning to [LoopStatus.Paused]. Set via [pause].
+     */
+    private val pauseRequested = AtomicBoolean(false)
+
+    /**
+     * Tracks the active coroutine [Job] started by [execute] so that [cancel] can
+     * interrupt it from outside the coroutine.
+     */
+    @Volatile
+    private var activeJob: Job? = null
+
+    /**
+     * Requests the currently-running execution session to pause after the current step.
+     *
+     * The loop will transition to [LoopStatus.Paused] at the next safe checkpoint. If no
+     * session is running this is a no-op.
+     */
+    fun pause() {
+        pauseRequested.set(true)
+        GalaxyLogger.log(TAG, mapOf("event" to "pause_requested"))
+    }
+
+    /**
+     * Clears the pause flag so that [execute] can be called again for a new session.
+     *
+     * This does NOT automatically restart a paused session. The caller is responsible
+     * for launching a new [execute] coroutine.
+     */
+    fun resume() {
+        pauseRequested.set(false)
+        if (_status.value is LoopStatus.Paused) {
+            _status.value = LoopStatus.Idle
+        }
+        GalaxyLogger.log(TAG, mapOf("event" to "resume_cleared"))
+    }
+
+    /**
+     * Cancels the active job (if any) and resets the status to [LoopStatus.Idle].
+     * Safe to call from any thread.
+     */
+    fun cancelAndReset() {
+        pauseRequested.set(false)
+        activeJob?.cancel()
+        activeJob = null
+        _status.value = LoopStatus.Idle
+        GalaxyLogger.log(TAG, mapOf("event" to "cancelled_and_reset"))
+    }
+
+    /**
      * Executes the automation pipeline for [instruction].
      *
      * Must be called from a coroutine (not the main thread). Internally suspends on
@@ -85,6 +139,8 @@ class LoopController(
      * @return [LoopResult] describing the final outcome.
      */
     suspend fun execute(instruction: String): LoopResult = withContext(Dispatchers.IO) {
+        activeJob = currentCoroutineContext()[Job]
+        pauseRequested.set(false)
         val sessionId = UUID.randomUUID().toString()
 
         GalaxyLogger.log(
@@ -136,6 +192,28 @@ class LoopController(
         // stepsConsumed tracks total dispatched steps across the initial plan and any replans.
         // maxSteps caps the total budget regardless of how many times replanning occurs.
         while (stepIndex < planSteps.size && stepsConsumed < maxSteps) {
+            // ── Pause checkpoint ─────────────────────────────────────────────
+            // Check before each step: if a remote task_assign has paused this loop,
+            // yield with Paused status and terminate this session gracefully.
+            if (pauseRequested.get()) {
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "session_paused",
+                        "session_id" to sessionId,
+                        "steps_consumed" to stepsConsumed
+                    )
+                )
+                _status.value = LoopStatus.Paused(sessionId, stepsConsumed)
+                return@withContext LoopResult(
+                    sessionId = sessionId,
+                    instruction = instruction,
+                    status = STATUS_CANCELLED,
+                    steps = executedSteps,
+                    stopReason = STOP_PREEMPTED,
+                    error = "Session paused by remote task handoff"
+                )
+            }
+
             val step = planSteps[stepIndex]
             val displayIndex = stepsConsumed + 1
 

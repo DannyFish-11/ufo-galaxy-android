@@ -28,6 +28,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.NotificationCompat
 import com.ufo.galaxy.R
@@ -36,6 +37,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.MessageRouter
 import com.ufo.galaxy.ui.MainActivity
+import com.ufo.galaxy.ui.RegistrationFailureNotifier
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -196,6 +198,14 @@ class EnhancedFloatingService : Service() {
         
         // 设置 WebSocket 监听
         setupWebSocketListener()
+
+        // Observe registration / connection failure events and surface them as toasts
+        // in the floating window (so the user is notified even when the main UI is hidden).
+        serviceScope.launch(Dispatchers.Main) {
+            RegistrationFailureNotifier.failures.collect { reason ->
+                showFailureToast(reason)
+            }
+        }
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -682,6 +692,18 @@ class EnhancedFloatingService : Service() {
      */
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
+    }
+
+    /**
+     * Shows a Toast notification for cross-device registration / connection failures.
+     * The status label in the floating window is also updated to reflect the error.
+     *
+     * Must be called on the main thread.
+     */
+    private fun showFailureToast(reason: String) {
+        Toast.makeText(this, reason, Toast.LENGTH_LONG).show()
+        taskStatus = STATUS_ERROR
+        updateStatusLabel()
     }
     
     /**

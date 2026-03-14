@@ -1,6 +1,7 @@
 package com.ufo.galaxy.ui
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ufo.galaxy.R
 import com.ufo.galaxy.service.FloatingWindowService
@@ -33,6 +35,7 @@ import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
 import com.ufo.galaxy.ui.theme.UFOGalaxyTheme
 import com.ufo.galaxy.ui.viewmodel.MainViewModel
+import kotlinx.coroutines.launch
 
 /**
  * UFO Galaxy Android - 主 Activity
@@ -79,6 +82,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         Log.i(TAG, "MainActivity 创建")
+        
+        // Observe registration / connection failure events from RuntimeController and display
+        // them as AlertDialogs so the user can take corrective action.
+        lifecycleScope.launch {
+            RegistrationFailureNotifier.failures.collect { reason ->
+                showRegistrationFailureDialog(reason)
+            }
+        }
         
         // 请求权限
         requestPermissions()
@@ -168,6 +179,25 @@ class MainActivity : ComponentActivity() {
             startForegroundService(floatingIntent)
         } else {
             startService(floatingIntent)
+        }
+    }
+
+    /**
+     * Displays an [AlertDialog] that surfaces a cross-device registration or connection
+     * failure to the user. The dialog is presented on the main thread.
+     */
+    private fun showRegistrationFailureDialog(reason: String) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            AlertDialog.Builder(this)
+                .setTitle("跨设备连接失败")
+                .setMessage(reason)
+                .setPositiveButton("知道了") { dialog, _ -> dialog.dismiss() }
+                .setNegativeButton("关闭跨设备") { dialog, _ ->
+                    dialog.dismiss()
+                    mainViewModel.toggleCrossDeviceEnabled()
+                }
+                .show()
         }
     }
 }

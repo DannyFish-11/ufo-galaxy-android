@@ -25,17 +25,26 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.planner.MobileVlmPlanner
+import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
 import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.service.ReadinessState
+import com.ufo.galaxy.ui.RegistrationFailureNotifier
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * UFO Galaxy Android Application
  * 应用程序入口，负责全局初始化
  */
 class UFOGalaxyApplication : Application() {
+
+    /** Application-level coroutine scope for fire-and-forget background tasks. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
     companion object {
         private const val TAG = "UFOGalaxyApp"
@@ -89,6 +98,10 @@ class UFOGalaxyApplication : Application() {
         lateinit var loopController: LoopController
             private set
 
+        // RuntimeController: manages cross-device ON/OFF lifecycle and local/remote handoff
+        lateinit var runtimeController: RuntimeController
+            private set
+
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
@@ -137,6 +150,14 @@ class UFOGalaxyApplication : Application() {
         
         // 初始化 WebSocket 客户端
         initWebSocketClient()
+
+        // 初始化跨设备运行时控制器（依赖 webSocketClient 和 loopController）
+        initRuntimeController()
+
+        // 在应用启动时确保本地模型文件可用（无论跨设备状态如何）
+        appScope.launch {
+            runtimeController.ensureModels()
+        }
         
         Log.i(TAG, "UFO Galaxy Application 初始化完成")
     }
@@ -147,6 +168,7 @@ class UFOGalaxyApplication : Application() {
         // Note: onTerminate() is not guaranteed to be called on real devices,
         // but is called in tests/emulators. Process termination cleans up anyway.
         modelDownloader.cancel()
+        runtimeController.destroy()
         Log.i(TAG, "UFO Galaxy Application 终止")
     }
     
@@ -359,6 +381,34 @@ class UFOGalaxyApplication : Application() {
             modelDownloader = modelDownloader
         )
         Log.d(TAG, "推理服务已初始化")
+    }
+
+    /**
+     * Initialises the [RuntimeController] that manages the cross-device ON/OFF lifecycle,
+     * WS connect/disconnect, remote/local handoff, and automatic fallback.
+     *
+     * The controller's [RuntimeController.onFailure] flow is bridged to
+     * [RegistrationFailureNotifier] so both the main UI and the floating window
+     * receive failure events without holding direct references to each other.
+     *
+     * Must be called after [initWebSocketClient] and [initInferenceServices].
+     */
+    private fun initRuntimeController() {
+        runtimeController = RuntimeController(
+            settings = appSettings,
+            webSocketClient = webSocketClient,
+            loopController = loopController,
+            modelAssetManager = modelAssetManager,
+            modelDownloader = modelDownloader
+        )
+        // Bridge RuntimeController failure events → RegistrationFailureNotifier so that
+        // both MainActivity and EnhancedFloatingService can observe them without coupling.
+        appScope.launch {
+            runtimeController.onFailure.collect { reason ->
+                RegistrationFailureNotifier.emit(reason)
+            }
+        }
+        Log.d(TAG, "RuntimeController 已初始化")
     }
     
     /**
