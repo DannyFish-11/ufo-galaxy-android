@@ -196,6 +196,18 @@ class EnhancedFloatingService : Service() {
         
         // 设置 WebSocket 监听
         setupWebSocketListener()
+
+        // Observe RuntimeController registration failures and show floating dialog.
+        serviceScope.launch {
+            UFOGalaxyApplication.runtimeController.registrationError.collect { reason ->
+                Log.w(TAG, "[FLOAT] Registration failure: $reason")
+                // Reset switch state on main thread.
+                crossDeviceSwitch?.post {
+                    crossDeviceSwitch?.isChecked = false
+                }
+                showRegistrationFailureDialog(reason)
+            }
+        }
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -320,13 +332,20 @@ class EnhancedFloatingService : Service() {
                     setTextColor(0xFFFFFFFF.toInt())
                     isChecked = UFOGalaxyApplication.appSettings.crossDeviceEnabled
                     setOnCheckedChangeListener { _, isChecked ->
-                        val app = UFOGalaxyApplication.appSettings
-                        app.crossDeviceEnabled = isChecked
-                        UFOGalaxyApplication.instance.setCrossDeviceEnabled(isChecked)
                         taskStatus = STATUS_IDLE
                         updateStatusLabel()
                         if (isChecked) {
-                            webSocketClient.connect()
+                            // Delegate to RuntimeController; it handles registration and
+                            // emits a registrationError event on failure (observed above).
+                            serviceScope.launch {
+                                val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                                if (!ok) {
+                                    // Revert switch; dialog is shown via registrationError observer.
+                                    crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = false }
+                                }
+                            }
+                        } else {
+                            UFOGalaxyApplication.runtimeController.stop()
                         }
                     }
                 }
@@ -609,6 +628,85 @@ class EnhancedFloatingService : Service() {
      */
     private fun updateStatusLabel() {
         statusText?.post { statusText?.text = buildStatusLabel() }
+    }
+
+    /**
+     * Shows a floating overlay dialog when cross-device device registration fails.
+     *
+     * Because [EnhancedFloatingService] is a [Service] (not an [Activity]), we cannot use
+     * the standard [android.app.AlertDialog] API directly. Instead, we create a small
+     * overlay view using the [WindowManager] with [TYPE_APPLICATION_OVERLAY] type, which
+     * is the same mechanism used for the floating island itself.
+     *
+     * The dialog auto-dismisses when the user taps "确定". If the overlay permission has
+     * not been granted yet, the error is logged (overlay cannot be shown without permission).
+     */
+    private fun showRegistrationFailureDialog(reason: String) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
+            !android.provider.Settings.canDrawOverlays(this)
+        ) {
+            Log.w(TAG, "[FLOAT] Cannot show registration failure dialog: overlay permission not granted. reason=$reason")
+            return
+        }
+
+        val context = this
+        // Build a simple LinearLayout dialog container.
+        val dialogView = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF212121.toInt())
+            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+
+            addView(android.widget.TextView(context).apply {
+                text = "跨设备注册失败"
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 16f
+                setPadding(0, 0, 0, dpToPx(8))
+            })
+
+            addView(android.widget.TextView(context).apply {
+                text = reason
+                setTextColor(0xFFCCCCCC.toInt())
+                textSize = 13f
+                setPadding(0, 0, 0, dpToPx(12))
+            })
+
+            // Dismiss button — must be added after we create dialogParams reference.
+        }
+
+        val dialogParams = WindowManager.LayoutParams().apply {
+            type = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+            }
+            format = android.graphics.PixelFormat.TRANSLUCENT
+            flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+            width = dpToPx(280)
+            height = WindowManager.LayoutParams.WRAP_CONTENT
+            gravity = android.view.Gravity.CENTER
+        }
+
+        // Dismiss button: removes the dialog view from the WindowManager.
+        dialogView.addView(android.widget.Button(context).apply {
+            text = "确定"
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFF1976D2.toInt())
+            setOnClickListener {
+                try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+            }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+
+        try {
+            windowManager.addView(dialogView, dialogParams)
+            Log.i(TAG, "[FLOAT] Registration failure dialog shown: $reason")
+        } catch (e: Exception) {
+            Log.e(TAG, "[FLOAT] Failed to show registration failure dialog", e)
+        }
     }
 
     /**
