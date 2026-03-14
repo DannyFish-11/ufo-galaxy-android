@@ -88,6 +88,12 @@ class GalaxyConnectionService : Service() {
             override fun onDisconnected() {
                 Log.d(TAG, "与 Galaxy 断开连接")
                 updateNotification("已断开")
+                // Safety: unblock the local LoopController in case the Gateway disconnected
+                // while a remote task was in flight. The finally blocks in handleTaskAssign,
+                // handleGoalExecution, and handleParallelSubtask cover normal completion;
+                // this covers unexpected drops (network outage, server crash) so the loop
+                // is never blocked permanently.
+                UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
             }
             
             override fun onMessage(message: String) {
@@ -206,32 +212,38 @@ class GalaxyConnectionService : Service() {
         // Pause any running local LoopController session.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
-        updateNotification("执行任务 ${taskId.take(8)}…")
-        val result = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
+        var taskResult: com.ufo.galaxy.protocol.TaskResultPayload? = null
+        try {
+            updateNotification("执行任务 ${taskId.take(8)}…")
+            val result = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
+            taskResult = result
 
-        val envelope = AipMessage(
-            type = MsgType.TASK_RESULT,
-            payload = result,
-            correlation_id = taskId,
-            device_id = localDeviceId
-        )
-        val sent = webSocketClient.sendJson(gson.toJson(envelope))
-        Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} steps=${result.steps.size} sent=$sent")
-        updateNotification("任务 ${taskId.take(8)}: ${result.status}")
-
-        // Unblock local loop now that the remote task is complete.
-        UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+            val envelope = AipMessage(
+                type = MsgType.TASK_RESULT,
+                payload = result,
+                correlation_id = taskId,
+                device_id = localDeviceId
+            )
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} steps=${result.steps.size} sent=$sent")
+            updateNotification("任务 ${taskId.take(8)}: ${result.status}")
+        } finally {
+            // Unblock local loop: always called even if edgeExecutor throws.
+            UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+        }
 
         // Persist result to OpenClawd memory (route_mode = "cross_device").
-        serviceScope.launch(Dispatchers.IO) {
-            storeMemoryEntry(
-                taskId = taskId,
-                goal = payload.goal,
-                status = result.status,
-                summary = "task_assign: ${result.steps.size} step(s) executed",
-                steps = result.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
-                routeMode = "cross_device"
-            )
+        taskResult?.let { result ->
+            serviceScope.launch(Dispatchers.IO) {
+                storeMemoryEntry(
+                    taskId = taskId,
+                    goal = payload.goal,
+                    status = result.status,
+                    summary = "task_assign: ${result.steps.size} step(s) executed",
+                    steps = result.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
+                    routeMode = "cross_device"
+                )
+            }
         }
     }
 

@@ -249,6 +249,82 @@ class RuntimeControllerTest {
         assertEquals(LoopController.STATUS_CANCELLED, result.status)
     }
 
+    // ── Disconnect safety: onRemoteTaskFinished unblocks loop ─────────────────
+
+    /**
+     * Verifies that [RuntimeController.onRemoteTaskFinished] is idempotent — calling it
+     * when no remote task is active must not crash or leave the loop in a bad state.
+     *
+     * This mirrors the behavior of [GalaxyConnectionService]'s onDisconnected handler,
+     * which always calls onRemoteTaskFinished() as a safety measure regardless of whether
+     * a task was in flight.
+     */
+    @Test
+    fun `onRemoteTaskFinished is idempotent when called with no task active`() {
+        val loopController = buildLoopController()
+        val (controller, _) = buildController(loopController = loopController)
+
+        assertFalse("isRemoteTaskActive should be false initially", loopController.isRemoteTaskActive)
+        // Calling onRemoteTaskFinished() when no task is active must not crash.
+        controller.onRemoteTaskFinished()
+        assertFalse("isRemoteTaskActive must remain false after spurious onRemoteTaskFinished", loopController.isRemoteTaskActive)
+    }
+
+    /**
+     * Verifies the "disconnect unblocks local loop" scenario described in Req 4:
+     * when the Gateway disconnects while a remote task is in flight,
+     * [RuntimeController.onRemoteTaskFinished] (called by the WS onDisconnected handler)
+     * must clear the block so local execution can resume.
+     */
+    @Test
+    fun `disconnect scenario - local loop is unblocked after onRemoteTaskFinished`() = runBlocking {
+        val loopController = buildLoopController()
+        val (controller, _) = buildController(loopController = loopController)
+
+        // Step 1: Gateway assigns a task → local loop is blocked.
+        controller.onRemoteTaskStarted()
+        assertTrue("Local loop must be blocked while remote task is active", loopController.isRemoteTaskActive)
+
+        // Step 2: Gateway disconnects → onRemoteTaskFinished() is called as safety.
+        controller.onRemoteTaskFinished()
+        assertFalse("Local loop must be unblocked after Gateway disconnect", loopController.isRemoteTaskActive)
+
+        // Step 3: Next local execute() must succeed (not return BLOCKED_BY_REMOTE).
+        val result = loopController.execute("tap the button")
+        assertEquals(
+            "Local loop must accept new execution after disconnect-unblock",
+            LoopController.STATUS_SUCCESS,
+            result.status
+        )
+        assertNotEquals(LoopController.STOP_BLOCKED_BY_REMOTE, result.stopReason)
+    }
+
+    /**
+     * Verifies that calling [RuntimeController.onRemoteTaskFinished] multiple times in a row
+     * (e.g., once from the disconnect handler and once from the task's finally block) is safe
+     * and leaves the loop in the correct unblocked state.
+     */
+    @Test
+    fun `onRemoteTaskFinished called twice is safe and leaves loop unblocked`() = runBlocking {
+        val loopController = buildLoopController()
+        val (controller, _) = buildController(loopController = loopController)
+
+        controller.onRemoteTaskStarted()
+        assertTrue(loopController.isRemoteTaskActive)
+
+        // First call (simulating WS disconnect handler).
+        controller.onRemoteTaskFinished()
+        assertFalse(loopController.isRemoteTaskActive)
+
+        // Second call (simulating the task's finally block completing shortly after).
+        controller.onRemoteTaskFinished()
+        assertFalse("isRemoteTaskActive must remain false after double call", loopController.isRemoteTaskActive)
+
+        // Loop must still be usable.
+        val result = loopController.execute("open the camera")
+        assertEquals(LoopController.STATUS_SUCCESS, result.status)
+    }
+
     // ── InputRouter (MessageRouter) integration with settings ─────────────────
 
     @Test
