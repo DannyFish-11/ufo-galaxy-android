@@ -204,3 +204,154 @@ All changes are **additive and backward-compatible**:
 | `service/GalaxyConnectionService.kt` | Wires bridge into `task_assign` handler. |
 | `UFOGalaxyApplication.kt` | `agentRuntimeBridge` singleton initialisation. |
 | `test/agent/AgentRuntimeBridgeTest.kt` | Unit tests for all bridge paths. |
+
+---
+
+# Round 6 – WebRTC / TURN Multi-Candidate Robustness
+
+## Overview
+
+Round 6 adds first-class support for **multi-candidate ICE signaling** and **TURN relay
+fallback** to ensure reliable peer-to-peer connections even when direct (host/srflx) paths
+are blocked by firewalls or NAT.
+
+---
+
+## New Classes
+
+| Class | Package | Responsibility |
+|-------|---------|----------------|
+| `SignalingMessage` | `webrtc` | Extended signaling envelope: multi-candidate list, TURN config, `trace_id`, `error`. |
+| `TurnConfig` | `webrtc` | TURN server configuration delivered by the gateway (`urls`, `username`, `credential`). |
+| `IceCandidateManager` | `webrtc` | Deduplication, priority ordering, TURN fallback with retry/backoff. |
+| `WebRTCSignalingClient` | `webrtc` | OkHttp WebSocket signaling client; dispatches candidates to `IceCandidateManager`. |
+
+---
+
+## Signaling Message Formats
+
+### Legacy (single ICE candidate – still supported)
+
+```json
+{
+  "type": "ice_candidate",
+  "candidate": { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 },
+  "device_id": "<id>",
+  "trace_id": "<UUID>"
+}
+```
+
+### Round-6 (batch / trickle ICE candidates with TURN)
+
+```json
+{
+  "type": "ice_candidates",
+  "candidates": [
+    { "candidate": "candidate:0 1 UDP 2130706431 192.168.1.1 54321 typ host", "sdpMid": "0", "sdpMLineIndex": 0 },
+    { "candidate": "candidate:1 1 UDP 1694498815 1.2.3.4 54321 typ srflx ...", "sdpMid": "0", "sdpMLineIndex": 0 },
+    { "candidate": "candidate:2 1 UDP 33562623 5.6.7.8 3478 typ relay ...",    "sdpMid": "0", "sdpMLineIndex": 0 }
+  ],
+  "turn_config": {
+    "urls": ["turn:100.64.0.1:3478", "turns:100.64.0.1:5349"],
+    "username": "galaxy_user",
+    "credential": "s3cr3t"
+  },
+  "device_id": "<id>",
+  "trace_id": "<UUID>"
+}
+```
+
+### Error message
+
+```json
+{ "type": "error", "error": "ICE gathering timeout", "trace_id": "<UUID>" }
+```
+
+---
+
+## Candidate Priority Order
+
+Candidates are always applied in the following order regardless of arrival sequence,
+consistent with the server-side Round-6 policy:
+
+| Priority | Type | Description |
+|----------|------|-------------|
+| 1 (highest) | `relay` | TURN relay — traverses NAT and firewalls |
+| 2 | `srflx` | STUN server-reflexive |
+| 3 (lowest) | `host` | Direct local candidate |
+
+The `IceCandidateManager` sorts incoming batches before applying them and deduplicates
+by raw SDP string (first occurrence wins).
+
+---
+
+## TURN Fallback
+
+When direct connectivity (host/srflx) fails, `IceCandidateManager.startTurnFallback()`
+switches to **relay-only** mode and re-applies all held TURN candidates:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MAX_FALLBACK_ATTEMPTS` | 3 | Maximum retry attempts before `onError` is invoked. |
+| `FALLBACK_BACKOFF_MS` | `[1000, 2000, 4000]` ms | Exponential backoff between attempts. |
+| `CONNECTION_TIMEOUT_MS` | 10 000 ms | Suggested timeout before triggering fallback. |
+
+`WebRTCSignalingClient.triggerTurnFallback()` is the entry point from the peer-connection
+ICE failure callback.
+
+---
+
+## Error Surfacing
+
+All errors include the `trace_id` for full-chain log correlation:
+
+```
+[trace=<UUID>] TURN fallback exhausted after 3 attempts
+[trace=<UUID>] Gateway error: ICE gathering timeout
+[trace=<UUID>] Signaling WS failure: Connection refused
+```
+
+The `onError` callback in `WebRTCSignalingClient` and `IceCandidateManager` is invoked for:
+- WebSocket connection failures
+- Gateway-sent `error` messages
+- TURN fallback exhaustion
+- TURN fallback with no relay candidates available
+
+---
+
+## Backward Compatibility
+
+- Legacy `ice_candidate` (single) messages are handled transparently — no call-site changes required.
+- `SignalingMessage.candidate` (single field) and `SignalingMessage.candidates` (list) are combined via `allCandidates`.
+- When no `turn_config` is delivered, `lastTurnConfig` is `null` and the client works with STUN-only.
+- `traceId`, `error` fields default to `null`; existing consumers are unaffected.
+
+---
+
+## Required Gateway Configuration
+
+To enable TURN relay, configure the Galaxy Gateway with a TURN server and ensure it
+sends `turn_config` alongside `ice_candidates` messages:
+
+```properties
+# config.properties (or AppSettings in-app)
+turn_server_url=turn:100.64.0.1:3478
+turn_username=galaxy_user
+turn_credential=s3cr3t
+```
+
+STUN-only deployments (no TURN) continue to work; relay fallback simply has no effect
+when no relay candidates are available.
+
+---
+
+## Related Files
+
+| File | Role |
+|------|------|
+| `webrtc/SignalingMessage.kt` | Signaling message model (Round 6 extensions). |
+| `webrtc/TurnConfig.kt` | TURN server configuration model. |
+| `webrtc/IceCandidateManager.kt` | Dedup, priority ordering, TURN fallback. |
+| `webrtc/WebRTCSignalingClient.kt` | OkHttp WebSocket signaling client. |
+| `test/webrtc/SignalingMessageTest.kt` | JSON round-trip, multi-candidate, TURN config tests. |
+| `test/webrtc/IceCandidateManagerTest.kt` | Dedup, priority, fallback, error path tests. |
