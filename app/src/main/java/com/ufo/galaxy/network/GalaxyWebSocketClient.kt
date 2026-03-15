@@ -121,7 +121,7 @@ class GalaxyWebSocketClient(
         val baseUrl = settings.galaxyGatewayUrl.trimEnd('/')
             // 移除已有的路径后缀（/ws/*），EnhancedAIPClient 的兼容做法
             .replace(Regex("/ws(/.*)?$"), "")
-        val wsUrl = ServerConfig.buildWsUrl(baseUrl, deviceId, wsPathIndex)
+        val wsUrl = ServerConfig.buildEffectiveWsUrl(baseUrl, deviceId, wsPathIndex)
 
         Log.i(TAG, "🔗 正在连接到 Gateway: $wsUrl (path[$wsPathIndex])")
 
@@ -242,8 +242,8 @@ class GalaxyWebSocketClient(
             this@GalaxyWebSocketClient.webSocket = null
             if (crossDeviceEnabled) {
                 _connectionState.value = ConnectionState.DISCONNECTED
-                // 尝试下一个 WS 路径
-                wsPathIndex = (wsPathIndex + 1) % ServerConfig.WS_PATHS.size
+                // 尝试下一个 WS 路径（遵循运行时有效路径列表）
+                wsPathIndex = (wsPathIndex + 1) % ServerConfig.effectiveWsPaths.size
                 scheduleReconnect()
             } else {
                 _connectionState.value = ConnectionState.DISABLED

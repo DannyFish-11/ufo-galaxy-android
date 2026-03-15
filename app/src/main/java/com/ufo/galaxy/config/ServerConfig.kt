@@ -24,6 +24,88 @@ object ServerConfig {
      */
     const val DEFAULT_STUN_URL = "stun:stun.l.google.com:19302"
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // Runtime overrides (set by RemoteConfigFetcher at startup)
+    //
+    // All fields are nullable; null means "use the compile-time default above".
+    // Use the corresponding effective* properties for connection logic so that
+    // remote-config overrides are respected automatically.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** Runtime WS base URL applied by [com.ufo.galaxy.config.RemoteConfigFetcher]. */
+    @Volatile var runtimeWsBase: String? = null
+
+    /** Runtime REST base URL applied by [com.ufo.galaxy.config.RemoteConfigFetcher]. */
+    @Volatile var runtimeRestBase: String? = null
+
+    /** Runtime WebSocket path list applied by [com.ufo.galaxy.config.RemoteConfigFetcher]. */
+    @Volatile var runtimeWsPaths: List<String>? = null
+
+    /** Runtime WebRTC signaling path applied by [com.ufo.galaxy.config.RemoteConfigFetcher]. */
+    @Volatile var runtimeWebrtcWsPath: String? = null
+
+    /**
+     * Runtime ICE server list (STUN + TURN) applied by
+     * [com.ufo.galaxy.config.RemoteConfigFetcher].
+     */
+    @Volatile var runtimeIceServers: List<String>? = null
+
+    /** Transport priority list from remote config, e.g. ["tailscale","intranet","internet"]. */
+    @Volatile var runtimeTransportPriority: List<String>? = null
+
+    /** Feature flags from remote config. */
+    @Volatile var runtimeFeatureFlags: Map<String, Boolean>? = null
+
+    /**
+     * Label of the transport channel chosen after probing
+     * (e.g. "tailscale", "intranet", "internet", or "default").
+     * Exposed for logging and diagnostics.
+     */
+    @Volatile var chosenChannelLabel: String? = null
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Effective values (runtime override → local config → compile-time default)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** Effective WebSocket base URL to use for all WS connections. */
+    val effectiveWsBase: String
+        get() = runtimeWsBase ?: DEFAULT_BASE_URL
+
+    /** Effective REST base URL to use for all REST calls. */
+    val effectiveRestBase: String
+        get() = runtimeRestBase ?: wsToHttpBase(DEFAULT_BASE_URL)
+
+    /** Effective WebSocket path list in priority order. */
+    val effectiveWsPaths: List<String>
+        get() = runtimeWsPaths ?: WS_PATHS
+
+    /** Effective WebRTC signaling WS path. */
+    val effectiveWebrtcWsPath: String
+        get() = runtimeWebrtcWsPath ?: WEBRTC_WS_PATH
+
+    /**
+     * Effective ICE server list for [org.webrtc.PeerConnection].
+     * Includes both STUN and TURN servers when provided by remote config.
+     */
+    val effectiveIceServers: List<String>
+        get() = runtimeIceServers ?: listOf(DEFAULT_STUN_URL)
+
+    /** Effective feature flags (empty map when none provided). */
+    val effectiveFeatureFlags: Map<String, Boolean>
+        get() = runtimeFeatureFlags ?: emptyMap()
+
+    /** Clear all runtime overrides, reverting to compile-time defaults. */
+    fun clearRuntimeOverrides() {
+        runtimeWsBase = null
+        runtimeRestBase = null
+        runtimeWsPaths = null
+        runtimeWebrtcWsPath = null
+        runtimeIceServers = null
+        runtimeTransportPriority = null
+        runtimeFeatureFlags = null
+        chosenChannelLabel = null
+    }
+
     /**
      * Primary WebSocket path for the AndroidBridge (server realization-v2).
      * `{id}` is substituted with the device identifier at runtime.
@@ -84,6 +166,26 @@ object ServerConfig {
             "pathIndex $pathIndex is out of range (${WS_PATHS.size} paths available)"
         }
         val path = WS_PATHS[pathIndex].replace("{id}", deviceId)
+        return "$baseUrl$path"
+    }
+
+    /**
+     * Build a WebSocket URL using the effective runtime path list and base URL.
+     *
+     * Respects any [runtimeWsPaths] override set by [com.ufo.galaxy.config.RemoteConfigFetcher].
+     * Falls back to [WS_PATHS] if no runtime override is set.
+     *
+     * @param baseUrl    WebSocket base URL; falls back to [effectiveWsBase] when blank.
+     * @param deviceId   Device identifier used to fill `{id}` placeholders.
+     * @param pathIndex  Index into [effectiveWsPaths]; defaults to 0 (highest priority).
+     * @throws IllegalArgumentException when [pathIndex] is out of range.
+     */
+    fun buildEffectiveWsUrl(baseUrl: String, deviceId: String, pathIndex: Int = 0): String {
+        val paths = effectiveWsPaths
+        require(pathIndex in paths.indices) {
+            "pathIndex $pathIndex is out of range (${paths.size} paths available)"
+        }
+        val path = paths[pathIndex].replace("{id}", deviceId)
         return "$baseUrl$path"
     }
 

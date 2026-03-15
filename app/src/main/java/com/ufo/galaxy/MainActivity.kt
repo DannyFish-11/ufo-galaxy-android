@@ -19,15 +19,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.ufo.galaxy.agent.GalaxyAgentV2
 import com.ufo.galaxy.agent.MessageRouter
 import com.ufo.galaxy.config.AppConfig
 import com.ufo.galaxy.config.AppSettings
+import com.ufo.galaxy.config.RemoteConfigFetcher
 import com.ufo.galaxy.input.NaturalLanguageInputManager
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.service.EnhancedFloatingService
 import com.ufo.galaxy.ui.theme.GeekThemePremium
 import java.util.*
+import kotlinx.coroutines.launch
 
 /**
  * UFO³ Galaxy Android Agent - 主活动
@@ -332,27 +335,46 @@ class MainActivity : ComponentActivity() {
 
     /**
      * 初始化各核心组件。权限获批后调用。
+     *
+     * 启动流程：
+     * 1. 从 /api/v1/config 拉取远端配置并进行多通道探测（选择最优传输通道）。
+     * 2. 使用更新后的配置初始化 WS 客户端和本地 Agent。
+     * 3. 仅当跨设备开关为 ON 时才建立 WS 连接。
      */
     private fun initializeComponents() {
-        try {
-            // WS 客户端（跨设备）
-            wsClient = GalaxyWebSocketClient(applicationContext)
+        lifecycleScope.launch {
+            try {
+                // ── Step 1: Remote config fetch + channel selection ────────────
+                // Updates ServerConfig in-memory overrides and optionally updates
+                // AppSettings with the best channel host.
+                // Falls back to local config.properties on any failure – no crash.
+                RemoteConfigFetcher.fetchAndApply(appSettings)
 
-            // 本地 Agent
-            galaxyAgent = GalaxyAgentV2(applicationContext)
-            galaxyAgent.start()
+                // ── Step 2: Init WS client + local Agent with updated config ──
+                wsClient = GalaxyWebSocketClient(applicationContext)
 
-            // 统一路由器
-            messageRouter = MessageRouter(applicationContext, wsClient, galaxyAgent)
+                // 本地 Agent
+                galaxyAgent = GalaxyAgentV2(applicationContext)
+                galaxyAgent.start()
 
-            // 若跨设备模式已持久化为 true，立即建立连接
-            if (appSettings.crossDeviceEnabled) {
-                wsClient.setCrossDeviceEnabled(true)
+                // 统一路由器
+                messageRouter = MessageRouter(applicationContext, wsClient, galaxyAgent)
+
+                // ── Step 3: Cross-device switch gate ──────────────────────────
+                // WS is only opened when the cross-device switch is ON.
+                // If the switch is OFF the app stays in local/offline mode.
+                if (appSettings.crossDeviceEnabled) {
+                    wsClient.setCrossDeviceEnabled(true)
+                }
+
+                Toast.makeText(this@MainActivity, "✅ Galaxy Agent 已启动", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "❌ 组件初始化失败: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
-
-            Toast.makeText(this, "✅ Galaxy Agent 已启动", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "❌ 组件初始化失败: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
