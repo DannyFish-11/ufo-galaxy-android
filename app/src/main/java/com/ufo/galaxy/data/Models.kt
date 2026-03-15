@@ -19,7 +19,7 @@ data class AppConfig(
     val serverUrl: String,
     val apiVersion: String,
     val isDebug: Boolean,
-    val crossDeviceEnabled: Boolean = true,
+    val crossDeviceEnabled: Boolean = false,
     val plannerMaxTokens: Int = 512,
     val plannerTemperature: Double = 0.1,
     val plannerTimeoutMs: Int = 30_000,
