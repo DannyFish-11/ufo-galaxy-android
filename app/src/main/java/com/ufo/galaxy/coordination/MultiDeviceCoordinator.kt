@@ -32,8 +32,15 @@ import java.util.UUID
  * @param dispatch     Suspending function called for each device.  Must not throw;
  *                     exceptions should be captured and returned as a failed [SubtaskResult].
  */
+/**
+ * @param crossDeviceEnabled When `false`, [dispatchParallel] is a no-op that returns a
+ *   [ParallelGroupResult] containing a failed [SubtaskResult] for each device,
+ *   with `error = "cross_device_disabled"`. This enforces the Round-4 hard constraint:
+ *   parallel multi-device tasks must not be initiated when the cross-device switch is OFF.
+ */
 class MultiDeviceCoordinator(
     private val deviceIds: List<String>,
+    private val crossDeviceEnabled: Boolean = true,
     private val dispatch: suspend (deviceId: String, subtaskId: String, goal: String) -> SubtaskResult
 ) {
 
@@ -46,6 +53,11 @@ class MultiDeviceCoordinator(
      * Results are collected asynchronously via [async]/[awaitAll] and returned in
      * the same order as [deviceIds].
      *
+     * **Hard constraint**: when [crossDeviceEnabled] is `false` this method returns
+     * immediately with a [ParallelGroupResult] where every subtask has
+     * `success=false` and `error="cross_device_disabled"`. No [dispatch] calls are
+     * made and no WS/network activity is initiated.
+     *
      * @param goal    Natural-language goal description to dispatch to every device.
      * @param groupId Stable group identifier for this batch; auto-generated if not supplied.
      * @return [ParallelGroupResult] aggregating all subtask outcomes.
@@ -54,6 +66,22 @@ class MultiDeviceCoordinator(
         goal: String,
         groupId: String = "grp_${UUID.randomUUID()}"
     ): ParallelGroupResult = coroutineScope {
+        // Hard constraint: cross-device switch OFF must block ALL multi-device dispatch.
+        if (!crossDeviceEnabled) {
+            val traceId = UUID.randomUUID().toString()
+            val reason = "cross_device_disabled"
+            Log.w(TAG, "[COORD] dispatchParallel blocked: cross_device=off trace_id=$traceId group_id=$groupId reason=$reason")
+            val blockedResults = deviceIds.mapIndexed { index, deviceId ->
+                SubtaskResult(
+                    subtaskId = "${groupId}_sub_$index",
+                    deviceId = deviceId,
+                    success = false,
+                    error = reason
+                )
+            }
+            return@coroutineScope ParallelGroupResult(groupId = groupId, goal = goal, subtaskResults = blockedResults)
+        }
+
         Log.i(TAG, "[COORD] dispatchParallel group_id=$groupId devices=${deviceIds.size} goal=${goal.take(60)}")
 
         val deferreds = deviceIds.mapIndexed { index, deviceId ->

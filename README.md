@@ -705,3 +705,57 @@ http://服务器IP:8080/router
   "overlay_ready": true
 }
 ```
+
+
+---
+
+## 🔒 跨设备开关硬约束 (Round 4)
+
+### 概述
+
+跨设备开关（Cross-Device Switch）是一个**硬约束**：关闭时，所有跨设备的 WebSocket 连接、任务调度和信令均被强制拦截，不会静默降级。
+
+### 关闭（OFF）行为
+
+| 操作 | 行为 |
+|------|------|
+| `GalaxyWebSocketClient.connect()` | 无操作（no-op），不建立 WS 连接 |
+| `GalaxyWebSocketClient.sendJson()` | **立即返回 false**，写入带 `trace_id` 的警告日志，不进入离线队列 |
+| `InputRouter.route()` | 强制走本地路径（`RouteMode.LOCAL`），不上行 WS，不报错 |
+| `MultiDeviceCoordinator.dispatchParallel()` | 立即返回全失败结果（`success=false`，`error="cross_device_disabled"`），不调用调度函数 |
+| `RuntimeController.start()` | 应在 UI 层判断；若未调用则不建立任何跨设备状态 |
+
+### 错误日志格式
+
+当 `crossDeviceEnabled=false` 时，`sendJson` 拦截日志的格式为：
+
+```
+W/GalaxyWebSocket: [WS:BLOCKED] sendJson rejected: cross_device=off trace_id=<uuid> type=<msg_type> reason=cross_device_disabled
+```
+
+`MultiDeviceCoordinator` 拦截日志格式为：
+
+```
+W/MultiDeviceCoordinator: [COORD] dispatchParallel blocked: cross_device=off trace_id=<uuid> group_id=<id> reason=cross_device_disabled
+```
+
+### 唯一调度路径规则
+
+本应用**只有一条合法的跨设备调度路径**：
+
+```
+用户输入 → InputRouter → GalaxyWebSocketClient (task_submit) → Galaxy Gateway
+```
+
+其他调度入口（如旧版 `MessageRouter`、直接调用 `GalaxyWebSocketClient.send()`）受相同的 `crossDeviceEnabled` 开关约束。**不存在绕过该开关的调度路径。**
+
+### 开启（ON）行为
+
+开启时，原有 AIP v3、trace/route_mode、能力 schema 上报行为完全保持不变。
+
+### 手动验证步骤
+
+1. 将跨设备开关设为 OFF → 发送任何消息 → 确认消息走本地路径，Logcat 无 `[WS:UPLINK]` 日志
+2. 将跨设备开关设为 OFF → 查看 Logcat → 无 `[WS:CONNECT]` 尝试
+3. 将跨设备开关设为 ON → 正常连接和任务下发，行为同前几轮 PR
+4. 运行单元测试：`./gradlew test --tests "com.ufo.galaxy.network.CrossDeviceSwitchTest"` 和 `./gradlew test --tests "com.ufo.galaxy.coordination.MultiDeviceCoordinatorTest"`
