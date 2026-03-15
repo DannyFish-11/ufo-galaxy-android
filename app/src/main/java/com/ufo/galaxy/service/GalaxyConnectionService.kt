@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
+import com.ufo.galaxy.agent.AgentRuntimeBridge
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.network.GalaxyWebSocketClient
@@ -189,18 +190,28 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * 处理 task_assign：反序列化 payload、执行本地 EdgeExecutor、回传 task_result。
+     * 处理 task_assign：反序列化 payload、执行本地 EdgeExecutor 或委托 AgentRuntimeBridge、回传 task_result。
      * 在 IO 线程中执行；EdgeExecutor 内部所有异常均已捕获并映射为 ERROR 结果。
      *
-     * When a task_assign arrives:
+     * When a task_assign arrives (Round 5 bridge flow):
      * 1. Notifies [RuntimeController.onRemoteTaskStarted] to cancel any running local
      *    [com.ufo.galaxy.loop.LoopController] session.
-     * 2. Executes the task via [EdgeExecutor].
-     * 3. Sends back the AIP v3 task_result envelope.
+     * 2a. If cross-device is ON **and** [TaskAssignPayload.require_local_agent] is `false`:
+     *     delegates to [AgentRuntimeBridge.handoff] with exec_mode=REMOTE, carrying
+     *     trace_id, route_mode, capability, and session context.
+     *     - If handoff succeeds ([HandoffResult.isHandoff] = true): task has been forwarded
+     *       to Agent Runtime; no local execution is needed. The Agent Runtime will send the
+     *       result directly to the Gateway.
+     *     - If handoff fails / times out (all retries exhausted): falls back to local
+     *       EdgeExecutor with an explicit error log; no silent swallowing.
+     * 2b. If cross-device is OFF or [require_local_agent] is `true`: executes locally via
+     *     [EdgeExecutor] as before (full backward compatibility).
+     * 3. Sends back the AIP v3 task_result envelope (for local execution or fallback path);
+     *    the envelope now includes [trace_id] and [route_mode] for full-chain traceability.
      * 4. Notifies [RuntimeController.onRemoteTaskFinished] to unblock local execution.
-     * 5. Persists the result to OpenClawd memory (route_mode="cross_device").
+     * 5. Persists the result to OpenClawd memory.
      */
-    private fun handleTaskAssign(taskId: String, payloadJson: String) {
+    private suspend fun handleTaskAssign(taskId: String, payloadJson: String) {
         val payload = try {
             gson.fromJson(payloadJson, TaskAssignPayload::class.java)
         } catch (e: Exception) {
@@ -212,6 +223,80 @@ class GalaxyConnectionService : Service() {
         // Pause any running local LoopController session.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
+        // Generate a stable trace_id for this task_assign chain (used by bridge + reply envelopes).
+        val traceId = java.util.UUID.randomUUID().toString()
+        val crossDevice = UFOGalaxyApplication.appSettings.crossDeviceEnabled
+        val routeMode = if (crossDevice) AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE
+                        else AgentRuntimeBridge.ROUTE_MODE_LOCAL
+
+        if (crossDevice && !payload.require_local_agent) {
+            // ── Bridge path: cross-device ON + task does not require local execution ──
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "bridge_handoff_attempt",
+                    "task_id" to taskId,
+                    "trace_id" to traceId,
+                    "route_mode" to routeMode
+                )
+            )
+            val handoffRequest = AgentRuntimeBridge.HandoffRequest(
+                traceId = traceId,
+                taskId = taskId,
+                goal = payload.goal,
+                execMode = AgentRuntimeBridge.EXEC_MODE_REMOTE,
+                routeMode = routeMode,
+                capability = "task_execution",
+                constraints = payload.constraints
+            )
+            val handoffResult = UFOGalaxyApplication.agentRuntimeBridge.handoff(handoffRequest)
+
+            if (handoffResult.isHandoff) {
+                // Task successfully handed off to Agent Runtime.
+                // Agent Runtime will send the result directly; no local execution needed.
+                updateNotification("任务 ${taskId.take(8)}: 已转交 Agent Runtime")
+                Log.i(
+                    TAG,
+                    "task_assign bridge handoff OK task_id=$taskId trace_id=$traceId"
+                )
+                // Unblock local loop after scheduling the handoff.
+                UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+            } else {
+                // Handoff failed (fallback to local execution).
+                Log.w(
+                    TAG,
+                    "task_assign bridge handoff failed — falling back to local execution " +
+                        "task_id=$taskId trace_id=$traceId error=${handoffResult.error}"
+                )
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "bridge_fallback",
+                        "task_id" to taskId,
+                        "trace_id" to traceId,
+                        "error" to handoffResult.error
+                    )
+                )
+                executeLocalTaskAssign(taskId, payload, traceId, routeMode)
+            }
+        } else {
+            // ── Local path: cross-device OFF or require_local_agent=true ─────────────
+            executeLocalTaskAssign(taskId, payload, traceId, routeMode)
+        }
+    }
+
+    /**
+     * Executes a task_assign payload locally via [EdgeExecutor] and sends the task_result
+     * back to the Gateway. Both trace_id and route_mode are propagated in the reply envelope.
+     *
+     * Called from:
+     *  - The local execution path (cross-device OFF or require_local_agent=true).
+     *  - The bridge fallback path (bridge handoff failed after all retries).
+     */
+    private suspend fun executeLocalTaskAssign(
+        taskId: String,
+        payload: TaskAssignPayload,
+        traceId: String,
+        routeMode: String
+    ) {
         var taskResult: com.ufo.galaxy.protocol.TaskResultPayload? = null
         try {
             updateNotification("执行任务 ${taskId.take(8)}…")
@@ -222,17 +307,23 @@ class GalaxyConnectionService : Service() {
                 type = MsgType.TASK_RESULT,
                 payload = result,
                 correlation_id = taskId,
-                device_id = localDeviceId
+                device_id = localDeviceId,
+                trace_id = traceId,
+                route_mode = routeMode
             )
             val sent = webSocketClient.sendJson(gson.toJson(envelope))
-            Log.i(TAG, "task_result 已回传 task_id=$taskId status=${result.status} steps=${result.steps.size} sent=$sent")
+            Log.i(
+                TAG,
+                "task_result 已回传 task_id=$taskId status=${result.status} " +
+                    "steps=${result.steps.size} trace_id=$traceId route_mode=$routeMode sent=$sent"
+            )
             updateNotification("任务 ${taskId.take(8)}: ${result.status}")
         } finally {
             // Unblock local loop: always called even if edgeExecutor throws.
             UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
         }
 
-        // Persist result to OpenClawd memory (route_mode = "cross_device").
+        // Persist result to OpenClawd memory.
         taskResult?.let { result ->
             serviceScope.launch(Dispatchers.IO) {
                 storeMemoryEntry(
@@ -241,7 +332,7 @@ class GalaxyConnectionService : Service() {
                     status = result.status,
                     summary = "task_assign: ${result.steps.size} step(s) executed",
                     steps = result.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
-                    routeMode = "cross_device"
+                    routeMode = routeMode
                 )
             }
         }
