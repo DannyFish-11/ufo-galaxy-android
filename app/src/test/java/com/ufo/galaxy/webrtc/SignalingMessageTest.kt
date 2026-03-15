@@ -194,4 +194,75 @@ class SignalingMessageTest {
         assertNotNull(msg.candidate)
         assertTrue(msg.candidate!!.candidate.startsWith("candidate:"))
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // AIP v3 metadata fields (protocol / version / trace_id / route_mode)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `toJson always includes protocol and version AIP v3 fields`() {
+        val msg = SignalingMessage(type = "offer", sdp = "v=0", deviceId = "dev1")
+        val json = msg.toJson()
+
+        assertEquals("AIP/1.0", json.getString("protocol"))
+        assertEquals("3.0", json.getString("version"))
+    }
+
+    @Test
+    fun `toJson includes trace_id when provided`() {
+        val traceId = "trace-abc-123"
+        val msg = SignalingMessage(type = "offer", sdp = "v=0", traceId = traceId)
+        val json = msg.toJson()
+
+        assertEquals(traceId, json.getString("trace_id"))
+    }
+
+    @Test
+    fun `toJson includes route_mode when provided`() {
+        val msg = SignalingMessage(type = "offer", sdp = "v=0", routeMode = "cross_device")
+        val json = msg.toJson()
+
+        assertEquals("cross_device", json.getString("route_mode"))
+    }
+
+    @Test
+    fun `toJson omits trace_id and route_mode when not provided`() {
+        val msg = SignalingMessage(type = "offer", sdp = "v=0", deviceId = "dev1")
+        val json = msg.toJson()
+
+        assertTrue("trace_id should be absent when not set", !json.has("trace_id"))
+        assertTrue("route_mode should be absent when not set", !json.has("route_mode"))
+    }
+
+    @Test
+    fun `offer message with full AIP v3 metadata round-trips through JSON`() {
+        val original = SignalingMessage(
+            type      = "offer",
+            sdp       = "v=0\r\n",
+            deviceId  = "android_dev",
+            traceId   = "trace-round-trip",
+            routeMode = "local"
+        )
+        val restored = SignalingMessage.fromJson(original.toJson())
+
+        assertEquals(original.traceId, restored.traceId)
+        assertEquals(original.routeMode, restored.routeMode)
+    }
+
+    @Test
+    fun `ice_candidate with trace_id includes it in JSON envelope`() {
+        val msg = SignalingMessage(
+            type      = "ice_candidate",
+            candidate = SignalingMessage.IceCandidate("candidate:1 1 UDP 1 0.0.0.0 1234 typ host", "0", 0),
+            deviceId  = "android_dev",
+            traceId   = "trace-ice-001",
+            routeMode = "cross_device"
+        )
+        val json = msg.toJson()
+
+        assertEquals("trace-ice-001", json.getString("trace_id"))
+        assertEquals("cross_device", json.getString("route_mode"))
+        assertEquals("AIP/1.0", json.getString("protocol"))
+        assertEquals("3.0", json.getString("version"))
+    }
 }

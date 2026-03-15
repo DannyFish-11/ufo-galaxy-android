@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.projection.MediaProjection
 import android.util.Log
 import com.ufo.galaxy.config.ServerConfig
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -35,6 +36,20 @@ class WebRTCManager(private val context: Context) {
     // ─── Configuration ────────────────────────────────────────────────────────
     private var deviceId: String = "unknown_device"
     private var gatewayWsBase: String = ServerConfig.DEFAULT_BASE_URL
+
+    /**
+     * Trace identifier for the current WebRTC session.
+     *
+     * Set via [initialize] from the caller (e.g. [GalaxyWebSocketClient.getTraceId])
+     * so that signaling frames share the same trace ID as the main AIP WS session.
+     */
+    private var sessionTraceId: String = AIPMessageBuilder.generateTraceId()
+
+    /**
+     * Route mode for outbound signaling frames.
+     * Mirrors the cross-device switch state; set via [initialize].
+     */
+    private var routeMode: String = AIPMessageBuilder.ROUTE_MODE_LOCAL
 
     // ─── Signaling ────────────────────────────────────────────────────────────
     private var signalingClient: WebRTCSignalingClient? = null
@@ -69,17 +84,29 @@ class WebRTCManager(private val context: Context) {
     }
 
     /**
-     * Initialise the manager with the gateway base URL and device identifier,
-     * and set up the [PeerConnectionFactory] with hardware codec support.
+     * Initialise the manager with the gateway base URL, device identifier, and
+     * optional AIP v3 session metadata.
      *
      * @param gatewayWsBase WebSocket base URL, e.g. `"ws://100.123.215.126:8050"`.
      * @param deviceId      Identifier for this device; substituted into the WS path.
+     * @param traceId       AIP v3 trace identifier for the session.  Pass the value
+     *                      from [GalaxyWebSocketClient.getTraceId] so that signaling
+     *                      frames share the same trace ID as the main WS session.
+     *                      A fresh ID is auto-generated when omitted.
+     * @param routeMode     AIP v3 route mode (`"local"` or `"cross_device"`).
      */
-    fun initialize(gatewayWsBase: String = ServerConfig.DEFAULT_BASE_URL, deviceId: String = "android_device") {
+    fun initialize(
+        gatewayWsBase: String = ServerConfig.DEFAULT_BASE_URL,
+        deviceId: String = "android_device",
+        traceId: String = AIPMessageBuilder.generateTraceId(),
+        routeMode: String = AIPMessageBuilder.ROUTE_MODE_LOCAL
+    ) {
         this.gatewayWsBase = gatewayWsBase
         this.deviceId = deviceId
+        this.sessionTraceId = traceId
+        this.routeMode = routeMode
         initializeFactory()
-        Log.i(TAG, "WebRTCManager initialized — gateway=$gatewayWsBase device=$deviceId")
+        Log.i(TAG, "WebRTCManager initialized — gateway=$gatewayWsBase device=$deviceId trace_id=$traceId route_mode=$routeMode")
     }
 
     /**
@@ -338,9 +365,11 @@ class WebRTCManager(private val context: Context) {
                 pc.setLocalDescription(object : SdpObserver {
                     override fun onSetSuccess() {
                         val offer = SignalingMessage(
-                            type     = "offer",
-                            sdp      = sdp.description,
-                            deviceId = deviceId
+                            type      = "offer",
+                            sdp       = sdp.description,
+                            deviceId  = deviceId,
+                            traceId   = sessionTraceId,
+                            routeMode = routeMode
                         )
                         signalingClient?.send(offer)
                         Log.i(TAG, "SDP offer sent (${sdp.description.length} chars)")
@@ -385,9 +414,11 @@ class WebRTCManager(private val context: Context) {
                         pc.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 val answer = SignalingMessage(
-                                    type     = "answer",
-                                    sdp      = answerSdp.description,
-                                    deviceId = deviceId
+                                    type      = "answer",
+                                    sdp       = answerSdp.description,
+                                    deviceId  = deviceId,
+                                    traceId   = sessionTraceId,
+                                    routeMode = routeMode
                                 )
                                 signalingClient?.send(answer)
                                 Log.i(TAG, "SDP answer sent")
@@ -469,7 +500,9 @@ class WebRTCManager(private val context: Context) {
                     sdpMid        = candidate.sdpMid,
                     sdpMLineIndex = candidate.sdpMLineIndex
                 ),
-                deviceId = deviceId
+                deviceId  = deviceId,
+                traceId   = sessionTraceId,
+                routeMode = routeMode
             )
             signalingClient?.send(msg)
         }
