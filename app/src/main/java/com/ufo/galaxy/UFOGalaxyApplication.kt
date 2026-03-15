@@ -7,6 +7,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.ufo.galaxy.agent.AutonomousExecutionPipeline
+import com.ufo.galaxy.agent.AgentRuntimeBridge
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.LocalCollaborationAgent
 import com.ufo.galaxy.agent.LocalGoalExecutor
@@ -101,6 +102,10 @@ class UFOGalaxyApplication : Application() {
         lateinit var runtimeController: RuntimeController
             private set
 
+        // AgentRuntimeBridge: bridges eligible tasks to Agent Runtime / OpenClawd when cross-device is ON
+        lateinit var agentRuntimeBridge: AgentRuntimeBridge
+            private set
+
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
@@ -167,6 +172,9 @@ class UFOGalaxyApplication : Application() {
 
         // 初始化网络与诊断增强模块
         initNetworkDiagnosticsModules()
+
+        // Initialise AgentRuntimeBridge (requires webSocketClient, appSettings, metricsRecorder).
+        initAgentRuntimeBridge()
 
         // Ensure model files are present at startup so that local loop and cross-device
         // runtime are both ready regardless of whether GalaxyConnectionService has started.
@@ -434,6 +442,22 @@ class UFOGalaxyApplication : Application() {
         metricsRecorder = MetricsRecorder(appSettings)
         metricsRecorder.start()
         Log.d(TAG, "网络与诊断增强模块已初始化")
+    }
+
+    /**
+     * Initialises [AgentRuntimeBridge], which delegates eligible tasks to Agent Runtime /
+     * OpenClawd when the cross-device switch is ON.
+     *
+     * Must be called after [initWebSocketClient] and [initNetworkDiagnosticsModules]
+     * because both [webSocketClient] and [metricsRecorder] must be available.
+     */
+    private fun initAgentRuntimeBridge() {
+        agentRuntimeBridge = AgentRuntimeBridge(
+            gatewayClient = webSocketClient,
+            settings = appSettings,
+            metricsRecorder = metricsRecorder
+        )
+        Log.d(TAG, "AgentRuntimeBridge 已初始化")
     }
 
     /**

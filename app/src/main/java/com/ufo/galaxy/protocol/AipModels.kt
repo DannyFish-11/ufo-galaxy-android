@@ -33,6 +33,13 @@ enum class MsgType(val value: String) {
  * @param timestamp      Unix epoch millis auto-set at construction.
  * @param session_id     Optional session identifier.
  * @param device_id      Optional device identifier.
+ * @param trace_id       End-to-end trace identifier propagated across all hops (Android →
+ *                       Gateway → Agent Runtime and back). Generated once per task; echoed
+ *                       unchanged in every message that belongs to the same execution chain.
+ *                       Consumers may use this for full-chain observability and log correlation.
+ * @param route_mode     Routing path taken for this message: `"local"` (cross-device OFF, or
+ *                       local execution only) or `"cross_device"` (delegated to Gateway /
+ *                       Agent Runtime). Preserved in every hop of the AIP v3 pipeline.
  */
 data class AipMessage(
     val type: MsgType,
@@ -41,7 +48,9 @@ data class AipMessage(
     val version: String = "3.0",
     val timestamp: Long = System.currentTimeMillis(),
     val session_id: String? = null,
-    val device_id: String? = null
+    val device_id: String? = null,
+    val trace_id: String? = null,
+    val route_mode: String? = null
 )
 
 /**

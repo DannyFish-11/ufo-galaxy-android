@@ -49,6 +49,19 @@ class MetricsRecorder(private val settings: AppSettings) {
     val taskSuccesses = AtomicInteger(0)
     val taskFailures = AtomicInteger(0)
 
+    /** Count of tasks successfully handed off to Agent Runtime via the bridge. */
+    val handoffSuccesses = AtomicInteger(0)
+
+    /** Count of bridge handoff attempts that exhausted all retries without success. */
+    val handoffFailures = AtomicInteger(0)
+
+    /**
+     * Count of times task execution fell back to local after a failed bridge handoff.
+     * Distinct from [handoffFailures]: a fallback implies local execution ran as a
+     * substitute, whereas a failure with no local fallback is also counted here.
+     */
+    val handoffFallbacks = AtomicInteger(0)
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var periodicJob: Job? = null
     private val startTimeMs = System.currentTimeMillis()
@@ -100,6 +113,21 @@ class MetricsRecorder(private val settings: AppSettings) {
         taskFailures.incrementAndGet()
     }
 
+    /** Records a successful bridge handoff to Agent Runtime. */
+    fun recordHandoffSuccess() {
+        handoffSuccesses.incrementAndGet()
+    }
+
+    /** Records a bridge handoff that failed (all retries exhausted). */
+    fun recordHandoffFailure() {
+        handoffFailures.incrementAndGet()
+    }
+
+    /** Records a fallback to local execution after a failed bridge handoff. */
+    fun recordHandoffFallback() {
+        handoffFallbacks.incrementAndGet()
+    }
+
     // ── Snapshot ──────────────────────────────────────────────────────────────
 
     /**
@@ -110,6 +138,9 @@ class MetricsRecorder(private val settings: AppSettings) {
         put("registration_failures", registrationFailures.get())
         put("task_successes", taskSuccesses.get())
         put("task_failures", taskFailures.get())
+        put("handoff_successes", handoffSuccesses.get())
+        put("handoff_failures", handoffFailures.get())
+        put("handoff_fallbacks", handoffFallbacks.get())
         put("uptime_ms", System.currentTimeMillis() - startTimeMs)
         put("ts", System.currentTimeMillis())
     }
@@ -124,6 +155,9 @@ class MetricsRecorder(private val settings: AppSettings) {
                 "reg_failures=${registrationFailures.get()} " +
                 "task_ok=${taskSuccesses.get()} " +
                 "task_fail=${taskFailures.get()} " +
+                "handoff_ok=${handoffSuccesses.get()} " +
+                "handoff_fail=${handoffFailures.get()} " +
+                "handoff_fallback=${handoffFallbacks.get()} " +
                 "uptime_ms=${snap.optLong("uptime_ms")}"
         )
         GalaxyLogger.log(TAG, mapOf(
@@ -131,7 +165,10 @@ class MetricsRecorder(private val settings: AppSettings) {
             "ws_reconnects" to wsReconnects.get(),
             "registration_failures" to registrationFailures.get(),
             "task_successes" to taskSuccesses.get(),
-            "task_failures" to taskFailures.get()
+            "task_failures" to taskFailures.get(),
+            "handoff_successes" to handoffSuccesses.get(),
+            "handoff_failures" to handoffFailures.get(),
+            "handoff_fallbacks" to handoffFallbacks.get()
         ))
         val endpoint = settings.metricsEndpoint
         if (endpoint.isNotBlank()) {
