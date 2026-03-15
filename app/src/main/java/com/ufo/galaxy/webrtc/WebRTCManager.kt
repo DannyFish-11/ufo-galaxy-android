@@ -235,10 +235,9 @@ class WebRTCManager(private val context: Context) {
     private fun createPeerConnection() {
         val factory = peerConnectionFactory ?: return
 
-        val iceServers = listOf(
-            PeerConnection.IceServer.builder(ServerConfig.DEFAULT_STUN_URL)
-                .createIceServer()
-        )
+        val iceServers = ServerConfig.effectiveIceServers.map { url ->
+            PeerConnection.IceServer.builder(url).createIceServer()
+        }
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
 
         peerConnection = factory.createPeerConnection(rtcConfig, peerConnectionObserver)
