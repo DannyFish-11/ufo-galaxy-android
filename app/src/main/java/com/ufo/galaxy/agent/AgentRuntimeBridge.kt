@@ -5,6 +5,7 @@ import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.MetricsRecorder
+import com.ufo.galaxy.observability.TraceContext
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
@@ -88,7 +89,14 @@ class AgentRuntimeBridge(
         val capability: String? = null,
         val sessionId: String? = null,
         val context: Map<String, String> = emptyMap(),
-        val constraints: List<String> = emptyList()
+        val constraints: List<String> = emptyList(),
+        /**
+         * Optional child span identifier.  When blank, a new span is started
+         * via [TraceContext.startSpan] at the beginning of [handoff] and ended in the
+         * finally block.  Pass a pre-existing span ID to nest this handoff under an
+         * outer span (e.g. a task execution span).
+         */
+        val spanId: String = ""
     )
 
     /**
@@ -128,6 +136,24 @@ class AgentRuntimeBridge(
      *         the async callback. `false` → caller must execute locally.
      */
     suspend fun handoff(request: HandoffRequest): HandoffResult {
+        // ── Span lifecycle ────────────────────────────────────────────────────
+        val spanId = request.spanId.ifBlank { TraceContext.startSpan() }
+
+        // ── Dispatcher selection log ──────────────────────────────────────────
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_DISPATCHER_SELECT, buildMap {
+                put("trace_id", request.traceId)
+                put("span_id", spanId)
+                put("task_id", request.taskId)
+                put("exec_mode", request.execMode)
+                put("route_mode", request.routeMode)
+                if (!request.capability.isNullOrBlank()) put("capability", request.capability)
+                if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
+                put("cross_device_on", settings.crossDeviceEnabled)
+            }
+        )
+
+        try {
         // ── OFF guard: cross-device switch must be ON ─────────────────────────
         if (!settings.crossDeviceEnabled) {
             Log.d(TAG, "[BRIDGE] cross_device=OFF — skipping handoff trace_id=${request.traceId}")
@@ -136,6 +162,7 @@ class AgentRuntimeBridge(
                     "event" to "handoff_skipped",
                     "reason" to "cross_device_off",
                     "trace_id" to request.traceId,
+                    "span_id" to spanId,
                     "task_id" to request.taskId
                 )
             )
@@ -150,6 +177,7 @@ class AgentRuntimeBridge(
                     "event" to "handoff_skipped",
                     "reason" to "exec_mode_local",
                     "trace_id" to request.traceId,
+                    "span_id" to spanId,
                     "task_id" to request.taskId
                 )
             )
@@ -163,12 +191,26 @@ class AgentRuntimeBridge(
                 TAG, mapOf(
                     "event" to "handoff_idempotent",
                     "trace_id" to request.traceId,
+                    "span_id" to spanId,
                     "task_id" to request.taskId,
                     "status" to cached.status
                 )
             )
             return cached
         }
+
+        // ── Bridge handoff log ────────────────────────────────────────────────
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_BRIDGE_HANDOFF, buildMap {
+                put("trace_id", request.traceId)
+                put("span_id", spanId)
+                put("task_id", request.taskId)
+                put("exec_mode", request.execMode)
+                put("route_mode", request.routeMode)
+                if (!request.capability.isNullOrBlank()) put("capability", request.capability)
+                if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
+            }
+        )
 
         // ── Retry loop with exponential backoff ───────────────────────────────
         var lastError: String? = null
@@ -183,6 +225,7 @@ class AgentRuntimeBridge(
                     TAG, mapOf(
                         "event" to "handoff_retry",
                         "trace_id" to request.traceId,
+                        "span_id" to spanId,
                         "attempt" to attempt,
                         "delay_ms" to delayMs
                     )
@@ -201,6 +244,7 @@ class AgentRuntimeBridge(
                     TAG, mapOf(
                         "event" to "handoff_success",
                         "trace_id" to request.traceId,
+                        "span_id" to spanId,
                         "task_id" to request.taskId,
                         "attempt" to attempt
                     )
@@ -217,6 +261,7 @@ class AgentRuntimeBridge(
                     TAG, mapOf(
                         "event" to "handoff_timeout",
                         "trace_id" to request.traceId,
+                        "span_id" to spanId,
                         "attempt" to attempt,
                         "timeout_ms" to DEFAULT_HANDOFF_TIMEOUT_MS
                     )
@@ -228,6 +273,7 @@ class AgentRuntimeBridge(
                     TAG, mapOf(
                         "event" to "handoff_error",
                         "trace_id" to request.traceId,
+                        "span_id" to spanId,
                         "attempt" to attempt,
                         "error" to lastError
                     )
@@ -250,6 +296,7 @@ class AgentRuntimeBridge(
             TAG, mapOf(
                 "event" to "handoff_fallback",
                 "trace_id" to request.traceId,
+                "span_id" to spanId,
                 "task_id" to request.taskId,
                 "error" to lastError
             )
@@ -259,6 +306,12 @@ class AgentRuntimeBridge(
             "[BRIDGE] handoff_fallback trace_id=${request.traceId} task_id=${request.taskId} error=$lastError"
         )
         return fallback
+        } finally {
+            // End the span only when we opened it ourselves (spanId was blank in the request).
+            if (request.spanId.isBlank()) {
+                TraceContext.endSpan()
+            }
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────

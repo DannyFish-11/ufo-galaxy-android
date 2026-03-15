@@ -20,18 +20,24 @@ import kotlin.concurrent.withLock
  *
  * ## Stable log tags
  *
- * | Tag                    | Meaning                                                     |
- * |------------------------|-------------------------------------------------------------|
- * | `GALAXY:CONNECT`       | WebSocket connection established                            |
- * | `GALAXY:DISCONNECT`    | WebSocket disconnected (with reason / close code)           |
- * | `GALAXY:RECONNECT`     | Reconnect attempt scheduled or in progress                  |
- * | `GALAXY:TASK:RECV`     | `task_assign` or `goal_execution` message received          |
- * | `GALAXY:TASK:EXEC`     | Task execution started by EdgeExecutor                      |
- * | `GALAXY:TASK:RETURN`   | Task result returned (status + task_id)                     |
- * | `GALAXY:READINESS`     | Readiness self-check completed                              |
- * | `GALAXY:DEGRADED`      | Device entered or exited degraded mode                      |
- * | `GALAXY:TASK:TIMEOUT`  | Running task exceeded configured timeout budget             |
- * | `GALAXY:TASK:CANCEL`   | task_cancel instruction received and processed              |
+ * | Tag                       | Meaning                                                     |
+ * |---------------------------|-------------------------------------------------------------|
+ * | `GALAXY:CONNECT`          | WebSocket connection established                            |
+ * | `GALAXY:DISCONNECT`       | WebSocket disconnected (with reason / close code)           |
+ * | `GALAXY:RECONNECT`        | Reconnect attempt scheduled or in progress                  |
+ * | `GALAXY:TASK:RECV`        | `task_assign` or `goal_execution` message received          |
+ * | `GALAXY:TASK:EXEC`        | Task execution started by EdgeExecutor                      |
+ * | `GALAXY:TASK:RETURN`      | Task result returned (status + task_id)                     |
+ * | `GALAXY:READINESS`        | Readiness self-check completed                              |
+ * | `GALAXY:DEGRADED`         | Device entered or exited degraded mode                      |
+ * | `GALAXY:TASK:TIMEOUT`     | Running task exceeded configured timeout budget             |
+ * | `GALAXY:TASK:CANCEL`      | task_cancel instruction received and processed              |
+ * | `GALAXY:SIGNAL:START`     | WebRTC signaling session started (WS connect + offer sent)  |
+ * | `GALAXY:SIGNAL:STOP`      | WebRTC signaling session stopped (WS close / disconnect)    |
+ * | `GALAXY:DISPATCHER:SELECT`| Dispatcher selection for a task (route_mode + exec_mode)    |
+ * | `GALAXY:BRIDGE:HANDOFF`   | Bridge handoff to Agent Runtime initiated                   |
+ * | `GALAXY:WEBRTC:TURN`      | TURN server config received or relay candidate applied      |
+ * | `GALAXY:ERROR`            | Error event; always includes `trace_id` and `cause`        |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -63,6 +69,21 @@ object GalaxyLogger {
     const val TAG_TASK_TIMEOUT = "GALAXY:TASK:TIMEOUT"
     /** Fired when a task_cancel instruction is received and processed. */
     const val TAG_TASK_CANCEL  = "GALAXY:TASK:CANCEL"
+    /** Fired when a WebRTC signaling session starts (WS connected, offer sent). */
+    const val TAG_SIGNAL_START = "GALAXY:SIGNAL:START"
+    /** Fired when a WebRTC signaling session stops (WS closed or failed). */
+    const val TAG_SIGNAL_STOP  = "GALAXY:SIGNAL:STOP"
+    /** Fired when a dispatcher is selected for a task (route_mode + exec_mode resolved). */
+    const val TAG_DISPATCHER_SELECT = "GALAXY:DISPATCHER:SELECT"
+    /** Fired when a bridge handoff to Agent Runtime is initiated. */
+    const val TAG_BRIDGE_HANDOFF = "GALAXY:BRIDGE:HANDOFF"
+    /** Fired when TURN server config is received or relay candidates are applied. */
+    const val TAG_WEBRTC_TURN = "GALAXY:WEBRTC:TURN"
+    /**
+     * Fired for any error event.  Fields MUST include `trace_id` and `cause`.
+     * Optional fields: `task_id`, `session_id`, `device_id`.
+     */
+    const val TAG_ERROR = "GALAXY:ERROR"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
@@ -76,6 +97,17 @@ object GalaxyLogger {
 
     @Volatile private var logFile: File? = null
     private val fileLock = ReentrantLock()
+
+    /**
+     * Active sampling configuration.  Defaults to [SamplingConfig.debug] (all events
+     * logged).  Override in [android.app.Application.onCreate] before any log calls:
+     * ```kotlin
+     * GalaxyLogger.samplingConfig = if (BuildConfig.DEBUG) SamplingConfig.debug()
+     *                               else SamplingConfig.production()
+     * ```
+     */
+    @Volatile
+    var samplingConfig: SamplingConfig = SamplingConfig.debug()
 
     /**
      * In-memory ring buffer holding the latest [MAX_MEMORY_ENTRIES] log entries.
@@ -127,7 +159,7 @@ object GalaxyLogger {
     }
 
     /**
-     * Records a structured log entry.
+     * Records a structured log entry (same as [log]).
      *
      * - Always writes to the Android logcat.
      * - Always adds the entry to the in-memory ring buffer (dropping the oldest when full).
@@ -161,6 +193,47 @@ object GalaxyLogger {
      * not affect it.
      */
     fun getEntries(): List<LogEntry> = memoryBuffer.toList()
+
+    /**
+     * Records a structured log entry **only** when [SamplingConfig.shouldSample]
+     * returns `true` for [tag].  Use this for high-frequency events where sampling
+     * is desirable.
+     *
+     * Error events ([TAG_ERROR]) are always written regardless of sampling rate.
+     *
+     * @param tag    One of the `TAG_*` constants defined in this object.
+     * @param fields Map of key→value pairs to include in the `fields` JSON object.
+     */
+    fun logSampled(tag: String, fields: Map<String, Any?> = emptyMap()) {
+        if (tag == TAG_ERROR || samplingConfig.shouldSample(tag)) {
+            log(tag, fields)
+        }
+    }
+
+    /**
+     * Convenience helper for error events.
+     *
+     * Calls [log] with [TAG_ERROR] and always includes `trace_id` and `cause` in
+     * `fields`.  Additional context fields may be passed via [extraFields].
+     *
+     * @param traceId    Current trace identifier from [TraceContext.currentTraceId].
+     * @param cause      Human-readable error description.
+     * @param extraFields Optional additional context (e.g. `task_id`, `session_id`).
+     */
+    fun logError(
+        traceId: String,
+        cause: String,
+        extraFields: Map<String, Any?> = emptyMap()
+    ) {
+        log(
+            TAG_ERROR,
+            buildMap {
+                put("trace_id", traceId)
+                put("cause", cause)
+                putAll(extraFields)
+            }
+        )
+    }
 
     /**
      * Returns the log file if it exists and has been initialised via [init].

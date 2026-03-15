@@ -1,7 +1,46 @@
-# Android Device-Side Observability (PR15)
+# Android Device-Side Observability & Tracing (Round 7)
 
-This document describes the structured logging system added in PR15 for monitoring
-key lifecycle events on the Android client.
+This document describes the structured logging, trace propagation, metrics, and
+sampling controls added incrementally across Android PRs.
+
+---
+
+## Trace Context (Round 7)
+
+Every outbound AIP v3 message carries two trace identifiers for end-to-end
+log correlation:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `trace_id` | `string` (UUID v4) | Session-level trace identifier. Generated once per WS session; reused in every message within that session. If the server provides a `trace_id` in a downlink message, the client accepts and echoes it in all subsequent uplink messages. |
+| `span_id`  | `string` (16 hex chars) | Operation-level span identifier. Identifies a single logical operation (e.g. one task execution, one signaling handshake). Scoped within a `trace_id`. |
+
+### TraceContext API
+
+```kotlin
+// Session start (WS open):
+TraceContext.reset()                          // generate fresh trace_id; clear span
+
+// Outbound message:
+val traceId = TraceContext.currentTraceId()
+val spanId  = TraceContext.currentSpanId()    // null when no active span
+
+// Accept server-provided trace_id from a downlink message:
+TraceContext.acceptServerTraceId(serverTraceId)
+
+// Task execution span:
+val spanId = TraceContext.startSpan()
+try { executeTask() } finally { TraceContext.endSpan() }
+```
+
+### Server ↔ Client trace_id contract
+
+- Client generates a fresh `trace_id` on every WS session open (`reset()`).
+- If the server sends a `trace_id` in a downlink message (`task_assign`, etc.),
+  `TraceContext.acceptServerTraceId()` is called to adopt it.
+- Subsequent uplink messages (`task_result`, `goal_result`, signaling frames)
+  echo the accepted `trace_id` so gateway and runtime logs correlate correctly.
+- A blank or null server `trace_id` is ignored — the client-generated ID is kept.
 
 ---
 
@@ -10,45 +49,201 @@ key lifecycle events on the Android client.
 All structured log entries are identified by one of the following stable tag constants
 (defined in `GalaxyLogger.kt`):
 
+### Connection lifecycle
+
 | Tag | Constant | When emitted |
 |-----|----------|--------------|
 | `GALAXY:CONNECT` | `GalaxyLogger.TAG_CONNECT` | WebSocket connection established (`onOpen`) |
 | `GALAXY:DISCONNECT` | `GalaxyLogger.TAG_DISCONNECT` | WebSocket closed or failed (`onClosed`, `onFailure`) |
 | `GALAXY:RECONNECT` | `GalaxyLogger.TAG_RECONNECT` | Reconnect attempt scheduled (exponential back-off) |
+
+### Task lifecycle
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
 | `GALAXY:TASK:RECV` | `GalaxyLogger.TAG_TASK_RECV` | `task_assign` or `goal_execution` message received |
 | `GALAXY:TASK:EXEC` | `GalaxyLogger.TAG_TASK_EXEC` | Task execution started by `EdgeExecutor` |
 | `GALAXY:TASK:RETURN` | `GalaxyLogger.TAG_TASK_RETURN` | Task result returned (status + step count) |
+| `GALAXY:TASK:TIMEOUT` | `GalaxyLogger.TAG_TASK_TIMEOUT` | Running task exceeded configured timeout budget |
+| `GALAXY:TASK:CANCEL` | `GalaxyLogger.TAG_TASK_CANCEL` | `task_cancel` instruction received and processed |
+
+### WebRTC / signaling lifecycle (Round 7)
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
+| `GALAXY:SIGNAL:START` | `GalaxyLogger.TAG_SIGNAL_START` | WebRTC signaling WS connected, session started |
+| `GALAXY:SIGNAL:STOP` | `GalaxyLogger.TAG_SIGNAL_STOP` | WebRTC signaling WS closed or disconnected |
+| `GALAXY:WEBRTC:TURN` | `GalaxyLogger.TAG_WEBRTC_TURN` | TURN config received, relay candidates applied, or TURN fallback triggered |
+
+### Dispatcher / bridge (Round 7)
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
+| `GALAXY:DISPATCHER:SELECT` | `GalaxyLogger.TAG_DISPATCHER_SELECT` | Dispatcher selected for a task (route_mode + exec_mode resolved) |
+| `GALAXY:BRIDGE:HANDOFF` | `GalaxyLogger.TAG_BRIDGE_HANDOFF` | Bridge handoff to Agent Runtime initiated |
+
+### Errors (Round 7)
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
+| `GALAXY:ERROR` | `GalaxyLogger.TAG_ERROR` | Any error; **always** includes `trace_id` and `cause` |
+
+### Readiness
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
 | `GALAXY:READINESS` | `GalaxyLogger.TAG_READINESS` | Readiness self-check completed (`ReadinessChecker`) |
 | `GALAXY:DEGRADED` | `GalaxyLogger.TAG_DEGRADED` | Device is in degraded mode (any readiness flag is false) |
 
 ---
 
-## Log Entry Format
+## Log Entry Schema
 
 Each entry is a single-line JSON object:
 
 ```json
-{"ts":1710000000000,"tag":"GALAXY:CONNECT","fields":{"url":"ws://host:8080","attempt":0}}
+{"ts":1710000000000,"tag":"GALAXY:SIGNAL:START","fields":{"trace_id":"abc-123","url":"ws://host:8765","device_id":"samsung_s23","route_mode":"cross_device"}}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ts` | `long` | Unix timestamp in milliseconds |
-| `tag` | `string` | Stable tag (see table above) |
+| `tag` | `string` | Stable tag (see tables above) |
 | `fields` | `object` | Event-specific key→value pairs |
+
+### Common fields (present in most events)
+
+| Key | Type | Present in |
+|-----|------|-----------|
+| `trace_id` | `string` | All events (mandatory in `GALAXY:ERROR`) |
+| `span_id`  | `string` | Events within a bridge/task span |
+| `task_id`  | `string` | Task lifecycle events |
+| `device_id`| `string` | Signaling and error events (when available) |
+| `session_id`| `string` | Bridge handoff, error events (when available) |
+| `route_mode`| `string` | Signaling, dispatcher, bridge events |
+| `exec_mode` | `string` | Dispatcher and bridge events |
+| `capability`| `string` | Dispatcher and bridge events (when available) |
+
+### `GALAXY:ERROR` required fields
+
+Every `GALAXY:ERROR` entry **must** include:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `trace_id` | `string` | Current trace identifier for log correlation |
+| `cause` | `string` | Human-readable error description |
 
 ### Example entries
 
 ```jsonl
 {"ts":1710001000000,"tag":"GALAXY:CONNECT","fields":{"url":"ws://192.168.1.10:8080","attempt":0}}
+{"ts":1710001100000,"tag":"GALAXY:SIGNAL:START","fields":{"trace_id":"abc-xyz-123","url":"ws://100.64.0.1:8765/ws/webrtc/dev1","device_id":"samsung_s23","route_mode":"cross_device"}}
+{"ts":1710001200000,"tag":"GALAXY:DISPATCHER:SELECT","fields":{"trace_id":"abc-xyz-123","span_id":"a1b2c3d4e5f6a7b8","task_id":"task-42","exec_mode":"remote","route_mode":"cross_device","cross_device_on":true}}
+{"ts":1710001201000,"tag":"GALAXY:BRIDGE:HANDOFF","fields":{"trace_id":"abc-xyz-123","span_id":"a1b2c3d4e5f6a7b8","task_id":"task-42","exec_mode":"remote","route_mode":"cross_device"}}
+{"ts":1710001250000,"tag":"GALAXY:WEBRTC:TURN","fields":{"trace_id":"abc-xyz-123","event":"turn_config_received","urls":2,"device_id":"samsung_s23"}}
+{"ts":1710001300000,"tag":"GALAXY:SIGNAL:STOP","fields":{"trace_id":"abc-xyz-123","code":1000,"reason":"Client disconnect","normal":true,"session_ms":200,"device_id":"samsung_s23"}}
 {"ts":1710002000000,"tag":"GALAXY:TASK:RECV","fields":{"task_id":"task-abc123","type":"task_assign"}}
 {"ts":1710002001000,"tag":"GALAXY:TASK:EXEC","fields":{"task_id":"task-abc123","max_steps":10}}
 {"ts":1710002015000,"tag":"GALAXY:TASK:RETURN","fields":{"task_id":"task-abc123","status":"success","steps":3,"error":null}}
-{"ts":1710003000000,"tag":"GALAXY:DISCONNECT","fields":{"type":"closed","code":1000,"reason":"user disconnect"}}
+{"ts":1710003000000,"tag":"GALAXY:ERROR","fields":{"trace_id":"abc-xyz-123","cause":"signaling_ws_failure","device_id":"samsung_s23","route_mode":"cross_device"}}
 {"ts":1710004000000,"tag":"GALAXY:READINESS","fields":{"model_ready":true,"accessibility_ready":false,"overlay_ready":true,"degraded_mode":true}}
-{"ts":1710004000001,"tag":"GALAXY:DEGRADED","fields":{"model_ready":true,"accessibility_ready":false,"overlay_ready":true}}
 {"ts":1710005000000,"tag":"GALAXY:RECONNECT","fields":{"attempt":1,"max_attempts":10,"delay_ms":1342}}
 ```
+
+---
+
+## Sampling Controls (Round 7)
+
+High-frequency production environments can use `SamplingConfig` to reduce log noise
+while preserving full fidelity for critical events.
+
+### Configuration
+
+```kotlin
+// Application.onCreate():
+GalaxyLogger.samplingConfig = if (BuildConfig.DEBUG) SamplingConfig.debug()
+                              else SamplingConfig.production()
+```
+
+### Predefined configurations
+
+| Factory | `errorRate` | `taskRate` | `connectionRate` | `signalingRate` | `dispatcherRate` | `turnRate` | `metricsFlushRate` | `defaultRate` |
+|---------|------------|-----------|-----------------|----------------|-----------------|-----------|-------------------|--------------|
+| `SamplingConfig.debug()` | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 |
+| `SamplingConfig.production()` | 1.0 | 1.0 | 0.1 | 0.1 | 1.0 | 0.1 | 0.0 | 0.1 |
+
+### Custom configuration
+
+```kotlin
+GalaxyLogger.samplingConfig = SamplingConfig(
+    errorRate        = 1.0,   // always capture errors
+    taskRate         = 1.0,   // always capture task lifecycle
+    connectionRate   = 0.25,  // 25% of WS connect/disconnect/reconnect events
+    signalingRate    = 0.5,   // 50% of signaling start/stop events
+    dispatcherRate   = 1.0,   // always capture dispatch decisions
+    turnRate         = 0.5,   // 50% of TURN events
+    metricsFlushRate = 0.0,   // suppress periodic metrics flush in logs
+    defaultRate      = 0.1    // 10% of all other events
+)
+```
+
+### Sampling rules
+
+- `GALAXY:ERROR` is **always** logged regardless of `errorRate` when using `logSampled()`.
+- Task lifecycle events (`GALAXY:TASK:*`) use `taskRate`.
+- Connection events (`GALAXY:CONNECT`, `GALAXY:DISCONNECT`, `GALAXY:RECONNECT`) use `connectionRate`.
+- Signaling events (`GALAXY:SIGNAL:START`, `GALAXY:SIGNAL:STOP`) use `signalingRate`.
+- Dispatcher / bridge events (`GALAXY:DISPATCHER:SELECT`, `GALAXY:BRIDGE:HANDOFF`) use `dispatcherRate`.
+- TURN events (`GALAXY:WEBRTC:TURN`) use `turnRate`.
+
+---
+
+## Metrics / Telemetry (Round 7)
+
+`MetricsRecorder` tracks the following counters. All metric names use the
+`galaxy.*` prefix for namespace isolation in external pipelines.
+
+### Counter metrics
+
+| Metric name | Description |
+|-------------|-------------|
+| `galaxy.ws.reconnects` | WebSocket reconnection attempts |
+| `galaxy.registration.failures` | Cross-device registration failures |
+| `galaxy.task.successes` | Tasks completed successfully |
+| `galaxy.task.failures` | Tasks failed or errored |
+| `galaxy.signaling.successes` | WebRTC signaling sessions completed successfully |
+| `galaxy.signaling.failures` | WebRTC signaling sessions ended in error/timeout |
+| `galaxy.turn.usages` | WebRTC connections using TURN relay |
+| `galaxy.turn.fallbacks` | ICE failures triggering TURN-only fallback |
+| `galaxy.handoff.successes` | Bridge handoffs accepted by Agent Runtime |
+| `galaxy.handoff.failures` | Bridge handoffs exhausting all retries |
+| `galaxy.handoff.fallbacks` | Local executions following a failed bridge handoff |
+
+### Latency metrics
+
+| Metric name | Description |
+|-------------|-------------|
+| `galaxy.signaling.latency_ms` | Observed signaling session duration in ms |
+
+### TelemetryExporter stub
+
+Attach a real pipeline (OTel, StatsD, custom HTTP):
+
+```kotlin
+// In Application.onCreate():
+metricsRecorder.telemetryExporter = object : TelemetryExporter {
+    override fun incrementCounter(name: String, delta: Int, tags: Map<String, String>) {
+        statsd.count(name, delta.toLong(), *tags.entries.map { "${it.key}:${it.value}" }.toTypedArray())
+    }
+    override fun recordLatency(name: String, valueMs: Long, tags: Map<String, String>) {
+        statsd.time(name, valueMs)
+    }
+    override fun flush() = Unit
+}
+```
+
+The default is `NoOpTelemetryExporter` (all methods are no-ops), so the app
+compiles and runs without any external pipeline configured.
 
 ---
 
@@ -123,6 +318,8 @@ a live snapshot of:
 | `GalaxyConnectionService` | `GALAXY:TASK:RECV` (task_assign, goal_execution) |
 | `EdgeExecutor` | `GALAXY:TASK:RECV`, `GALAXY:TASK:EXEC`, `GALAXY:TASK:RETURN` |
 | `ReadinessChecker` | `GALAXY:READINESS`, `GALAXY:DEGRADED` |
+| `WebRTCSignalingClient` | `GALAXY:SIGNAL:START`, `GALAXY:SIGNAL:STOP`, `GALAXY:WEBRTC:TURN`, `GALAXY:ERROR` |
+| `AgentRuntimeBridge` | `GALAXY:DISPATCHER:SELECT`, `GALAXY:BRIDGE:HANDOFF`, `GALAXY:ERROR` |
 
 ---
 
@@ -130,8 +327,18 @@ a live snapshot of:
 
 | File | Purpose |
 |------|---------|
-| `app/src/main/java/com/ufo/galaxy/observability/GalaxyLogger.kt` | Singleton structured logger (ring buffer + file) |
+| `app/src/main/java/com/ufo/galaxy/observability/GalaxyLogger.kt` | Singleton structured logger (ring buffer + file + new tags) |
+| `app/src/main/java/com/ufo/galaxy/observability/TraceContext.kt` | Thread-safe trace_id/span_id holder; accepts server IDs |
+| `app/src/main/java/com/ufo/galaxy/observability/SamplingConfig.kt` | Per-tag sampling controls; debug/production presets |
+| `app/src/main/java/com/ufo/galaxy/observability/TelemetryExporter.kt` | Pluggable telemetry export interface + NoOp default |
+| `app/src/main/java/com/ufo/galaxy/observability/MetricsRecorder.kt` | Counters + latency + exporter integration |
+| `app/src/main/java/com/ufo/galaxy/webrtc/WebRTCSignalingClient.kt` | Structured logging; trace passthrough from server messages |
+| `app/src/main/java/com/ufo/galaxy/agent/AgentRuntimeBridge.kt` | Dispatcher-select + bridge-handoff logs; span_id support |
 | `app/src/main/java/com/ufo/galaxy/ui/components/DiagnosticsScreen.kt` | Diagnostics Composable + `shareLogs()` helper |
 | `app/src/main/res/xml/file_provider_paths.xml` | FileProvider path config for log sharing |
 | `app/src/test/java/com/ufo/galaxy/observability/GalaxyLoggerTest.kt` | JVM unit tests for GalaxyLogger |
+| `app/src/test/java/com/ufo/galaxy/observability/TracePropagationTest.kt` | JVM unit tests for TraceContext |
+| `app/src/test/java/com/ufo/galaxy/observability/SamplingConfigTest.kt` | JVM unit tests for SamplingConfig + logSampled/logError |
+| `app/src/test/java/com/ufo/galaxy/observability/ObservabilityMetricsTest.kt` | JVM unit tests for new counters and TelemetryExporter |
 | `docs/OBSERVABILITY.md` | This document |
+
