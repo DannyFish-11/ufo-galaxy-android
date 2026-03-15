@@ -40,21 +40,3 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 }
-
-/**
- * 硬件按键接收器
- * 监听媒体按键用于唤醒
- */
-class HardwareKeyReceiver : BroadcastReceiver() {
-    
-    companion object {
-        private const val TAG = "HardwareKeyReceiver"
-    }
-    
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_MEDIA_BUTTON) {
-            Log.d(TAG, "收到媒体按键事件")
-            // TODO: 处理硬件按键唤醒
-        }
-    }
-}

@@ -61,9 +61,8 @@
     java.lang.Object readResolve();
 }
 
-# 移除日志
+# 移除 verbose/debug 日志（保留 info 及以上用于 Release 排查）
 -assumenosideeffects class android.util.Log {
     public static int v(...);
     public static int d(...);
-    public static int i(...);
 }

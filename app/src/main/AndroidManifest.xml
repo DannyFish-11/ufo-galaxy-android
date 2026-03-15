@@ -36,7 +36,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.UFOGalaxy"
-        android:usesCleartextTraffic="true"
         tools:targetApi="34">
         
         <!-- 主 Activity -->
@@ -98,17 +97,7 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
-        
-        <!-- 硬件按键接收器 -->
-        <receiver
-            android:name=".service.HardwareKeyReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </receiver>
-        
+
         <!-- 增强版悬浮窗服务 -->
         <service
             android:name=".service.EnhancedFloatingService"

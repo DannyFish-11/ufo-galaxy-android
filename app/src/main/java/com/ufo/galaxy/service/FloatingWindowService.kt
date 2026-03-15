@@ -156,12 +156,13 @@ class FloatingWindowService : Service() {
         layoutParams.width = targetWidth
         layoutParams.height = targetHeight
         
+        val view = floatingView ?: return
         try {
-            windowManager.updateViewLayout(floatingView, layoutParams)
+            windowManager.updateViewLayout(view, layoutParams)
         } catch (e: Exception) {
             Log.e(TAG, "更新悬浮窗失败", e)
         }
-        
+
         Log.d(TAG, "悬浮窗展开状态: $isExpanded")
     }
     
@@ -256,8 +257,9 @@ class FloatingWindowService : Service() {
                     layoutParams.x = initialX + (event.rawX - initialTouchX).toInt()
                     layoutParams.y = initialY + (event.rawY - initialTouchY).toInt()
                     
+                    val view = floatingView ?: return false
                     try {
-                        windowManager.updateViewLayout(floatingView, layoutParams)
+                        windowManager.updateViewLayout(view, layoutParams)
                     } catch (e: Exception) {
                         Log.e(TAG, "移动悬浮窗失败", e)
                     }
