@@ -84,18 +84,36 @@ JSON always contains:
 
 ```json
 {
-  "protocol": "AIP/1.0",
-  "version":  "3.0",
-  "type":     "<v3 type from AIPMessageBuilder.MessageType>",
+  "protocol":    "AIP/1.0",
+  "version":     "3.0",
+  "type":        "<v3 type from AIPMessageBuilder.MessageType>",
   "source_node": "android_<device_id>",
   "target_node": "server",
   "device_id":   "android_<device_id>",
   "device_type": "Android_Agent",
   "message_id":  "<8-char UUID>",
   "timestamp":   1700000000,
+  "trace_id":    "<UUID generated once per WS session, reused for all messages>",
+  "route_mode":  "local" | "cross_device",
   "payload":     { ... }
 }
 ```
+
+> **Required fields (AIP v3):** `protocol`, `version`, `trace_id`, and
+> `route_mode` are mandatory in every outbound message.
+>
+> - `trace_id` is generated via `AIPMessageBuilder.generateTraceId()` **once**
+>   when a new WS connection opens and reused for every subsequent message in
+>   that session.  Callers (e.g. `WebRTCManager`) can retrieve the current
+>   session trace ID from `GalaxyWebSocketClient.getTraceId()`.
+>
+> - `route_mode` is derived from the cross-device switch:
+>   - Switch **OFF** → `"local"` (`AIPMessageBuilder.ROUTE_MODE_LOCAL`)
+>   - Switch **ON**  → `"cross_device"` (`AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE`)
+>
+> WebRTC signaling frames (offer / answer / ice_candidate) also carry
+> `protocol`, `version`, `trace_id`, and `route_mode` in their JSON envelope
+> so that gateway and remote peers can correlate them with the main AIP session.
 
 ### 3.1 `device_register`
 

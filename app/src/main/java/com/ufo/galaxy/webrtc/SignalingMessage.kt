@@ -1,5 +1,6 @@
 package com.ufo.galaxy.webrtc
 
+import com.ufo.galaxy.protocol.AIPMessageBuilder
 import org.json.JSONObject
 
 /**
@@ -18,12 +19,21 @@ import org.json.JSONObject
  * - `offer`          – SDP offer from the Android device to the remote peer.
  * - `answer`         – SDP answer from the remote peer to the Android device.
  * - `ice_candidate`  – ICE candidate exchanged between peers.
+ *
+ * AIP v3 metadata fields (`protocol`, `version`, `trace_id`, `route_mode`)
+ * are included in every outbound JSON envelope so that the gateway and
+ * remote peers can correlate and route signaling frames alongside other
+ * AIP messages.
  */
 data class SignalingMessage(
     val type: String,
     val sdp: String? = null,
     val candidate: IceCandidate? = null,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    /** AIP v3 trace identifier – reuse the session trace ID from [GalaxyWebSocketClient]. */
+    val traceId: String? = null,
+    /** AIP v3 route mode – `"local"` or `"cross_device"`. */
+    val routeMode: String? = null
 ) {
 
     /**
@@ -51,12 +61,22 @@ data class SignalingMessage(
 
     /**
      * Serialize this message to a [JSONObject] suitable for sending over the WebSocket.
+     *
+     * AIP v3 envelope fields (`protocol`, `version`, `trace_id`, `route_mode`) are
+     * always included so the gateway can correlate signaling frames with other AIP
+     * messages from the same session.
      */
     fun toJson(): JSONObject = JSONObject().apply {
+        // AIP v3 envelope metadata
+        put("protocol", AIPMessageBuilder.PROTOCOL_AIP1)
+        put("version", AIPMessageBuilder.PROTOCOL_V3)
+        // WebRTC-specific fields
         put("type", type)
         sdp?.let { put("sdp", it) }
         candidate?.let { put("candidate", it.toJson()) }
         deviceId?.let { put("device_id", it) }
+        traceId?.let { put("trace_id", it) }
+        routeMode?.let { put("route_mode", it) }
     }
 
     companion object {
@@ -69,7 +89,9 @@ data class SignalingMessage(
             type = json.getString("type"),
             sdp = json.optString("sdp").takeIf { it.isNotEmpty() },
             candidate = json.optJSONObject("candidate")?.let { IceCandidate.fromJson(it) },
-            deviceId = json.optString("device_id").takeIf { it.isNotEmpty() }
+            deviceId = json.optString("device_id").takeIf { it.isNotEmpty() },
+            traceId = json.optString("trace_id").takeIf { it.isNotEmpty() },
+            routeMode = json.optString("route_mode").takeIf { it.isNotEmpty() }
         )
 
         /**

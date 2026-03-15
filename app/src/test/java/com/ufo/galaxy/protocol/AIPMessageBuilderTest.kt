@@ -492,4 +492,79 @@ class AIPMessageBuilderTest {
         assertEquals("2.5.0", p.getString("version"))
         assertTrue("supported_actions should be present", p.has("supported_actions"))
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // trace_id / route_mode (AIP v3 required fields – Round 2)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `build includes trace_id and route_mode by default`() {
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.HEARTBEAT,
+            sourceNodeId = "android_dev",
+            targetNodeId = "server",
+            payload      = JSONObject()
+        )
+
+        assertTrue("trace_id should be present", msg.has("trace_id"))
+        assertTrue("trace_id should be non-empty", msg.getString("trace_id").isNotEmpty())
+        assertTrue("route_mode should be present", msg.has("route_mode"))
+        assertEquals(AIPMessageBuilder.ROUTE_MODE_LOCAL, msg.getString("route_mode"))
+    }
+
+    @Test
+    fun `build honours explicit trace_id`() {
+        val fixedTraceId = "test-trace-12345"
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.DEVICE_REGISTER,
+            sourceNodeId = "android_dev",
+            targetNodeId = "server",
+            payload      = JSONObject(),
+            traceId      = fixedTraceId
+        )
+
+        assertEquals(fixedTraceId, msg.getString("trace_id"))
+    }
+
+    @Test
+    fun `build honours cross_device route_mode`() {
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.HEARTBEAT,
+            sourceNodeId = "android_dev",
+            targetNodeId = "server",
+            payload      = JSONObject(),
+            routeMode    = AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE
+        )
+
+        assertEquals(AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE, msg.getString("route_mode"))
+    }
+
+    @Test
+    fun `build omits trace_id and route_mode when includeV3 is false`() {
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.HEARTBEAT,
+            sourceNodeId = "android_dev",
+            targetNodeId = "server",
+            payload      = JSONObject(),
+            includeV3    = false
+        )
+
+        assertTrue("trace_id should be absent when includeV3=false", !msg.has("trace_id"))
+        assertTrue("route_mode should be absent when includeV3=false", !msg.has("route_mode"))
+    }
+
+    @Test
+    fun `generateTraceId produces non-empty unique values`() {
+        val id1 = AIPMessageBuilder.generateTraceId()
+        val id2 = AIPMessageBuilder.generateTraceId()
+
+        assertTrue("trace ID should be non-empty", id1.isNotEmpty())
+        assertTrue("consecutive generateTraceId calls should differ", id1 != id2)
+    }
+
+    @Test
+    fun `ROUTE_MODE_LOCAL and ROUTE_MODE_CROSS_DEVICE have expected values`() {
+        assertEquals("local", AIPMessageBuilder.ROUTE_MODE_LOCAL)
+        assertEquals("cross_device", AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE)
+    }
 }

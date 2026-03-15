@@ -55,6 +55,36 @@ class DeviceCommunication(
 
     // Stored server URL (ws-scheme base) for reconnection attempts
     private var lastServerWsBase: String? = null
+
+    /**
+     * Trace identifier for the current WS session.
+     *
+     * Refreshed on every new connection (onOpen) so all messages within one
+     * session share the same trace ID for end-to-end correlation.
+     */
+    @Volatile private var sessionTraceId: String = AIPMessageBuilder.generateTraceId()
+
+    /**
+     * Whether cross-device mode is active.
+     * Determines [route_mode] injected into every outbound message.
+     */
+    @Volatile private var crossDeviceEnabled: Boolean = false
+
+    /** Returns the trace identifier for the current WS session. */
+    fun getTraceId(): String = sessionTraceId
+
+    /**
+     * Toggle cross-device mode.  This changes the [route_mode] value injected
+     * into outbound messages ([ROUTE_MODE_CROSS_DEVICE] vs [ROUTE_MODE_LOCAL]).
+     */
+    fun setCrossDeviceEnabled(enabled: Boolean) {
+        crossDeviceEnabled = enabled
+    }
+
+    /** Derive route_mode from the cross-device switch state. */
+    private fun currentRouteMode(): String =
+        if (crossDeviceEnabled) AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE
+        else AIPMessageBuilder.ROUTE_MODE_LOCAL
     
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -147,7 +177,9 @@ class DeviceCommunication(
     /** Create the [WebSocketListener] shared by all connection attempts. */
     private fun createWsListener() = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.i(TAG, "WebSocket 已打开")
+            // Refresh trace ID at the start of each new WS session.
+            sessionTraceId = AIPMessageBuilder.generateTraceId()
+            Log.i(TAG, "WebSocket 已打开 [trace_id=$sessionTraceId route_mode=${currentRouteMode()}]")
             isConnected = true
             reconnectAttempts = 0
             wsPathIndex = 0  // Reset to preferred path for future connections
@@ -259,7 +291,9 @@ class DeviceCommunication(
             messageType = "command",
             sourceNodeId = deviceId,
             targetNodeId = "server",
-            payload = payload
+            payload = payload,
+            traceId = sessionTraceId,
+            routeMode = currentRouteMode()
         ).apply {
             // Keep `action` at top level for server-side command routing
             put("action", action)
@@ -295,7 +329,9 @@ class DeviceCommunication(
             messageType = "command",
             sourceNodeId = deviceId,
             targetNodeId = "server",
-            payload = payload
+            payload = payload,
+            traceId = sessionTraceId,
+            routeMode = currentRouteMode()
         ).apply {
             put("action", "chat")
         }
@@ -384,7 +420,9 @@ class DeviceCommunication(
                                     messageType = "response",
                                     sourceNodeId = deviceRegistry.getDeviceId(),
                                     targetNodeId = "server",
-                                    payload = result
+                                    payload = result,
+                                    traceId = sessionTraceId,
+                                    routeMode = currentRouteMode()
                                 ).apply {
                                     put("action", action)
                                     put("correlation_id", effectiveCorrelationId)

@@ -21,6 +21,20 @@ object AIPMessageBuilder {
     /** v3 protocol version string. */
     const val PROTOCOL_V3 = "3.0"
 
+    /** Route mode value for local-only execution (cross-device switch OFF). */
+    const val ROUTE_MODE_LOCAL = "local"
+
+    /** Route mode value for cross-device execution (cross-device switch ON). */
+    const val ROUTE_MODE_CROSS_DEVICE = "cross_device"
+
+    /**
+     * Generate a fresh trace identifier for a new session or connection.
+     *
+     * Callers should generate one trace ID per WS session and reuse it across
+     * all messages sent within that session.
+     */
+    fun generateTraceId(): String = UUID.randomUUID().toString()
+
     // ──────────────────────────────────────────────────────────────────────────
     // v3 message type constants (authoritative names expected by AndroidBridge)
     // ──────────────────────────────────────────────────────────────────────────
@@ -99,6 +113,14 @@ object AIPMessageBuilder {
      * @param deviceType    Optional device-type hint (default `"Android_Agent"`).
      * @param includeV3     When `true`, v3-compatible extra fields are included.
      * @param messageId     Unique message identifier; auto-generated if omitted.
+     * @param traceId       Trace identifier for the current session; auto-generated
+     *                      if omitted.  Callers should reuse the same trace ID for
+     *                      every message in a single WS session – use
+     *                      [generateTraceId] once at session start and pass the
+     *                      result here.
+     * @param routeMode     Routing mode for this message.  Use [ROUTE_MODE_LOCAL]
+     *                      when the cross-device switch is OFF, or
+     *                      [ROUTE_MODE_CROSS_DEVICE] when it is ON.
      */
     fun build(
         messageType: String,
@@ -107,7 +129,9 @@ object AIPMessageBuilder {
         payload: JSONObject,
         deviceType: String = "Android_Agent",
         includeV3: Boolean = true,
-        messageId: String = UUID.randomUUID().toString().take(8)
+        messageId: String = UUID.randomUUID().toString().take(8),
+        traceId: String = generateTraceId(),
+        routeMode: String = ROUTE_MODE_LOCAL
     ): JSONObject {
         return JSONObject().apply {
             // ── AIP/1.0 required fields ──────────────────────────────────────
@@ -124,6 +148,8 @@ object AIPMessageBuilder {
                 put("version", PROTOCOL_V3)
                 put("device_id", sourceNodeId)
                 put("device_type", deviceType)
+                put("trace_id", traceId)
+                put("route_mode", routeMode)
             }
         }
     }

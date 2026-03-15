@@ -59,14 +59,31 @@ class GalaxyWebSocketClient(
 
     private val settings by lazy { AppSettings(context) }
 
-    /** 当前 WebSocket 实例（nullable；null 表示未连接） */
+    /** Current WebSocket instance (null when not connected). */
     @Volatile private var webSocket: WebSocket? = null
 
-    /** 跨设备开关状态（由 [setCrossDeviceEnabled] 驱动）*/
+    /** Cross-device switch state (driven by [setCrossDeviceEnabled]). */
     @Volatile private var crossDeviceEnabled: Boolean = false
 
-    /** 当前 WS 路径候选下标，连接失败时轮转到下一条 */
+    /** Current WS path candidate index; advanced on connection failure. */
     private var wsPathIndex = 0
+
+    /**
+     * Trace identifier for the current WS session.
+     *
+     * A fresh ID is generated each time a new connection is opened ([onOpen]).
+     * All messages sent within a session reuse this ID so they can be correlated
+     * end-to-end.  Expose via [getTraceId] for callers (e.g. WebRTCManager).
+     */
+    @Volatile private var sessionTraceId: String = AIPMessageBuilder.generateTraceId()
+
+    /** Returns the trace identifier for the current WS session. */
+    fun getTraceId(): String = sessionTraceId
+
+    /** Derive route_mode from the cross-device switch state. */
+    private fun currentRouteMode(): String =
+        if (crossDeviceEnabled) AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE
+        else AIPMessageBuilder.ROUTE_MODE_LOCAL
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -172,7 +189,9 @@ class GalaxyWebSocketClient(
             messageType = MsgType.TASK_SUBMIT,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
-            payload = payload.toJson()
+            payload = payload.toJson(),
+            traceId = sessionTraceId,
+            routeMode = currentRouteMode()
         )
 
         return try {
@@ -196,7 +215,9 @@ class GalaxyWebSocketClient(
     private val wsListener = object : WebSocketListener() {
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.i(TAG, "✅ Gateway WebSocket 已连接")
+            // Refresh trace ID for this new session.
+            sessionTraceId = AIPMessageBuilder.generateTraceId()
+            Log.i(TAG, "✅ Gateway WebSocket 已连接 [trace_id=$sessionTraceId route_mode=${currentRouteMode()}]")
             this@GalaxyWebSocketClient.webSocket = webSocket
             _connectionState.value = ConnectionState.CONNECTED
             wsPathIndex = 0  // 重置路径下标：下次优先用最高优先级路径
@@ -280,10 +301,12 @@ class GalaxyWebSocketClient(
             messageType = MsgType.CAPABILITY_REPORT,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
-            payload = payload
+            payload = payload,
+            traceId = sessionTraceId,
+            routeMode = currentRouteMode()
         )
         ws.send(msg.toString())
-        Log.i(TAG, "📋 能力上报已发送")
+        Log.i(TAG, "📋 能力上报已发送 [trace_id=$sessionTraceId route_mode=${currentRouteMode()}]")
     }
 
     /** 清理资源（一般在 Application.onTerminate 或测试中调用）。 */
