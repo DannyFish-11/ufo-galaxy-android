@@ -28,9 +28,11 @@ class MultiDeviceCoordinatorTest {
 
     private fun coordinator(
         devices: List<String>,
+        crossDeviceEnabled: Boolean = true,
         dispatch: suspend (deviceId: String, subtaskId: String, goal: String) -> MultiDeviceCoordinator.SubtaskResult
     ) = MultiDeviceCoordinator(
         deviceIds = devices,
+        crossDeviceEnabled = crossDeviceEnabled,
         dispatch = dispatch
     )
 
@@ -232,5 +234,82 @@ class MultiDeviceCoordinatorTest {
         val group = coord.dispatchParallel("auto group goal")
 
         assertTrue("Auto-generated groupId must not be empty", group.groupId.isNotEmpty())
+    }
+
+    // ── Round 4: cross-device OFF hard constraint ──────────────────────────────
+
+    @Test
+    fun `dispatchParallel returns all-failed result when crossDeviceEnabled is false`() = runBlocking {
+        var dispatchCalled = false
+        val devices = listOf("phone-1", "tablet-1")
+        val coord = coordinator(devices, crossDeviceEnabled = false) { deviceId, subtaskId, _ ->
+            dispatchCalled = true
+            MultiDeviceCoordinator.SubtaskResult(subtaskId = subtaskId, deviceId = deviceId, success = true)
+        }
+
+        val group = coord.dispatchParallel("open settings", groupId = "grp-blocked")
+
+        assertFalse("dispatch lambda must NOT be called when cross-device is OFF", dispatchCalled)
+        assertEquals("All subtasks must fail when cross-device is OFF", 0, group.succeededCount)
+        assertEquals("All subtasks must fail when cross-device is OFF", 2, group.failedCount)
+        assertFalse("allSucceeded must be false when cross-device is OFF", group.allSucceeded)
+    }
+
+    @Test
+    fun `dispatchParallel blocked result contains cross_device_disabled error`() = runBlocking {
+        val coord = coordinator(listOf("dev-a"), crossDeviceEnabled = false) { _, subtaskId, _ ->
+            MultiDeviceCoordinator.SubtaskResult(subtaskId = subtaskId, deviceId = "dev-a", success = true)
+        }
+
+        val group = coord.dispatchParallel("some goal", groupId = "grp-err")
+
+        val result = group.subtaskResults.first()
+        assertFalse("Blocked subtask must have success=false", result.success)
+        assertNotNull("Blocked subtask must have an error message", result.error)
+        assertTrue(
+            "Error must mention cross_device_disabled",
+            result.error!!.contains("cross_device_disabled")
+        )
+    }
+
+    @Test
+    fun `dispatchParallel blocked preserves groupId and goal`() = runBlocking {
+        val coord = coordinator(listOf("dev"), crossDeviceEnabled = false) { _, subtaskId, _ ->
+            MultiDeviceCoordinator.SubtaskResult(subtaskId = subtaskId, deviceId = "dev", success = true)
+        }
+
+        val group = coord.dispatchParallel("critical task", groupId = "expected-group")
+
+        assertEquals("groupId must be preserved in blocked result", "expected-group", group.groupId)
+        assertEquals("goal must be preserved in blocked result", "critical task", group.goal)
+    }
+
+    @Test
+    fun `dispatchParallel blocked returns correct subtask count for empty device list`() = runBlocking {
+        val coord = coordinator(emptyList(), crossDeviceEnabled = false) { _, subtaskId, _ ->
+            MultiDeviceCoordinator.SubtaskResult(subtaskId = subtaskId, deviceId = "", success = true)
+        }
+
+        val group = coord.dispatchParallel("goal")
+
+        assertTrue("No subtask results for empty device list", group.subtaskResults.isEmpty())
+        assertEquals(0, group.failedCount)
+    }
+
+    @Test
+    fun `dispatchParallel executes normally when crossDeviceEnabled is true`() = runBlocking {
+        var dispatchCallCount = 0
+        val devices = listOf("phone-1", "tablet-1")
+        val coord = coordinator(devices, crossDeviceEnabled = true) { deviceId, subtaskId, _ ->
+            dispatchCallCount++
+            MultiDeviceCoordinator.SubtaskResult(subtaskId = subtaskId, deviceId = deviceId, success = true)
+        }
+
+        val group = coord.dispatchParallel("run task", groupId = "grp-on")
+
+        assertEquals("dispatch must be called for each device when ON", 2, dispatchCallCount)
+        assertEquals(2, group.succeededCount)
+        assertEquals(0, group.failedCount)
+        assertTrue(group.allSucceeded)
     }
 }

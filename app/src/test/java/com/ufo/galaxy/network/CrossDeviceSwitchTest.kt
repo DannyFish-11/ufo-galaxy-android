@@ -184,7 +184,111 @@ class CrossDeviceSwitchTest {
         // (actual reconnect attempt would need a live server; just verifying no exception)
     }
 
+    // ── Round 4: cross-device OFF hard constraint on sendJson ─────────────────
 
+    @Test
+    fun `sendJson returns false immediately when crossDeviceEnabled is false`() {
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
+        val json = """{"type":"task_submit","payload":{}}"""
+        val result = client.sendJson(json)
+        assertFalse("sendJson must return false when cross-device is OFF", result)
+    }
+
+    @Test
+    fun `sendJson does not enqueue when crossDeviceEnabled is false even for queueable type`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false,
+            offlineQueue = testQueue
+        )
+        // task_result is normally queueable, but cross-device OFF must block before queuing
+        val json = """{"type":"task_result","payload":{}}"""
+        val result = client.sendJson(json)
+        assertFalse("sendJson must return false when cross-device is OFF", result)
+        assertEquals("Offline queue must remain empty when cross-device is OFF", 0, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson blocks task_submit when crossDeviceEnabled is false`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"task_submit","payload":{"task_text":"open WeChat"}}"""
+        val result = client.sendJson(json)
+        assertFalse("task_submit must be blocked when cross-device is OFF", result)
+    }
+
+    @Test
+    fun `sendJson blocks goal_result when crossDeviceEnabled is false`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"goal_result","payload":{}}"""
+        val result = client.sendJson(json)
+        assertFalse("goal_result must be blocked when cross-device is OFF", result)
+        assertEquals("Queue must be empty — blocked before queuing logic", 0, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson passes through when crossDeviceEnabled is true and disconnected`() {
+        // When ON but disconnected, queueable types should be queued (existing behaviour).
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"task_result","payload":{}}"""
+        val result = client.sendJson(json)
+        // Not connected → returns false but enqueues
+        assertFalse("sendJson returns false when ON but not connected", result)
+        assertEquals("task_result must be queued when cross-device is ON (disconnected)", 1, testQueue.size)
+    }
+
+    @Test
+    fun `setCrossDeviceEnabled false then sendJson is blocked`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        // Toggle OFF at runtime
+        client.setCrossDeviceEnabled(false)
+        assertFalse(client.crossDeviceEnabled)
+
+        val json = """{"type":"task_submit","payload":{}}"""
+        val result = client.sendJson(json)
+        assertFalse("sendJson must be blocked after runtime toggle to OFF", result)
+        assertEquals("Queue must remain empty after runtime toggle OFF", 0, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson OFF guard blocks all message types without queueing`() {
+        // Verify the hard constraint applies uniformly across all AIP v3 message types.
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false,
+            offlineQueue = testQueue
+        )
+        val messageTypes = listOf(
+            "task_submit", "task_result", "goal_result",
+            "cancel_result", "heartbeat", "capability_report"
+        )
+        for (type in messageTypes) {
+            val json = """{"type":"$type","payload":{}}"""
+            assertFalse("sendJson must block type=$type when cross-device is OFF", client.sendJson(json))
+        }
+        assertEquals("Offline queue must stay empty for all blocked message types", 0, testQueue.size)
+    }
 
     @Test
     fun `MsgType includes GOAL_EXECUTION, PARALLEL_SUBTASK, GOAL_RESULT`() {

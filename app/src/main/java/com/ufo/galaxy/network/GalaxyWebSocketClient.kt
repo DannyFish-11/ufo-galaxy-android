@@ -445,6 +445,20 @@ class GalaxyWebSocketClient(
      *         (queued or dropped depending on type).
      */
     override fun sendJson(json: String): Boolean {
+        // Hard constraint: cross-device switch OFF must block ALL outbound WS sends,
+        // even if a stale connection is somehow still open.
+        if (!crossDeviceEnabled) {
+            val traceId = java.util.UUID.randomUUID().toString()
+            val msgType = tryExtractType(json)
+            Log.w(TAG, "[WS:BLOCKED] sendJson rejected: cross_device=off trace_id=$traceId type=$msgType reason=cross_device_disabled")
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "send_blocked",
+                "trace_id" to traceId,
+                "type" to (msgType ?: "unknown"),
+                "reason" to "cross_device_disabled"
+            ))
+            return false
+        }
         if (!isConnected) {
             // Attempt to queue queueable message types for later delivery
             val msgType = tryExtractType(json)
