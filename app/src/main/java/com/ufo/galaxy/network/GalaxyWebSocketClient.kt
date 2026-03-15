@@ -12,8 +12,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -47,11 +52,15 @@ import kotlin.random.Random
  *                           while disconnected.  Pass a pre-configured [OfflineTaskQueue]
  *                           (with [android.content.SharedPreferences]) for persistence;
  *                           defaults to an in-memory-only queue.
+ * @param allowSelfSigned    When true, OkHttp trusts self-signed TLS certificates.
+ *                           Only relevant when using `wss://` / `https://` URLs.
+ *                           **Debug/dev only** — never use on public networks.
  */
 class GalaxyWebSocketClient(
     private val serverUrl: String,
     crossDeviceEnabled: Boolean = true,
-    val offlineQueue: OfflineTaskQueue = OfflineTaskQueue()
+    val offlineQueue: OfflineTaskQueue = OfflineTaskQueue(),
+    private val allowSelfSigned: Boolean = false
 ) : GatewayClient {
     companion object {
         private const val TAG = "GalaxyWebSocket"
@@ -61,6 +70,38 @@ class GalaxyWebSocketClient(
         private val RECONNECT_BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
         private const val RECONNECT_JITTER_MAX_MS = 1_000L
         private const val MAX_RECONNECT_ATTEMPTS = 10
+
+        /**
+         * Builds an OkHttpClient configured for WebSocket connections.
+         *
+         * When [allowSelfSigned] is `true` the client accepts all TLS certificates,
+         * including self-signed ones. Use this **only** in debug/dev environments on
+         * private (e.g. Tailscale) networks — it disables hostname verification.
+         */
+        fun buildOkHttpClient(allowSelfSigned: Boolean = false): OkHttpClient {
+            val builder = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .pingInterval(20, TimeUnit.SECONDS)
+            if (allowSelfSigned) {
+                try {
+                    val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+                        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+                        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                    })
+                    val sslContext = SSLContext.getInstance("TLS")
+                    sslContext.init(null, trustAllCerts, SecureRandom())
+                    builder.sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                    builder.hostnameVerifier { _, _ -> true }
+                    Log.w(TAG, "[WS:CONNECT] allowSelfSigned=true — TLS certificate validation is DISABLED (debug only)")
+                } catch (e: Exception) {
+                    Log.e(TAG, "[WS:CONNECT] Failed to configure self-signed trust: ${e.message}")
+                }
+            }
+            return builder.build()
+        }
     }
     
     /**
@@ -119,13 +160,8 @@ class GalaxyWebSocketClient(
         fun onTaskCancel(taskId: String, cancelPayloadJson: String) = Unit
     }
     
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .pingInterval(20, TimeUnit.SECONDS)
-        .build()
-    
+    private val client = buildOkHttpClient(allowSelfSigned)
+
     private val gson = Gson()
     private var webSocket: WebSocket? = null
     private val listeners: CopyOnWriteArrayList<Listener> = CopyOnWriteArrayList()

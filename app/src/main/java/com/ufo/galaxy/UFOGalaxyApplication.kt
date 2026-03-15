@@ -22,8 +22,11 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.network.NetworkDiagnostics
 import com.ufo.galaxy.network.OfflineTaskQueue
+import com.ufo.galaxy.network.TailscaleAdapter
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.service.AccessibilityActionExecutor
@@ -106,6 +109,18 @@ class UFOGalaxyApplication : Application() {
         lateinit var appSettings: AppSettings
             private set
 
+        // TailscaleAdapter: Tailscale 网络检测与自动发现（网络与诊断增强包）
+        lateinit var tailscaleAdapter: TailscaleAdapter
+            private set
+
+        // NetworkDiagnostics: 网络诊断模块（网络与诊断增强包）
+        lateinit var networkDiagnostics: NetworkDiagnostics
+            private set
+
+        // MetricsRecorder: 指标记录器（网络与诊断增强包）
+        lateinit var metricsRecorder: MetricsRecorder
+            private set
+
         /**
          * Latest readiness snapshot. Reflects the last call to [ReadinessChecker.checkAll].
          * Initialised to all-false on startup; updated after [initModelAssetManager] and
@@ -150,6 +165,9 @@ class UFOGalaxyApplication : Application() {
         // Initialise RuntimeController (requires webSocketClient, appSettings, loopController).
         initRuntimeController()
 
+        // 初始化网络与诊断增强模块
+        initNetworkDiagnosticsModules()
+
         // Ensure model files are present at startup so that local loop and cross-device
         // runtime are both ready regardless of whether GalaxyConnectionService has started.
         // Runs in a background scope; failures are logged but never block the app.
@@ -167,6 +185,7 @@ class UFOGalaxyApplication : Application() {
         // but is called in tests/emulators. Process termination cleans up anyway.
         modelDownloader.cancel()
         runtimeController.cancel()
+        metricsRecorder.stop()
         Log.i(TAG, "UFO Galaxy Application 终止")
     }
     
@@ -290,17 +309,22 @@ class UFOGalaxyApplication : Application() {
      *
      * An [OfflineTaskQueue] backed by SharedPreferences is injected so that queued
      * task results survive app restarts (messages older than 24 h are discarded on load).
+     *
+     * Config priority for the server URL: SharedPreferences (gateway_host/port/tls) →
+     * assets/config.properties → compile-time default (via [AppSettings.effectiveGatewayWsUrl]).
      */
     private fun initWebSocketClient() {
         val queuePrefs = getSharedPreferences(OfflineTaskQueue.TAG, MODE_PRIVATE)
         val offlineQueue = OfflineTaskQueue(prefs = queuePrefs)
+        val wsUrl = appSettings.effectiveGatewayWsUrl()
         webSocketClient = GalaxyWebSocketClient(
-            serverUrl = appSettings.galaxyGatewayUrl,
+            serverUrl = wsUrl,
             crossDeviceEnabled = appSettings.crossDeviceEnabled,
-            offlineQueue = offlineQueue
+            offlineQueue = offlineQueue,
+            allowSelfSigned = appSettings.allowSelfSigned
         )
         webSocketClient.setDeviceMetadata(appSettings.toMetadataMap())
-        Log.d(TAG, "WebSocket 客户端已初始化 (offlineQueue restored size=${offlineQueue.size})")
+        Log.d(TAG, "WebSocket 客户端已初始化: url=$wsUrl allowSelfSigned=${appSettings.allowSelfSigned} (offlineQueue restored size=${offlineQueue.size})")
     }
 
     /**
@@ -394,6 +418,22 @@ class UFOGalaxyApplication : Application() {
             loopController = loopController
         )
         Log.d(TAG, "RuntimeController 已初始化")
+    }
+
+    /**
+     * Initialises the network-diagnostics enhancement modules:
+     * - [TailscaleAdapter]: Tailscale detection and auto-discovery
+     * - [NetworkDiagnostics]: HTTP + WS health checks
+     * - [MetricsRecorder]: WS reconnect / registration failure / task metrics
+     *
+     * Must be called after [initConfig] (needs [appSettings]).
+     */
+    private fun initNetworkDiagnosticsModules() {
+        tailscaleAdapter = TailscaleAdapter(appSettings)
+        networkDiagnostics = NetworkDiagnostics(appSettings)
+        metricsRecorder = MetricsRecorder(appSettings)
+        metricsRecorder.start()
+        Log.d(TAG, "网络与诊断增强模块已初始化")
     }
 
     /**

@@ -92,7 +92,14 @@ data class MainUiState(
      * The value is the human-readable failure reason. Set back to null via
      * [MainViewModel.clearRegistrationFailure] after the user dismisses the dialog.
      */
-    val registrationFailure: String? = null
+    val registrationFailure: String? = null,
+    // ── Network settings (网络与诊断增强包) ──────────────────────────────────
+    /** True while the network settings screen is shown. */
+    val showNetworkSettings: Boolean = false,
+    /** True while a network diagnostics run is in progress. */
+    val isDiagnosticsRunning: Boolean = false,
+    /** Text of the last completed diagnostics run; null if not yet run. */
+    val diagnosticsReport: String? = null
 )
 
 /**
@@ -220,6 +227,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             webSocketClient.reconnectAttemptCount.collect { attempts ->
+                if (attempts > _uiState.value.reconnectAttempt) {
+                    // New reconnect attempt — record in metrics
+                    UFOGalaxyApplication.metricsRecorder.recordWsReconnect()
+                }
                 _uiState.update { it.copy(reconnectAttempt = attempts) }
             }
         }
@@ -228,6 +239,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         UFOGalaxyApplication.runtimeController.registrationError
             .onEach { reason ->
                 Log.w(TAG, "RuntimeController registration failure: $reason")
+                UFOGalaxyApplication.metricsRecorder.recordRegistrationFailure()
                 pushError(reason)
                 _uiState.update { it.copy(registrationFailure = reason, crossDeviceEnabled = false) }
             }
@@ -484,13 +496,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Toggles the cross-device collaboration setting.
      *
-     * - When toggling **on**: delegates to [RuntimeController.startWithTimeout] which
-     *   connects the WebSocket, sends the device_register / capability_report handshake,
-     *   and transitions to [RuntimeController.RuntimeState.Active]. If the registration
-     *   fails or times out, [RuntimeController] automatically falls back to local-only
-     *   mode and emits a failure event via [RuntimeController.registrationError], which
-     *   is observed in [init] and surfaced via [MainUiState.registrationFailure] for
-     *   dialog display in [com.ufo.galaxy.ui.MainActivity].
+     * - When toggling **on**: checks if the gateway is configured (non-placeholder address).
+     *   If not configured, opens the network settings screen for the user to set up the
+     *   gateway address (or auto-discover via Tailscale) instead of failing silently.
+     *   If configured, delegates to [RuntimeController.startWithTimeout].
      * - When toggling **off**: delegates to [RuntimeController.stop] which disconnects
      *   the WebSocket and transitions to [RuntimeController.RuntimeState.LocalOnly].
      * - Persists the new value via [AppSettings] and updates [MainUiState.crossDeviceEnabled]
@@ -502,8 +511,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Update UI state immediately to reflect user's intent.
         _uiState.update { it.copy(crossDeviceEnabled = newValue) }
         if (newValue) {
+            // Check if gateway is configured before attempting connection.
+            val settings = UFOGalaxyApplication.appSettings
+            val gatewayConfigured = settings.gatewayHost.isNotBlank() ||
+                isRealUrl(settings.galaxyGatewayUrl)
+            if (!gatewayConfigured) {
+                // Gateway not configured — revert toggle and prompt user to set up.
+                Log.i(TAG, "toggleCrossDeviceEnabled: gateway not configured → opening settings")
+                _uiState.update { it.copy(crossDeviceEnabled = false, showNetworkSettings = true) }
+                return
+            }
             // Persist intent; RuntimeController will revert if registration fails.
-            UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
+            settings.crossDeviceEnabled = true
             viewModelScope.launch {
                 val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
                 if (!ok) {
@@ -540,6 +559,108 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // crossDeviceEnabled was set to false when the failure occurred; toggling now
         // will set it to true and attempt a new startWithTimeout().
         toggleCrossDeviceEnabled()
+    }
+
+    // ── Network settings (网络与诊断增强包) ──────────────────────────────────
+
+    /** Opens the network settings screen. */
+    fun openNetworkSettings() {
+        _uiState.update { it.copy(showNetworkSettings = true) }
+    }
+
+    /** Closes the network settings screen. */
+    fun closeNetworkSettings() {
+        _uiState.update { it.copy(showNetworkSettings = false) }
+    }
+
+    /**
+     * Saves network settings to [AppSettings] and optionally triggers a WS reconnect.
+     *
+     * @param reconnect When true, stops the current runtime and starts again with the new config.
+     */
+    fun saveNetworkSettings(
+        gatewayHost: String,
+        gatewayPort: Int,
+        useTls: Boolean,
+        allowSelfSigned: Boolean,
+        deviceId: String,
+        restBase: String,
+        metricsEndpoint: String,
+        reconnect: Boolean = false
+    ) {
+        val s = UFOGalaxyApplication.appSettings
+        s.gatewayHost = gatewayHost.trim()
+        s.gatewayPort = gatewayPort
+        s.useTls = useTls
+        s.allowSelfSigned = allowSelfSigned
+        s.deviceId = deviceId.trim()
+        // Only update restBaseUrl when the user filled the field; otherwise leave existing value
+        if (restBase.isNotBlank()) s.restBaseUrl = restBase.trim()
+        s.metricsEndpoint = metricsEndpoint.trim()
+        Log.i(TAG, "saveNetworkSettings: host=${s.gatewayHost} port=${s.gatewayPort} tls=${s.useTls} reconnect=$reconnect")
+        if (reconnect && _uiState.value.crossDeviceEnabled) {
+            UFOGalaxyApplication.runtimeController.stop()
+            viewModelScope.launch {
+                val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                if (!ok) {
+                    _uiState.update { it.copy(crossDeviceEnabled = false) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Triggers Tailscale auto-discovery via [com.ufo.galaxy.network.TailscaleAdapter].
+     * If a gateway is found, writes the host to [AppSettings] and updates the UI.
+     */
+    fun autoDiscoverTailscale() {
+        viewModelScope.launch {
+            val adapter = UFOGalaxyApplication.tailscaleAdapter
+            val foundHost = adapter.autoDiscoverNode50()
+            if (foundHost != null) {
+                adapter.applyGatewayHost(foundHost)
+                Log.i(TAG, "autoDiscoverTailscale: found gateway $foundHost")
+            } else {
+                Log.w(TAG, "autoDiscoverTailscale: no gateway found")
+                pushError("自动探测未找到可用的网关节点")
+            }
+        }
+    }
+
+    /**
+     * Detects the device's own Tailscale IP and writes it to [AppSettings.gatewayHost].
+     * Used by the "一键填入 Tailscale" button.
+     */
+    fun fillTailscaleIp() {
+        viewModelScope.launch {
+            val adapter = UFOGalaxyApplication.tailscaleAdapter
+            val ip = adapter.getLocalTailscaleIp()
+            if (ip != null) {
+                UFOGalaxyApplication.appSettings.gatewayHost = ip
+                Log.i(TAG, "fillTailscaleIp: $ip")
+            } else {
+                pushError("未检测到 Tailscale 网络，请确认已安装并登录 Tailscale")
+            }
+        }
+    }
+
+    /**
+     * Runs the full network diagnostics suite and stores the report in [MainUiState.diagnosticsReport].
+     */
+    fun runNetworkDiagnostics() {
+        if (_uiState.value.isDiagnosticsRunning) return
+        _uiState.update { it.copy(isDiagnosticsRunning = true, diagnosticsReport = null) }
+        viewModelScope.launch {
+            try {
+                val diagnostics = UFOGalaxyApplication.networkDiagnostics
+                val report = diagnostics.runAll()
+                _uiState.update { it.copy(isDiagnosticsRunning = false, diagnosticsReport = report.toText()) }
+                Log.i(TAG, "Network diagnostics complete: allOk=${report.allOk}")
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isDiagnosticsRunning = false, diagnosticsReport = "诊断失败: ${e.message}") }
+                Log.e(TAG, "runNetworkDiagnostics failed", e)
+            }
+        }
     }
     
     /**
@@ -690,4 +811,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun formatDiagTs(ts: Long): String =
         SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(ts))
+
+    /**
+     * Returns true when [url] looks like a real, configured URL (not a placeholder).
+     *
+     * A URL is considered a placeholder when it:
+     * - is blank
+     * - contains `x` in the host portion (e.g. "100.x.x.x")
+     * - uses the compile-time fallback scheme + host pattern
+     */
+    internal fun isRealUrl(url: String): Boolean {
+        if (url.isBlank()) return false
+        // Extract the host portion (between :// and the next : or /)
+        val host = url
+            .substringAfter("://")
+            .substringBefore(":")
+            .substringBefore("/")
+        // Placeholder patterns: contains 'x' (e.g. "100.x.x.x") or is empty
+        if (host.isBlank()) return false
+        if (host.contains('x', ignoreCase = true) && !host.matches(Regex("[0-9a-fA-F:.]+"))) return false
+        return true
+    }
 }
