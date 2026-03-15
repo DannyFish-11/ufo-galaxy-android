@@ -290,12 +290,29 @@ class GalaxyWebSocketClient(
         }
     }
 
-    /** 连接成功后发送能力上报，让 Gateway 记录本设备支持的操作。 */
+    /** 连接成功后发送能力上报，让 Gateway 记录本设备支持的操作。
+     *
+     * When [crossDeviceEnabled] is `true` the payload is extended with a
+     * `capability_schema` array (built by [DeviceRegistry.buildAllCapabilitySchemas])
+     * so the server routing layer knows the exec_mode for each capability.
+     * The legacy `supported_actions` list is always included for backward
+     * compatibility with older server versions.
+     */
     private fun sendCapabilityReport(ws: WebSocket) {
+        val registry = com.ufo.galaxy.device.DeviceRegistry.getInstance(context)
+        val capabilities = registry.capabilities.value
+        val schemas = if (crossDeviceEnabled) registry.buildAllCapabilitySchemas() else emptyList()
+
         val payload = JSONObject().apply {
             put("platform", "android")
-            put("cross_device_enabled", crossDeviceEnabled)
             put("version", "2.5.0")
+            put("cross_device_enabled", crossDeviceEnabled)
+            put("supported_actions", org.json.JSONArray(capabilities))
+            if (crossDeviceEnabled && schemas.isNotEmpty()) {
+                val schemaArray = org.json.JSONArray()
+                schemas.forEach { schemaArray.put(it.toJson()) }
+                put("capability_schema", schemaArray)
+            }
         }
         val msg = AIPMessageBuilder.build(
             messageType = MsgType.CAPABILITY_REPORT,
@@ -306,7 +323,14 @@ class GalaxyWebSocketClient(
             routeMode = currentRouteMode()
         )
         ws.send(msg.toString())
-        Log.i(TAG, "📋 能力上报已发送 [trace_id=$sessionTraceId route_mode=${currentRouteMode()}]")
+        if (crossDeviceEnabled && schemas.isNotEmpty()) {
+            val localCount  = schemas.count { it.execMode == com.ufo.galaxy.device.DeviceRegistry.EXEC_MODE_LOCAL }
+            val remoteCount = schemas.count { it.execMode == com.ufo.galaxy.device.DeviceRegistry.EXEC_MODE_REMOTE }
+            val bothCount   = schemas.count { it.execMode == com.ufo.galaxy.device.DeviceRegistry.EXEC_MODE_BOTH }
+            Log.i(TAG, "📋 能力上报已发送 [count=${capabilities.size} local=$localCount remote=$remoteCount both=$bothCount trace_id=$sessionTraceId route_mode=${currentRouteMode()}]")
+        } else {
+            Log.i(TAG, "📋 能力上报已发送 [trace_id=$sessionTraceId route_mode=${currentRouteMode()}]")
+        }
     }
 
     /** 清理资源（一般在 Application.onTerminate 或测试中调用）。 */

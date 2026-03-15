@@ -145,6 +145,38 @@ Must be sent **immediately after** registration (before the server sends any
 `task_assign`).  The server's `CapabilityRegistry` uses this to expose the
 device's tools to the LLM scheduler.
 
+When **cross-device mode is ON** the payload is extended with a
+`capability_schema` array.  Each entry carries a structured schema so that
+the server routing layer can decide whether to dispatch execution locally or
+remotely for each capability.  The legacy `supported_actions` list is always
+present for backward compatibility with older server deployments.
+
+#### `capability_schema` field semantics
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | ✓ | Capability name matching an entry in `supported_actions` |
+| `params` | object | ✓ | JSON Schema describing accepted input parameters |
+| `returns` | object | ✓ | JSON Schema (or `description` string) for the return value |
+| `version` | string | ✓ | Semantic version of the capability interface |
+| `exec_mode` | string | ✓ | `"local"` · `"remote"` · `"both"` (see below) |
+| `tags` | array | — | Optional device/OS constraint hints (e.g. `"android"`, `"hardware"`) |
+
+#### `exec_mode` semantics
+
+| Value | Meaning |
+|---|---|
+| `"local"` | The capability runs exclusively on the local Android device (e.g. `touch`, `screen_capture`, `camera`). |
+| `"remote"` | The capability requires routing to a remote server for execution. |
+| `"both"` | The capability can run either on-device **or** remotely (e.g. `natural_language`, which may be served by a local MobileVlmPlanner or a remote LLM). |
+
+`exec_mode` is determined by `DeviceRegistry.buildCapabilitySchema()` in the
+companion object.  The mapping is defined once in source and can be extended
+without an app restart by calling `DeviceRegistry.rebuildCapabilities()` after
+a runtime permission change.
+
+#### Payload example (cross-device ON)
+
 ```json
 {
   "type": "capability_report",
@@ -155,10 +187,33 @@ device's tools to the LLM scheduler.
       "natural_language", "screen", "screen_capture", "system_control",
       "text_input", "touch", "ui_automation"
     ],
-    "version": "2.5.0"
+    "version": "2.5.0",
+    "cross_device_enabled": true,
+    "capability_schema": [
+      {
+        "action":    "screen_capture",
+        "params":    { "type": "object", "properties": {} },
+        "returns":   { "type": "string", "description": "Base64-encoded screenshot PNG" },
+        "version":   "1.0",
+        "exec_mode": "local",
+        "tags":      ["android", "ui"]
+      },
+      {
+        "action":    "natural_language",
+        "params":    { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] },
+        "returns":   { "type": "object", "description": "Parsed command or LLM response" },
+        "version":   "1.0",
+        "exec_mode": "both",
+        "tags":      ["android", "nlp"]
+      }
+    ]
   }
 }
 ```
+
+> **Note:** `capability_schema` is **only** sent when cross-device mode is ON.
+> When cross-device mode is OFF the WebSocket is not connected at all, so no
+> `capability_report` is sent.
 
 ### 3.3 `heartbeat`
 
@@ -203,9 +258,9 @@ device_register { payload: DeviceInfo }
                                       Return ACK { action: "device_register" }
     ◄────────────────────────────────
 
-capability_report { payload: { platform, supported_actions, version } }
+capability_report { payload: { platform, supported_actions, version, capability_schema[] } }
     ────────────────────────────────►
-                                      Sync to CapabilityRegistry
+                                      Sync to CapabilityRegistry (exec_mode per capability)
                                       Device now visible to NL scheduler
 
 heartbeat (every 30 s)

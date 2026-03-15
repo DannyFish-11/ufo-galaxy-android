@@ -240,11 +240,23 @@ class DeviceCommunication(
      *
      * Sends a [AIPMessageBuilder.MessageType.CAPABILITY_REPORT] payload so the
      * server's CapabilityRegistry records this device's supported actions.
+     *
+     * When cross-device mode is active, the payload includes a structured
+     * `capability_schema` array with `exec_mode` for each capability so the
+     * server routing layer can make accurate dispatch decisions.
      */
     private fun sendCapabilityReport() {
-        val message = deviceRegistry.createCapabilityReportMessage()
+        val message = deviceRegistry.createCapabilityReportMessage(crossDeviceEnabled)
         send(message)
-        Log.i(TAG, "发送能力上报")
+        if (crossDeviceEnabled) {
+            val schemas = deviceRegistry.buildAllCapabilitySchemas()
+            val localCount  = schemas.count { it.execMode == com.ufo.galaxy.device.DeviceRegistry.EXEC_MODE_LOCAL }
+            val remoteCount = schemas.count { it.execMode == com.ufo.galaxy.device.DeviceRegistry.EXEC_MODE_REMOTE }
+            val bothCount   = schemas.count { it.execMode == com.ufo.galaxy.device.DeviceRegistry.EXEC_MODE_BOTH }
+            Log.i(TAG, "发送能力上报 [count=${schemas.size} local=$localCount remote=$remoteCount both=$bothCount]")
+        } else {
+            Log.i(TAG, "发送能力上报")
+        }
     }
     
     /**
