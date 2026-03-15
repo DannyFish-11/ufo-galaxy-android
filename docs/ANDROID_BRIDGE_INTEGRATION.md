@@ -110,6 +110,40 @@ These are populated in every `task_result` reply sent by `GalaxyConnectionServic
 Consumers (Gateway, Agent Runtime, memory indexer) can use `trace_id` for full-chain
 log correlation and `route_mode` to distinguish local from remote results.
 
+### span_id for operation-level tracing (Round 7)
+
+`AgentRuntimeBridge.HandoffRequest` now carries an optional `spanId` field.
+When blank (the default), a new span is automatically started via `TraceContext.startSpan()`
+and ended in a `finally` block.  To nest a handoff under an outer span, pass
+the pre-existing span identifier:
+
+```kotlin
+val spanId = TraceContext.startSpan()
+try {
+    bridge.handoff(request.copy(spanId = spanId))
+    // ... other operations in the same span ...
+} finally {
+    TraceContext.endSpan()
+}
+```
+
+All bridge log events (`GALAXY:DISPATCHER:SELECT`, `GALAXY:BRIDGE:HANDOFF`, etc.)
+include both `trace_id` and `span_id` so that distributed traces can be correlated
+at both session and operation granularity.
+
+### Server trace_id echo (Round 7)
+
+When a downlink message carries a `trace_id`, the client adopts it via
+`TraceContext.acceptServerTraceId(serverTraceId)`.  Subsequent uplink messages
+and signaling frames echo the same ID, so server-side traces initiated by the
+gateway are visible in client-side logs without any extra configuration.
+
+```
+Client generates trace_id="A"    → sends device_register with trace_id="A"
+Server responds with trace_id="B" → client accepts "B"
+Client sends task_result          → trace_id="B" (echoed)
+```
+
 ---
 
 ## Fallback Behaviour
