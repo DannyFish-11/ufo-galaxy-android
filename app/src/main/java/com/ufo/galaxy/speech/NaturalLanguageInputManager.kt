@@ -40,7 +40,7 @@ class NaturalLanguageInputManager(private val router: MessageRouter) {
             return false
         }
         Log.d(TAG, "submit: routing \"${trimmed.take(60)}\"")
-        return router.route(trimmed)
+        return router.route(trimmed) == MessageRouter.RouteMode.CROSS_DEVICE
     }
 
     /**

@@ -29,7 +29,7 @@ class NaturalLanguageInputManagerTest {
             crossDeviceEnabled = false,
             offlineQueue = OfflineTaskQueue(prefs = null)
         )
-        return MessageRouter(settings, client, onLocal)
+        return MessageRouter(settings, client, localFallback = onLocal)
     }
 
     // ── submit() ──────────────────────────────────────────────────────────────

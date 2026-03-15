@@ -546,9 +546,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Activity onResume 时调用
      */
     fun onResume() {
-        Log.d(TAG, "onResume - 尝试连接 WebSocket")
-        viewModelScope.launch {
-            webSocketClient.connect()
+        Log.d(TAG, "onResume - 检查 WebSocket 状态")
+        if (UFOGalaxyApplication.appSettings.crossDeviceEnabled) {
+            viewModelScope.launch {
+                webSocketClient.connect()
+            }
         }
         // Refresh readiness flags — overlay/accessibility state may have changed while
         // the app was in the background (e.g. user visited settings to grant permissions).
