@@ -177,7 +177,18 @@ rest.base.url=http://100.x.x.x:8000
 - `capabilities` – 设备能力列表，由 `DeviceRegistry` 自动收集
 - `timestamp` – Unix 时间戳（秒）
 
-`capability_report` payload 必须包含 `platform`、`supported_actions`、`version` 三个字段，用于服务端 `CapabilityRegistry` 同步。
+`capability_report` payload 必须包含 `platform`、`supported_actions`、`version` 三个字段，用于服务端 `CapabilityRegistry` 同步。跨设备模式开启时还会附加 `capability_schema` 数组，每条记录包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `action` | string | 能力名称，与 `supported_actions` 对应 |
+| `params` | object | 参数的 JSON Schema 描述 |
+| `returns` | object | 返回值的 JSON Schema 描述 |
+| `version` | string | 能力接口语义版本 |
+| `exec_mode` | string | 执行模式：`"local"`（仅设备端）、`"remote"`（仅远端）、`"both"`（两者均可，如 `natural_language`） |
+| `tags` | array | 可选的设备/OS 约束提示，如 `"android"`、`"hardware"` |
+
+`exec_mode` 由 `DeviceRegistry.buildCapabilitySchema()` 根据能力名称静态映射。调用 `DeviceRegistry.rebuildCapabilities()` 可在不重启应用的情况下（如权限变化后）刷新能力列表。跨设备模式关闭时不发送 `capability_report`。
 
 入站消息由 `AIPMessageBuilder.parse()` 统一解析，支持三种格式：AIP/1.0 原生、Microsoft Galaxy 格式以及 v3 格式。
 

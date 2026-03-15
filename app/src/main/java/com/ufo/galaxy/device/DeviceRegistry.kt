@@ -26,13 +26,266 @@ class DeviceRegistry(private val context: Context) {
     
     companion object {
         private const val TAG = "DeviceRegistry"
-        
+
+        /** Execution mode: capability runs only on the local device. */
+        const val EXEC_MODE_LOCAL = "local"
+
+        /** Execution mode: capability requires routing to a remote server. */
+        const val EXEC_MODE_REMOTE = "remote"
+
+        /** Execution mode: capability can run on the local device or remotely. */
+        const val EXEC_MODE_BOTH = "both"
+
         @Volatile
         private var instance: DeviceRegistry? = null
         
         fun getInstance(context: Context): DeviceRegistry {
             return instance ?: synchronized(this) {
                 instance ?: DeviceRegistry(context.applicationContext).also { instance = it }
+            }
+        }
+
+        /**
+         * Build the structured capability schema for a single [action].
+         *
+         * Each schema describes the action's parameter shape, return value,
+         * semantic version, and [exec_mode] so that the server's routing layer
+         * can accurately decide whether to dispatch execution locally or remotely.
+         *
+         * @param action  Capability name as reported in `supported_actions`.
+         * @return        [CapabilitySchema] with all required fields populated.
+         */
+        fun buildCapabilitySchema(action: String): CapabilitySchema {
+            return when (action) {
+                "screen_capture" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Base64-encoded screenshot PNG")
+                    },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui")
+                )
+                "touch" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("x", JSONObject().apply { put("type", "number"); put("description", "X coordinate in pixels") })
+                            put("y", JSONObject().apply { put("type", "number"); put("description", "Y coordinate in pixels") })
+                        })
+                        put("required", JSONArray().apply { put("x"); put("y") })
+                    },
+                    returns = JSONObject().apply { put("type", "boolean"); put("description", "True if the touch event was delivered") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui")
+                )
+                "screen" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply { put("type", "object"); put("description", "Screen dimensions and orientation") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui")
+                )
+                "keyboard" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("text", JSONObject().apply { put("type", "string"); put("description", "Text to type") })
+                        })
+                        put("required", JSONArray().apply { put("text") })
+                    },
+                    returns = JSONObject().apply { put("type", "boolean") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui")
+                )
+                "text_input" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("text", JSONObject().apply { put("type", "string") })
+                        })
+                        put("required", JSONArray().apply { put("text") })
+                    },
+                    returns = JSONObject().apply { put("type", "boolean") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui")
+                )
+                "ui_automation" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("action", JSONObject().apply { put("type", "string"); put("description", "UI action to perform") })
+                            put("target", JSONObject().apply { put("type", "string"); put("description", "Target element selector") })
+                        })
+                    },
+                    returns = JSONObject().apply { put("type", "object"); put("description", "Action execution result") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui", "accessibility")
+                )
+                "app_control" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        val commandEnum = JSONArray().apply { put("launch"); put("stop"); put("bring_to_front") }
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("package_name", JSONObject().apply { put("type", "string"); put("description", "Android package name") })
+                            put("command", JSONObject().apply { put("type", "string"); put("enum", commandEnum) })
+                        })
+                    },
+                    returns = JSONObject().apply { put("type", "boolean") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "system")
+                )
+                "system_control" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("command", JSONObject().apply { put("type", "string"); put("description", "System command (e.g. volume_up, back, home)") })
+                        })
+                        put("required", JSONArray().apply { put("command") })
+                    },
+                    returns = JSONObject().apply { put("type", "boolean") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "system")
+                )
+                "gesture_simulation" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("gesture", JSONObject().apply { put("type", "string"); put("description", "Gesture type (swipe, pinch, etc.)") })
+                            put("points", JSONObject().apply { put("type", "array"); put("description", "Gesture path points") })
+                        })
+                    },
+                    returns = JSONObject().apply { put("type", "boolean") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "ui")
+                )
+                "natural_language" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("text", JSONObject().apply { put("type", "string"); put("description", "Natural language instruction") })
+                            put("context", JSONObject().apply { put("type", "object"); put("description", "Optional execution context") })
+                        })
+                        put("required", JSONArray().apply { put("text") })
+                    },
+                    returns = JSONObject().apply { put("type", "object"); put("description", "Parsed command or LLM response") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_BOTH,
+                    tags = listOf("android", "nlp")
+                )
+                "camera", "camera_front", "camera_back" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("format", JSONObject().apply { put("type", "string"); put("enum", JSONArray().apply { put("jpeg"); put("png") }) })
+                        })
+                    },
+                    returns = JSONObject().apply { put("type", "string"); put("description", "Base64-encoded image") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "camera")
+                )
+                "microphone", "voice_input" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("duration_ms", JSONObject().apply { put("type", "number"); put("description", "Recording duration in milliseconds") })
+                        })
+                    },
+                    returns = JSONObject().apply { put("type", "string"); put("description", "Transcribed text or audio data") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "audio")
+                )
+                "bluetooth" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply { put("type", "array"); put("description", "List of nearby Bluetooth devices") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "connectivity")
+                )
+                "nfc" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply { put("type", "object"); put("description", "NFC tag data") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "connectivity")
+                )
+                "gps", "location" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("latitude", JSONObject().apply { put("type", "number") })
+                            put("longitude", JSONObject().apply { put("type", "number") })
+                            put("accuracy", JSONObject().apply { put("type", "number") })
+                        })
+                    },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "location")
+                )
+                "accelerometer", "gyroscope", "compass" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject().apply {
+                            put("x", JSONObject().apply { put("type", "number") })
+                            put("y", JSONObject().apply { put("type", "number") })
+                            put("z", JSONObject().apply { put("type", "number") })
+                        })
+                    },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "sensor")
+                )
+                "wifi" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply { put("type", "object"); put("description", "WiFi connection state and SSID") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "connectivity")
+                )
+                "mobile_data" -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object"); put("properties", JSONObject()) },
+                    returns = JSONObject().apply { put("type", "object"); put("description", "Mobile data connection state") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL,
+                    tags = listOf("android", "hardware", "connectivity")
+                )
+                else -> CapabilitySchema(
+                    action = action,
+                    params = JSONObject().apply { put("type", "object") },
+                    returns = JSONObject().apply { put("type", "object") },
+                    version = "1.0",
+                    execMode = EXEC_MODE_LOCAL
+                )
             }
         }
     }
@@ -232,16 +485,33 @@ class DeviceRegistry(private val context: Context) {
      *
      * Required payload fields:
      * - `platform`          – OS platform string (`"android"`)
-     * - `supported_actions` – array of capability names
+     * - `supported_actions` – array of capability names (legacy, always present for backward compatibility)
      * - `version`           – client/app version string
+     *
+     * When [crossDeviceEnabled] is `true`, a `capability_schema` array is also
+     * included.  Each entry contains the structured schema for one capability:
+     * `action`, `params`, `returns`, `version`, `exec_mode`, and optional `tags`.
+     * This lets the server route engine dispatch each capability to the correct
+     * execution target without guessing.
+     *
+     * @param crossDeviceEnabled  When `true`, the structured `capability_schema`
+     *                            is appended to the payload.  Must be `false` (or
+     *                            omitted) for local-only sessions so that the
+     *                            payload remains minimal.
      */
-    fun createCapabilityReportMessage(): JSONObject {
+    fun createCapabilityReportMessage(crossDeviceEnabled: Boolean = false): JSONObject {
         val info = _deviceInfo.value ?: initialize()
 
         val payload = JSONObject().apply {
             put("platform", "android")
             put("supported_actions", JSONArray(_capabilities.value))
             put("version", info.appVersion)
+            if (crossDeviceEnabled) {
+                val schemas = buildAllCapabilitySchemas()
+                val schemaArray = JSONArray()
+                schemas.forEach { schemaArray.put(it.toJson()) }
+                put("capability_schema", schemaArray)
+            }
         }
 
         return AIPMessageBuilder.build(
@@ -251,6 +521,31 @@ class DeviceRegistry(private val context: Context) {
             payload = payload,
             deviceType = "Android_Agent"
         )
+    }
+
+    /**
+     * Build structured schemas for all currently registered capabilities.
+     *
+     * The returned list mirrors [capabilities] in order.  Each [CapabilitySchema]
+     * entry includes `exec_mode` so that callers (e.g. `GalaxyWebSocketClient`)
+     * can log exec_mode distribution and include the schema in the
+     * `capability_report` payload when cross-device is enabled.
+     *
+     * This method reads the current value of [_capabilities], so calling it after
+     * a [rebuildCapabilities] call reflects any runtime permission changes.
+     */
+    fun buildAllCapabilitySchemas(): List<CapabilitySchema> =
+        _capabilities.value.map { buildCapabilitySchema(it) }
+
+    /**
+     * Re-collect device capabilities from the system.
+     *
+     * Call this after a runtime permission grant/revoke so that [capabilities]
+     * and any subsequent [capability_report] reflect the new permission state
+     * without requiring an app restart.
+     */
+    fun rebuildCapabilities() {
+        _capabilities.value = collectCapabilities()
     }
 
     /**
@@ -386,4 +681,37 @@ enum class DeviceStatus(val value: String) {
     ONLINE("online"),
     BUSY("busy"),
     ERROR("error")
+}
+
+/**
+ * Structured schema for a single device capability.
+ *
+ * Sent as part of the `capability_report` payload when cross-device mode is
+ * active so that the server routing layer can make accurate execution decisions.
+ *
+ * @property action    Capability identifier matching an entry in `supported_actions`.
+ * @property params    JSON Schema object describing accepted input parameters.
+ * @property returns   JSON Schema object (or description) of the return value.
+ * @property version   Semantic version of this capability's interface.
+ * @property execMode  Execution target: [DeviceRegistry.EXEC_MODE_LOCAL],
+ *                     [DeviceRegistry.EXEC_MODE_REMOTE], or [DeviceRegistry.EXEC_MODE_BOTH].
+ * @property tags      Optional device/OS constraint hints (e.g. `"android"`, `"hardware"`).
+ */
+class CapabilitySchema(
+    val action: String,
+    val params: JSONObject,
+    val returns: JSONObject,
+    val version: String,
+    val execMode: String,
+    val tags: List<String> = emptyList()
+) {
+    /** Serialise to a [JSONObject] ready for inclusion in the `capability_schema` array. */
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("action", action)
+        put("params", params)
+        put("returns", returns)
+        put("version", version)
+        put("exec_mode", execMode)
+        if (tags.isNotEmpty()) put("tags", JSONArray(tags))
+    }
 }
