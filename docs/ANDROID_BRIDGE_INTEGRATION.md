@@ -293,7 +293,7 @@ switches to **relay-only** mode and re-applies all held TURN candidates:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `MAX_FALLBACK_ATTEMPTS` | 3 | Maximum retry attempts before `onError` is invoked. |
-| `FALLBACK_BACKOFF_MS` | `[1 000, 2 000, 4 000]` ms | Exponential backoff between attempts. |
+| `FALLBACK_BACKOFF_MS` | `[1000, 2000, 4000]` ms | Exponential backoff between attempts. |
 | `CONNECTION_TIMEOUT_MS` | 10 000 ms | Suggested timeout before triggering fallback. |
 
 `WebRTCSignalingClient.triggerTurnFallback()` is the entry point from the peer-connection

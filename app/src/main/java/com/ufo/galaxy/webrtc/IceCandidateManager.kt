@@ -59,6 +59,17 @@ class IceCandidateManager(
     var fallbackAttempts: Int = 0
         private set
 
+    /**
+     * Backoff delay (ms) that the caller should honour before triggering the next
+     * reconnect attempt after [startTurnFallback] returns `true`.
+     *
+     * Set to the computed delay of the most recent successful fallback attempt;
+     * reset to 0 by [reset].
+     */
+    @Volatile
+    var lastBackoffDelayMs: Long = 0L
+        private set
+
     companion object {
         /** Maximum retry attempts in TURN-only fallback mode. */
         const val MAX_FALLBACK_ATTEMPTS = 3
@@ -161,12 +172,12 @@ class IceCandidateManager(
         }
         turnFallbackActive = true
         fallbackAttempts++
-        val delayMs = if (fallbackAttempts <= FALLBACK_BACKOFF_MS.size)
+        lastBackoffDelayMs = if (fallbackAttempts <= FALLBACK_BACKOFF_MS.size)
             FALLBACK_BACKOFF_MS[fallbackAttempts - 1]
         else
             FALLBACK_BACKOFF_MS.last()
         Log.w(TAG, "[trace=$traceId] Starting TURN fallback attempt $fallbackAttempts/$MAX_FALLBACK_ATTEMPTS " +
-                "(backoff=${delayMs}ms)")
+                "(backoff=${lastBackoffDelayMs}ms); caller should delay before retrying connectivity")
         // Re-apply all relay candidates held so far
         val relayCount = getTurnCandidates().count { c ->
             Log.d(TAG, "[trace=$traceId] Re-applying relay candidate (fallback)")
@@ -185,6 +196,7 @@ class IceCandidateManager(
         seen.clear()
         turnFallbackActive = false
         fallbackAttempts = 0
+        lastBackoffDelayMs = 0L
         Log.d(TAG, "[trace=$traceId] IceCandidateManager reset")
     }
 

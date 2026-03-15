@@ -260,6 +260,30 @@ class IceCandidateManagerTest {
         assertEquals(2, m.fallbackAttempts)
     }
 
+    @Test
+    fun `lastBackoffDelayMs is set after startTurnFallback`() {
+        val m = manager()
+        m.addCandidate(relay("candidate:r 1 UDP 33562623 5.6.7.8 3478 typ relay raddr 1.2.3.4 rport 3478"))
+        assertEquals(0L, m.lastBackoffDelayMs)
+
+        m.startTurnFallback()
+        assertEquals(IceCandidateManager.FALLBACK_BACKOFF_MS[0], m.lastBackoffDelayMs)
+
+        m.startTurnFallback()
+        assertEquals(IceCandidateManager.FALLBACK_BACKOFF_MS[1], m.lastBackoffDelayMs)
+    }
+
+    @Test
+    fun `lastBackoffDelayMs resets to 0 after reset`() {
+        val m = manager()
+        m.addCandidate(relay("candidate:r 1 UDP 33562623 5.6.7.8 3478 typ relay raddr 1.2.3.4 rport 3478"))
+        m.startTurnFallback()
+        assertTrue(m.lastBackoffDelayMs > 0L)
+
+        m.reset()
+        assertEquals(0L, m.lastBackoffDelayMs)
+    }
+
     // ── reset ─────────────────────────────────────────────────────────────────
 
     @Test
