@@ -47,10 +47,24 @@ git clone https://github.com/DannyFish-11/ufo-galaxy-realization.git
 cd ufo-galaxy-realization/android_client
 ```
 
-### 2. 配置服务器地址
-编辑 `app/build.gradle`，修改 `GALAXY_SERVER_URL`:
+### 2. 配置服务器地址（推荐：App 内配置，无需改代码/重打包）
+
+从 v2.1 起，你可以直接在 App 内配置网关，**无需修改 `app/build.gradle` 或重打包 APK**：
+
+1. 打开 App → 顶栏 ⚙ 图标 → **网络与诊断** 设置界面
+2. 填入 **主机/IP**（支持 Tailscale 100.x.x.x）和 **端口**
+3. 点击 **保存并重连** 即可
+
+> **Tailscale 用户**：点击 **一键填入 Tailscale** 自动检测本机 Tailscale IP，或点击 **自动探测** 扫描常见 Tailscale 网段发现网关。
+
+如果你需要在编译时指定默认地址（用于预配置 APK），仍可修改 `app/build.gradle`：
 ```gradle
 buildConfigField "String", "GALAXY_SERVER_URL", '"ws://YOUR_SERVER_IP:8765"'
+```
+或在 `assets/config.properties` 中设置（不需要重编译）：
+```properties
+galaxy_gateway_url=ws://100.64.0.1:8765
+rest_base_url=http://100.64.0.1:8765
 ```
 
 ### 3. 使用 Android Studio 打开
@@ -133,7 +147,28 @@ android_client/
 
 ## 配置说明
 
-### 服务器配置
+### 优先级（Config Priority）
+
+网关地址按以下优先级加载（高→低）：
+1. **App 内设置**（SharedPreferences）— 推荐，无需改代码/重打包
+2. **assets/config.properties** — 预配置 APK 的便捷选项
+3. **编译时默认值**（`BuildConfig.GALAXY_SERVER_URL`）
+
+### App 内配置（v2.1 新增，推荐方式）
+
+打开 App → 顶栏 ⚙ → **网络与诊断** 界面：
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| 主机/IP | 网关服务器 IP 或域名 | `100.64.0.1` |
+| 端口 | 网关端口 | `8765` |
+| 使用 TLS | 开启 `wss://` / `https://` | 默认关 |
+| 允许自签名 | 调试环境信任自签名证书 | **仅限内网** |
+| 设备 ID | 上报到服务端的设备标识 | 留空用系统默认 |
+| REST 基础 URL | 留空则由主机+端口自动推导 | |
+| 指标上报端点 | 可选，留空则仅本地日志 | `http://100.64.0.1:9090/metrics` |
+
+### 服务器配置（编译时）
 在 `app/build.gradle` 中配置:
 ```gradle
 defaultConfig {
@@ -146,6 +181,15 @@ buildTypes {
     }
 }
 ```
+
+### Tailscale 配置
+UFO Galaxy 支持通过 [Tailscale](https://tailscale.com/) 私有 VPN 实现跨设备通信：
+1. 在服务端和 Android 设备上均安装并登录 Tailscale
+2. 在 App 内 ⚙ 设置界面点击 **一键填入 Tailscale** 自动填入本机 IP
+3. 或点击 **自动探测** 扫描常见 Tailscale 网段 (`100.64.0.0/10`) 发现网关
+4. 点击 **保存并重连** 完成配置
+
+> 无需修改任何代码或重新打包 APK。
 
 ### 签名配置
 Release 构建需要签名密钥:

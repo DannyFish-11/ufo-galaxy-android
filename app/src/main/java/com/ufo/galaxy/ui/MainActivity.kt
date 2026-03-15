@@ -15,6 +15,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +25,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ufo.galaxy.R
+import com.ufo.galaxy.UFOGalaxyApplication
+import com.ufo.galaxy.data.SharedPrefsAppSettings
 import com.ufo.galaxy.service.FloatingWindowService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
@@ -278,6 +281,37 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
+    // Show network settings screen when requested
+    if (uiState.showNetworkSettings) {
+        val settings = UFOGalaxyApplication.appSettings
+        NetworkSettingsScreen(
+            wsStateLabel = if (uiState.isConnected) "已连接" else if (uiState.crossDeviceEnabled) "连接中…" else "已断开",
+            wsConnected = uiState.isConnected,
+            initialGatewayHost = settings.gatewayHost,
+            initialGatewayPort = settings.gatewayPort.toString(),
+            initialUseTls = settings.useTls,
+            initialAllowSelfSigned = settings.allowSelfSigned,
+            initialDeviceId = settings.deviceId,
+            initialRestBase = settings.restBaseUrl,
+            initialMetricsEndpoint = settings.metricsEndpoint,
+            isDiagnosticsRunning = uiState.isDiagnosticsRunning,
+            diagnosticsText = uiState.diagnosticsReport,
+            onSave = { host, port, tls, selfSigned, deviceId, restBase, metrics ->
+                viewModel.saveNetworkSettings(host, port, tls, selfSigned, deviceId, restBase, metrics, reconnect = false)
+                Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
+            },
+            onSaveAndReconnect = { host, port, tls, selfSigned, deviceId, restBase, metrics ->
+                viewModel.saveNetworkSettings(host, port, tls, selfSigned, deviceId, restBase, metrics, reconnect = true)
+                Toast.makeText(context, "设置已保存，正在重连…", Toast.LENGTH_SHORT).show()
+            },
+            onAutoDiscover = { viewModel.autoDiscoverTailscale() },
+            onFillTailscaleIp = { viewModel.fillTailscaleIp() },
+            onRunDiagnostics = { viewModel.runNetworkDiagnostics() },
+            onClose = { viewModel.closeNetworkSettings() }
+        )
+        return
+    }
+
     // Show registration failure dialog when cross-device registration fails.
     uiState.registrationFailure?.let { reason ->
         AlertDialog(
@@ -290,8 +324,11 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.clearRegistrationFailure() }) {
-                    Text("关闭跨设备")
+                TextButton(onClick = {
+                    viewModel.clearRegistrationFailure()
+                    viewModel.openNetworkSettings()
+                }) {
+                    Text("查看诊断/设置")
                 }
             }
         )
@@ -342,6 +379,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         // Diagnostics button (PR15)
                         IconButton(onClick = { viewModel.toggleDiagnostics() }) {
                             Icon(Icons.Default.Info, contentDescription = "Diagnostics")
+                        }
+                        // Network settings button (网络与诊断增强包)
+                        IconButton(onClick = { viewModel.openNetworkSettings() }) {
+                            Icon(Icons.Default.Settings, contentDescription = "网络与诊断设置")
                         }
                         Text(
                             text = stringResource(R.string.settings_cross_device),

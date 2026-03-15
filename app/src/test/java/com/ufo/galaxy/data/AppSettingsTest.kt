@@ -242,4 +242,51 @@ class AppSettingsTest {
         assertEquals("galaxy_gateway_url", SharedPrefsAppSettings.KEY_GALAXY_GATEWAY_URL)
         assertEquals("rest_base_url", SharedPrefsAppSettings.KEY_REST_BASE_URL)
     }
+
+    // ── Network config key constants (网络与诊断增强包) ──────────────────────
+
+    @Test
+    fun `SharedPrefsAppSettings network config key constants are stable`() {
+        assertEquals("gateway_host", SharedPrefsAppSettings.KEY_GATEWAY_HOST)
+        assertEquals("gateway_port", SharedPrefsAppSettings.KEY_GATEWAY_PORT)
+        assertEquals("use_tls", SharedPrefsAppSettings.KEY_USE_TLS)
+        assertEquals("allow_self_signed", SharedPrefsAppSettings.KEY_ALLOW_SELF_SIGNED)
+        assertEquals("device_id", SharedPrefsAppSettings.KEY_DEVICE_ID)
+        assertEquals("metrics_endpoint", SharedPrefsAppSettings.KEY_METRICS_ENDPOINT)
+    }
+
+    @Test
+    fun `DEFAULT_GATEWAY_PORT is 8765`() {
+        assertEquals(8765, SharedPrefsAppSettings.DEFAULT_GATEWAY_PORT)
+    }
+
+    @Test
+    fun `effectiveGatewayWsUrl falls back to galaxyGatewayUrl when host is blank`() {
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000")
+        assertEquals("ws://10.0.0.1:9000", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `effectiveGatewayWsUrl uses host+port when gatewayHost is set`() {
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765)
+        assertEquals("ws://100.64.0.1:8765", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `effectiveGatewayWsUrl uses wss scheme when useTls is true`() {
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true)
+        assertEquals("wss://100.64.0.1:8765", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `effectiveRestBaseUrl uses http+host when host is set`() {
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = false)
+        assertEquals("http://100.64.0.1:8765", settings.effectiveRestBaseUrl())
+    }
+
+    @Test
+    fun `effectiveRestBaseUrl uses https when useTls is true`() {
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true)
+        assertEquals("https://100.64.0.1:8765", settings.effectiveRestBaseUrl())
+    }
 }

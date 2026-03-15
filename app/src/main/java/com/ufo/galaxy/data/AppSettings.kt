@@ -74,6 +74,67 @@ interface AppSettings {
     val degradedMode: Boolean
         get() = !modelReady || !accessibilityReady || !overlayReady
 
+    // ── Network configuration (网络与诊断增强包) ──────────────────────────────
+
+    /**
+     * Gateway host (IP or hostname), e.g. "100.64.0.1".
+     * When non-blank, [effectiveGatewayWsUrl] and [effectiveRestBaseUrl] are
+     * built from this field, [gatewayPort], and [useTls] instead of using
+     * [galaxyGatewayUrl] / [restBaseUrl] directly.
+     */
+    var gatewayHost: String
+
+    /** Gateway port number, e.g. 8765. */
+    var gatewayPort: Int
+
+    /**
+     * When true, use `wss://` and `https://` schemes; otherwise `ws://` and `http://`.
+     * Default is false (plain, suitable for Tailscale private networks).
+     */
+    var useTls: Boolean
+
+    /**
+     * When true, OkHttp accepts self-signed TLS certificates.
+     * Only effective when [useTls] is true. **Debug/dev environments only** —
+     * never use in production over public networks.
+     */
+    var allowSelfSigned: Boolean
+
+    /**
+     * Stable device identifier included in handshake and diagnostics payloads.
+     * Defaults to `"${Build.MANUFACTURER}_${Build.MODEL}"` when blank.
+     */
+    var deviceId: String
+
+    /**
+     * Optional HTTP endpoint for posting telemetry metrics.
+     * E.g. `"http://100.64.0.1:9090/metrics"`. Blank = metrics are only logged locally.
+     */
+    var metricsEndpoint: String
+
+    /**
+     * Builds the effective WebSocket base URL from the fine-grained fields when
+     * [gatewayHost] is set, otherwise falls back to [galaxyGatewayUrl].
+     *
+     * Priority: gatewayHost/port/tls (SharedPrefs) → galaxyGatewayUrl (SharedPrefs or
+     * assets/config.properties default) → compile-time default.
+     */
+    fun effectiveGatewayWsUrl(): String =
+        if (gatewayHost.isNotBlank()) {
+            val scheme = if (useTls) "wss" else "ws"
+            "$scheme://$gatewayHost:$gatewayPort"
+        } else galaxyGatewayUrl
+
+    /**
+     * Builds the effective REST base URL from the fine-grained fields when
+     * [gatewayHost] is set, otherwise falls back to [restBaseUrl].
+     */
+    fun effectiveRestBaseUrl(): String =
+        if (gatewayHost.isNotBlank()) {
+            val scheme = if (useTls) "https" else "http"
+            "$scheme://$gatewayHost:$gatewayPort"
+        } else restBaseUrl
+
     /**
      * Returns all settings as a [Map] suitable for inclusion in a
      * [CapabilityReport.metadata] payload sent to the gateway.
@@ -109,7 +170,14 @@ class InMemoryAppSettings(
     override var deviceRole: String = SharedPrefsAppSettings.DEFAULT_DEVICE_ROLE,
     override var modelReady: Boolean = false,
     override var accessibilityReady: Boolean = false,
-    override var overlayReady: Boolean = false
+    override var overlayReady: Boolean = false,
+    // Network config fields
+    override var gatewayHost: String = "",
+    override var gatewayPort: Int = SharedPrefsAppSettings.DEFAULT_GATEWAY_PORT,
+    override var useTls: Boolean = false,
+    override var allowSelfSigned: Boolean = false,
+    override var deviceId: String = "",
+    override var metricsEndpoint: String = ""
 ) : AppSettings
 
 /**
@@ -188,6 +256,32 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getBoolean(KEY_OVERLAY_READY, false)
         set(value) { prefs.edit().putBoolean(KEY_OVERLAY_READY, value).apply() }
 
+    // ── Network config fields ─────────────────────────────────────────────────
+
+    override var gatewayHost: String
+        get() = prefs.getString(KEY_GATEWAY_HOST, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_GATEWAY_HOST, value).apply() }
+
+    override var gatewayPort: Int
+        get() = prefs.getInt(KEY_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
+        set(value) { prefs.edit().putInt(KEY_GATEWAY_PORT, value).apply() }
+
+    override var useTls: Boolean
+        get() = prefs.getBoolean(KEY_USE_TLS, false)
+        set(value) { prefs.edit().putBoolean(KEY_USE_TLS, value).apply() }
+
+    override var allowSelfSigned: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false)
+        set(value) { prefs.edit().putBoolean(KEY_ALLOW_SELF_SIGNED, value).apply() }
+
+    override var deviceId: String
+        get() = prefs.getString(KEY_DEVICE_ID, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_DEVICE_ID, value).apply() }
+
+    override var metricsEndpoint: String
+        get() = prefs.getString(KEY_METRICS_ENDPOINT, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_METRICS_ENDPOINT, value).apply() }
+
     companion object {
         /** SharedPreferences file name. */
         const val PREFS_NAME = "ufo_galaxy_settings"
@@ -203,8 +297,19 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_ACCESSIBILITY_READY = "accessibility_ready"
         const val KEY_OVERLAY_READY = "overlay_ready"
 
+        // Network config keys
+        const val KEY_GATEWAY_HOST = "gateway_host"
+        const val KEY_GATEWAY_PORT = "gateway_port"
+        const val KEY_USE_TLS = "use_tls"
+        const val KEY_ALLOW_SELF_SIGNED = "allow_self_signed"
+        const val KEY_DEVICE_ID = "device_id"
+        const val KEY_METRICS_ENDPOINT = "metrics_endpoint"
+
         /** Default device role sent in capability reports. */
         const val DEFAULT_DEVICE_ROLE = "phone"
+
+        /** Default gateway port. */
+        const val DEFAULT_GATEWAY_PORT = 8765
 
         /** Compile-time fallback gateway URL (used when assets/config.properties is absent). */
         const val DEFAULT_GATEWAY_URL = "ws://100.x.x.x:8765"
