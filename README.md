@@ -851,3 +851,101 @@ turn_credential=s3cr3t
 ./gradlew test --tests "com.ufo.galaxy.webrtc.SignalingMessageTest"
 ./gradlew test --tests "com.ufo.galaxy.webrtc.IceCandidateManagerTest"
 ```
+
+
+---
+
+## PR-C4: TaskSubmitPayload & MsgType 对齐（AIP v3）
+
+### 概述
+
+本次变更将 `TaskSubmitPayload` 的结构与 AIP v3 服务端 schema 完全对齐，并统一客户端所有消息类型常量为 v3 命名，消除遗留 v2/legacy 类型字符串带来的路由风险。
+
+### 核心变更
+
+#### 1. `TaskSubmitPayload` v3 对齐
+
+新增 `task_id` 字段（与 `AipMessage.correlation_id` 对应，方便服务端在 payload 层面关联请求与回复）：
+
+```kotlin
+data class TaskSubmitPayload(
+    val task_text: String,   // 用户自然语言指令
+    val device_id: String,   // 设备唯一标识
+    val session_id: String,  // 会话级别标识
+    val task_id: String = "", // ← PR-C4 新增：任务 ID，对应 AipMessage.correlation_id
+    val context: TaskSubmitContext = TaskSubmitContext()
+)
+```
+
+`validate()` 方法在发送前校验所有必填字段（`task_text`、`device_id`、`session_id` 均非空）。校验失败时 `InputRouter` 通过 `onError` 回调而非静默丢弃。
+
+#### 2. `AipMessage` 信封 `protocol` 字段
+
+所有出站 AIP 消息均携带 `protocol = "AIP/1.0"`（默认值，原有代码无感知升级）：
+
+```kotlin
+data class AipMessage(
+    val type: MsgType,
+    val payload: Any,
+    val protocol: String = "AIP/1.0", // ← PR-C4 新增
+    val version: String = "3.0",
+    ...
+)
+```
+
+序列化后的 JSON 示例：
+
+```json
+{
+  "type": "task_submit",
+  "protocol": "AIP/1.0",
+  "version": "3.0",
+  "correlation_id": "<task-uuid>",
+  "device_id": "android_...",
+  "payload": {
+    "task_text": "打开微信",
+    "device_id": "android_...",
+    "session_id": "<session-uuid>",
+    "task_id": "<task-uuid>"
+  }
+}
+```
+
+#### 3. `MsgType.LEGACY_TYPE_MAP` 与 `toV3Type()`
+
+`MsgType` companion 对象新增 LEGACY_TYPE_MAP 供旧代码或外部输入做类型规范化：
+
+| Legacy 字符串   | v3 等价             |
+|-----------------|---------------------|
+| `registration`  | `device_register`   |
+| `register`      | `device_register`   |
+| `heartbeat`     | `heartbeat`         |
+| `command`       | `task_assign`       |
+| `command_result`| `command_result`    |
+
+使用示例：
+
+```kotlin
+val v3Type = MsgType.toV3Type("registration") // → "device_register"
+```
+
+新代码必须直接使用 `MsgType.XXX` 常量；`toV3Type()` 仅用于规范化外部（遗留/第三方）输入。
+
+### 相关文件
+
+| 文件 | 变更摘要 |
+|------|----------|
+| `protocol/AipModels.kt` | `AipMessage` 增加 `protocol` 字段；`TaskSubmitPayload` 增加 `task_id`、`validate()`；`MsgType` 增加 `LEGACY_TYPE_MAP`、`toV3Type()` |
+| `input/InputRouter.kt` | `sendViaWebSocket` 传入 `task_id`；发送前调用 `TaskSubmitPayload.validate()` |
+| `network/MessageRouter.kt` | `sendViaWebSocket` 传入 `task_id` |
+| `test/protocol/TaskSubmitV3Test.kt` | 新增：v3 shape、envelope 字段、type 常量、LEGACY_TYPE_MAP、负向测试 |
+| `test/protocol/AipModelsTest.kt` | 新增 `protocol` 字段断言、`task_id` 字段测试 |
+| `test/input/InputRouterTest.kt` | 新增：发送 JSON 包含 `task_id`、`protocol`、`version` 断言 |
+
+### 运行测试
+
+```bash
+./gradlew test --tests "com.ufo.galaxy.protocol.TaskSubmitV3Test"
+./gradlew test --tests "com.ufo.galaxy.protocol.AipModelsTest"
+./gradlew test --tests "com.ufo.galaxy.input.InputRouterTest"
+```

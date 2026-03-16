@@ -175,17 +175,30 @@ class InputRouter(
      *
      * Two distinct identifiers are used (matching the AIP v3 schema):
      *  - [taskId]: the message-level correlation identifier included in [AipMessage.correlation_id]
-     *    so that the reply (`task_assign`) can be matched to this submission.
+     *    so that the reply (`task_assign`) can be matched to this submission.  [taskId] is also
+     *    copied into [TaskSubmitPayload.task_id] so the gateway can see it in the payload.
      *  - `sessionId`: the session-level identifier in [TaskSubmitPayload.session_id] that the
      *    Gateway uses to group steps within a single user request.
+     *
+     * The payload is validated via [TaskSubmitPayload.validate] before sending; a validation
+     * failure is treated as an internal error and surfaced via [onError].
      */
     private fun sendViaWebSocket(text: String, deviceId: String, taskId: String): RouteMode {
         val sessionId = UUID.randomUUID().toString() // session-level ID within the payload
         val payload = TaskSubmitPayload(
             task_text = text,
             device_id = deviceId,
-            session_id = sessionId
+            session_id = sessionId,
+            task_id = taskId
         )
+        if (!payload.validate()) {
+            val fieldError = payload.validationError() ?: "unknown field"
+            val reason = "TaskSubmitPayload 验证失败：$fieldError。"
+            Log.e(TAG, "[ROUTE] route_mode=error task_id=$taskId reason=payload_validation_failed ($fieldError)")
+            GalaxyLogger.log(TAG, mapOf("event" to "route_error", "task_id" to taskId, "reason" to "payload_validation_failed", "field" to fieldError))
+            onError?.invoke(reason)
+            return RouteMode.ERROR
+        }
         val envelope = AipMessage(
             type = MsgType.TASK_SUBMIT,
             payload = payload,

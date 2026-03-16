@@ -44,6 +44,7 @@ class AipModelsTest {
         val after = System.currentTimeMillis()
 
         assertEquals("3.0", msg.version)
+        assertEquals("AIP/1.0", msg.protocol)
         assertTrue(msg.timestamp in before..after)
         assertNull(msg.correlation_id)
         assertNull(msg.session_id)
@@ -112,6 +113,24 @@ class AipModelsTest {
         assertEquals("打开微信并发送消息给张三", payload.task_text)
         assertEquals("device-001", payload.device_id)
         assertEquals("session-abc", payload.session_id)
+    }
+
+    @Test
+    fun `TaskSubmitPayload task_id defaults to empty and can be set explicitly`() {
+        val withDefault = TaskSubmitPayload(
+            task_text = "test",
+            device_id = "dev-x",
+            session_id = "sess-y"
+        )
+        assertEquals("", withDefault.task_id)
+
+        val withExplicit = TaskSubmitPayload(
+            task_text = "test",
+            device_id = "dev-x",
+            session_id = "sess-y",
+            task_id = "task-uuid-001"
+        )
+        assertEquals("task-uuid-001", withExplicit.task_id)
     }
 
     @Test
