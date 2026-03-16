@@ -101,14 +101,17 @@ class AIPClient(
     }
 
     fun sendAIPMessage(messageType: String, payload: JSONObject) {
+        // Normalise any legacy type string to its authoritative v3 name before
+        // building the envelope so that the wire message always carries a v3 type.
+        val v3Type = AIPMessageBuilder.toV3Type(messageType)
         val message = AIPMessageBuilder.build(
-            messageType = messageType,
+            messageType = v3Type,
             sourceNodeId = deviceId,
             targetNodeId = "Node_50_Transformer",
             payload = payload
         ).toString()
 
-        webSocket?.send(message) ?: Log.e(TAG, "WebSocket is null. Message not sent: $messageType")
+        webSocket?.send(message) ?: Log.e(TAG, "WebSocket is null. Message not sent: $v3Type")
     }
 
     private fun sendHeartbeat() {
@@ -186,7 +189,7 @@ class AIPClient(
                         put("location", "Lat: 34.0522, Lon: -118.2437")
                         put("is_charging", false)
                     }
-                    sendAIPMessage("status_update", statusPayload)
+                    sendAIPMessage(AIPMessageBuilder.MessageType.COMMAND_RESULT, statusPayload)
                 }
                 else -> Log.w(TAG, "Unhandled message type: $msgType")
             }
