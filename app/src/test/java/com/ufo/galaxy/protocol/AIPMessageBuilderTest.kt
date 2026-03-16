@@ -52,18 +52,19 @@ class AIPMessageBuilderTest {
     }
 
     @Test
-    fun `build omits v3 fields when includeV3 is false`() {
+    fun `build always includes v3 fields regardless of caller intent`() {
+        // v3 fields (version, device_id, device_type) are mandatory in all outbound
+        // messages and cannot be suppressed.
         val msg = AIPMessageBuilder.build(
             messageType = "heartbeat",
             sourceNodeId = "dev_1",
             targetNodeId = "Galaxy",
-            payload = JSONObject(),
-            includeV3 = false
+            payload = JSONObject()
         )
 
-        assertTrue("version field should be absent", !msg.has("version"))
-        assertTrue("device_id field should be absent", !msg.has("device_id"))
-        assertTrue("device_type field should be absent", !msg.has("device_type"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals("dev_1", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
     }
 
     @Test
@@ -540,17 +541,18 @@ class AIPMessageBuilderTest {
     }
 
     @Test
-    fun `build omits trace_id and route_mode when includeV3 is false`() {
+    fun `build always includes trace_id and route_mode`() {
+        // trace_id and route_mode are mandatory v3 envelope fields and are always present.
         val msg = AIPMessageBuilder.build(
             messageType  = AIPMessageBuilder.MessageType.HEARTBEAT,
             sourceNodeId = "android_dev",
             targetNodeId = "server",
-            payload      = JSONObject(),
-            includeV3    = false
+            payload      = JSONObject()
         )
 
-        assertTrue("trace_id should be absent when includeV3=false", !msg.has("trace_id"))
-        assertTrue("route_mode should be absent when includeV3=false", !msg.has("route_mode"))
+        assertTrue("trace_id should always be present", msg.has("trace_id"))
+        assertTrue("route_mode should always be present", msg.has("route_mode"))
+        assertEquals(AIPMessageBuilder.ROUTE_MODE_LOCAL, msg.getString("route_mode"))
     }
 
     @Test
@@ -566,5 +568,195 @@ class AIPMessageBuilderTest {
     fun `ROUTE_MODE_LOCAL and ROUTE_MODE_CROSS_DEVICE have expected values`() {
         assertEquals("local", AIPMessageBuilder.ROUTE_MODE_LOCAL)
         assertEquals("cross_device", AIPMessageBuilder.ROUTE_MODE_CROSS_DEVICE)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // v3 envelope enforcement – five core message types (PR-C1)
+    // Each test asserts version="3.0" and all required top-level fields.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `v3 envelope - device_register has all required fields`() {
+        val payload = JSONObject().apply {
+            put("device_id", "android_xyz")
+            put("device_type", "android")
+        }
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.DEVICE_REGISTER,
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
+
+        assertEquals(AIPMessageBuilder.PROTOCOL_AIP1, msg.getString("protocol"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals(AIPMessageBuilder.MessageType.DEVICE_REGISTER, msg.getString("type"))
+        assertEquals("android_xyz", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
+        assertTrue("message_id must be present", msg.has("message_id"))
+        assertEquals("android_xyz", msg.getString("source_node"))
+        assertEquals("server", msg.getString("target_node"))
+        assertTrue("timestamp must be positive", msg.getLong("timestamp") > 0)
+    }
+
+    @Test
+    fun `v3 envelope - heartbeat has all required fields`() {
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.HEARTBEAT,
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = JSONObject().apply { put("status", "ok") }
+        )
+
+        assertEquals(AIPMessageBuilder.PROTOCOL_AIP1, msg.getString("protocol"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals(AIPMessageBuilder.MessageType.HEARTBEAT, msg.getString("type"))
+        assertEquals("android_xyz", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
+        assertTrue("message_id must be present", msg.has("message_id"))
+        assertEquals("android_xyz", msg.getString("source_node"))
+        assertEquals("server", msg.getString("target_node"))
+        assertTrue("timestamp must be positive", msg.getLong("timestamp") > 0)
+    }
+
+    @Test
+    fun `v3 envelope - capability_report via buildCapabilityReport has all required fields`() {
+        val capabilities = org.json.JSONArray().apply {
+            put("screen_capture"); put("touch"); put("ui_automation")
+        }
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", capabilities)
+            put("version", "3.0")
+        }
+        val msg = AIPMessageBuilder.buildCapabilityReport(
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
+
+        assertEquals(AIPMessageBuilder.PROTOCOL_AIP1, msg.getString("protocol"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals(AIPMessageBuilder.MessageType.CAPABILITY_REPORT, msg.getString("type"))
+        assertEquals("android_xyz", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
+        assertTrue("message_id must be present", msg.has("message_id"))
+        assertEquals("android_xyz", msg.getString("source_node"))
+        assertEquals("server", msg.getString("target_node"))
+        assertTrue("timestamp must be positive", msg.getLong("timestamp") > 0)
+    }
+
+    @Test
+    fun `v3 envelope - task_assign has all required fields`() {
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.TASK_ASSIGN,
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = JSONObject().apply { put("task_id", "t_001") }
+        )
+
+        assertEquals(AIPMessageBuilder.PROTOCOL_AIP1, msg.getString("protocol"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals(AIPMessageBuilder.MessageType.TASK_ASSIGN, msg.getString("type"))
+        assertEquals("android_xyz", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
+        assertTrue("message_id must be present", msg.has("message_id"))
+        assertEquals("android_xyz", msg.getString("source_node"))
+        assertEquals("server", msg.getString("target_node"))
+        assertTrue("timestamp must be positive", msg.getLong("timestamp") > 0)
+    }
+
+    @Test
+    fun `v3 envelope - command_result has all required fields`() {
+        val msg = AIPMessageBuilder.build(
+            messageType  = AIPMessageBuilder.MessageType.COMMAND_RESULT,
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = JSONObject().apply { put("status", "success") }
+        )
+
+        assertEquals(AIPMessageBuilder.PROTOCOL_AIP1, msg.getString("protocol"))
+        assertEquals(AIPMessageBuilder.PROTOCOL_V3, msg.getString("version"))
+        assertEquals(AIPMessageBuilder.MessageType.COMMAND_RESULT, msg.getString("type"))
+        assertEquals("android_xyz", msg.getString("device_id"))
+        assertEquals("Android_Agent", msg.getString("device_type"))
+        assertTrue("message_id must be present", msg.has("message_id"))
+        assertEquals("android_xyz", msg.getString("source_node"))
+        assertEquals("server", msg.getString("target_node"))
+        assertTrue("timestamp must be positive", msg.getLong("timestamp") > 0)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // buildCapabilityReport() – negative tests for missing required fields
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `buildCapabilityReport throws when platform is missing`() {
+        val payload = JSONObject().apply {
+            put("supported_actions", org.json.JSONArray().apply { put("touch") })
+            put("version", "3.0")
+            // 'platform' intentionally omitted
+        }
+        AIPMessageBuilder.buildCapabilityReport(
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `buildCapabilityReport throws when supported_actions is missing`() {
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("version", "3.0")
+            // 'supported_actions' intentionally omitted
+        }
+        AIPMessageBuilder.buildCapabilityReport(
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `buildCapabilityReport throws when version is missing`() {
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", org.json.JSONArray().apply { put("touch") })
+            // 'version' intentionally omitted
+        }
+        AIPMessageBuilder.buildCapabilityReport(
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `buildCapabilityReport throws when platform is blank`() {
+        val payload = JSONObject().apply {
+            put("platform", "  ")  // blank
+            put("supported_actions", org.json.JSONArray().apply { put("touch") })
+            put("version", "3.0")
+        }
+        AIPMessageBuilder.buildCapabilityReport(
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `buildCapabilityReport throws when version is blank`() {
+        val payload = JSONObject().apply {
+            put("platform", "android")
+            put("supported_actions", org.json.JSONArray().apply { put("touch") })
+            put("version", "")  // blank
+        }
+        AIPMessageBuilder.buildCapabilityReport(
+            sourceNodeId = "android_xyz",
+            targetNodeId = "server",
+            payload      = payload
+        )
     }
 }
