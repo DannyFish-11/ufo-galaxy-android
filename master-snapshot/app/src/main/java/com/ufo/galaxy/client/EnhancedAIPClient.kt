@@ -22,11 +22,23 @@ import java.util.concurrent.TimeUnit
  * 增强版 AIP 客户端
  *
  * 新增功能：
- * 1. 支持微软 Galaxy 的消息格式
- * 2. 通过 [AIPMessageBuilder] 统一消息格式转换（AIP/1.0 <-> Microsoft AIP）
- * 3. 通过 [ServerConfig] 集中管理 WebSocket 路径，支持按优先级自动回退
- * 4. 增强的能力声明
- * 5. 支持 MCP 工具注册
+ * 1. 通过 [AIPMessageBuilder] 统一消息格式构建，所有出站消息强制使用 v3 信封
+ *    （version="3.0", protocol="AIP/1.0"）和 v3 消息类型名称。
+ * 2. 通过 [ServerConfig] 集中管理 WebSocket 路径，支持按优先级自动回退。
+ * 3. 增强的能力声明，包括 Android 原生能力和扩展能力。
+ * 4. **Microsoft 兼容层（PR-C3）**：通过 [applyMicrosoftMapping] 在最外层为 v3 信封
+ *    追加 `ms_*` 补充字段，供 Microsoft Galaxy 集成消费方使用。v3 信封字段本身
+ *    始终保持不变（`protocol`、`version`、`type`、`source_node` 等）。
+ *    可通过 [microsoftMappingEnabled] 开关控制此行为（默认开启）。
+ *
+ * ## Microsoft 兼容映射行为（[microsoftMappingEnabled] = true，默认值）
+ * 每条出站 v3 消息在发送前会追加以下三个 `ms_*` 键：
+ * - `ms_message_type`：Microsoft 协议的消息类型字符串（见 [microsoftTypeMapping]）
+ * - `ms_agent_id`：`source_node` 的别名（Microsoft 字段名）
+ * - `ms_session_id`：`timestamp` 的毫秒值别名（Microsoft 约定）
+ *
+ * ## 禁用兼容映射（[microsoftMappingEnabled] = false）
+ * 关闭后，出站消息为纯 v3 载荷，不含任何 `ms_*` 字段，适用于非 Microsoft 端点。
  */
 class EnhancedAIPClient(
     private val deviceId: String,
@@ -47,13 +59,32 @@ class EnhancedAIPClient(
     // Index into ServerConfig.WS_PATHS used for the current connection attempt
     private var wsPathIndex = 0
 
-    // 消息类型映射：我们的格式 -> 微软格式（仅用于 Microsoft Galaxy 兼容层）
-    private val typeMapping = mapOf(
-        AIPMessageBuilder.MessageType.DEVICE_REGISTER to "REGISTER",
-        AIPMessageBuilder.MessageType.TASK_ASSIGN     to "TASK",
-        AIPMessageBuilder.MessageType.COMMAND_RESULT  to "COMMAND_RESULTS",
-        "status_update"                               to "TASK_END",
-        AIPMessageBuilder.MessageType.HEARTBEAT       to "HEARTBEAT"
+    /**
+     * Controls the Microsoft-compatibility mapping layer applied to all outbound messages.
+     *
+     * When `true` (default for Microsoft endpoints), [applyMicrosoftMapping] is invoked
+     * after [AIPMessageBuilder.build], augmenting each v3 envelope with three `ms_*`
+     * supplementary headers expected by Microsoft Galaxy integration consumers.
+     * The v3 envelope itself (`protocol`, `version`, `type`, `source_node`, etc.) is
+     * **never** modified or removed.
+     *
+     * Set to `false` for non-Microsoft endpoints where a raw v3 payload is preferred.
+     */
+    var microsoftMappingEnabled: Boolean = true
+
+    /**
+     * Microsoft compatibility mapping: v3 type name → Microsoft `ms_message_type` value.
+     *
+     * Keys are the authoritative v3 type names defined in [AIPMessageBuilder.MessageType].
+     * Values are the Microsoft Galaxy wire-type strings.  This map is intentionally minimal
+     * (one entry per v3 message type) to reduce future drift.
+     */
+    private val microsoftTypeMapping: Map<String, String> = mapOf(
+        AIPMessageBuilder.MessageType.DEVICE_REGISTER   to "REGISTER",
+        AIPMessageBuilder.MessageType.HEARTBEAT         to "HEARTBEAT",
+        AIPMessageBuilder.MessageType.CAPABILITY_REPORT to "CAPABILITY_REPORT",
+        AIPMessageBuilder.MessageType.TASK_ASSIGN       to "TASK",
+        AIPMessageBuilder.MessageType.COMMAND_RESULT    to "COMMAND_RESULTS"
     )
 
     private val wsListener = object : WebSocketListener() {
@@ -145,10 +176,11 @@ class EnhancedAIPClient(
     /**
      * 发送增强的注册消息（符合微软 Galaxy 的 AgentProfile 格式）
      *
-     * The AIP v3 envelope (`device_id`, `device_type`, `message_id`,
-     * `timestamp`, `version`) is built via [AIPMessageBuilder] first so that
-     * these fields are always present and consistent.  The resulting message is
-     * then converted to Microsoft Galaxy wire format via [convertToMicrosoftAIP].
+     * The v3 envelope is built via [AIPMessageBuilder] first so that all required
+     * fields (`protocol`, `version`, `device_id`, `device_type`, `message_id`,
+     * `timestamp`) are always present and consistent.  When [microsoftMappingEnabled]
+     * is `true`, [applyMicrosoftMapping] is applied at the outermost layer to add
+     * the `ms_*` supplementary headers without altering any v3 envelope field.
      */
     private fun sendEnhancedRegistration() {
         val registrationPayload = JSONObject().apply {
@@ -191,15 +223,14 @@ class EnhancedAIPClient(
             payload = registrationPayload
         )
 
-        val microsoftMessage = convertToMicrosoftAIP(aipMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Registration failed.")
+        sendWire(aipMessage, "Registration")
         Log.i(TAG, "Enhanced registration message sent to Microsoft Galaxy.")
         // Send capability report after registration
         sendCapabilityReport()
     }
 
     /**
-     * 发送能力上报（通过 [AIPMessageBuilder] 构建 capability_report 后转换为微软格式）
+     * 发送能力上报（v3 type: [AIPMessageBuilder.MessageType.CAPABILITY_REPORT]）
      *
      * Sent immediately after registration so the server CapabilityRegistry can
      * record the device's supported actions.  Payload includes `platform`,
@@ -221,23 +252,52 @@ class EnhancedAIPClient(
             targetNodeId = "Galaxy",
             payload = payload
         )
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Capability report not sent.")
+        sendWire(ourMessage, "Capability report")
         Log.i(TAG, "Capability report sent.")
     }
 
     /**
-     * 将我们的 AIP/1.0 消息转换为微软 AIP 格式
+     * Apply Microsoft-compatibility headers to a fully-formed v3 envelope message.
+     *
+     * This function is **non-destructive**: all v3 envelope fields (`protocol`,
+     * `version`, `type`, `source_node`, `target_node`, `timestamp`, `message_id`,
+     * `payload`, `device_id`, `device_type`) are preserved intact.
+     * The following Microsoft-specific keys are **added** as supplementary headers:
+     *
+     *   - `ms_message_type` – Microsoft wire-type string (see [microsoftTypeMapping])
+     *   - `ms_agent_id`     – alias for `source_node` (Microsoft field name)
+     *   - `ms_session_id`   – alias for `timestamp` in milliseconds (Microsoft convention)
+     *
+     * @param v3Message A v3 envelope produced by [AIPMessageBuilder.build].
+     * @return A new [JSONObject] with all original fields plus the three `ms_*` headers.
      */
-    private fun convertToMicrosoftAIP(ourMessage: JSONObject): JSONObject {
-        val messageType = typeMapping[ourMessage.getString("type")] ?: "TASK"
-
-        return JSONObject().apply {
-            put("message_type", messageType)
-            put("agent_id", ourMessage.optString("source_node", deviceId))
-            put("session_id", ourMessage.optLong("timestamp", System.currentTimeMillis()))
-            put("payload", ourMessage.getJSONObject("payload"))
+    private fun applyMicrosoftMapping(v3Message: JSONObject): JSONObject {
+        val v3Type = v3Message.optString("type")
+        val msType = microsoftTypeMapping[v3Type]
+        if (msType == null) {
+            Log.w(TAG, "applyMicrosoftMapping: no ms_message_type mapping for v3 type '$v3Type'; falling back to uppercase")
         }
+        return JSONObject(v3Message.toString()).apply {
+            put("ms_message_type", msType ?: v3Type.uppercase())
+            put("ms_agent_id", v3Message.optString("source_node", deviceId))
+            put("ms_session_id", v3Message.optLong("timestamp") * 1000L)
+        }
+    }
+
+    /**
+     * Send a v3 envelope over the WebSocket wire.
+     *
+     * If [microsoftMappingEnabled] is `true`, [applyMicrosoftMapping] is applied at
+     * the outermost layer to augment the message with Microsoft-specific headers.
+     * The v3 envelope is always built and validated by [AIPMessageBuilder] before
+     * this method is called; the mapping is purely additive.
+     *
+     * @param message   Fully-formed v3 envelope from [AIPMessageBuilder.build].
+     * @param errorTag  Short label used in the error log when the WebSocket is null.
+     */
+    private fun sendWire(message: JSONObject, errorTag: String = "Message") {
+        val wire = if (microsoftMappingEnabled) applyMicrosoftMapping(message) else message
+        webSocket?.send(wire.toString()) ?: Log.e(TAG, "WebSocket is null. $errorTag not sent.")
     }
 
     /**
@@ -281,53 +341,55 @@ class EnhancedAIPClient(
     }
 
     /**
-     * 发送命令执行结果（通过 [AIPMessageBuilder] 构建 AIP/1.0 消息后转换为微软格式）
+     * 发送命令执行结果（v3 type: [AIPMessageBuilder.MessageType.COMMAND_RESULT]）
      */
     private fun sendCommandResult(command: String, result: JSONObject) {
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = "command_result",
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.COMMAND_RESULT,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = result
         )
-
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Result not sent.")
+        sendWire(aipMessage, "Result")
     }
 
     /**
-     * 发送心跳
+     * 发送心跳（v3 type: [AIPMessageBuilder.MessageType.HEARTBEAT]）
      *
-     * The AIP/1.0 envelope is built via [AIPMessageBuilder] first, then
-     * converted to Microsoft Galaxy format so that `message_id`, `timestamp`,
-     * and other v3-compatible fields are always present and consistent.
+     * The v3 envelope (`protocol`, `version`, `device_id`, `device_type`,
+     * `message_id`, `timestamp`) is built via [AIPMessageBuilder] and sent
+     * via [sendWire], which optionally applies [applyMicrosoftMapping].
      */
     private fun sendHeartbeat() {
         val payload = JSONObject().apply {
             put("status", "online")
         }
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = "heartbeat",
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.HEARTBEAT,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = payload
         )
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Heartbeat not sent.")
+        sendWire(aipMessage, "Heartbeat")
     }
 
     /**
-     * 发送自定义消息（通过 [AIPMessageBuilder] 构建后自动转换为微软格式）
+     * 发送自定义消息。
+     *
+     * Any legacy [messageType] string is normalised to its v3 equivalent via
+     * [AIPMessageBuilder.toV3Type] before the envelope is built, so the wire
+     * message always carries an authoritative v3 type name and the full v3
+     * envelope (`version="3.0"`, `protocol="AIP/1.0"`).  The Microsoft mapping
+     * layer is applied last via [sendWire] when [microsoftMappingEnabled] is `true`.
      */
     fun sendMessage(messageType: String, payload: JSONObject) {
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = messageType,
+        val v3Type = AIPMessageBuilder.toV3Type(messageType)
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = v3Type,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = payload
         )
-
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Message not sent.")
+        sendWire(aipMessage)
     }
 }
