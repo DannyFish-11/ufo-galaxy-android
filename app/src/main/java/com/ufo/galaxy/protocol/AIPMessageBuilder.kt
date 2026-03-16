@@ -6,12 +6,19 @@ import java.util.UUID
 /**
  * Central builder and parser for AIP messages.
  *
- * Every outbound message should pass through [build] so that AIP/1.0 fields and
- * optional v3-compatible fields are set in a single, consistent place.
+ * Every outbound message should pass through [build] (or a typed convenience
+ * function such as [buildCapabilityReport]) so that v3 envelope fields are set
+ * in a single, consistent place.
  *
  * Every inbound message should pass through [parse] (or [normalise]) so that
  * callers always see AIP/1.0 field names regardless of which wire format the
  * sender used (AIP/1.0 native, Microsoft Galaxy, or v3).
+ *
+ * ## v3 enforcement
+ * All outbound messages produced by [build] **always** include the full v3
+ * envelope: `protocol`, `version`, `device_id`, `device_type`, `message_id`,
+ * `source_node`, `target_node`, `timestamp`, `trace_id`, and `route_mode`.
+ * There is no opt-out for outbound messages.
  */
 object AIPMessageBuilder {
 
@@ -96,14 +103,12 @@ object AIPMessageBuilder {
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Build an outbound AIP message.
+     * Build an outbound AIP message with a mandatory v3 envelope.
      *
-     * The resulting [JSONObject] contains:
-     * - All required **AIP/1.0** fields (`protocol`, `type`, `source_node`,
-     *   `target_node`, `timestamp`, `message_id`, `payload`) for backward
-     *   compatibility.
-     * - Optional **v3-compatible** fields (`version`, `device_id`, `device_type`)
-     *   that maximise server compatibility when [includeV3] is `true` (the default).
+     * The resulting [JSONObject] always contains every top-level required field:
+     * `protocol`, `version`, `device_id`, `device_type`, `message_id`,
+     * `source_node`, `target_node`, `timestamp`, `trace_id`, `route_mode`,
+     * and `payload`.
      *
      * @param messageType   v3 `type` value – prefer [MessageType] constants
      *                      (e.g. [MessageType.DEVICE_REGISTER], [MessageType.HEARTBEAT]).
@@ -111,7 +116,6 @@ object AIPMessageBuilder {
      * @param targetNodeId  Destination node identifier.
      * @param payload       Arbitrary payload [JSONObject].
      * @param deviceType    Optional device-type hint (default `"Android_Agent"`).
-     * @param includeV3     When `true`, v3-compatible extra fields are included.
      * @param messageId     Unique message identifier; auto-generated if omitted.
      * @param traceId       Trace identifier for the current session; auto-generated
      *                      if omitted.  Callers should reuse the same trace ID for
@@ -128,7 +132,6 @@ object AIPMessageBuilder {
         targetNodeId: String,
         payload: JSONObject,
         deviceType: String = "Android_Agent",
-        includeV3: Boolean = true,
         messageId: String = UUID.randomUUID().toString().take(8),
         traceId: String = generateTraceId(),
         routeMode: String = ROUTE_MODE_LOCAL
@@ -143,15 +146,65 @@ object AIPMessageBuilder {
             put("message_id", messageId)
             put("payload", payload)
 
-            // ── v3-compatible optional fields ─────────────────────────────────
-            if (includeV3) {
-                put("version", PROTOCOL_V3)
-                put("device_id", sourceNodeId)
-                put("device_type", deviceType)
-                put("trace_id", traceId)
-                put("route_mode", routeMode)
-            }
+            // ── v3 required fields (always present) ───────────────────────────
+            put("version", PROTOCOL_V3)
+            put("device_id", sourceNodeId)
+            put("device_type", deviceType)
+            put("trace_id", traceId)
+            put("route_mode", routeMode)
         }
+    }
+
+    /**
+     * Build a `capability_report` outbound message with payload validation.
+     *
+     * This is a convenience wrapper around [build] that enforces the required
+     * `capability_report` payload contract before constructing the envelope.
+     * An [IllegalArgumentException] is thrown when any required payload field
+     * (`platform`, `supported_actions`, `version`) is absent or blank, so that
+     * an invalid message is never sent.
+     *
+     * @param sourceNodeId     Sending device / node identifier.
+     * @param targetNodeId     Destination node identifier.
+     * @param payload          Payload [JSONObject] that **must** contain:
+     *                         - `platform`          – non-blank platform string (e.g. `"android"`).
+     *                         - `supported_actions` – [org.json.JSONArray] of action names.
+     *                         - `version`           – non-blank version string (e.g. `"2.5.0"`).
+     * @param deviceType       Optional device-type hint (default `"Android_Agent"`).
+     * @param messageId        Unique message identifier; auto-generated if omitted.
+     * @param traceId          Trace identifier; auto-generated if omitted.
+     * @param routeMode        Routing mode; defaults to [ROUTE_MODE_LOCAL].
+     * @throws IllegalArgumentException if `platform`, `supported_actions`, or
+     *                                  `version` are missing from [payload].
+     */
+    fun buildCapabilityReport(
+        sourceNodeId: String,
+        targetNodeId: String,
+        payload: JSONObject,
+        deviceType: String = "Android_Agent",
+        messageId: String = UUID.randomUUID().toString().take(8),
+        traceId: String = generateTraceId(),
+        routeMode: String = ROUTE_MODE_LOCAL
+    ): JSONObject {
+        require(payload.optString("platform").isNotBlank()) {
+            "capability_report payload must include a non-blank 'platform' field"
+        }
+        require(payload.has("supported_actions")) {
+            "capability_report payload must include a 'supported_actions' field"
+        }
+        require(payload.optString("version").isNotBlank()) {
+            "capability_report payload must include a non-blank 'version' field"
+        }
+        return build(
+            messageType  = MessageType.CAPABILITY_REPORT,
+            sourceNodeId = sourceNodeId,
+            targetNodeId = targetNodeId,
+            payload      = payload,
+            deviceType   = deviceType,
+            messageId    = messageId,
+            traceId      = traceId,
+            routeMode    = routeMode
+        )
     }
 
     // ──────────────────────────────────────────────────────────────────────────
