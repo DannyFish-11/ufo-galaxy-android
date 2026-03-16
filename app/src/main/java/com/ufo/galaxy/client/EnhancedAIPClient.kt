@@ -22,11 +22,12 @@ import java.util.concurrent.TimeUnit
  * 增强版 AIP 客户端
  *
  * 新增功能：
- * 1. 支持微软 Galaxy 的消息格式
- * 2. 通过 [AIPMessageBuilder] 统一消息格式转换（AIP/1.0 <-> Microsoft AIP）
- * 3. 通过 [ServerConfig] 集中管理 WebSocket 路径，支持按优先级自动回退
- * 4. 增强的能力声明
- * 5. 支持 MCP 工具注册
+ * 1. 通过 [AIPMessageBuilder] 统一消息格式构建，所有出站消息强制使用 v3 信封
+ *    （version="3.0", protocol="AIP/1.0"）和 v3 消息类型名称。
+ * 2. 通过 [ServerConfig] 集中管理 WebSocket 路径，支持按优先级自动回退
+ * 3. 增强的能力声明
+ * 4. 支持 MCP 工具注册
+ * 5. Legacy 消息类型输入通过 [AIPMessageBuilder.toV3Type] 自动规范化为 v3 名称。
  */
 class EnhancedAIPClient(
     private val deviceId: String,
@@ -47,18 +48,9 @@ class EnhancedAIPClient(
     // Index into ServerConfig.WS_PATHS used for the current connection attempt
     private var wsPathIndex = 0
 
-    // 消息类型映射：我们的格式 -> 微软格式（仅用于 Microsoft Galaxy 兼容层）
-    private val typeMapping = mapOf(
-        AIPMessageBuilder.MessageType.DEVICE_REGISTER to "REGISTER",
-        AIPMessageBuilder.MessageType.TASK_ASSIGN     to "TASK",
-        AIPMessageBuilder.MessageType.COMMAND_RESULT  to "COMMAND_RESULTS",
-        "status_update"                               to "TASK_END",
-        AIPMessageBuilder.MessageType.HEARTBEAT       to "HEARTBEAT"
-    )
-
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.i(TAG, "Connected to Microsoft UFO Galaxy.")
+            Log.i(TAG, "Connected to UFO Galaxy.")
             this@EnhancedAIPClient.webSocket = webSocket
             reconnectJob?.cancel()
             sendEnhancedRegistration()
@@ -67,7 +59,7 @@ class EnhancedAIPClient(
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             Log.d(TAG, "Received message: $text")
-            handleMicrosoftAIPMessage(text)
+            handleInboundMessage(text)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -99,7 +91,7 @@ class EnhancedAIPClient(
     fun connect() {
         val wsUrl = ServerConfig.buildWsUrl(galaxyUrl, deviceId, wsPathIndex)
         val request = Request.Builder().url(wsUrl).build()
-        Log.i(TAG, "Connecting to Microsoft Galaxy at $wsUrl...")
+        Log.i(TAG, "Connecting to Galaxy at $wsUrl...")
         client.newWebSocket(request, wsListener)
     }
 
@@ -143,12 +135,13 @@ class EnhancedAIPClient(
     }
 
     /**
-     * 发送增强的注册消息（符合微软 Galaxy 的 AgentProfile 格式）
+     * 发送增强的注册消息
      *
-     * The AIP v3 envelope (`device_id`, `device_type`, `message_id`,
-     * `timestamp`, `version`) is built via [AIPMessageBuilder] first so that
-     * these fields are always present and consistent.  The resulting message is
-     * then converted to Microsoft Galaxy wire format via [convertToMicrosoftAIP].
+     * Builds a v3 AIP envelope via [AIPMessageBuilder] with type
+     * [AIPMessageBuilder.MessageType.DEVICE_REGISTER] and sends it directly
+     * over the WebSocket.  The v3 envelope fields (`protocol`, `version`,
+     * `device_id`, `device_type`, `message_id`, `timestamp`) are always
+     * present in the wire message.
      */
     private fun sendEnhancedRegistration() {
         val registrationPayload = JSONObject().apply {
@@ -191,18 +184,16 @@ class EnhancedAIPClient(
             payload = registrationPayload
         )
 
-        val microsoftMessage = convertToMicrosoftAIP(aipMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Registration failed.")
-        Log.i(TAG, "Enhanced registration message sent to Microsoft Galaxy.")
+        webSocket?.send(aipMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Registration failed.")
+        Log.i(TAG, "Enhanced registration message sent.")
         // Send capability report after registration
         sendCapabilityReport()
     }
 
     /**
-     * 发送能力上报（通过 [AIPMessageBuilder] 构建 capability_report 后转换为微软格式）
+     * 发送能力上报（通过 [AIPMessageBuilder.buildCapabilityReport] 构建并直接发送 v3 消息）
      *
-     * Sent immediately after registration so the server CapabilityRegistry can
-     * record the device's supported actions.  Payload includes `platform`,
+     * Sent immediately after registration.  Payload includes `platform`,
      * `supported_actions`, and `version` as required by the AndroidBridge.
      */
     private fun sendCapabilityReport() {
@@ -215,35 +206,19 @@ class EnhancedAIPClient(
             })
             put("version", "2.5.0")
         }
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = AIPMessageBuilder.MessageType.CAPABILITY_REPORT,
+        val aipMessage = AIPMessageBuilder.buildCapabilityReport(
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = payload
         )
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Capability report not sent.")
+        webSocket?.send(aipMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Capability report not sent.")
         Log.i(TAG, "Capability report sent.")
     }
 
     /**
-     * 将我们的 AIP/1.0 消息转换为微软 AIP 格式
+     * 处理来自服务端的消息（使用 [AIPMessageBuilder] 统一解析）
      */
-    private fun convertToMicrosoftAIP(ourMessage: JSONObject): JSONObject {
-        val messageType = typeMapping[ourMessage.getString("type")] ?: "TASK"
-
-        return JSONObject().apply {
-            put("message_type", messageType)
-            put("agent_id", ourMessage.optString("source_node", deviceId))
-            put("session_id", ourMessage.optLong("timestamp", System.currentTimeMillis()))
-            put("payload", ourMessage.getJSONObject("payload"))
-        }
-    }
-
-    /**
-     * 处理来自微软 Galaxy 的消息（使用 [AIPMessageBuilder] 统一解析）
-     */
-    private fun handleMicrosoftAIPMessage(text: String) {
+    private fun handleInboundMessage(text: String) {
         try {
             // Normalise to AIP/1.0 field names via the shared builder/parser
             val ourMessage = AIPMessageBuilder.parse(text) ?: run {
@@ -252,10 +227,13 @@ class EnhancedAIPClient(
             }
 
             val msgType = ourMessage.getString("type")
+            // Normalise inbound legacy type names to v3 so the when branches only
+            // need to handle authoritative v3 type strings.
+            val v3MsgType = AIPMessageBuilder.toV3Type(msgType)
             val payload = ourMessage.getJSONObject("payload")
 
-            when (msgType) {
-                "command" -> {
+            when (v3MsgType) {
+                AIPMessageBuilder.MessageType.TASK_ASSIGN -> {
                     val command = payload.optString("command", payload.optString("action"))
                     val params = payload.optJSONObject("params") ?: JSONObject()
                     Log.i(TAG, "Executing command from Galaxy: $command")
@@ -263,13 +241,13 @@ class EnhancedAIPClient(
                     val result = executeAndroidCommand(command, params)
                     sendCommandResult(command, result)
                 }
-                "heartbeat" -> {
+                AIPMessageBuilder.MessageType.HEARTBEAT -> {
                     sendHeartbeat()
                 }
                 else -> Log.w(TAG, "Unhandled message type: $msgType")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling Microsoft AIP message: ${e.message}", e)
+            Log.e(TAG, "Error handling inbound message: ${e.message}", e)
         }
     }
 
@@ -281,53 +259,54 @@ class EnhancedAIPClient(
     }
 
     /**
-     * 发送命令执行结果（通过 [AIPMessageBuilder] 构建 AIP/1.0 消息后转换为微软格式）
+     * 发送命令执行结果（v3 type: [AIPMessageBuilder.MessageType.COMMAND_RESULT]）
      */
     private fun sendCommandResult(command: String, result: JSONObject) {
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = "command_result",
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.COMMAND_RESULT,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = result
         )
-
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Result not sent.")
+        webSocket?.send(aipMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Result not sent.")
     }
 
     /**
-     * 发送心跳
+     * 发送心跳（v3 type: [AIPMessageBuilder.MessageType.HEARTBEAT]）
      *
-     * The AIP/1.0 envelope is built via [AIPMessageBuilder] first, then
-     * converted to Microsoft Galaxy format so that `message_id`, `timestamp`,
-     * and other v3-compatible fields are always present and consistent.
+     * The AIP v3 envelope (`protocol`, `version`, `device_id`, `device_type`,
+     * `message_id`, `timestamp`) is built via [AIPMessageBuilder] and sent
+     * directly over the WebSocket.
      */
     private fun sendHeartbeat() {
         val payload = JSONObject().apply {
             put("status", "online")
         }
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = "heartbeat",
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = AIPMessageBuilder.MessageType.HEARTBEAT,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = payload
         )
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Heartbeat not sent.")
+        webSocket?.send(aipMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Heartbeat not sent.")
     }
 
     /**
-     * 发送自定义消息（通过 [AIPMessageBuilder] 构建后自动转换为微软格式）
+     * 发送自定义消息。
+     *
+     * Any legacy [messageType] string is normalised to its v3 equivalent via
+     * [AIPMessageBuilder.toV3Type] before the envelope is built, so the wire
+     * message always carries an authoritative v3 type name and the full v3
+     * envelope (`version="3.0"`, `protocol="AIP/1.0"`).
      */
     fun sendMessage(messageType: String, payload: JSONObject) {
-        val ourMessage = AIPMessageBuilder.build(
-            messageType = messageType,
+        val v3Type = AIPMessageBuilder.toV3Type(messageType)
+        val aipMessage = AIPMessageBuilder.build(
+            messageType = v3Type,
             sourceNodeId = deviceId,
             targetNodeId = "Galaxy",
             payload = payload
         )
-
-        val microsoftMessage = convertToMicrosoftAIP(ourMessage)
-        webSocket?.send(microsoftMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Message not sent.")
+        webSocket?.send(aipMessage.toString()) ?: Log.e(TAG, "WebSocket is null. Message not sent.")
     }
 }
