@@ -1,16 +1,19 @@
 # UFO Galaxy Android 客户端
 
-**版本: v2.0.1**
+**版本: v3.0.0**
 
 L4 级自主性智能系统 Android 客户端，实现书法卷轴式 UI 和系统级 AI 交互。
+
+> **v3.0.0 起客户端已完全切换为 AIP v3-only 模式**（`version="3.0"`, `protocol="AIP/1.0"`）。  
+> v2 集成方请参阅 [从 v2 升级](#从-v2-升级) 章节。
 
 ## 仓库关系
 
 本仓库是 [ufo-galaxy-realization](https://github.com/DannyFish-11/ufo-galaxy-realization) 主仓库的 Android 客户端子模块。
 
 - **主仓库**: https://github.com/DannyFish-11/ufo-galaxy-realization
-- **版本同步**: v2.0.1
-- **同步时间**: 2025-02-15
+- **版本同步**: v3.0.0
+- **同步时间**: 2026-03-16
 
 ## 功能特性
 
@@ -948,4 +951,280 @@ val v3Type = MsgType.toV3Type("registration") // → "device_register"
 ./gradlew test --tests "com.ufo.galaxy.protocol.TaskSubmitV3Test"
 ./gradlew test --tests "com.ufo.galaxy.protocol.AipModelsTest"
 ./gradlew test --tests "com.ufo.galaxy.input.InputRouterTest"
+```
+
+
+---
+
+## 从 v2 升级
+
+本节为从 v2 客户端迁移到 v3 的集成方提供简明升级指南。
+
+### 主要破坏性变更
+
+| 项目 | v2 行为 | v3 行为 |
+|------|---------|---------|
+| 消息类型 | `"registration"`, `"command"` 等遗留字符串 | `"device_register"`, `"task_assign"` 等 v3 常量（见 `MsgType` 枚举） |
+| 信封字段 | `protocol` 字段可能缺失 | **强制** `protocol="AIP/1.0"`, `version="3.0"` |
+| `AIPMessageBuilder` | v3 字段为可选（`includeV3=false` 允许） | v3 字段**始终**包含（`includeV3` 默认 `true`，无法关闭） |
+| `capability_report` | 无必填字段校验 | payload **必须**含 `platform`、`supported_actions`、`version` |
+| `TaskSubmitPayload` | 无 `task_id` 字段 | **新增** `task_id`（与 `AipMessage.correlation_id` 对应） |
+| `EnhancedAIPClient` | 无 Microsoft 兼容层 | 默认开启 `ms_*` 补充字段（可通过 `microsoftMappingEnabled=false` 关闭） |
+
+### 迁移步骤
+
+1. **替换消息类型字符串**：将所有硬编码的遗留类型字符串替换为 `MsgType` 枚举值；
+   或在读取外部输入时通过 `MsgType.toV3Type("registration")` 规范化。
+
+2. **检查 `capability_report` payload**：确保 payload 含 `platform`、`supported_actions` 数组和 `version` 字符串。
+
+3. **`TaskSubmitPayload` 中补充 `task_id`**：从 `AipMessage.correlation_id` 复制或生成唯一 ID；
+   发送前调用 `payload.validate()` 确认必填字段完整。
+
+4. **`EnhancedAIPClient` Microsoft 映射**：若对接非 Microsoft 端点，请设置 `microsoftMappingEnabled = false`。
+
+---
+
+## PR-C5: 文档/示例 & 自动化测试收尾（AIP v3）
+
+### 概述
+
+PR-C5 是 C1–C4 系列的收尾 PR，补全文档多语言示例、统一 example 测试覆盖、并完成 CI 卫生检查。
+
+### AIP v3 信封格式（所有消息通用）
+
+所有出站消息均包含以下顶层字段：
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "<msg_type>",
+  "source_node": "<device_id>",
+  "target_node": "Galaxy",
+  "timestamp": 1710000000,
+  "message_id": "a1b2c3d4",
+  "device_id":  "<device_id>",
+  "device_type": "Android_Agent",
+  "payload": { ... }
+}
+```
+
+### 核心消息类型示例
+
+#### device_register
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "device_register",
+  "source_node": "android_pixel8_01",
+  "target_node": "Galaxy",
+  "timestamp": 1710000000,
+  "message_id": "a1b2c3d4",
+  "device_id":  "android_pixel8_01",
+  "device_type": "Android_Agent",
+  "payload": {
+    "platform":    "android",
+    "os_version":  "14",
+    "hardware": {
+      "manufacturer": "Google",
+      "model":  "Pixel 8",
+      "device": "husky"
+    },
+    "tools": [
+      "location", "camera", "sensor_data", "automation",
+      "notification", "sms", "phone_call", "contacts",
+      "calendar", "voice_input", "screen_capture", "app_control"
+    ],
+    "capabilities": {
+      "nlu": false,
+      "hardware_control": true,
+      "sensor_access":    true,
+      "network_access":   true,
+      "ui_automation":    true
+    }
+  }
+}
+```
+
+#### heartbeat
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "heartbeat",
+  "source_node": "android_pixel8_01",
+  "target_node": "Galaxy",
+  "timestamp": 1710000030,
+  "message_id": "b2c3d4e5",
+  "device_id":  "android_pixel8_01",
+  "device_type": "Android_Agent",
+  "payload": { "status": "online" }
+}
+```
+
+#### capability_report
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "capability_report",
+  "source_node": "android_pixel8_01",
+  "target_node": "Galaxy",
+  "timestamp": 1710000001,
+  "message_id": "c3d4e5f6",
+  "device_id":  "android_pixel8_01",
+  "device_type": "Android_Agent",
+  "payload": {
+    "platform": "android",
+    "supported_actions": [
+      "location", "camera", "sensor_data", "automation",
+      "notification", "sms", "phone_call", "contacts",
+      "calendar", "voice_input", "screen_capture", "app_control"
+    ],
+    "version": "3.0.0"
+  }
+}
+```
+
+#### task_assign（下行，服务端 → 设备）
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "task_assign",
+  "source_node": "Galaxy",
+  "target_node": "android_pixel8_01",
+  "timestamp": 1710000060,
+  "message_id": "d4e5f6a7",
+  "payload": {
+    "task_id": "task-uuid-001",
+    "goal":    "打开微信并发送「你好」",
+    "constraints": ["不得访问联系人列表"],
+    "max_steps": 10,
+    "require_local_agent": true
+  }
+}
+```
+
+#### command_result（上行，设备 → 服务端）
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "command_result",
+  "source_node": "android_pixel8_01",
+  "target_node": "Galaxy",
+  "timestamp": 1710000062,
+  "message_id": "e5f6a7b8",
+  "device_id":  "android_pixel8_01",
+  "device_type": "Android_Agent",
+  "payload": {
+    "task_id": "task-uuid-001",
+    "step_id": "1",
+    "action":  "tap",
+    "status":  "success"
+  }
+}
+```
+
+#### task_submit（上行，用户发起）
+
+```json
+{
+  "protocol": "AIP/1.0",
+  "version":  "3.0",
+  "type":     "task_submit",
+  "source_node": "android_pixel8_01",
+  "target_node": "Galaxy",
+  "timestamp": 1710000055,
+  "message_id": "f6a7b8c9",
+  "device_id":  "android_pixel8_01",
+  "device_type": "Android_Agent",
+  "payload": {
+    "task_text":  "帮我打开导航去最近的星巴克",
+    "device_id":  "android_pixel8_01",
+    "session_id": "sess-20260316-001",
+    "task_id":    "task-uuid-055",
+    "context": {
+      "locale":         "zh-CN",
+      "app_foreground": "com.android.launcher3"
+    }
+  }
+}
+```
+
+### Microsoft 兼容映射示例（EnhancedAIPClient）
+
+当 `microsoftMappingEnabled = true`（默认）时，每条出站消息在 v3 信封基础上**追加** `ms_*` 补充字段：
+
+```json
+{
+  "protocol":      "AIP/1.0",
+  "version":       "3.0",
+  "type":          "device_register",
+  "source_node":   "android_pixel8_01",
+  "target_node":   "Galaxy",
+  "timestamp":     1710000000,
+  "message_id":    "a1b2c3d4",
+  "device_id":     "android_pixel8_01",
+  "device_type":   "Android_Agent",
+  "payload":       { "platform": "android", "..." : "..." },
+  "ms_message_type": "REGISTER",
+  "ms_agent_id":     "android_pixel8_01",
+  "ms_session_id":   1710000000000
+}
+```
+
+v3 字段（`protocol`、`version`、`type` 等）**始终保持不变**；`ms_*` 字段为纯补充，不影响 v3 路由。
+
+在代码中关闭 Microsoft 映射（适用于非 Microsoft 端点）：
+
+```kotlin
+val client = EnhancedAIPClient(
+    deviceId   = "android_pixel8_01",
+    galaxyUrl  = "wss://your-gateway-host:8765",
+    context    = applicationContext
+)
+client.microsoftMappingEnabled = false  // 关闭后出站消息为纯 v3，无 ms_* 字段
+client.connect()
+```
+
+### v3 消息类型映射表
+
+| v3 消息类型         | Microsoft `ms_message_type` | 方向    | 说明                       |
+|---------------------|-----------------------------|---------|----------------------------|
+| `device_register`   | `REGISTER`                  | 上行    | 设备注册握手               |
+| `heartbeat`         | `HEARTBEAT`                 | 上行    | 周期性保活（每 30 秒）     |
+| `capability_report` | `CAPABILITY_REPORT`         | 上行    | 能力声明，注册成功后立即发 |
+| `task_assign`       | `TASK`                      | 下行    | 服务端下发任务             |
+| `command_result`    | `COMMAND_RESULTS`           | 上行    | 步骤级执行结果             |
+| `task_submit`       | —                           | 上行    | 用户发起任务请求           |
+| `task_result`       | —                           | 上行    | 任务级完成结果             |
+| `task_cancel`       | —                           | 下行    | 服务端取消任务             |
+| `cancel_result`     | —                           | 上行    | 取消确认                   |
+
+### 相关文件
+
+| 文件 | 变更摘要 |
+|------|----------|
+| `README.md` | 版本升级至 v3.0.0；新增从 v2 升级指南；补全所有 6 种核心消息类型示例 |
+| `docs/CHANGELOG.md` | 新增：C1–C5 全系列 v3 迁移变更记录 |
+| `docs/AIP_V3_EXAMPLES.md` | 新增：完整 AIP v3 示例载荷文档 |
+| `test/protocol/ExamplePayloadsTest.kt` | 新增：6 种核心消息类型可运行示例测试 |
+| `test/client/MicrosoftMappingExampleTest.kt` | 新增：Microsoft 映射开关示例测试 |
+
+### 运行测试
+
+```bash
+./gradlew test --tests "com.ufo.galaxy.protocol.ExamplePayloadsTest"
+./gradlew test --tests "com.ufo.galaxy.client.MicrosoftMappingExampleTest"
+# 运行全部协议测试
+./gradlew test --tests "com.ufo.galaxy.protocol.*"
 ```
