@@ -181,6 +181,42 @@ rest.base.url=http://100.x.x.x:8765
 
 入站消息由 `AIPMessageBuilder.parse()` 统一解析，支持三种格式：AIP/1.0 原生、Microsoft Galaxy 格式以及 v3 格式。
 
+#### EnhancedAIPClient – Microsoft 兼容映射（PR-C3）
+
+`EnhancedAIPClient` 面向 Microsoft Galaxy 端点，在 v3 信封之上追加三个 `ms_*` 补充字段。
+这一映射由 `microsoftMappingEnabled` 开关控制（**默认开启**）：
+
+```kotlin
+// 开启（默认）：v3 信封 + ms_* 补充字段
+client.microsoftMappingEnabled = true
+
+// 关闭：纯 v3 载荷，适用于非 Microsoft 端点
+client.microsoftMappingEnabled = false
+```
+
+**映射行为（`microsoftMappingEnabled = true`）：**
+- v3 信封所有字段（`protocol`、`version`、`type`、`source_node` 等）**保持不变**。
+- 追加以下三个 `ms_*` 补充字段：
+
+| 追加字段 | 来源 | 说明 |
+|---|---|---|
+| `ms_message_type` | v3 `type` 经 `microsoftTypeMapping` 转换 | Microsoft 协议消息类型字符串 |
+| `ms_agent_id` | v3 `source_node` | Microsoft 字段名别名 |
+| `ms_session_id` | v3 `timestamp` × 1000 | Microsoft 约定（毫秒） |
+
+**v3 type → `ms_message_type` 对照：**
+
+| v3 `type` | `ms_message_type` |
+|---|---|
+| `device_register` | `REGISTER` |
+| `heartbeat` | `HEARTBEAT` |
+| `capability_report` | `CAPABILITY_REPORT` |
+| `task_assign` | `TASK` |
+| `command_result` | `COMMAND_RESULTS` |
+
+> **注意**：映射层不做任何协议降级（不移除任何 v3 字段），`type` 字段始终保持 v3 类型名。
+> `sendMessage()` 在构建信封前会通过 `AIPMessageBuilder.toV3Type()` 将 legacy 类型字符串规范化为 v3 名称。
+
 ### 🏗 通信栈架构
 
 ```
@@ -192,6 +228,7 @@ GalaxyClient  (统一入口)
 AIPClient / EnhancedAIPClient  (兼容/回退)
     └── AIPMessageBuilder  (消息构建/解析)
     └── ServerConfig  (URL 路径管理)
+    └── applyMicrosoftMapping()  (MS 兼容层，PR-C3，可通过 microsoftMappingEnabled 开关)
 
 Node50Client  (legacy Node 50 连接)
     └── AIPMessageBuilder  (消息构建/解析)
@@ -242,6 +279,7 @@ Node50Client  (legacy Node 50 连接)
 
 | 版本 | 日期 | 更新内容 |
 |------|------|----------|
+| v2.5.5 | 2026-03-16 | PR-C3 EnhancedAIPClient 兼容封装（v3 信封→微软映射）：新增 `microsoftMappingEnabled` 开关（默认开启）；`applyMicrosoftMapping()` 以非破坏性方式为 v3 信封追加三个 `ms_*` 补充字段（`ms_message_type` / `ms_agent_id` / `ms_session_id`）供 Microsoft Galaxy 消费；旧 `convertToMicrosoftAIP()` 已移除（其会剥离 v3 信封字段，违反 v3-only 约定）；`sendMessage()` 新增 `toV3Type()` 类型规范化；所有内部发包方法改用 `sendWire()` 统一经过映射层；新增 `EnhancedAIPClientMappingTest`（覆盖映射开/关、legacy 类型规范化、v3 字段保全、ms_* 字段正确性等测试用例） |
 | v2.5.4 | 2026-03-13 | 跨设备开关修复：新增 `SystemControlHelper`（WiFi/蓝牙/音量/亮度统一实现）；`AndroidCommandExecutor.toggleWifi` 改为 Android 10+ 系统面板回退；新增 `toggle_bluetooth` 命令；`AutonomyManager` 补全所有 `TaskExecutor` 调用的缺失方法（setWiFi/setBluetooth/setVolume/setBrightness/captureUITree/performHome/performBack/performRecent/openApp/closeApp/switchToApp/clickByText/clickByResourceId/swipe/scroll/getCurrentApp/getDeviceStatus）；修复 `GalaxyApiClient` 悬空引用及重复 `cleanup()` 方法；新增蓝牙/WiFi/WRITE_SETTINGS 权限声明 |
 | v2.5.3 | 2026-03-11 | Android↔realization-v2 系统性对接对齐：ServerConfig.WS_PATHS 主路径切换至 `/ws/android/{id}`（AndroidBridge 标准路由）；AIPMessageBuilder 新增 MessageType 常量（device_register/heartbeat/capability_report/task_assign/command_result）及 LEGACY_TYPE_MAP；AIPClient/EnhancedAIPClient/Node50Client 注册消息统一使用 device_register；DeviceRegistry 新增 createCapabilityReportMessage()；DeviceCommunication/AIPClient/EnhancedAIPClient 注册后自动发送 capability_report；新增 docs/ANDROID_BRIDGE_INTEGRATION.md |
 | v2.5.2 | 2026-03-07 | AIP v3 全栈系统性对齐：DeviceCommunication 入站消息通过 AIPMessageBuilder.parse() 统一规范化；EnhancedAIPClient 注册消息通过 AIPMessageBuilder.build() 构建 v3 信封后转换；Node50Client 切换 ServerConfig.buildWsUrl() + AIPMessageBuilder；GalaxyAgentV2/TaskExecutor 切换 AIPMessageBuilder；AIPProtocol 废弃标注 |
