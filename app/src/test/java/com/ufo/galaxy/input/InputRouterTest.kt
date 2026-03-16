@@ -412,4 +412,31 @@ class InputRouterTest {
             secondResult!!.status
         )
     }
+
+    // ── PR-C4: TaskSubmit v3 shape and payload validation ─────────────────────
+
+    @Test
+    fun `route CROSS_DEVICE JSON contains task_id field in payload`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        router.route("take a photo")
+
+        val sent = gateway.sentMessages.first()
+        assertTrue("Sent JSON must contain task_id field", sent.contains("task_id"))
+    }
+
+    @Test
+    fun `route CROSS_DEVICE JSON contains AIP protocol and version fields`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        router.route("open WeChat")
+
+        val sent = gateway.sentMessages.first()
+        assertTrue("Sent JSON must contain protocol field", sent.contains("protocol"))
+        assertTrue("Sent JSON must contain AIP/1.0", sent.contains("AIP/1.0"))
+        assertTrue("Sent JSON must contain version field", sent.contains("version"))
+        assertTrue("Sent JSON must contain 3.0", sent.contains("3.0"))
+    }
 }

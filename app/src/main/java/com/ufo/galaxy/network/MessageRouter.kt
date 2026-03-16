@@ -90,7 +90,8 @@ class MessageRouter(
         val payload = TaskSubmitPayload(
             task_text = text,
             device_id = deviceId,
-            session_id = sessionId
+            session_id = sessionId,
+            task_id = taskId
         )
         val envelope = AipMessage(
             type = MsgType.TASK_SUBMIT,

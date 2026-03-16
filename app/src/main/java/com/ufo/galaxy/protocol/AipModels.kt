@@ -19,7 +19,40 @@ enum class MsgType(val value: String) {
     /** Downlink: server requests cancellation of a running task or parallel subtask. */
     TASK_CANCEL("task_cancel"),
     /** Uplink: device acknowledges the cancellation request. */
-    CANCEL_RESULT("cancel_result")
+    CANCEL_RESULT("cancel_result");
+
+    companion object {
+        /**
+         * Mapping from legacy / v2 outbound type strings to authoritative AIP v3 names.
+         *
+         * New code must use [MsgType] enum entries directly.  This map exists solely for
+         * normalisation of legacy inputs (e.g. from stored preferences or third-party code)
+         * before messages are sent via [InputRouter] or [MessageRouter].
+         *
+         * | Legacy string     | v3 equivalent      |
+         * |-------------------|--------------------|
+         * | `registration`    | `device_register`  |
+         * | `register`        | `device_register`  |
+         * | `heartbeat`       | `heartbeat`        |
+         * | `command`         | `task_assign`      |
+         * | `command_result`  | `command_result`   |
+         */
+        val LEGACY_TYPE_MAP: Map<String, String> = mapOf(
+            "registration"   to DEVICE_REGISTER.value,
+            "register"       to DEVICE_REGISTER.value,
+            "heartbeat"      to HEARTBEAT.value,
+            "command"        to TASK_ASSIGN.value,
+            "command_result" to COMMAND_RESULT.value
+        )
+
+        /**
+         * Converts a legacy / v2 type string to its authoritative AIP v3 equivalent.
+         *
+         * Returns [legacyType] unchanged when it is already a v3 name or not listed in
+         * [LEGACY_TYPE_MAP].
+         */
+        fun toV3Type(legacyType: String): String = LEGACY_TYPE_MAP[legacyType] ?: legacyType
+    }
 }
 
 /**
@@ -29,6 +62,7 @@ enum class MsgType(val value: String) {
  * @param type           Message type identifier.
  * @param payload        Typed payload object (TaskSubmitPayload, TaskAssignPayload, etc.).
  * @param correlation_id Echoes the originating [TaskAssignPayload.task_id] in replies.
+ * @param protocol       Wire-protocol identifier; always `"AIP/1.0"` for AIP v3 messages.
  * @param version        Protocol version; always "3.0".
  * @param timestamp      Unix epoch millis auto-set at construction.
  * @param session_id     Optional session identifier.
@@ -45,6 +79,7 @@ data class AipMessage(
     val type: MsgType,
     val payload: Any,
     val correlation_id: String? = null,
+    val protocol: String = "AIP/1.0",
     val version: String = "3.0",
     val timestamp: Long = System.currentTimeMillis(),
     val session_id: String? = null,
@@ -90,14 +125,39 @@ data class TaskSubmitContext(
  * @param task_text  Natural-language task description from the user.
  * @param device_id  Unique device identifier.
  * @param session_id Active session identifier.
+ * @param task_id    Unique task identifier; echoed from [AipMessage.correlation_id] so the
+ *                   gateway can correlate the submit with the subsequent task_assign reply.
+ *                   Defaults to an empty string when the caller does not supply one (e.g. in
+ *                   tests), but **must** be populated for every real outbound message.
  * @param context    Optional device and session context.
  */
 data class TaskSubmitPayload(
     val task_text: String,
     val device_id: String,
     val session_id: String,
+    val task_id: String = "",
     val context: TaskSubmitContext = TaskSubmitContext()
-)
+) {
+    /**
+     * Returns `true` when all required fields are non-blank.
+     *
+     * Callers (e.g. [com.ufo.galaxy.input.InputRouter]) should call [validate] before
+     * sending the payload and reject messages that fail.  For a human-readable description
+     * of the first failing field, use [validationError].
+     */
+    fun validate(): Boolean = task_text.isNotBlank() && device_id.isNotBlank() && session_id.isNotBlank()
+
+    /**
+     * Returns a debug-friendly description of the first failing required field, or `null` when
+     * [validate] passes.  Intended for logging / error messages only; not for UI display.
+     */
+    fun validationError(): String? = when {
+        task_text.isBlank()  -> "task_text is blank"
+        device_id.isBlank()  -> "device_id is blank"
+        session_id.isBlank() -> "session_id is blank"
+        else                 -> null
+    }
+}
 
 /**
  * Step [6] – Downlink payload: Gateway → Android (AIP v3).
