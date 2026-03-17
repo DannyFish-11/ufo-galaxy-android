@@ -106,11 +106,11 @@ class GalaxyConnectionService : Service() {
                 updateNotification("连接错误")
             }
 
-            override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
-                Log.i(TAG, "收到 task_assign: task_id=$taskId")
-                GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "task_assign"))
+            override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String?) {
+                Log.i(TAG, "收到 task_assign: task_id=$taskId trace_id=$traceId")
+                GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "task_assign", "trace_id" to (traceId ?: "")))
                 serviceScope.launch {
-                    handleTaskAssign(taskId, taskAssignPayloadJson)
+                    handleTaskAssign(taskId, taskAssignPayloadJson, traceId)
                 }
             }
 
@@ -211,20 +211,22 @@ class GalaxyConnectionService : Service() {
      * 4. Notifies [RuntimeController.onRemoteTaskFinished] to unblock local execution.
      * 5. Persists the result to OpenClawd memory.
      */
-    private suspend fun handleTaskAssign(taskId: String, payloadJson: String) {
+    private suspend fun handleTaskAssign(taskId: String, payloadJson: String, inboundTraceId: String?) {
         val payload = try {
             gson.fromJson(payloadJson, TaskAssignPayload::class.java)
         } catch (e: Exception) {
             Log.e(TAG, "task_assign payload 解析失败: ${e.message}", e)
-            sendTaskError(taskId, "bad_payload: ${e.message}")
+            sendTaskError(taskId, "bad_payload: ${e.message}", inboundTraceId)
             return
         }
 
         // Pause any running local LoopController session.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
-        // Generate a stable trace_id for this task_assign chain (used by bridge + reply envelopes).
-        val traceId = java.util.UUID.randomUUID().toString()
+        // Preserve trace_id from the inbound task_assign envelope for full-chain correlation.
+        // Generate a new UUID only when the gateway did not supply one.
+        val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.randomUUID().toString()
         val crossDevice = UFOGalaxyApplication.appSettings.crossDeviceEnabled
         val routeMode = if (crossDevice) AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE
                         else AgentRuntimeBridge.ROUTE_MODE_LOCAL
@@ -300,7 +302,15 @@ class GalaxyConnectionService : Service() {
         var taskResult: com.ufo.galaxy.protocol.TaskResultPayload? = null
         try {
             updateNotification("执行任务 ${taskId.take(8)}…")
-            val result = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
+            val rawResult = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
+            // Augment the result with envelope-level fields required by v3 task_result contract.
+            val resultSummary = "task execution: ${rawResult.steps.size} step(s) " +
+                "status=${rawResult.status}"
+            val result = rawResult.copy(
+                trace_id = traceId,
+                device_id = localDeviceId,
+                result_summary = resultSummary
+            )
             taskResult = result
 
             val envelope = AipMessage(
@@ -601,18 +611,22 @@ class GalaxyConnectionService : Service() {
     /**
      * 回传 task_result 错误（payload 解析失败时使用）。
      */
-    private fun sendTaskError(taskId: String, errorMsg: String) {
+    private fun sendTaskError(taskId: String, errorMsg: String, traceId: String? = null) {
         val errorResult = TaskResultPayload(
             task_id = taskId,
             correlation_id = taskId,
             status = com.ufo.galaxy.agent.EdgeExecutor.STATUS_ERROR,
-            error = errorMsg
+            error = errorMsg,
+            device_id = localDeviceId,
+            trace_id = traceId,
+            result_summary = "error: $errorMsg"
         )
         val envelope = AipMessage(
             type = MsgType.TASK_RESULT,
             payload = errorResult,
             correlation_id = taskId,
-            device_id = localDeviceId
+            device_id = localDeviceId,
+            trace_id = traceId
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }

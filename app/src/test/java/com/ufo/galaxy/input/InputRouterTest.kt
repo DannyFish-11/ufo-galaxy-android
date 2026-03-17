@@ -439,4 +439,29 @@ class InputRouterTest {
         assertTrue("Sent JSON must contain version field", sent.contains("version"))
         assertTrue("Sent JSON must contain 3.0", sent.contains("3.0"))
     }
+
+    // ── Gateway field alignment: trace_id + route_mode ─────────────────────────
+
+    @Test
+    fun `route CROSS_DEVICE JSON contains trace_id field`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        router.route("open maps and navigate home")
+
+        val sent = gateway.sentMessages.first()
+        assertTrue("Sent JSON must contain trace_id for end-to-end correlation", sent.contains("trace_id"))
+    }
+
+    @Test
+    fun `route CROSS_DEVICE JSON contains route_mode field set to cross_device`() {
+        val gateway = FakeGatewayClient(connected = true, sendResult = true)
+        val router = buildRouter(crossDeviceEnabled = true, gatewayClient = gateway)
+
+        router.route("set alarm for 7am")
+
+        val sent = gateway.sentMessages.first()
+        assertTrue("Sent JSON must contain route_mode field", sent.contains("route_mode"))
+        assertTrue("route_mode must be cross_device for cross-device submissions", sent.contains("cross_device"))
+    }
 }

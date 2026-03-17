@@ -120,11 +120,15 @@ class GalaxyWebSocketClient(
          * correlation_id when sending the task_result reply.
          * [taskAssignPayloadJson] is the raw JSON of the payload object, ready for
          * deserialization into [com.ufo.galaxy.protocol.TaskAssignPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should use [traceId] as-is in the reply envelope and in the
+         * [com.ufo.galaxy.protocol.TaskResultPayload.trace_id] field, generating a
+         * new UUID only when [traceId] is null or blank.
          *
          * Default implementation is a no-op to maintain backward compatibility
          * with existing [Listener] implementations.
          */
-        fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) = Unit
+        fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String? = null) = Unit
 
         /**
          * Called when a [com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION] message is received.
@@ -174,6 +178,20 @@ class GalaxyWebSocketClient(
     private var reconnectJob: Job? = null
     private var heartbeatJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /**
+     * Session-level trace identifier regenerated on each successful [onOpen].
+     * All outbound messages within a session reuse this ID for end-to-end correlation.
+     * Exposed via [getTraceId] for callers that need to propagate the current session trace.
+     */
+    @Volatile private var sessionTraceId: String = java.util.UUID.randomUUID().toString()
+
+    /** Returns the trace identifier for the current WS session. */
+    fun getTraceId(): String = sessionTraceId
+
+    /** Derives route_mode from the cross-device switch state. */
+    private fun currentRouteMode(): String =
+        if (crossDeviceEnabled) "cross_device" else "local"
 
     // ── Observable state ──────────────────────────────────────────────────────
 
@@ -330,8 +348,10 @@ class GalaxyWebSocketClient(
         
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "[WS:CONNECT] WebSocket open — resetting backoff counter")
-                GalaxyLogger.log(GalaxyLogger.TAG_CONNECT, mapOf("url" to serverUrl, "attempt" to reconnectAttempts))
+                // Regenerate session trace ID for fresh end-to-end correlation.
+                sessionTraceId = java.util.UUID.randomUUID().toString()
+                Log.i(TAG, "[WS:CONNECT] WebSocket open — resetting backoff counter trace_id=$sessionTraceId")
+                GalaxyLogger.log(GalaxyLogger.TAG_CONNECT, mapOf("url" to serverUrl, "attempt" to reconnectAttempts, "trace_id" to sessionTraceId))
                 isConnected = true
                 reconnectAttempts = 0
                 _reconnectAttemptCount.value = 0
@@ -545,6 +565,9 @@ class GalaxyWebSocketClient(
             addProperty("version", report.version)
             addProperty("platform", report.platform)
             addProperty("device_id", report.device_id)
+            addProperty("device_type", "Android_Agent")
+            addProperty("trace_id", sessionTraceId)
+            addProperty("route_mode", currentRouteMode())
             add("supported_actions", gson.toJsonTree(report.supported_actions))
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(report.metadata))
@@ -554,7 +577,7 @@ class GalaxyWebSocketClient(
         webSocket?.send(handshakeJson)
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
-                " cross_device_enabled=$crossDeviceEnabled")
+                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}")
     }
 
     /**
@@ -606,13 +629,34 @@ class GalaxyWebSocketClient(
                     // Parse strong-typed task_assign; dispatch via onTaskAssign so callers
                     // can forward to EdgeExecutor without coupling the WS client to Android
                     // platform classes. correlation_id prefers task_id from payload.
+                    // The envelope trace_id is propagated to the listener so the reply can
+                    // echo the same trace identifier for full-chain correlation.
                     val payloadObj = json.getAsJsonObject("payload")
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
                     val correlationId = json.get("correlation_id")?.asString ?: taskId
                     val deviceId = json.get("device_id")?.asString ?: ""
+                    val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "[WS:DOWNLINK] type=task_assign task_id=$taskId correlation_id=$correlationId device_id=$deviceId")
-                    listeners.forEach { it.onTaskAssign(taskId, payloadJson) }
+                    Log.i(TAG, "[WS:DOWNLINK] type=task_assign task_id=$taskId correlation_id=$correlationId device_id=$deviceId trace_id=$traceId")
+                    listeners.forEach { it.onTaskAssign(taskId, payloadJson, traceId) }
+                }
+                // ── Legacy task-management types (compatibility window) ──────────
+                // Inbound task_execute and task_status_query are remapped to the unified
+                // task_assign handler. No separate fork logic is maintained.
+                "task_execute", "task_status_query" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val taskId = payloadObj?.get("task_id")?.asString
+                        ?: json.get("task_id")?.asString ?: ""
+                    val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                    // Use payload object if present; fall back to empty object so that the
+                    // TaskAssignPayload deserialization does not pick up envelope-level fields.
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    val originalType = json.get("type")?.asString ?: "unknown"
+                    if (payloadObj == null) {
+                        Log.w(TAG, "[WS:DOWNLINK] legacy type=$originalType has no payload object; task_id=$taskId will use defaults")
+                    }
+                    Log.i(TAG, "[WS:DOWNLINK] legacy type=$originalType → remapped to task_assign task_id=$taskId trace_id=$traceId")
+                    listeners.forEach { it.onTaskAssign(taskId, payloadJson, traceId) }
                 }
                 "goal_execution" -> {
                     val payloadObj = json.getAsJsonObject("payload")
@@ -683,7 +727,7 @@ class GalaxyWebSocketClient(
     }
     
     /**
-     * 发送心跳，附带 device_id 与重连次数用于联调追踪。
+     * 发送心跳，附带 device_id、route_mode、device_type 与重连次数用于联调追踪。
      */
     private fun sendHeartbeat() {
         val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
@@ -691,11 +735,14 @@ class GalaxyWebSocketClient(
             addProperty("type", "heartbeat")
             addProperty("timestamp", System.currentTimeMillis())
             addProperty("device_id", deviceId)
+            addProperty("device_type", "Android_Agent")
+            addProperty("route_mode", currentRouteMode())
+            addProperty("trace_id", sessionTraceId)
             addProperty("reconnect_attempts", reconnectAttempts)
         }
         val json = gson.toJson(heartbeat)
         webSocket?.send(json)
-        Log.d(TAG, "[WS:HEARTBEAT] device_id=$deviceId reconnect_attempts=$reconnectAttempts")
+        Log.d(TAG, "[WS:HEARTBEAT] device_id=$deviceId route_mode=${currentRouteMode()} reconnect_attempts=$reconnectAttempts")
     }
     
     /**

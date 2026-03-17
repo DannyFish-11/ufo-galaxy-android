@@ -29,20 +29,26 @@ enum class MsgType(val value: String) {
          * normalisation of legacy inputs (e.g. from stored preferences or third-party code)
          * before messages are sent via [InputRouter] or [MessageRouter].
          *
-         * | Legacy string     | v3 equivalent      |
-         * |-------------------|--------------------|
-         * | `registration`    | `device_register`  |
-         * | `register`        | `device_register`  |
-         * | `heartbeat`       | `heartbeat`        |
-         * | `command`         | `task_assign`      |
-         * | `command_result`  | `command_result`   |
+         * | Legacy string        | v3 equivalent      |
+         * |----------------------|--------------------|
+         * | `registration`       | `device_register`  |
+         * | `register`           | `device_register`  |
+         * | `heartbeat`          | `heartbeat`        |
+         * | `command`            | `task_assign`      |
+         * | `command_result`     | `command_result`   |
+         * | `task_execute`       | `task_assign`      |
+         * | `task_status_query`  | `task_assign`      |
          */
         val LEGACY_TYPE_MAP: Map<String, String> = mapOf(
-            "registration"   to DEVICE_REGISTER.value,
-            "register"       to DEVICE_REGISTER.value,
-            "heartbeat"      to HEARTBEAT.value,
-            "command"        to TASK_ASSIGN.value,
-            "command_result" to COMMAND_RESULT.value
+            "registration"      to DEVICE_REGISTER.value,
+            "register"          to DEVICE_REGISTER.value,
+            "heartbeat"         to HEARTBEAT.value,
+            "command"           to TASK_ASSIGN.value,
+            "command_result"    to COMMAND_RESULT.value,
+            // Legacy task-management types mapped to the unified v3 task_assign path.
+            // Receiving code must re-map these to task_assign internally (compatibility window).
+            "task_execute"      to TASK_ASSIGN.value,
+            "task_status_query" to TASK_ASSIGN.value
         )
 
         /**
@@ -210,6 +216,13 @@ data class StepResult(
  * @param steps          Ordered list of step results accumulated during execution.
  * @param error          Human-readable error description when status is "error".
  * @param snapshot       Optional final screen snapshot for cloud-side correction.
+ * @param trace_id       End-to-end trace identifier echoed from the originating [task_assign]
+ *                       envelope. Populated by [GalaxyConnectionService] before sending.
+ *                       Generated locally when the inbound task_assign carried none.
+ * @param device_id      Identifier of the device that executed the task.
+ *                       Populated by [GalaxyConnectionService] before sending.
+ * @param result_summary Human-readable one-line outcome description.
+ *                       Populated by [GalaxyConnectionService] before sending.
  */
 data class TaskResultPayload(
     val task_id: String,
@@ -217,7 +230,10 @@ data class TaskResultPayload(
     val status: String,
     val steps: List<StepResult> = emptyList(),
     val error: String? = null,
-    val snapshot: Snapshot? = null
+    val snapshot: Snapshot? = null,
+    val trace_id: String? = null,
+    val device_id: String = "",
+    val result_summary: String? = null
 )
 
 /**

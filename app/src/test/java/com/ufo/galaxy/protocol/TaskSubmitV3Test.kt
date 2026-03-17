@@ -166,6 +166,18 @@ class TaskSubmitV3Test {
     }
 
     @Test
+    fun `LEGACY_TYPE_MAP maps task_execute to task_assign`() {
+        assertEquals("task_assign", MsgType.toV3Type("task_execute"),
+            "task_execute must be remapped to task_assign for Task Manager unification")
+    }
+
+    @Test
+    fun `LEGACY_TYPE_MAP maps task_status_query to task_assign`() {
+        assertEquals("task_assign", MsgType.toV3Type("task_status_query"),
+            "task_status_query must be remapped to task_assign for Task Manager unification")
+    }
+
+    @Test
     fun `toV3Type returns unknown types unchanged`() {
         assertEquals("unknown_legacy_type", MsgType.toV3Type("unknown_legacy_type"))
     }

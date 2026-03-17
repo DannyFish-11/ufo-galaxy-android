@@ -207,4 +207,71 @@ class OpenClawdMemoryBackflowTest {
         assertTrue("JSON must contain route_mode", json.contains("\"route_mode\""))
         assertTrue("JSON must contain timestamp_ms", json.contains("\"timestamp_ms\""))
     }
+
+    // ── v1-first with 404 legacy fallback ──────────────────────────────────────
+
+    /**
+     * Builds an [OkHttpClient] that returns [v1Code] for v1 URL patterns
+     * (`/api/v1/...`) and [legacyCode] for all other paths.
+     */
+    private fun routingClient(
+        v1Code: Int,
+        legacyCode: Int,
+        legacyBody: String = ""
+    ): OkHttpClient {
+        val interceptor = Interceptor { chain ->
+            val url = chain.request().url.toString()
+            val (code, body) = if ("/api/v1/" in url) Pair(v1Code, "") else Pair(legacyCode, legacyBody)
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message(if (code in 200..299) "OK" else "Error")
+                .body(body.toResponseBody("application/json".toMediaType()))
+                .build()
+        }
+        return OkHttpClient.Builder().addInterceptor(interceptor).build()
+    }
+
+    @Test
+    fun `store falls back to legacy endpoint when v1 returns 404`() {
+        // v1 returns 404; legacy returns 200
+        val client = routingClient(v1Code = 404, legacyCode = 200)
+        val bf = backflow(client)
+        assertTrue("store must return true when legacy endpoint succeeds after v1 404", bf.store(sampleEntry()))
+    }
+
+    @Test
+    fun `store returns false when both v1 and legacy return non-2xx`() {
+        val client = routingClient(v1Code = 404, legacyCode = 500)
+        val bf = backflow(client)
+        assertFalse("store must return false when legacy also fails", bf.store(sampleEntry()))
+    }
+
+    @Test
+    fun `store uses v1 endpoint and does not call legacy when v1 succeeds`() {
+        // v1 returns 200; legacy would fail with 500 (should never be reached)
+        val client = routingClient(v1Code = 200, legacyCode = 500)
+        val bf = backflow(client)
+        assertTrue("store must return true when v1 succeeds without touching legacy", bf.store(sampleEntry()))
+    }
+
+    @Test
+    fun `queryByTaskId falls back to legacy endpoint when v1 returns 404`() {
+        val legacyBody = sampleJson("fallback-q-001")
+        val client = routingClient(v1Code = 404, legacyCode = 200, legacyBody = legacyBody)
+        val bf = backflow(client)
+
+        val result = bf.queryByTaskId("fallback-q-001")
+
+        assertNotNull("queryByTaskId must return an entry from the legacy fallback", result)
+        assertEquals("fallback-q-001", result!!.task_id)
+    }
+
+    @Test
+    fun `queryByTaskId returns null when both v1 and legacy return 404`() {
+        val client = routingClient(v1Code = 404, legacyCode = 404)
+        val bf = backflow(client)
+        assertNull("queryByTaskId must return null when both endpoints return 404", bf.queryByTaskId("missing"))
+    }
 }
