@@ -203,7 +203,9 @@ class InputRouter(
             type = MsgType.TASK_SUBMIT,
             payload = payload,
             correlation_id = taskId,
-            device_id = deviceId
+            device_id = deviceId,
+            trace_id = taskId,      // use task_id as the initial trace_id for this submission
+            route_mode = "cross_device"
         )
         val json = gson.toJson(envelope)
         val sent = webSocketClient.sendJson(json)

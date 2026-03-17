@@ -333,6 +333,59 @@ class AipModelsTest {
         assertFalse("TaskResultPayload must not contain y", fieldNames.contains("y"))
     }
 
+    @Test
+    fun `TaskResultPayload includes trace_id device_id result_summary fields`() {
+        val payload = TaskResultPayload(
+            task_id = "task-300",
+            correlation_id = "task-300",
+            status = "success",
+            trace_id = "trace-uuid-001",
+            device_id = "samsung_galaxy_s24",
+            result_summary = "task_assign: 3 step(s) status=success"
+        )
+
+        assertEquals("trace-uuid-001", payload.trace_id)
+        assertEquals("samsung_galaxy_s24", payload.device_id)
+        assertEquals("task_assign: 3 step(s) status=success", payload.result_summary)
+    }
+
+    @Test
+    fun `TaskResultPayload trace_id defaults to null`() {
+        val payload = TaskResultPayload(task_id = "t", status = "success")
+        assertNull("trace_id must default to null", payload.trace_id)
+    }
+
+    @Test
+    fun `TaskResultPayload device_id defaults to empty string`() {
+        val payload = TaskResultPayload(task_id = "t", status = "success")
+        assertEquals("", payload.device_id)
+    }
+
+    @Test
+    fun `TaskResultPayload result_summary defaults to null`() {
+        val payload = TaskResultPayload(task_id = "t", status = "success")
+        assertNull("result_summary must default to null", payload.result_summary)
+    }
+
+    @Test
+    fun `TaskResultPayload error path sets trace_id and result_summary`() {
+        val payload = TaskResultPayload(
+            task_id = "task-error-001",
+            correlation_id = "task-error-001",
+            status = "error",
+            error = "grounding failed",
+            trace_id = "trace-err-uuid",
+            device_id = "test-device",
+            result_summary = "error: grounding failed"
+        )
+
+        assertEquals("error", payload.status)
+        assertEquals("grounding failed", payload.error)
+        assertEquals("trace-err-uuid", payload.trace_id)
+        assertEquals("test-device", payload.device_id)
+        assertNotNull(payload.result_summary)
+    }
+
     // ── CommandResultPayload ──────────────────────────────────────────────────
 
     @Test

@@ -389,3 +389,164 @@ when no relay candidates are available.
 | `webrtc/WebRTCSignalingClient.kt` | OkHttp WebSocket signaling client. |
 | `test/webrtc/SignalingMessageTest.kt` | JSON round-trip, multi-candidate, TURN config tests. |
 | `test/webrtc/IceCandidateManagerTest.kt` | Dedup, priority, fallback, error path tests. |
+
+---
+
+# Round 8 – Cross-Device Stack Alignment with ufo-galaxy-realization-v2
+
+## Overview
+
+Round 8 aligns the Android cross-device stack with the ufo-galaxy-realization-v2 task manager
+protocol across four areas: TaskEnvelope/lifecycle, Task Manager unification, Gateway routing
+field alignment, and API route v1-first behavior.
+
+---
+
+## 1 – TaskEnvelope / lifecycle alignment
+
+### task_result payload fields
+
+`TaskResultPayload` now carries three additional fields that make the uplink result
+self-contained (not requiring the caller to inspect the outer `AipMessage` envelope):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `trace_id` | `String?` | Echoed from the originating `task_assign` envelope. |
+| `device_id` | `String` | Identifier of the executing device. |
+| `result_summary` | `String?` | Human-readable one-line outcome. |
+
+`GalaxyConnectionService.executeLocalTaskAssign` populates all three fields before
+sending the reply so that Gateway, Agent Runtime, and memory indexer can consume them
+without parsing the outer envelope.
+
+### trace_id propagation
+
+`GalaxyConnectionService.handleTaskAssign` now preserves the `trace_id` field from the
+inbound `task_assign` AIP envelope instead of always generating a fresh UUID:
+
+```
+task_assign (inbound) → trace_id="A" (from gateway)
+    → task_result (uplink)    → trace_id="A"  (echo)
+    → memory store            → trace_id="A"  (echo)
+    → bridge_handoff          → trace_id="A"  (echo)
+```
+
+When the inbound `task_assign` does **not** include a `trace_id`, a new UUID is generated
+locally and propagated consistently through the rest of the chain.
+
+---
+
+## 2 – Task Manager unification
+
+### Single execution pipeline
+
+The `task_assign → TaskExecutor → task_result` pipeline is now the **only** execution
+path. Legacy `task_execute` and `task_status_query` message types are remapped to
+`task_assign` at two layers:
+
+1. **`MsgType.LEGACY_TYPE_MAP`** — maps the string `"task_execute"` and
+   `"task_status_query"` to `"task_assign"` for any callers that use `toV3Type()`.
+2. **`GalaxyWebSocketClient.handleMessage()`** — inbound `task_execute` /
+   `task_status_query` frames are dispatched to `Listener.onTaskAssign` (same handler
+   as genuine `task_assign` frames). No separate fork logic is maintained.
+
+```
+Inbound: task_execute      ─┐
+Inbound: task_status_query ─┤ → onTaskAssign() → handleTaskAssign() → task_result
+Inbound: task_assign       ─┘
+```
+
+Legacy types are a **compatibility window** only; new server code must send `task_assign`.
+
+---
+
+## 3 – Gateway / Device Router field alignment
+
+### Session trace_id
+
+`GalaxyWebSocketClient` maintains a `sessionTraceId` (UUID) generated on each successful
+WebSocket `onOpen`. All outbound messages within a session include this identifier:
+
+| Message | New fields added |
+|---------|-----------------|
+| `capability_report` (handshake) | `trace_id`, `route_mode`, `device_type` |
+| `heartbeat` | `trace_id`, `route_mode`, `device_type` |
+
+`getTraceId()` exposes the current session trace ID for external consumers.
+
+### task_submit outbound envelope
+
+`InputRouter.sendViaWebSocket` now includes `trace_id` (set to `task_id`) and
+`route_mode = "cross_device"` in every outbound `TASK_SUBMIT` `AipMessage` envelope:
+
+```json
+{
+  "type": "task_submit",
+  "correlation_id": "<task_id>",
+  "device_id": "<device>",
+  "trace_id": "<task_id>",
+  "route_mode": "cross_device",
+  "payload": { ... }
+}
+```
+
+### device_type field
+
+All outbound messages include `"device_type": "Android_Agent"` so the Gateway can
+distinguish Android clients from other node types in the device registry.
+
+---
+
+## 4 – API routes & fields (v1-first behavior)
+
+### OpenClawd Memory Backflow
+
+`OpenClawdMemoryBackflow.store()` and `queryByTaskId()` now follow a **v1-first with
+404 fallback** strategy:
+
+1. Try `POST /api/v1/memory/store` (resp. `GET /api/v1/memory/query`).
+2. If the server returns **HTTP 404** only, retry against the legacy path
+   (`/api/memory/store` / `/api/memory/query`).
+3. Any other error code (4xx/5xx/exception) is returned immediately — no second attempt.
+
+This ensures the client works with both the current v1 gateway and older gateway deployments
+that have not yet migrated to the v1 path prefix.
+
+### REST endpoint reference
+
+| Operation | v1 path (preferred) | Legacy path (404 fallback) |
+|-----------|---------------------|---------------------------|
+| Memory store | `POST /api/v1/memory/store` | `POST /api/memory/store` |
+| Memory query | `GET  /api/v1/memory/query` | `GET  /api/memory/query` |
+| Health | `GET  /api/v1/health` | — |
+| Devices list | `GET  /api/v1/devices/list` | — |
+
+---
+
+## Backward Compatibility
+
+All Round 8 changes are **additive and backward-compatible**:
+
+- `TaskResultPayload.trace_id`, `device_id`, `result_summary` default to `null`/`""` —
+  existing gateway consumers that do not read these fields are unaffected.
+- Legacy `task_execute` / `task_status_query` messages still produce a valid `task_result`
+  reply — no client regression.
+- The memory backflow legacy fallback is triggered only on HTTP 404; a 200 response from
+  the v1 endpoint bypasses legacy entirely, so there is no extra round-trip for up-to-date
+  deployments.
+
+---
+
+## Related Files (Round 8)
+
+| File | Role |
+|------|------|
+| `protocol/AipModels.kt` | `TaskResultPayload` + `MsgType.LEGACY_TYPE_MAP` extensions. |
+| `network/GalaxyWebSocketClient.kt` | Session `trace_id`, legacy type remapping, field additions. |
+| `service/GalaxyConnectionService.kt` | Inbound `trace_id` propagation; `TaskResultPayload` augmentation. |
+| `input/InputRouter.kt` | `trace_id` + `route_mode` in outbound `task_submit` envelope. |
+| `memory/OpenClawdMemoryBackflow.kt` | v1-first with 404 legacy fallback for memory endpoints. |
+| `test/protocol/AipModelsTest.kt` | `TaskResultPayload` new fields coverage. |
+| `test/protocol/TaskSubmitV3Test.kt` | `task_execute`/`task_status_query` legacy map coverage. |
+| `test/input/InputRouterTest.kt` | `trace_id`/`route_mode` in outbound envelope. |
+| `test/memory/OpenClawdMemoryBackflowTest.kt` | 404 fallback path coverage. |
