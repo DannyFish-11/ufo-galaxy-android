@@ -499,23 +499,50 @@ distinguish Android clients from other node types in the device registry.
 
 ## 4 – API routes & fields (v1-first behavior)
 
+All REST calls from the Android client use a **v1-first with 404 fallback** strategy:
+
+1. Issue the request to the **v1** path (`/api/v1/...`).
+2. If the server returns **HTTP 404 only**, retry against the **legacy** path (`/api/...`).
+3. Any other error code (4xx/5xx) or network exception is returned immediately — no second
+   attempt is made so that real server errors surface promptly.
+
+This ensures the client works transparently with both current v1 gateway deployments and
+older deployments that have not yet migrated to the v1 path prefix.
+
+### Device Register & Heartbeat (`GalaxyApiClient`)
+
+`GalaxyApiClient.registerDevice()` and `sendHeartbeat()` follow the v1-first strategy:
+
+1. Try `POST /api/v1/devices/register` (resp. `POST /api/v1/devices/heartbeat`).
+2. If the server returns **HTTP 404** only, retry against the legacy path
+   (`/api/devices/register` / `/api/devices/heartbeat`).
+3. Any other error code (4xx/5xx/exception) is returned immediately — no second attempt.
+
+### Remote Config (`RemoteConfigFetcher`)
+
+`RemoteConfigFetcher.fetchConfig()` follows the same v1-first strategy:
+
+1. Try `GET /api/v1/config`.
+2. If the server returns **HTTP 404** only, retry against the legacy path `GET /api/config`.
+3. Any other error (non-404 HTTP code or network exception) is returned as `null`
+   immediately — no second attempt.
+
 ### OpenClawd Memory Backflow
 
-`OpenClawdMemoryBackflow.store()` and `queryByTaskId()` now follow a **v1-first with
-404 fallback** strategy:
+`OpenClawdMemoryBackflow.store()` and `queryByTaskId()` follow the same v1-first strategy:
 
 1. Try `POST /api/v1/memory/store` (resp. `GET /api/v1/memory/query`).
 2. If the server returns **HTTP 404** only, retry against the legacy path
    (`/api/memory/store` / `/api/memory/query`).
 3. Any other error code (4xx/5xx/exception) is returned immediately — no second attempt.
 
-This ensures the client works with both the current v1 gateway and older gateway deployments
-that have not yet migrated to the v1 path prefix.
-
 ### REST endpoint reference
 
 | Operation | v1 path (preferred) | Legacy path (404 fallback) |
 |-----------|---------------------|---------------------------|
+| Device register | `POST /api/v1/devices/register` | `POST /api/devices/register` |
+| Device heartbeat | `POST /api/v1/devices/heartbeat` | `POST /api/devices/heartbeat` |
+| Remote config | `GET  /api/v1/config` | `GET  /api/config` |
 | Memory store | `POST /api/v1/memory/store` | `POST /api/memory/store` |
 | Memory query | `GET  /api/v1/memory/query` | `GET  /api/memory/query` |
 | Health | `GET  /api/v1/health` | — |
@@ -531,13 +558,14 @@ All Round 8 changes are **additive and backward-compatible**:
   existing gateway consumers that do not read these fields are unaffected.
 - Legacy `task_execute` / `task_status_query` messages still produce a valid `task_result`
   reply — no client regression.
-- The memory backflow legacy fallback is triggered only on HTTP 404; a 200 response from
-  the v1 endpoint bypasses legacy entirely, so there is no extra round-trip for up-to-date
-  deployments.
+- The v1-first fallback for register, heartbeat, config, and memory is triggered only on
+  HTTP 404; a 200 response from the v1 endpoint bypasses legacy entirely, so there is no
+  extra round-trip for up-to-date deployments.
+- `GalaxyApiClient` and `RemoteConfigFetcher` are new classes; no existing code is modified.
 
 ---
 
-## Related Files (Round 8)
+## Related Files (Round 8 + v1-first follow-up)
 
 | File | Role |
 |------|------|
@@ -546,7 +574,11 @@ All Round 8 changes are **additive and backward-compatible**:
 | `service/GalaxyConnectionService.kt` | Inbound `trace_id` propagation; `TaskResultPayload` augmentation. |
 | `input/InputRouter.kt` | `trace_id` + `route_mode` in outbound `task_submit` envelope. |
 | `memory/OpenClawdMemoryBackflow.kt` | v1-first with 404 legacy fallback for memory endpoints. |
+| `api/GalaxyApiClient.kt` | v1-first with 404 fallback for device register + heartbeat. |
+| `config/RemoteConfigFetcher.kt` | v1-first with 404 fallback for remote config endpoint. |
 | `test/protocol/AipModelsTest.kt` | `TaskResultPayload` new fields coverage. |
 | `test/protocol/TaskSubmitV3Test.kt` | `task_execute`/`task_status_query` legacy map coverage. |
 | `test/input/InputRouterTest.kt` | `trace_id`/`route_mode` in outbound envelope. |
-| `test/memory/OpenClawdMemoryBackflowTest.kt` | 404 fallback path coverage. |
+| `test/memory/OpenClawdMemoryBackflowTest.kt` | 404 fallback path coverage for memory. |
+| `test/api/GalaxyApiClientTest.kt` | 404 fallback path coverage for register + heartbeat. |
+| `test/config/RemoteConfigFetcherTest.kt` | 404 fallback path coverage for remote config. |
