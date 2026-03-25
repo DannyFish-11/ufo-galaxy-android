@@ -22,18 +22,29 @@ import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 
 /**
- * Central controller for the cross-device collaboration runtime (AIP v3 + Galaxy Gateway).
+ * **Sole lifecycle authority** for the cross-device collaboration runtime (AIP v3 + Galaxy
+ * Gateway).
  *
- * Manages the complete ON/OFF lifecycle:
- *  - **ON** ([start]): Connect WebSocket to Gateway (AIP v3), register the device via
- *    capability_report handshake, begin heartbeats, and publish [RuntimeState.Active].
- *  - **OFF** ([stop]): Cleanly disconnect the WebSocket, stop runtime tasks, and
- *    transition to [RuntimeState.LocalOnly] so the [LoopController] handles all work.
- *  - **Failure**: If registration or the network fails within [registrationTimeoutMs],
- *    automatically falls back to local-only mode, disables cross-device in [settings],
- *    and emits a human-readable reason via [registrationError] so both
+ * All WS connect / disconnect decisions, settings mutations, and runtime-state transitions
+ * for the cross-device pipeline **must** go through this class. No other component should
+ * call [GalaxyWebSocketClient.connect], [GalaxyWebSocketClient.disconnect], or mutate
+ * [AppSettings.crossDeviceEnabled] directly.
+ *
+ * Lifecycle overview:
+ *  - **User-initiated ON** ([startWithTimeout] → [start]): Enables the WS client, connects
+ *    within [registrationTimeoutMs], transitions to [RuntimeState.Active] on success.
+ *    On failure / timeout: emits [registrationError], falls back to [RuntimeState.LocalOnly],
+ *    and resets [AppSettings.crossDeviceEnabled] to `false`.
+ *  - **User-initiated OFF** ([stop]): Cleanly disconnects the WS, disables cross-device in
+ *    [settings], and transitions to [RuntimeState.LocalOnly].
+ *  - **Background restore** ([connectIfEnabled]): Called on service restart or activity
+ *    resume.  Syncs the WS client with the persisted [AppSettings.crossDeviceEnabled] value
+ *    and triggers a best-effort reconnect — without emitting [registrationError] or
+ *    modifying settings on transient failure.
+ *  - **Failure**: Any registration or network failure inside [start] / [startWithTimeout]
+ *    emits a human-readable reason via [registrationError] so both
  *    [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
- *    can show a dialog/alert (never silently logged only).
+ *    can show a dialog/alert — **never** silently log-only.
  *
  * Remote task handoff (AIP v3 compliance):
  *  - [onRemoteTaskStarted]: called when a `task_assign` or `goal_execution` arrives from
@@ -202,6 +213,76 @@ class RuntimeController(
             handleFailure(reason)
             false
         }
+    }
+
+    /**
+     * Restores the cross-device runtime state from [settings] without going through the
+     * full user-initiated [startWithTimeout] / [start] flow.
+     *
+     * **When to call**: from [com.ufo.galaxy.service.GalaxyConnectionService.onStartCommand]
+     * on service (re)start, and from [com.ufo.galaxy.ui.viewmodel.MainViewModel.onResume] on
+     * activity resume.  This is the **only** place [GalaxyWebSocketClient.connect] should be
+     * invoked outside of [start]; all other callers must use [startWithTimeout] or [stop].
+     *
+     * Behaviour:
+     * - If [AppSettings.crossDeviceEnabled] is `true`: ensures the WS client is enabled,
+     *   installs a one-shot listener to transition to [RuntimeState.Active] when the WS
+     *   connects, and calls [GalaxyWebSocketClient.connect].  If the connection fails or is
+     *   lost, the WS client's built-in exponential-backoff reconnect handles retries silently
+     *   (no [registrationError] emitted, no settings mutation).
+     * - If [AppSettings.crossDeviceEnabled] is `false`: disables the WS client and transitions
+     *   to [RuntimeState.LocalOnly] (no-op if already there).
+     *
+     * This method is **non-suspending** and thread-safe; it may be called from any thread.
+     */
+    fun connectIfEnabled() {
+        val crossDeviceOn = settings.crossDeviceEnabled
+        Log.d(TAG, "[RUNTIME] connectIfEnabled: crossDevice=$crossDeviceOn state=${_state.value}")
+        GalaxyLogger.log(TAG, mapOf("event" to "runtime_connect_if_enabled", "cross_device" to crossDeviceOn))
+
+        webSocketClient.setCrossDeviceEnabled(crossDeviceOn)
+
+        if (!crossDeviceOn) {
+            if (_state.value !is RuntimeState.LocalOnly) {
+                _state.value = RuntimeState.LocalOnly
+            }
+            return
+        }
+
+        // Only install a state-transition listener when we are not already in the middle of
+        // a start() or already active — avoid double-listener races.
+        if (_state.value !is RuntimeState.Starting && _state.value !is RuntimeState.Active) {
+            _state.value = RuntimeState.Starting
+            webSocketClient.addListener(object : GalaxyWebSocketClient.Listener {
+                override fun onConnected() {
+                    Log.i(TAG, "[RUNTIME] connectIfEnabled: WS connected → Active")
+                    GalaxyLogger.log(TAG, mapOf("event" to "runtime_restore_active"))
+                    webSocketClient.removeListener(this)
+                    if (_state.value == RuntimeState.Starting) {
+                        _state.value = RuntimeState.Active
+                    }
+                }
+
+                override fun onDisconnected() {
+                    webSocketClient.removeListener(this)
+                    if (_state.value == RuntimeState.Starting) {
+                        // Transient failure — fall back to LocalOnly; WS reconnect will retry.
+                        _state.value = RuntimeState.LocalOnly
+                    }
+                }
+
+                override fun onError(error: String) {
+                    webSocketClient.removeListener(this)
+                    if (_state.value == RuntimeState.Starting) {
+                        _state.value = RuntimeState.LocalOnly
+                    }
+                }
+
+                override fun onMessage(message: String) = Unit
+            })
+        }
+
+        webSocketClient.connect()
     }
 
     /**

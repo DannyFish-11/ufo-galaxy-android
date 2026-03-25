@@ -499,11 +499,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * - When toggling **on**: checks if the gateway is configured (non-placeholder address).
      *   If not configured, opens the network settings screen for the user to set up the
      *   gateway address (or auto-discover via Tailscale) instead of failing silently.
-     *   If configured, delegates to [RuntimeController.startWithTimeout].
-     * - When toggling **off**: delegates to [RuntimeController.stop] which disconnects
-     *   the WebSocket and transitions to [RuntimeController.RuntimeState.LocalOnly].
-     * - Persists the new value via [AppSettings] and updates [MainUiState.crossDeviceEnabled]
-     *   immediately so the toggle reflects user intent.
+     *   If configured, delegates to [RuntimeController.startWithTimeout], which is the
+     *   **sole lifecycle authority** responsible for enabling the WS client and updating
+     *   [AppSettings.crossDeviceEnabled].
+     * - When toggling **off**: delegates to [RuntimeController.stop], which disconnects
+     *   the WebSocket, resets [AppSettings.crossDeviceEnabled], and transitions to
+     *   [RuntimeController.RuntimeState.LocalOnly].
+     * - Updates [MainUiState.crossDeviceEnabled] immediately so the toggle reflects user
+     *   intent; [RuntimeController] will revert both the setting and the UI state if
+     *   registration fails.
      */
     fun toggleCrossDeviceEnabled() {
         val newValue = !_uiState.value.crossDeviceEnabled
@@ -521,8 +525,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(crossDeviceEnabled = false, showNetworkSettings = true) }
                 return
             }
-            // Persist intent; RuntimeController will revert if registration fails.
-            settings.crossDeviceEnabled = true
+            // Delegate entirely to RuntimeController — it sets settings.crossDeviceEnabled,
+            // enables the WS client, and handles failure/fallback internally.
             viewModelScope.launch {
                 val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
                 if (!ok) {
@@ -531,7 +535,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } else {
-            UFOGalaxyApplication.appSettings.crossDeviceEnabled = false
+            // Delegate entirely to RuntimeController — it resets settings.crossDeviceEnabled
+            // and disconnects the WS client.
             UFOGalaxyApplication.runtimeController.stop()
         }
     }
@@ -667,10 +672,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Activity onResume 时调用
      */
     fun onResume() {
-        Log.d(TAG, "onResume - 尝试连接 WebSocket")
-        viewModelScope.launch {
-            webSocketClient.connect()
-        }
+        Log.d(TAG, "onResume - 通过 RuntimeController 恢复连接状态")
+        // Delegate to RuntimeController — the sole lifecycle authority — to restore the WS
+        // connection if cross-device is currently enabled in settings.  Direct
+        // webSocketClient.connect() calls are not permitted outside RuntimeController.
+        UFOGalaxyApplication.runtimeController.connectIfEnabled()
         // Refresh readiness flags — overlay/accessibility state may have changed while
         // the app was in the background (e.g. user visited settings to grant permissions).
         refreshReadiness()
