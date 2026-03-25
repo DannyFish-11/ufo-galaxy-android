@@ -17,6 +17,10 @@ import com.ufo.galaxy.data.SharedPrefsAppSettings
 import com.ufo.galaxy.grounding.SeeClickGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.local.DefaultLocalLoopExecutor
+import com.ufo.galaxy.local.DefaultLocalLoopReadinessProvider
+import com.ufo.galaxy.local.LocalLoopExecutor
+import com.ufo.galaxy.local.LocalLoopReadinessProvider
 import com.ufo.galaxy.loop.ExecutorBridge
 import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
@@ -96,6 +100,14 @@ class UFOGalaxyApplication : Application() {
 
         // LoopController: local closed-loop automation pipeline (natural language → loop)
         lateinit var loopController: LoopController
+            private set
+
+        // LocalLoopReadinessProvider: single source of truth for local-loop subsystem readiness
+        lateinit var localLoopReadinessProvider: LocalLoopReadinessProvider
+            private set
+
+        // LocalLoopExecutor: canonical entrypoint for local goal execution (UI + gateway paths)
+        lateinit var localLoopExecutor: LocalLoopExecutor
             private set
 
         // RuntimeController: manages cross-device ON/OFF lifecycle, registration, and fallback
@@ -412,6 +424,16 @@ class UFOGalaxyApplication : Application() {
             screenshotProvider = AccessibilityScreenshotProvider(),
             modelAssetManager = modelAssetManager,
             modelDownloader = modelDownloader
+        )
+        localLoopReadinessProvider = DefaultLocalLoopReadinessProvider(
+            modelAssetManager = modelAssetManager,
+            plannerService = plannerService,
+            groundingService = groundingService
+        )
+        localLoopExecutor = DefaultLocalLoopExecutor(
+            loopController = loopController,
+            goalExecutor = localGoalExecutor,
+            readinessProvider = localLoopReadinessProvider
         )
         Log.d(TAG, "推理服务已初始化")
     }
