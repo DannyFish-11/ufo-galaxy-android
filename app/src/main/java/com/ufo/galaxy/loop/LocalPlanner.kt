@@ -3,6 +3,7 @@ package com.ufo.galaxy.loop
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.local.FailureCode
 import com.ufo.galaxy.local.PlannerFallbackLadder
+import com.ufo.galaxy.nlp.GoalNormalizer
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
@@ -47,16 +48,21 @@ class LocalPlanner(
      * @return [ActionSequence] with at least one [ActionStep] (rule-based fallback always fires).
      */
     fun plan(sessionId: String, instruction: String, screenshotBase64: String?): ActionSequence {
+        val normalized = GoalNormalizer.normalize(instruction)
+
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "plan",
                 "session_id" to sessionId,
                 "inference_available" to isAvailable(),
-                "instruction_len" to instruction.length
+                "instruction_len" to instruction.length,
+                "normalized_len" to normalized.normalizedText.length,
+                "normalization_changed" to (normalized.normalizedText != normalized.originalText),
+                "extracted_constraints" to normalized.extractedConstraints.size
             )
         )
 
-        val result = fallbackLadder.plan(sessionId, instruction, screenshotBase64)
+        val result = fallbackLadder.plan(sessionId, normalized.normalizedText, screenshotBase64)
 
         GalaxyLogger.log(
             TAG, mapOf(
@@ -91,12 +97,15 @@ class LocalPlanner(
         failureReason: String,
         screenshotBase64: String?
     ): ActionSequence {
+        val normalized = GoalNormalizer.normalize(instruction)
+
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "replan",
                 "session_id" to sessionId,
                 "failed_step" to failedStep.id,
-                "reason" to failureReason.take(120)
+                "reason" to failureReason.take(120),
+                "normalization_changed" to (normalized.normalizedText != normalized.originalText)
             )
         )
 
@@ -108,7 +117,7 @@ class LocalPlanner(
 
         val result = fallbackLadder.replan(
             sessionId = sessionId,
-            goal = instruction,
+            goal = normalized.normalizedText,
             failedStep = planStep,
             failureReason = failureReason,
             screenshotBase64 = screenshotBase64

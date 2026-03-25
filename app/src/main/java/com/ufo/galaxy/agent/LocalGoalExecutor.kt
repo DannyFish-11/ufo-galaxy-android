@@ -1,6 +1,7 @@
 package com.ufo.galaxy.agent
 
 import android.util.Log
+import com.ufo.galaxy.nlp.GoalNormalizer
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.TaskAssignPayload
@@ -42,16 +43,22 @@ class LocalGoalExecutor(
      */
     fun executeGoal(payload: GoalExecutionPayload): GoalResultPayload {
         val startMs = System.currentTimeMillis()
+        val normalized = GoalNormalizer.normalize(payload.goal)
         Log.i(
             TAG,
             "executeGoal task_id=${payload.task_id} group_id=${payload.group_id} " +
-                "subtask_index=${payload.subtask_index} goal='${payload.goal.take(MAX_GOAL_LOG_LENGTH)}'"
+                "subtask_index=${payload.subtask_index} goal='${payload.goal.take(MAX_GOAL_LOG_LENGTH)}'" +
+                if (normalized.normalizedText != normalized.originalText)
+                    " normalized_goal='${normalized.normalizedText.take(MAX_GOAL_LOG_LENGTH)}'"
+                else ""
         )
+
+        val mergedConstraints = payload.constraints + normalized.extractedConstraints
 
         val taskAssign = TaskAssignPayload(
             task_id = payload.task_id,
-            goal = payload.goal,
-            constraints = payload.constraints,
+            goal = normalized.normalizedText,
+            constraints = mergedConstraints,
             max_steps = payload.max_steps.coerceAtLeast(1),
             require_local_agent = true
         )
