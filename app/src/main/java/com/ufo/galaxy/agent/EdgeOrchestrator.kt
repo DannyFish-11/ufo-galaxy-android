@@ -9,6 +9,19 @@ import com.ufo.galaxy.data.TaskResultPayload
 import java.io.ByteArrayOutputStream
 
 /**
+ * **LEGACY — not part of the canonical Android runtime pipeline.**
+ *
+ * This class uses the bitmap-based [LocalPlanner] / [GUIGrounding] / [ScreenshotCapture]
+ * agent-package interfaces and is **not wired into any active execution path**.
+ * It is retained only as a migration boundary; do not add new features here.
+ *
+ * Canonical replacement: [EdgeExecutor], which uses the injectable
+ * [com.ufo.galaxy.inference.LocalPlannerService] and
+ * [com.ufo.galaxy.inference.LocalGroundingService] interfaces (base64-based, JVM-testable)
+ * and is the sole task execution engine wired through [com.ufo.galaxy.service.GalaxyConnectionService]
+ * → [com.ufo.galaxy.agent.LocalGoalExecutor] → [com.ufo.galaxy.agent.AutonomousExecutionPipeline].
+ *
+ * Original doc:
  * Cloud-edge execution orchestrator for AIP v3.
  *
  * Receives a [TaskAssignPayload] (step [6]) and drives the full local pipeline:
@@ -16,17 +29,12 @@ import java.io.ByteArrayOutputStream
  *
  * Produces a [TaskResultPayload] (step [8]) including an optional Base64 JPEG snapshot
  * so the gateway can perform cloud-side correction in step [9] if required.
- *
- * Architecture constraints honoured:
- *  - No x/y coordinates originate from the gateway; all coordinates are resolved locally
- *    inside [GUIGrounding].
- *  - [require_local_agent] == false immediately aborts with CANCELLED, preserving the
- *    contract for tasks that must not run locally.
- *  - [max_steps] from [TaskAssignPayload] caps the execution budget at all times,
- *    including after replanning.
- *  - Out-of-memory conditions in any on-device model are caught and reported as ERROR
- *    results with the last available snapshot attached.
  */
+@Deprecated(
+    message = "Not part of the canonical Android runtime pipeline. " +
+        "Use EdgeExecutor (via LocalGoalExecutor / AutonomousExecutionPipeline) instead.",
+    level = DeprecationLevel.WARNING
+)
 class EdgeOrchestrator(
     private val screenshotCapture: ScreenshotCapture,
     private val localPlanner: LocalPlanner,

@@ -4,20 +4,21 @@ import android.util.Log
 import com.ufo.galaxy.inference.LocalPlannerService
 
 /**
+ * **LEGACY — not part of the canonical Android runtime pipeline.**
+ *
+ * This class is **not instantiated in any active execution path**. The canonical
+ * execution pipeline ([EdgeExecutor]) calls [LocalPlannerService] directly and does not
+ * use this wrapper. Retained only as a migration boundary; do not add new features here.
+ *
+ * Original doc:
  * Thin wrapper around [LocalPlannerService] that converts a high-level goal into a
  * sequence of [LocalPlannerService.PlanStep] objects without requiring a live screenshot.
- *
- * Used by [LocalGoalExecutor] to produce a minimal local plan when the device receives
- * a [com.ufo.galaxy.protocol.GoalExecutionPayload]. The wrapper exists so that
- * goal-level planning can be unit-tested independently from screenshot capture and
- * grounding.
- *
- * When the underlying planner model is not loaded, a single "noop" fallback step is
- * returned so that the caller always gets a non-empty plan and can surface the model
- * readiness issue through the result's error field.
- *
- * @param plannerService Local MobileVLM planner service.
  */
+@Deprecated(
+    message = "Not part of the canonical Android runtime pipeline. " +
+        "EdgeExecutor calls LocalPlannerService directly; this wrapper is unused.",
+    level = DeprecationLevel.WARNING
+)
 class LocalTaskPlanner(private val plannerService: LocalPlannerService) {
 
     companion object {
