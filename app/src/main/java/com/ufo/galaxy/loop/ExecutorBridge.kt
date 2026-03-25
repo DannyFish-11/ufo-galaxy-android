@@ -4,22 +4,23 @@ import com.ufo.galaxy.agent.AccessibilityExecutor
 import com.ufo.galaxy.agent.ImageScaler
 import com.ufo.galaxy.agent.NoOpImageScaler
 import com.ufo.galaxy.inference.LocalGroundingService
+import com.ufo.galaxy.local.FailureCode
+import com.ufo.galaxy.local.GroundingFallbackLadder
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
  * Maps [ActionStep]s to concrete [AccessibilityExecutor] actions and dispatches them.
  *
- * For actions that require screen-coordinate grounding (tap, scroll),
- * [groundingService] resolves intent → (x, y) before dispatching.
- * Actions that do not need coordinates (type, back, home, open_app) are dispatched
- * directly without a grounding call. When [groundingService] is not loaded, all
- * actions fall back to direct dispatch with zero coordinates.
+ * For actions that require screen-coordinate grounding (tap, scroll), a
+ * [GroundingFallbackLadder] resolves intent → (x, y) through up to six stages before
+ * returning a structured failure. Actions that do not need coordinates (type, back,
+ * home, open_app) are dispatched directly without a grounding call.
  *
  * @param groundingService      SeeClick NCNN grounding engine.
  * @param accessibilityExecutor Dispatches device actions via AccessibilityService.
  * @param imageScaler           Optional downscaler for grounding input;
  *                              use [NoOpImageScaler] in JVM tests.
- * @param scaledMaxEdge         Max longest edge (px) for grounding input; 0 = full resolution.
+ * @param scaledMaxEdge         Max longest edge (px) for primary grounding input; 0 = full resolution.
  */
 class ExecutorBridge(
     private val groundingService: LocalGroundingService,
@@ -33,13 +34,24 @@ class ExecutorBridge(
 
         /**
          * Action types that bypass coordinate grounding and are dispatched directly.
-         * All others (tap, scroll) go through [groundingService].
+         * All others (tap, scroll) go through [GroundingFallbackLadder].
          */
         private val NO_GROUNDING_ACTIONS = setOf("type", "back", "home", "open_app")
     }
 
+    private val groundingLadder = GroundingFallbackLadder(
+        groundingService = groundingService,
+        imageScaler = imageScaler,
+        primaryMaxEdge = if (scaledMaxEdge > 0) scaledMaxEdge else GroundingFallbackLadder.DEFAULT_PRIMARY_MAX_EDGE,
+        resizedMaxEdge = if (scaledMaxEdge > 0) scaledMaxEdge / 2 else GroundingFallbackLadder.DEFAULT_RESIZED_MAX_EDGE
+    )
+
     /**
      * Executes [step] against the device and returns an updated [ActionStep] with the result.
+     *
+     * Grounding now uses [GroundingFallbackLadder] so transient SeeClick failures are
+     * retried at a smaller resolution before falling back to accessibility-node or heuristic
+     * region coordinates, rather than immediately failing the step.
      *
      * @param step         Action to execute.
      * @param jpegBytes    Full-resolution JPEG bytes of the current screen (used for grounding).
@@ -63,10 +75,13 @@ class ExecutorBridge(
         )
 
         return try {
-            val (action, confidence) = resolveAction(step, jpegBytes, screenWidth, screenHeight)
+            val (action, confidence, groundingStage) = resolveAction(
+                step, jpegBytes, screenWidth, screenHeight
+            )
             val success = accessibilityExecutor.execute(action)
             val status = if (success) StepStatus.SUCCESS else StepStatus.FAILED
-            val failureReason = if (!success) "AccessibilityExecutor returned false" else null
+            val failureCode = if (!success) FailureCode.EXEC_ACCESSIBILITY_RETURNED_FALSE else null
+            val failureReason = if (!success) failureCode!!.description else null
 
             GalaxyLogger.log(
                 TAG, mapOf(
@@ -74,11 +89,17 @@ class ExecutorBridge(
                     "step_id" to step.id,
                     "action_type" to step.actionType,
                     "success" to success,
-                    "confidence" to confidence
+                    "confidence" to confidence,
+                    "grounding_stage" to groundingStage
                 )
             )
 
-            step.copy(status = status, confidence = confidence, failureReason = failureReason)
+            step.copy(
+                status = status,
+                confidence = confidence,
+                failureReason = failureReason,
+                failureCode = failureCode
+            )
         } catch (e: Exception) {
             GalaxyLogger.log(
                 TAG, mapOf(
@@ -89,58 +110,56 @@ class ExecutorBridge(
             )
             step.copy(
                 status = StepStatus.FAILED,
-                failureReason = e.message ?: "Execution exception"
+                failureReason = e.message ?: "Execution exception",
+                failureCode = FailureCode.EXEC_EXCEPTION
             )
         }
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
+    /**
+     * Returns a Triple of (action, confidence, groundingStage).
+     * groundingStage is the name of the grounding ladder stage used (for logging).
+     */
     private fun resolveAction(
         step: ActionStep,
         jpegBytes: ByteArray,
         screenWidth: Int,
         screenHeight: Int
-    ): Pair<AccessibilityExecutor.AccessibilityAction, Float> {
+    ): Triple<AccessibilityExecutor.AccessibilityAction, Float, String> {
 
         // Actions that never need grounding are dispatched directly.
-        if (step.actionType in NO_GROUNDING_ACTIONS || !groundingService.isModelLoaded()) {
-            return Pair(buildDirectAction(step), 1f)
+        if (step.actionType in NO_GROUNDING_ACTIONS) {
+            return Triple(buildDirectAction(step), 1f, "direct")
         }
 
-        // Downscale screenshot for grounding efficiency.
-        val scaled = imageScaler.scaleToMaxEdge(
-            jpegBytes = jpegBytes,
-            fullWidth = screenWidth,
-            fullHeight = screenHeight,
-            maxEdge = scaledMaxEdge
-        )
-
-        val grounding = groundingService.ground(
+        // Use the grounding fallback ladder for coordinate-based actions.
+        val grounding = groundingLadder.ground(
+            sessionId = "",
+            stepId = step.id,
             intent = step.intent,
-            screenshotBase64 = scaled.scaledJpegBase64,
-            width = scaled.scaledWidth,
-            height = scaled.scaledHeight
+            jpegBytes = jpegBytes,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
         )
 
-        if (grounding.error != null) {
-            throw IllegalStateException("Grounding failed: ${grounding.error}")
+        if (!grounding.succeeded) {
+            throw IllegalStateException(
+                grounding.error ?: FailureCode.GROUND_ALL_STAGES_EXHAUSTED.description
+            )
         }
-
-        // Remap coordinates from scaled space back to full resolution.
-        val fullX = remapCoord(grounding.x, scaled.scaledWidth, screenWidth)
-        val fullY = remapCoord(grounding.y, scaled.scaledHeight, screenHeight)
 
         val action: AccessibilityExecutor.AccessibilityAction = when (step.actionType) {
-            "tap" -> AccessibilityExecutor.AccessibilityAction.Tap(fullX, fullY)
+            "tap" -> AccessibilityExecutor.AccessibilityAction.Tap(grounding.x, grounding.y)
             "scroll" -> AccessibilityExecutor.AccessibilityAction.Scroll(
-                fullX, fullY,
+                grounding.x, grounding.y,
                 step.parameters.getOrDefault("direction", "down")
             )
-            else -> AccessibilityExecutor.AccessibilityAction.Tap(fullX, fullY)
+            else -> AccessibilityExecutor.AccessibilityAction.Tap(grounding.x, grounding.y)
         }
 
-        return Pair(action, grounding.confidence)
+        return Triple(action, grounding.confidence, grounding.stageUsed)
     }
 
     private fun buildDirectAction(
@@ -159,10 +178,5 @@ class ExecutorBridge(
             step.parameters.getOrDefault("direction", "down")
         )
         else -> AccessibilityExecutor.AccessibilityAction.Tap(0, 0)
-    }
-
-    private fun remapCoord(coordInScaled: Int, scaledDim: Int, fullDim: Int): Int {
-        if (scaledDim <= 0 || fullDim <= 0) return coordInScaled
-        return Math.round(coordInScaled.toFloat() * fullDim.toFloat() / scaledDim.toFloat())
     }
 }
