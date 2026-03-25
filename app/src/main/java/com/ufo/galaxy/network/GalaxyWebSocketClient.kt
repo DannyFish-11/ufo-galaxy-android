@@ -23,14 +23,33 @@ import kotlin.math.min
 import kotlin.random.Random
 
 /**
- * Galaxy WebSocket 客户端
- * 负责与 Galaxy 服务器的实时通信
+ * **The sole cross-device uplink and session transport backbone** for the Android runtime.
+ *
+ * All outbound cross-device messages flow through this class:
+ *  - **Device registration / capability report**: sent automatically on [onOpen] via
+ *    [sendHandshake], carrying platform, device_id, supported_actions, capability schema,
+ *    and metadata flags.
+ *  - **Heartbeats**: emitted every [HEARTBEAT_INTERVAL_MS] (30 s) with device_id,
+ *    route_mode, and reconnect_attempts for liveness monitoring.
+ *  - **Task / goal uplink**: [sendJson] is the single write path for `task_submit`,
+ *    `task_result`, `goal_result`, and `cancel_result` envelopes.  Callers must use
+ *    [InputRouter] (or [GalaxyConnectionService] for inbound dispatch) — never bypass
+ *    [sendJson] with a separate WebSocket connection.
+ *  - **Offline replay**: `task_result` and `goal_result` envelopes are buffered in
+ *    [offlineQueue] when disconnected and replayed in FIFO order on reconnect.
+ *
+ * **Lifecycle ownership**: [RuntimeController] is the sole authority for connect /
+ * disconnect decisions and cross-device enable/disable toggling. No other component
+ * should call [connect], [disconnect], or [setCrossDeviceEnabled] directly.
  *
  * **Reconnect strategy** — exponential backoff with jitter:
  *   base delays 1 s → 2 s → 4 s → 8 s → 16 s → 30 s (capped), plus up to 1 s
  *   of random jitter.  Attempt counter is reset to 0 on a successful [onOpen].
  *   Calling [connect] while already connected or connecting is a no-op.
  *   Calling [connect] after an explicit [disconnect] restarts the attempt counter.
+ *
+ * **Cross-device gate**: [sendJson] is hard-blocked when [crossDeviceEnabled] is `false`,
+ *   regardless of connection state, to enforce the local-only mode invariant.
  *
  * **Offline task queue** — when [sendJson] is called while disconnected and the
  *   message type matches [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
