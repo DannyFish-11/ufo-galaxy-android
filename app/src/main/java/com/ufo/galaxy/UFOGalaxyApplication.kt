@@ -107,7 +107,9 @@ class UFOGalaxyApplication : Application() {
         lateinit var localLoopReadinessProvider: LocalLoopReadinessProvider
             private set
 
-        // LocalLoopExecutor: canonical entrypoint for local goal execution (UI + gateway paths)
+        // LocalLoopExecutor: canonical entrypoint for UI/voice-driven local goal execution.
+        // Gateway goal execution (goal_execution / parallel_subtask) flows exclusively through
+        // AutonomousExecutionPipeline → LocalGoalExecutor to ensure runtime and feature gates.
         lateinit var localLoopExecutor: LocalLoopExecutor
             private set
 
