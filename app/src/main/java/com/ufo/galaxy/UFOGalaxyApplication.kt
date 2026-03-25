@@ -34,6 +34,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.runtime.RuntimeController
+import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
@@ -112,6 +113,10 @@ class UFOGalaxyApplication : Application() {
 
         // RuntimeController: manages cross-device ON/OFF lifecycle, registration, and fallback
         lateinit var runtimeController: RuntimeController
+            private set
+
+        // LocalInferenceRuntimeManager: lifecycle authority for the on-device planner+grounding pair
+        lateinit var localInferenceRuntimeManager: LocalInferenceRuntimeManager
             private set
 
         // AgentRuntimeBridge: bridges eligible tasks to Agent Runtime / OpenClawd when cross-device is ON
@@ -205,6 +210,7 @@ class UFOGalaxyApplication : Application() {
         // but is called in tests/emulators. Process termination cleans up anyway.
         modelDownloader.cancel()
         runtimeController.cancel()
+        localInferenceRuntimeManager.cancel()
         metricsRecorder.stop()
         Log.i(TAG, "UFO Galaxy Application 终止")
     }
@@ -434,6 +440,11 @@ class UFOGalaxyApplication : Application() {
             loopController = loopController,
             goalExecutor = localGoalExecutor,
             readinessProvider = localLoopReadinessProvider
+        )
+        localInferenceRuntimeManager = LocalInferenceRuntimeManager(
+            plannerService = plannerService,
+            groundingService = groundingService,
+            modelAssetManager = modelAssetManager
         )
         Log.d(TAG, "推理服务已初始化")
     }

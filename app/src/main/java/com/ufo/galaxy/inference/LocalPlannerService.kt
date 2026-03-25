@@ -12,6 +12,23 @@ package com.ufo.galaxy.inference
  */
 interface LocalPlannerService {
 
+    // ── Structured warmup ────────────────────────────────────────────────────
+
+    /**
+     * Pre-warms the planner runtime and returns a [WarmupResult] with stage-level detail.
+     *
+     * Implementations should validate:
+     * 1. Health endpoint reachability ([WarmupResult.WarmupStage.HEALTH_CHECK]).
+     * 2. Dry-run inference success ([WarmupResult.WarmupStage.DRY_RUN_INFERENCE]).
+     * 3. Valid response shape ([WarmupResult.WarmupStage.RESPONSE_VALIDATION]).
+     *
+     * The default implementation delegates to [prewarm] and wraps the boolean result.
+     * Override this method to provide richer failure detail.
+     */
+    fun warmupWithResult(): WarmupResult =
+        if (prewarm()) WarmupResult.success()
+        else WarmupResult.failure(WarmupResult.WarmupStage.HEALTH_CHECK, "Planner warmup failed")
+
     /**
      * A single planned action step produced by the planner.
      *

@@ -6,6 +6,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import com.google.gson.JsonSyntaxException
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.inference.WarmupResult
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -50,6 +51,13 @@ class MobileVlmPlanner(
     private val gson = Gson()
     private var modelLoaded = false
 
+    /** Stores the last structured warmup failure for diagnostics; null when loaded. */
+    @Volatile
+    var lastWarmupResult: WarmupResult = WarmupResult.failure(
+        WarmupResult.WarmupStage.HEALTH_CHECK, "loadModel not yet called"
+    )
+        private set
+
     companion object {
         private const val COMPLETIONS_PATH = "/v1/chat/completions"
         private const val HEALTH_PATH = "/health"
@@ -68,8 +76,8 @@ class MobileVlmPlanner(
     }
 
     override fun loadModel(): Boolean {
-        modelLoaded = pingEndpoint()
-        return modelLoaded
+        val result = warmupWithResult()
+        return result.success
     }
 
     override fun unloadModel() {
@@ -82,18 +90,69 @@ class MobileVlmPlanner(
      * Pre-warms the MobileVLM inference server by pinging /health and sending a minimal
      * 1-token dry-run completion request to bring the model weights into active memory.
      * Returns true if the server is reachable and responds to the dry-run.
+     *
+     * Prefer [warmupWithResult] for structured failure reporting.
      */
-    override fun prewarm(): Boolean {
-        if (!pingEndpoint()) return false
-        return try {
-            val dryRun = buildDryRunRequestJson()
-            httpPost(dryRun)
-            modelLoaded = true
-            true
-        } catch (e: Exception) {
-            modelLoaded = pingEndpoint()
-            modelLoaded
+    override fun prewarm(): Boolean = warmupWithResult().success
+
+    /**
+     * Hardened warmup that validates:
+     * 1. Health endpoint reachability.
+     * 2. Dry-run inference round-trip.
+     * 3. Valid response shape (choices[0].message.content present).
+     *
+     * Sets [modelLoaded] and [lastWarmupResult] as a side-effect.
+     */
+    override fun warmupWithResult(): WarmupResult {
+        // Stage 1: health check
+        if (!pingEndpoint()) {
+            val result = WarmupResult.failure(
+                WarmupResult.WarmupStage.HEALTH_CHECK,
+                "MobileVLM health endpoint not reachable at $endpointUrl"
+            )
+            modelLoaded = false
+            lastWarmupResult = result
+            return result
         }
+
+        // Stage 2: dry-run inference
+        val responseText = try {
+            httpPost(buildDryRunRequestJson())
+        } catch (e: Exception) {
+            val result = WarmupResult.failure(
+                WarmupResult.WarmupStage.DRY_RUN_INFERENCE,
+                "MobileVLM dry-run inference failed: ${e.message}"
+            )
+            modelLoaded = false
+            lastWarmupResult = result
+            return result
+        }
+
+        // Stage 3: response shape validation
+        val content = try {
+            val root = gson.fromJson(responseText, JsonObject::class.java)
+            root?.getAsJsonArray("choices")
+                ?.get(0)?.asJsonObject
+                ?.getAsJsonObject("message")
+                ?.get("content")?.asString
+        } catch (e: Exception) {
+            null
+        }
+
+        if (content == null) {
+            val result = WarmupResult.failure(
+                WarmupResult.WarmupStage.RESPONSE_VALIDATION,
+                "MobileVLM dry-run response missing choices[0].message.content"
+            )
+            modelLoaded = false
+            lastWarmupResult = result
+            return result
+        }
+
+        val result = WarmupResult.success()
+        modelLoaded = true
+        lastWarmupResult = result
+        return result
     }
 
     override fun plan(
