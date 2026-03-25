@@ -6,8 +6,19 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.service.HardwareKeyListener
 
 /**
- * Provides a [LocalLoopReadiness] snapshot reflecting the current state of every
- * subsystem required for local closed-loop execution.
+ * **Full local-loop readiness gate** — six-subsystem pre-execution readiness check.
+ *
+ * Provides a [LocalLoopReadiness] snapshot reflecting the state of every subsystem
+ * required for the local closed-loop execution pipeline. Evaluated by
+ * [com.ufo.galaxy.loop.LoopController] before starting any session.
+ *
+ * ## Scope — distinction from [com.ufo.galaxy.service.ReadinessChecker]
+ * [com.ufo.galaxy.service.ReadinessChecker] is a lightweight **three-check** probe
+ * (model files, accessibility, overlay) whose results are persisted to
+ * [com.ufo.galaxy.data.AppSettings] and included in the gateway `capability_report`.
+ * **This interface** is the richer **six-check** gate that also covers planner loading,
+ * grounding loading, and per-subsystem failure categorisation; it is evaluated
+ * immediately before local execution begins and is not surfaced in the capability_report.
  *
  * Implementations must be lightweight and non-blocking: they are called from the UI
  * thread for status indicators as well as from background threads before execution.

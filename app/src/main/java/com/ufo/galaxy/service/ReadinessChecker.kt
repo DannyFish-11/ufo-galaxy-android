@@ -10,12 +10,14 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
- * Snapshot of the three capability readiness checks.
+ * Snapshot of the three capability readiness checks used in [ReadinessChecker].
  *
  * @property modelReady          Local model files are present and verified on disk.
  * @property accessibilityReady  [HardwareKeyListener] accessibility service is enabled.
  * @property overlayReady        Overlay (SYSTEM_ALERT_WINDOW) permission is granted.
  * @property degradedMode        True when any check failed; autonomous execution may be limited.
+ *
+ * @see ReadinessChecker
  */
 data class ReadinessState(
     val modelReady: Boolean,
@@ -27,14 +29,31 @@ data class ReadinessState(
 }
 
 /**
- * Performs the three capability readiness self-checks required before autonomous execution:
- * - local model availability (with optional checksum verification)
- * - accessibility service enabled
- * - overlay (SYSTEM_ALERT_WINDOW) permission granted
+ * **Capability-report readiness probe** — lightweight three-check surface-level audit.
+ *
+ * This object performs the three readiness checks whose results are persisted to
+ * [com.ufo.galaxy.data.AppSettings] and surfaced in the gateway `capability_report`
+ * metadata (`model_ready`, `accessibility_ready`, `overlay_ready`). It is the
+ * **minimal readiness contract** understood by the Gateway and is evaluated at app start
+ * and whenever capability metadata must be refreshed (e.g., on permission grant, boot).
+ *
+ * ## Scope — what this is **not**
+ * This is **not** the full pre-execution readiness gate for the local closed-loop pipeline.
+ * Before the [com.ufo.galaxy.loop.LoopController] runs a task it evaluates the richer
+ * six-subsystem check provided by
+ * [com.ufo.galaxy.local.LocalLoopReadinessProvider] / [com.ufo.galaxy.local.LocalLoopReadiness],
+ * which additionally covers planner loading, grounding loading, per-subsystem failure
+ * categorisation, and [com.ufo.galaxy.local.LocalLoopState] transitions.
+ *
+ * ## Relationship summary
+ * | Class | Checks | Used by |
+ * |---|---|---|
+ * | [ReadinessChecker] | 3 (model files, accessibility, overlay) | capability_report metadata, [com.ufo.galaxy.UFOGalaxyApplication], UI readiness flags |
+ * | [com.ufo.galaxy.local.DefaultLocalLoopReadinessProvider] | 6 (above + planner, grounding, screenshot, action executor) | [com.ufo.galaxy.loop.LoopController] pre-execution gate |
  *
  * All checks are non-blocking and reflect the current system state at the time of the call.
  * Results are written back to [com.ufo.galaxy.data.AppSettings] by the caller so they
- * are available to the UI and capability_report metadata.
+ * are available to the UI and capability_report metadata without requiring a re-check.
  */
 object ReadinessChecker {
 
