@@ -338,24 +338,27 @@ class UFOGalaxyApplication : Application() {
     /**
      * Toggles the cross-device collaboration switch at runtime.
      *
-     * When [enabled] is false:
-     *  - [GalaxyWebSocketClient.crossDeviceEnabled] is set to false.
-     *  - Any active WS connection is disconnected.
-     *  - No further registration or capability_report messages will be sent.
+     * Delegates entirely to [RuntimeController], which is the sole lifecycle authority for
+     * the cross-device runtime:
+     *  - When [enabled] is false: [RuntimeController.stop] disconnects the WS, resets
+     *    [AppSettings.crossDeviceEnabled], and transitions to LocalOnly.
+     *  - When [enabled] is true: [AppSettings.crossDeviceEnabled] is updated and
+     *    [RuntimeController.connectIfEnabled] syncs the WS client state and initiates a
+     *    best-effort reconnect. Callers that need the full registration flow with timeout and
+     *    failure notification should use [RuntimeController.startWithTimeout] directly.
      *
-     * When [enabled] is true:
-     *  - [GalaxyWebSocketClient.crossDeviceEnabled] is set to true.
-     *  - The caller should start (or restart) [GalaxyConnectionService] to
-     *    establish the connection and send the initial capability_report.
-     *
-     * Thread-safe: delegates to [GalaxyWebSocketClient.setCrossDeviceEnabled] which is
-     * annotated with [@Volatile].
+     * Must only be called after [initRuntimeController] has completed (i.e., post-[onCreate]).
      */
     fun setCrossDeviceEnabled(enabled: Boolean) {
         Log.i(TAG, "setCrossDeviceEnabled $enabled")
-        webSocketClient.setCrossDeviceEnabled(enabled)
-        if (!enabled && webSocketClient.isConnected()) {
-            webSocketClient.disconnect()
+        if (!enabled) {
+            // RuntimeController.stop() handles WS disconnect, settings update, and state transition.
+            runtimeController.stop()
+        } else {
+            // Persist the intent first so connectIfEnabled() reads the correct value.
+            appSettings.crossDeviceEnabled = true
+            // RuntimeController.connectIfEnabled() syncs the WS client and triggers reconnect.
+            runtimeController.connectIfEnabled()
         }
     }
 

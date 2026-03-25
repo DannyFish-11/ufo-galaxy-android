@@ -310,7 +310,7 @@ class RuntimeController(
      * the loop as blocked while the remote task executes.
      *
      * AIP v3 compliance: only tasks delivered via `task_assign` / `goal_execution`
-     * envelopes trigger this; direct user input via [com.ufo.galaxy.network.MessageRouter]
+     * envelopes trigger this; direct user input via [com.ufo.galaxy.input.InputRouter]
      * in cross-device mode goes uplink as `task_submit` and is not affected.
      */
     fun onRemoteTaskStarted() {

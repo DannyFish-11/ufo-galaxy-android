@@ -27,7 +27,8 @@ enum class MsgType(val value: String) {
          *
          * New code must use [MsgType] enum entries directly.  This map exists solely for
          * normalisation of legacy inputs (e.g. from stored preferences or third-party code)
-         * before messages are sent via [InputRouter] or [MessageRouter].
+         * before messages are sent via [com.ufo.galaxy.input.InputRouter], the sole canonical
+         * cross-device uplink routing backbone.
          *
          * | Legacy string        | v3 equivalent      |
          * |----------------------|--------------------|

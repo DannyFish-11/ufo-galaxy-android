@@ -1,25 +1,26 @@
 package com.ufo.galaxy.speech
 
 import android.util.Log
-import com.ufo.galaxy.network.MessageRouter
+import com.ufo.galaxy.input.InputRouter
 
 /**
  * Natural-language input collector.
  *
  * This class is responsible **only** for gathering user text/voice input and
- * forwarding it into the unified [MessageRouter]. It must not make any routing
+ * forwarding it into the canonical [InputRouter]. It must not make any routing
  * decisions itself — all cross-device / local branching is handled by the router.
  *
  * Usage:
  * ```kotlin
- * val inputManager = NaturalLanguageInputManager(messageRouter)
+ * val inputManager = NaturalLanguageInputManager(inputRouter)
  * inputManager.submit("打开微信")
  * ```
  *
- * @param router The [MessageRouter] that decides whether to send the input via
- *               WebSocket (cross-device) or handle it locally.
+ * @param router The [InputRouter] that decides whether to send the input via
+ *               WebSocket (cross-device) or handle it locally via [LoopController].
+ *               [InputRouter] is the sole canonical routing path for all user input.
  */
-class NaturalLanguageInputManager(private val router: MessageRouter) {
+class NaturalLanguageInputManager(private val router: InputRouter) {
 
     companion object {
         private const val TAG = "NLInputManager"
@@ -30,8 +31,8 @@ class NaturalLanguageInputManager(private val router: MessageRouter) {
      *
      * The text is trimmed; empty strings are silently ignored.
      *
-     * @return `true` if the input was routed via WebSocket, `false` if the local
-     *         fallback was used (or if the input was empty).
+     * @return `true` if the input was routed via WebSocket (cross-device uplink),
+     *         `false` if the local path was taken or the input was empty.
      */
     fun submit(text: String): Boolean {
         val trimmed = text.trim()
@@ -40,7 +41,7 @@ class NaturalLanguageInputManager(private val router: MessageRouter) {
             return false
         }
         Log.d(TAG, "submit: routing \"${trimmed.take(60)}\"")
-        return router.route(trimmed)
+        return router.route(trimmed) == InputRouter.RouteMode.CROSS_DEVICE
     }
 
     /**
