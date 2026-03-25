@@ -3,6 +3,7 @@ package com.ufo.galaxy.loop
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.local.FailureCode
 import com.ufo.galaxy.local.PlannerFallbackLadder
+import com.ufo.galaxy.nlp.GoalNormalizer
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
@@ -15,10 +16,16 @@ import com.ufo.galaxy.observability.GalaxyLogger
  * Grounding (SeeClick) is intentionally **not** performed here; it runs per-step inside
  * [ExecutorBridge] so that each step uses the freshest possible screenshot.
  *
+ * Before each plan or replan call the raw instruction is passed through [GoalNormalizer]
+ * so the planner always receives a stable, alias-resolved form.  The original instruction
+ * text is preserved in [ActionSequence.instruction] for display and logging.
+ *
  * @param plannerService MobileVLM V2-1.7B planner backend ([LocalPlannerService]).
+ * @param goalNormalizer Normalizes raw natural-language instructions before planning.
  */
 class LocalPlanner(
-    private val plannerService: LocalPlannerService
+    private val plannerService: LocalPlannerService,
+    private val goalNormalizer: GoalNormalizer = GoalNormalizer()
 ) {
 
     companion object {
@@ -47,16 +54,19 @@ class LocalPlanner(
      * @return [ActionSequence] with at least one [ActionStep] (rule-based fallback always fires).
      */
     fun plan(sessionId: String, instruction: String, screenshotBase64: String?): ActionSequence {
+        val normalizedGoal = goalNormalizer.normalize(instruction)
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "plan",
                 "session_id" to sessionId,
                 "inference_available" to isAvailable(),
-                "instruction_len" to instruction.length
+                "instruction_len" to instruction.length,
+                "normalized_len" to normalizedGoal.normalized.length,
+                "constraints" to normalizedGoal.constraints.size
             )
         )
 
-        val result = fallbackLadder.plan(sessionId, instruction, screenshotBase64)
+        val result = fallbackLadder.plan(sessionId, normalizedGoal.normalized, screenshotBase64)
 
         GalaxyLogger.log(
             TAG, mapOf(
@@ -91,12 +101,14 @@ class LocalPlanner(
         failureReason: String,
         screenshotBase64: String?
     ): ActionSequence {
+        val normalizedGoal = goalNormalizer.normalize(instruction)
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "replan",
                 "session_id" to sessionId,
                 "failed_step" to failedStep.id,
-                "reason" to failureReason.take(120)
+                "reason" to failureReason.take(120),
+                "normalized_len" to normalizedGoal.normalized.length
             )
         )
 
@@ -108,7 +120,7 @@ class LocalPlanner(
 
         val result = fallbackLadder.replan(
             sessionId = sessionId,
-            goal = instruction,
+            goal = normalizedGoal.normalized,
             failedStep = planStep,
             failureReason = failureReason,
             screenshotBase64 = screenshotBase64
