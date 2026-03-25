@@ -145,21 +145,19 @@ class GalaxyConnectionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "服务启动")
 
-        // 恢复持久化的 crossDeviceEnabled 状态，确保进程重启后路由行为一致
+        // Restore cross-device runtime state via RuntimeController — the sole lifecycle
+        // authority.  RuntimeController reads settings.crossDeviceEnabled internally;
+        // direct webSocketClient.setCrossDeviceEnabled() / connect() calls are not
+        // permitted outside RuntimeController.
         val settings = UFOGalaxyApplication.appSettings
         val savedCrossDevice = settings.crossDeviceEnabled
-        if (webSocketClient.crossDeviceEnabled != savedCrossDevice) {
-            webSocketClient.setCrossDeviceEnabled(savedCrossDevice)
-            Log.i(TAG, "服务重启：恢复 crossDeviceEnabled=$savedCrossDevice")
-        }
+        UFOGalaxyApplication.runtimeController.connectIfEnabled()
+        Log.i(TAG, "服务启动：通过 RuntimeController 恢复跨设备状态 crossDeviceEnabled=$savedCrossDevice")
 
         // 启动前台服务（常驻通知，防止后台进程被系统回收）
         startForeground(NOTIFICATION_ID, createNotification(
             if (savedCrossDevice) "跨设备模式已启用" else "本地模式"
         ))
-
-        // 连接到服务器（若 crossDeviceEnabled=false 则为 no-op）
-        webSocketClient.connect()
 
         // Pre-warm and then load models in background.
         // Pre-warming sends a lightweight health ping + optional dry-run to reduce cold start
