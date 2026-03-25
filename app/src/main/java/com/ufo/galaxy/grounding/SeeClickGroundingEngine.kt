@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonSyntaxException
 import com.ufo.galaxy.inference.LocalGroundingService
+import com.ufo.galaxy.inference.WarmupResult
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -47,14 +48,21 @@ class SeeClickGroundingEngine(
     private val gson = Gson()
     private var modelLoaded = false
 
+    /** Stores the last structured warmup failure for diagnostics; null when loaded. */
+    @Volatile
+    var lastWarmupResult: WarmupResult = WarmupResult.failure(
+        WarmupResult.WarmupStage.HEALTH_CHECK, "loadModel not yet called"
+    )
+        private set
+
     companion object {
         private const val GROUND_PATH = "/ground"
         private const val HEALTH_PATH = "/health"
     }
 
     override fun loadModel(): Boolean {
-        modelLoaded = pingEndpoint()
-        return modelLoaded
+        val result = warmupWithResult()
+        return result.success
     }
 
     override fun unloadModel() {
@@ -64,12 +72,66 @@ class SeeClickGroundingEngine(
     override fun isModelLoaded(): Boolean = modelLoaded
 
     /**
-     * Pre-warms the SeeClick inference server by pinging /health to verify reachability.
-     * Returns true if the server is available.
+     * Pre-warms the SeeClick inference server.
+     * Prefer [warmupWithResult] for structured failure reporting.
      */
-    override fun prewarm(): Boolean {
-        modelLoaded = pingEndpoint()
-        return modelLoaded
+    override fun prewarm(): Boolean = warmupWithResult().success
+
+    /**
+     * Hardened warmup that validates:
+     * 1. Health endpoint reachability.
+     * 2. Dry-run grounding round-trip with a 1×1 synthetic image.
+     * 3. Valid response shape (x and y fields present).
+     *
+     * Sets [modelLoaded] and [lastWarmupResult] as a side-effect.
+     */
+    override fun warmupWithResult(): WarmupResult {
+        // Stage 1: health check
+        if (!pingEndpoint()) {
+            val result = WarmupResult.failure(
+                WarmupResult.WarmupStage.HEALTH_CHECK,
+                "SeeClick health endpoint not reachable at $endpointUrl"
+            )
+            modelLoaded = false
+            lastWarmupResult = result
+            return result
+        }
+
+        // Stage 2: dry-run grounding with a minimal synthetic screenshot
+        val responseText = try {
+            httpPost(buildDryRunRequest())
+        } catch (e: Exception) {
+            val result = WarmupResult.failure(
+                WarmupResult.WarmupStage.DRY_RUN_INFERENCE,
+                "SeeClick dry-run grounding failed: ${e.message}"
+            )
+            modelLoaded = false
+            lastWarmupResult = result
+            return result
+        }
+
+        // Stage 3: response shape validation — x and y must be present
+        val valid = try {
+            val root = gson.fromJson(responseText, JsonObject::class.java)
+            root?.get("x") != null && root.get("y") != null
+        } catch (e: Exception) {
+            false
+        }
+
+        if (!valid) {
+            val result = WarmupResult.failure(
+                WarmupResult.WarmupStage.RESPONSE_VALIDATION,
+                "SeeClick dry-run response missing x/y coordinates"
+            )
+            modelLoaded = false
+            lastWarmupResult = result
+            return result
+        }
+
+        val result = WarmupResult.success()
+        modelLoaded = true
+        lastWarmupResult = result
+        return result
     }
 
     override fun ground(
@@ -181,4 +243,27 @@ class SeeClickGroundingEngine(
             false
         }
     }
+
+    /**
+     * Builds a minimal dry-run grounding request using a 1×1 transparent PNG encoded as
+     * base64. The response content is used only for shape validation; coordinates are
+     * discarded.
+     *
+     * The synthetic image is the smallest valid JPEG that most NCNN/MNN backends will
+     * accept without rejecting the request for a malformed screenshot.
+     */
+    private fun buildDryRunRequest(): String = gson.toJson(JsonObject().apply {
+        // Minimal 1×1 white JPEG (raw base64, no line-wrapping needed)
+        addProperty("screenshot", DRY_RUN_SCREENSHOT_B64)
+        addProperty("intent", "dry-run")
+        addProperty("width", 1)
+        addProperty("height", 1)
+        if (modelParamPath.isNotEmpty()) addProperty("model_param_path", modelParamPath)
+        if (modelBinPath.isNotEmpty()) addProperty("model_bin_path", modelBinPath)
+    })
 }
+
+private const val DRY_RUN_SCREENSHOT_B64 =
+    "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a" +
+        "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFgABAQEAAAAAAAAA" +
+        "AAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/ACoAAA=="
