@@ -439,8 +439,21 @@ class GalaxyWebSocketClient(
     
     /**
      * 发送文本消息
+     *
+     * **DEPRECATED**: Use [sendJson] with a fully-serialised AIP v3 envelope.
+     * This method bypasses the cross-device gate and is retained only for legacy
+     * compatibility during migration.
      */
+    @Deprecated(
+        message = "Use sendJson() with a fully-serialised AIP v3 envelope. " +
+            "sendJson() enforces the cross-device gate and offline queuing.",
+        replaceWith = ReplaceWith("sendJson(json)")
+    )
     fun send(text: String): Boolean {
+        if (!crossDeviceEnabled) {
+            Log.w(TAG, "[WS:BLOCKED] send() rejected: cross_device=off reason=cross_device_disabled")
+            return false
+        }
         if (!isConnected) {
             Log.w(TAG, "未连接，无法发送")
             return false
@@ -456,8 +469,21 @@ class GalaxyWebSocketClient(
     
     /**
      * 发送 AIP 消息
+     *
+     * **DEPRECATED**: Use [sendJson] with a fully-serialised AIP v3 envelope.
+     * This method bypasses the cross-device gate and is retained only for legacy
+     * compatibility during migration.
      */
+    @Deprecated(
+        message = "Use sendJson() with a fully-serialised AIP v3 envelope. " +
+            "sendJson() enforces the cross-device gate and offline queuing.",
+        replaceWith = ReplaceWith("sendJson(json)")
+    )
     fun sendAIPMessage(message: AIPMessage): Boolean {
+        if (!crossDeviceEnabled) {
+            Log.w(TAG, "[WS:BLOCKED] sendAIPMessage() rejected: cross_device=off reason=cross_device_disabled")
+            return false
+        }
         if (!isConnected) {
             Log.w(TAG, "未连接，无法发送")
             return false
@@ -593,7 +619,9 @@ class GalaxyWebSocketClient(
         }
 
         val handshakeJson = gson.toJson(handshake)
-        webSocket?.send(handshakeJson)
+        // Route through sendJson() so the cross-device gate is uniformly enforced
+        // across all uplink message types, including the initial capability_report.
+        sendJson(handshakeJson)
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
                 " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}")
@@ -614,11 +642,6 @@ class GalaxyWebSocketClient(
         errorType: String,
         errorContext: String
     ): Boolean {
-        if (!isConnected) {
-            Log.w(TAG, "未连接，无法发送诊断载荷")
-            return false
-        }
-
         val deviceId = getDeviceId()
 
         val diagnostics = JsonObject().apply {
@@ -630,7 +653,9 @@ class GalaxyWebSocketClient(
             addProperty("node_name", nodeName)
         }
 
-        return webSocket?.send(gson.toJson(diagnostics)) ?: false
+        // Route through sendJson() so the cross-device gate and connection check
+        // are applied uniformly — the same as every other cross-device uplink message.
+        return sendJson(gson.toJson(diagnostics))
     }
     
     /**
