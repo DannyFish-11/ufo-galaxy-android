@@ -75,6 +75,10 @@ data class AIPMessage(
  * AIP v3.0 能力上报载荷
  * 用于 Loop 3（自动扩展）：服务端依据此信息推断能力差距
  *
+ * This is the **canonical runtime identity payload** consumed by the server to determine
+ * device capability and readiness without any Android-specific interpretation.
+ * Every sent payload **must** contain all keys in [REQUIRED_METADATA_KEYS].
+ *
  * @param platform           Device platform identifier (e.g., "android").
  * @param device_id          Unique device identifier.
  * @param supported_actions  Low-level action capabilities (e.g., "screen_capture", "app_control").
@@ -82,9 +86,13 @@ data class AIPMessage(
  * @param capabilities       High-level autonomous capability names (e.g.,
  *                           "autonomous_goal_execution", "local_task_planning").
  *                           Empty list when not applicable.
- * @param metadata           Key-value metadata flags reported to the gateway, e.g.:
- *                           goal_execution_enabled, local_model_enabled,
- *                           cross_device_enabled, parallel_execution_enabled, device_role.
+ * @param metadata           Canonical runtime identity flags reported to the gateway.
+ *                           Must contain all 8 keys defined in [REQUIRED_METADATA_KEYS]:
+ *                           `goal_execution_enabled`, `local_model_enabled`,
+ *                           `cross_device_enabled`, `parallel_execution_enabled`,
+ *                           `device_role`, `model_ready`, `accessibility_ready`,
+ *                           `overlay_ready`. Use [AppSettings.toMetadataMap] to build
+ *                           a conforming map. Use [validate] to check completeness.
  */
 data class CapabilityReport(
     val platform: String,
@@ -93,7 +101,53 @@ data class CapabilityReport(
     val version: String = "3.0",
     val capabilities: List<String> = emptyList(),
     val metadata: Map<String, Any> = emptyMap()
-)
+) {
+    /**
+     * Returns `true` when [metadata] contains all keys in [REQUIRED_METADATA_KEYS].
+     *
+     * Call this before sending the payload to the gateway to detect incomplete metadata
+     * early. A payload with missing keys will still be sent but the server may treat
+     * the device as having unknown readiness state.
+     */
+    fun validate(): Boolean = REQUIRED_METADATA_KEYS.all { metadata.containsKey(it) }
+
+    /**
+     * Returns the set of missing required metadata keys, or an empty set when the
+     * payload is complete. Intended for logging / diagnostics only.
+     */
+    fun missingMetadataKeys(): Set<String> = REQUIRED_METADATA_KEYS - metadata.keys
+
+    companion object {
+        /**
+         * The canonical set of metadata keys that every `capability_report` payload
+         * **must** contain for the server to treat this device as a fully-identified
+         * runtime peer.
+         *
+         * | Key                       | Type    | Meaning |
+         * |---------------------------|---------|---------|
+         * | `goal_execution_enabled`  | Boolean | Device can execute autonomous goals end-to-end. |
+         * | `local_model_enabled`     | Boolean | On-device inference models are loaded and ready. |
+         * | `cross_device_enabled`    | Boolean | Cross-device collaboration switch is ON. |
+         * | `parallel_execution_enabled` | Boolean | Parallel subtask execution is active. |
+         * | `device_role`             | String  | Logical cluster role: "phone", "tablet", "hub". |
+         * | `model_ready`             | Boolean | Model files are present and verified on disk. |
+         * | `accessibility_ready`     | Boolean | HardwareKeyListener accessibility service is enabled. |
+         * | `overlay_ready`           | Boolean | SYSTEM_ALERT_WINDOW (overlay) permission is granted. |
+         *
+         * Populated in production by [AppSettings.toMetadataMap].
+         */
+        val REQUIRED_METADATA_KEYS: Set<String> = setOf(
+            "goal_execution_enabled",
+            "local_model_enabled",
+            "cross_device_enabled",
+            "parallel_execution_enabled",
+            "device_role",
+            "model_ready",
+            "accessibility_ready",
+            "overlay_ready"
+        )
+    }
+}
 
 /**
  * 结构化诊断/遥测载荷

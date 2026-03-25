@@ -275,13 +275,20 @@ class GalaxyWebSocketClient(
     /**
      * Device metadata flags included in the capability_report.
      * Updated via [setDeviceMetadata].
+     *
+     * Default initialised to the full 8-field canonical runtime identity map so that
+     * a capability_report sent before [setDeviceMetadata] is ever called (e.g. in tests)
+     * still satisfies [CapabilityReport.REQUIRED_METADATA_KEYS].
      */
     private var deviceMetadata: Map<String, Any> = mapOf(
         "goal_execution_enabled" to false,
         "local_model_enabled" to false,
         "cross_device_enabled" to crossDeviceEnabled,
         "parallel_execution_enabled" to false,
-        "device_role" to "phone"
+        "device_role" to "phone",
+        "model_ready" to false,
+        "accessibility_ready" to false,
+        "overlay_ready" to false
     )
     
     /**
@@ -334,9 +341,20 @@ class GalaxyWebSocketClient(
     /**
      * Updates the device metadata reported in the capability_report.
      *
-     * Expected keys: goal_execution_enabled, local_model_enabled, cross_device_enabled,
-     * parallel_execution_enabled, device_role.
-     * Unrecognised keys are forwarded as-is to the gateway.
+     * The supplied map must contain all keys defined in
+     * [CapabilityReport.REQUIRED_METADATA_KEYS] so that the gateway can treat the
+     * device as a fully-identified runtime peer:
+     *   - `goal_execution_enabled`     (Boolean)
+     *   - `local_model_enabled`        (Boolean)
+     *   - `cross_device_enabled`       (Boolean) — overwritten at send-time from the live flag
+     *   - `parallel_execution_enabled` (Boolean)
+     *   - `device_role`                (String)
+     *   - `model_ready`                (Boolean)
+     *   - `accessibility_ready`        (Boolean)
+     *   - `overlay_ready`              (Boolean)
+     *
+     * Use [AppSettings.toMetadataMap] to build a conforming map. Unrecognised extra keys
+     * are forwarded as-is to the gateway and ignored by servers that do not know them.
      */
     fun setDeviceMetadata(metadata: Map<String, Any>) {
         deviceMetadata = metadata
@@ -571,10 +589,24 @@ class GalaxyWebSocketClient(
     }
 
     /**
-     * 发送 AIP v3.0 能力上报（握手消息）
-     * 包含 platform、device_id、supported_actions、version，供服务端 Loop 3 推断能力差距。
-     * [modelCapabilities] and [highLevelCapabilities] are merged in to reflect current
-     * model/permission readiness. [deviceMetadata] is included for autonomous capability flags.
+     * Sends the AIP v3.0 capability_report handshake immediately after the WebSocket opens.
+     *
+     * The payload is the **canonical runtime identity** of this device. It includes:
+     *  - `platform` / `device_id` / `version` — stable device identity fields.
+     *  - `device_type` — always `"Android_Agent"`.
+     *  - `trace_id` / `route_mode` — per-session observability fields.
+     *  - `supported_actions` — merged low-level action list from [baseActions] and
+     *    [modelCapabilities] (set via [setModelCapabilities]).
+     *  - `capabilities` — high-level autonomous capability names from [highLevelCapabilities]
+     *    (set via [setHighLevelCapabilities]), defaulting to the standard 5-capability set.
+     *  - `metadata` — the full 8-field canonical runtime identity map (see
+     *    [CapabilityReport.REQUIRED_METADATA_KEYS]): `goal_execution_enabled`,
+     *    `local_model_enabled`, `parallel_execution_enabled`, `device_role`,
+     *    `model_ready`, `accessibility_ready`, `overlay_ready`, and `cross_device_enabled`
+     *    (always overwritten from the live [crossDeviceEnabled] flag at send-time).
+     *
+     * Update [deviceMetadata] via [setDeviceMetadata] (using [AppSettings.toMetadataMap])
+     * before the WS opens to ensure the handshake reflects current device state.
      */
     private fun sendHandshake() {
         val deviceId = getDeviceId()
@@ -619,6 +651,12 @@ class GalaxyWebSocketClient(
         }
 
         val handshakeJson = gson.toJson(handshake)
+        // Warn if metadata is incomplete so the issue is surfaced in logcat immediately.
+        val missing = report.missingMetadataKeys()
+        if (missing.isNotEmpty()) {
+            Log.w(TAG, "[WS:CAPABILITY_REPORT] metadata is missing required keys: $missing — " +
+                    "call setDeviceMetadata(appSettings.toMetadataMap()) before connecting")
+        }
         // Route through sendJson() so the cross-device gate is uniformly enforced
         // across all uplink message types, including the initial capability_report.
         sendJson(handshakeJson)
