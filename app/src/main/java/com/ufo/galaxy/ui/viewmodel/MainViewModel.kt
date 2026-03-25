@@ -10,7 +10,8 @@ import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
 import com.ufo.galaxy.input.InputRouter
-import com.ufo.galaxy.loop.LoopController
+import com.ufo.galaxy.local.LocalLoopOptions
+import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
@@ -379,22 +380,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Executes [goal] directly via [LoopController] (local-only path).
+     * Executes [goal] via the canonical [LocalLoopExecutor] (local-only path).
      *
-     * Retained for edge cases where direct [LoopController] access is needed outside of
+     * Retained for edge cases where direct local execution is needed outside of
      * [inputRouter]. Normal code paths use [inputRouter.route] which launches
      * [LoopController.execute] internally and delivers the result via [onLocalResult].
      */
     private suspend fun executeLocally(goal: String) {
-        val result = UFOGalaxyApplication.loopController.execute(goal)
+        val result = UFOGalaxyApplication.localLoopExecutor.execute(LocalLoopOptions(instruction = goal))
 
         // Record the outcome for the diagnostics panel.
         pushTaskId(result.sessionId, result.status)
 
         val summary = when (result.status) {
-            LoopController.STATUS_SUCCESS ->
-                "任务完成（${result.steps.size} 步）"
-            LoopController.STATUS_CANCELLED ->
+            LocalLoopResult.STATUS_SUCCESS ->
+                "任务完成（${result.stepCount} 步）"
+            LocalLoopResult.STATUS_CANCELLED ->
                 "任务取消: ${result.error ?: ""}"
             else ->
                 "任务失败: ${result.error ?: result.stopReason ?: "未知错误"}"
