@@ -1,5 +1,7 @@
 package com.ufo.galaxy.loop
 
+import com.ufo.galaxy.local.FailureCode
+
 /**
  * Execution status for a single [ActionStep].
  */
@@ -27,6 +29,7 @@ enum class StepStatus {
  * @param retries       Number of retry attempts consumed for this step.
  * @param confidence    Grounding confidence score [0.0, 1.0]; 0 when grounding was skipped.
  * @param failureReason Human-readable reason when [status] is [StepStatus.FAILED].
+ * @param failureCode   Structured [FailureCode] when [status] is [StepStatus.FAILED]; null on success.
  */
 data class ActionStep(
     val id: String,
@@ -36,7 +39,8 @@ data class ActionStep(
     val status: StepStatus = StepStatus.PENDING,
     val retries: Int = 0,
     val confidence: Float = 0f,
-    val failureReason: String? = null
+    val failureReason: String? = null,
+    val failureCode: FailureCode? = null
 )
 
 /**
@@ -61,6 +65,8 @@ data class ActionSequence(
  * @param steps       All [ActionStep]s executed (including retries and skips).
  * @param stopReason  Machine-readable stop reason (e.g., "task_complete", "max_steps_reached").
  * @param error       Human-readable error message when [status] is not "success".
+ * @param failureCode Structured [FailureCode] when [status] is "failed"; null on success.
+ * @param observations Post-action observations for each executed step; empty if not collected.
  */
 data class LoopResult(
     val sessionId: String,
@@ -68,8 +74,59 @@ data class LoopResult(
     val status: String,
     val steps: List<ActionStep>,
     val stopReason: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val failureCode: FailureCode? = null,
+    val observations: List<com.ufo.galaxy.local.StepObservation> = emptyList()
 )
+
+/**
+ * Describes the current state of a [LoopController] session.
+ */
+sealed class LoopStatus {
+    /** No session is active. */
+    object Idle : LoopStatus()
+
+    /**
+     * A session is actively running.
+     *
+     * @param sessionId     Current session identifier.
+     * @param stepIndex     1-based index of the step currently executing.
+     * @param totalSteps    Total steps planned in the current sequence (may change after replan).
+     * @param currentAction Human-readable description of the action being executed.
+     */
+    data class Running(
+        val sessionId: String,
+        val stepIndex: Int,
+        val totalSteps: Int,
+        val currentAction: String
+    ) : LoopStatus()
+
+    /**
+     * Session completed successfully.
+     *
+     * @param sessionId Session identifier.
+     * @param stepCount Total steps executed.
+     * @param summary   Human-readable completion summary.
+     */
+    data class Done(
+        val sessionId: String,
+        val stepCount: Int,
+        val summary: String
+    ) : LoopStatus()
+
+    /**
+     * Session ended due to an error or exceeded the max-steps budget.
+     *
+     * @param sessionId Session identifier.
+     * @param reason    Human-readable failure reason.
+     * @param stepIndex 1-based index of the step at which the failure occurred.
+     */
+    data class Failed(
+        val sessionId: String,
+        val reason: String,
+        val stepIndex: Int
+    ) : LoopStatus()
+}
 
 /**
  * Describes the current state of a [LoopController] session.
