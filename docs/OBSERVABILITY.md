@@ -1,4 +1,4 @@
-# Android Device-Side Observability & Tracing (Round 7)
+# Android Device-Side Observability & Tracing (Round 7 + PR-E)
 
 This document describes the structured logging, trace propagation, metrics, and
 sampling controls added incrementally across Android PRs.
@@ -94,6 +94,15 @@ All structured log entries are identified by one of the following stable tag con
 |-----|----------|--------------|
 | `GALAXY:READINESS` | `GalaxyLogger.TAG_READINESS` | Readiness self-check completed (`ReadinessChecker`) |
 | `GALAXY:DEGRADED` | `GalaxyLogger.TAG_DEGRADED` | Device is in degraded mode (any readiness flag is false) |
+
+### Local loop lifecycle (PR-E)
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
+| `GALAXY:LOCAL_LOOP:START` | `GalaxyLogger.TAG_LOCAL_LOOP_START` | Local-loop goal session starts (instruction received) |
+| `GALAXY:LOCAL_LOOP:STEP` | `GalaxyLogger.TAG_LOCAL_LOOP_STEP` | Single step completed within a local-loop session |
+| `GALAXY:LOCAL_LOOP:PLAN` | `GalaxyLogger.TAG_LOCAL_LOOP_PLAN` | Planner produced an initial plan or replan |
+| `GALAXY:LOCAL_LOOP:DONE` | `GalaxyLogger.TAG_LOCAL_LOOP_DONE` | Local-loop goal session ended (success / failure / cancel) |
 
 ---
 
@@ -219,11 +228,31 @@ GalaxyLogger.samplingConfig = SamplingConfig(
 | `galaxy.handoff.failures` | Bridge handoffs exhausting all retries |
 | `galaxy.handoff.fallbacks` | Local executions following a failed bridge handoff |
 
+### Local-loop counter metrics (PR-E)
+
+| Metric name | Description |
+|-------------|-------------|
+| `local_loop.goal.total` | Total local-loop goal sessions started |
+| `local_loop.goal.success` | Goal sessions completed successfully |
+| `local_loop.goal.failure` | Goal sessions that ended in failure |
+| `local_loop.replan.count` | Replan events triggered within a session |
+| `local_loop.fallback.count` | Fallback-tier activations (planner or grounding ladder) |
+| `local_loop.no_ui_change.count` | No-UI-change stagnation events detected |
+| `local_loop.timeout.count` | Sessions that exceeded their timeout budget |
+
 ### Latency metrics
 
 | Metric name | Description |
 |-------------|-------------|
 | `galaxy.signaling.latency_ms` | Observed signaling session duration in ms |
+
+### Local-loop latency metrics (PR-E)
+
+| Metric name | Description |
+|-------------|-------------|
+| `local_loop.step.latency_ms` | Per-step wall-clock duration in the local loop |
+| `local_loop.planner.latency_ms` | MobileVLM planner inference latency |
+| `local_loop.grounding.latency_ms` | SeeClick grounding engine latency |
 
 ### TelemetryExporter stub
 
@@ -320,6 +349,88 @@ a live snapshot of:
 | `ReadinessChecker` | `GALAXY:READINESS`, `GALAXY:DEGRADED` |
 | `WebRTCSignalingClient` | `GALAXY:SIGNAL:START`, `GALAXY:SIGNAL:STOP`, `GALAXY:WEBRTC:TURN`, `GALAXY:ERROR` |
 | `AgentRuntimeBridge` | `GALAXY:DISPATCHER:SELECT`, `GALAXY:BRIDGE:HANDOFF`, `GALAXY:ERROR` |
+| `DefaultLocalLoopExecutor` (or custom caller) | `GALAXY:LOCAL_LOOP:START`, `GALAXY:LOCAL_LOOP:STEP`, `GALAXY:LOCAL_LOOP:PLAN`, `GALAXY:LOCAL_LOOP:DONE` |
+
+---
+
+## Session Trace / Replay Scaffold (PR-E)
+
+The `trace` package provides a lightweight model to record individual local-loop
+execution sessions for diagnostics and post-mortem replay analysis.
+
+### LocalLoopTrace
+
+`LocalLoopTrace` is created at the start of a session and progressively populated:
+
+```kotlin
+val trace = LocalLoopTrace(
+    sessionId = UUID.randomUUID().toString(),
+    originalGoal = goal,
+    normalizedGoal = normalizedGoal,        // optional
+    readinessSnapshot = readiness           // optional
+)
+
+// During execution:
+trace.recordPlan(PlanOutput(stepIndex = 0, isReplan = false, actionCount = 3, latencyMs = 250L))
+trace.recordGrounding(GroundingOutput(stepId = "step_1", actionType = "tap", confidence = 0.9f, targetFound = true, latencyMs = 80L))
+trace.recordAction(ActionRecord(stepId = "step_1", actionType = "tap", intent = "Tap the icon", dispatchedAt = System.currentTimeMillis(), succeeded = true))
+trace.recordStep(stepObservation)
+
+// Session end:
+trace.complete(TerminalResult(status = TerminalResult.STATUS_SUCCESS, stopReason = "task_complete", error = null, totalSteps = trace.stepCount))
+```
+
+**Design constraints**: raw screenshots are never stored. Only summarised metadata
+(step counts, latencies, observations) is kept to minimise memory usage.
+
+### LocalLoopTraceStore
+
+`LocalLoopTraceStore` is an in-memory bounded store that retains the last
+`maxTraces` (default: 20) session traces:
+
+```kotlin
+val traceStore = LocalLoopTraceStore()   // or LocalLoopTraceStore(maxTraces = 50)
+
+traceStore.beginTrace(trace)             // register at session start
+traceStore.completeTrace(sessionId)      // log completion at session end
+
+val recent  = traceStore.allTraces()     // newest-first snapshot
+val done    = traceStore.completedTraces()
+val running = traceStore.runningTraces()
+val single  = traceStore.getTrace(sessionId)
+```
+
+Traces are held in memory only; they are not persisted across process restarts.
+Use `GalaxyLogger` / the log file for durable session history.
+
+---
+
+## Local-Loop Config Centralization (PR-E)
+
+`LocalLoopConfig` is the central configuration model for the local execution
+pipeline, consolidating values that were previously scattered across call sites.
+
+```kotlin
+// Use all defaults (matches prior behavior):
+val config = LocalLoopConfig.defaults()
+
+// Custom override:
+val config = LocalLoopConfig(
+    maxSteps = 15,
+    goalTimeoutMs = 120_000L,
+    planner = PlannerConfig(maxTokens = 1024, temperature = 0.05),
+    grounding = GroundingConfig(scaledMaxEdge = 1080),
+    fallback = FallbackConfig(enableRemoteHandoff = true)
+)
+```
+
+### Sub-configs
+
+| Type | Purpose |
+|------|---------|
+| `PlannerConfig` | MobileVLM token budget, temperature, inference timeout |
+| `GroundingConfig` | SeeClick timeout, screenshot scaling limit |
+| `FallbackConfig` | Planner/grounding fallback ladder toggles, remote handoff flag |
 
 ---
 
@@ -336,9 +447,16 @@ a live snapshot of:
 | `app/src/main/java/com/ufo/galaxy/agent/AgentRuntimeBridge.kt` | Dispatcher-select + bridge-handoff logs; span_id support |
 | `app/src/main/java/com/ufo/galaxy/ui/components/DiagnosticsScreen.kt` | Diagnostics Composable + `shareLogs()` helper |
 | `app/src/main/res/xml/file_provider_paths.xml` | FileProvider path config for log sharing |
+| `app/src/main/java/com/ufo/galaxy/config/LocalLoopConfig.kt` | Central local-loop config model (PR-E) |
+| `app/src/main/java/com/ufo/galaxy/trace/LocalLoopTrace.kt` | Session trace model with append helpers (PR-E) |
+| `app/src/main/java/com/ufo/galaxy/trace/LocalLoopTraceStore.kt` | Bounded in-memory trace store (PR-E) |
 | `app/src/test/java/com/ufo/galaxy/observability/GalaxyLoggerTest.kt` | JVM unit tests for GalaxyLogger |
 | `app/src/test/java/com/ufo/galaxy/observability/TracePropagationTest.kt` | JVM unit tests for TraceContext |
 | `app/src/test/java/com/ufo/galaxy/observability/SamplingConfigTest.kt` | JVM unit tests for SamplingConfig + logSampled/logError |
-| `app/src/test/java/com/ufo/galaxy/observability/ObservabilityMetricsTest.kt` | JVM unit tests for new counters and TelemetryExporter |
+| `app/src/test/java/com/ufo/galaxy/observability/ObservabilityMetricsTest.kt` | JVM unit tests for Round-7 counters and TelemetryExporter |
+| `app/src/test/java/com/ufo/galaxy/observability/LocalLoopMetricsTest.kt` | JVM unit tests for local-loop metrics (PR-E) |
+| `app/src/test/java/com/ufo/galaxy/trace/LocalLoopTraceTest.kt` | JVM unit tests for LocalLoopTrace (PR-E) |
+| `app/src/test/java/com/ufo/galaxy/trace/LocalLoopTraceStoreTest.kt` | JVM unit tests for LocalLoopTraceStore (PR-E) |
+| `app/src/test/java/com/ufo/galaxy/config/LocalLoopConfigTest.kt` | JVM unit tests for LocalLoopConfig (PR-E) |
 | `docs/OBSERVABILITY.md` | This document |
 

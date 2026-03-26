@@ -32,8 +32,20 @@ import java.util.concurrent.atomic.AtomicInteger
  * - [handoffFailures]       — Bridge handoffs that exhausted all retries
  * - [handoffFallbacks]      — Task executions that fell back to local after handoff failure
  *
+ * Local-loop counters:
+ * - [localLoopGoalTotal]    — Total local-loop goal sessions started
+ * - [localLoopGoalSuccess]  — Local-loop goal sessions that completed successfully
+ * - [localLoopGoalFailure]  — Local-loop goal sessions that ended in failure
+ * - [localLoopReplanCount]  — Times a replan was triggered within a local-loop session
+ * - [localLoopFallbackCount]— Times a fallback tier was used within a local-loop session
+ * - [localLoopNoUiChangeCount] — Times a no-UI-change stagnation event was detected
+ * - [localLoopTimeoutCount] — Times a local-loop session exceeded its timeout budget
+ *
  * Latency histograms (cumulative buckets, in ms):
  * - [signalingLatencyMs]    — Observed signaling round-trip latencies
+ * - [localLoopStepLatencyMs]    — Per-step wall-clock latencies in the local loop
+ * - [localLoopPlannerLatencyMs] — Planner inference latencies in the local loop
+ * - [localLoopGroundingLatencyMs] — Grounding engine latencies in the local loop
  *
  * 每 [LOG_INTERVAL_MS]（5 分钟）在本地写一次日志。
  * 若 [AppSettings.metricsEndpoint] 非空，同时 POST 一份 JSON 报告到该端点。
@@ -69,6 +81,19 @@ class MetricsRecorder(private val settings: AppSettings) {
         const val METRIC_HANDOFF_SUCCESSES       = "galaxy.handoff.successes"
         const val METRIC_HANDOFF_FAILURES        = "galaxy.handoff.failures"
         const val METRIC_HANDOFF_FALLBACKS       = "galaxy.handoff.fallbacks"
+
+        // ── Local-loop metric names ────────────────────────────────────────────
+
+        const val METRIC_LOCAL_LOOP_GOAL_TOTAL       = "local_loop.goal.total"
+        const val METRIC_LOCAL_LOOP_GOAL_SUCCESS     = "local_loop.goal.success"
+        const val METRIC_LOCAL_LOOP_GOAL_FAILURE     = "local_loop.goal.failure"
+        const val METRIC_LOCAL_LOOP_STEP_LATENCY_MS  = "local_loop.step.latency_ms"
+        const val METRIC_LOCAL_LOOP_PLANNER_LATENCY_MS   = "local_loop.planner.latency_ms"
+        const val METRIC_LOCAL_LOOP_GROUNDING_LATENCY_MS = "local_loop.grounding.latency_ms"
+        const val METRIC_LOCAL_LOOP_REPLAN_COUNT     = "local_loop.replan.count"
+        const val METRIC_LOCAL_LOOP_FALLBACK_COUNT   = "local_loop.fallback.count"
+        const val METRIC_LOCAL_LOOP_NO_UI_CHANGE_COUNT = "local_loop.no_ui_change.count"
+        const val METRIC_LOCAL_LOOP_TIMEOUT_COUNT    = "local_loop.timeout.count"
     }
 
     // ── Counters ──────────────────────────────────────────────────────────────
@@ -103,6 +128,32 @@ class MetricsRecorder(private val settings: AppSettings) {
      */
     val handoffFallbacks = AtomicInteger(0)
 
+    // ── Local-loop counters ────────────────────────────────────────────────────
+
+    /** Total local-loop goal sessions started (includes successes, failures, and cancels). */
+    val localLoopGoalTotal = AtomicInteger(0)
+
+    /** Local-loop goal sessions that completed successfully. */
+    val localLoopGoalSuccess = AtomicInteger(0)
+
+    /** Local-loop goal sessions that ended in failure (error, step budget, or timeout). */
+    val localLoopGoalFailure = AtomicInteger(0)
+
+    /** Times a replan was triggered within a local-loop session (stagnation or plan repeat). */
+    val localLoopReplanCount = AtomicInteger(0)
+
+    /**
+     * Times a fallback tier was used within a local-loop session
+     * (planner fallback ladder or grounding fallback ladder).
+     */
+    val localLoopFallbackCount = AtomicInteger(0)
+
+    /** Times a no-UI-change stagnation event was detected in a local-loop step. */
+    val localLoopNoUiChangeCount = AtomicInteger(0)
+
+    /** Times a local-loop session exceeded its configured timeout budget. */
+    val localLoopTimeoutCount = AtomicInteger(0)
+
     // ── Latency samples ────────────────────────────────────────────────────────
 
     /**
@@ -113,6 +164,30 @@ class MetricsRecorder(private val settings: AppSettings) {
         java.util.LinkedList()
     )
     private val MAX_LATENCY_SAMPLES = 256
+
+    /**
+     * Per-step wall-clock latencies in the local loop (milliseconds).
+     * Bounded to [MAX_LATENCY_SAMPLES] entries; oldest are dropped when full.
+     */
+    val localLoopStepLatencyMs: MutableList<Long> = java.util.Collections.synchronizedList(
+        java.util.LinkedList()
+    )
+
+    /**
+     * Planner inference latencies in the local loop (milliseconds).
+     * Bounded to [MAX_LATENCY_SAMPLES] entries; oldest are dropped when full.
+     */
+    val localLoopPlannerLatencyMs: MutableList<Long> = java.util.Collections.synchronizedList(
+        java.util.LinkedList()
+    )
+
+    /**
+     * Grounding engine latencies in the local loop (milliseconds).
+     * Bounded to [MAX_LATENCY_SAMPLES] entries; oldest are dropped when full.
+     */
+    val localLoopGroundingLatencyMs: MutableList<Long> = java.util.Collections.synchronizedList(
+        java.util.LinkedList()
+    )
 
     // ── Telemetry exporter ────────────────────────────────────────────────────
 
@@ -211,12 +286,7 @@ class MetricsRecorder(private val settings: AppSettings) {
 
     /** Records a latency observation for a signaling round-trip. */
     fun recordSignalingLatency(latencyMs: Long) {
-        synchronized(signalingLatencyMs) {
-            if (signalingLatencyMs.size >= MAX_LATENCY_SAMPLES) {
-                (signalingLatencyMs as java.util.LinkedList).removeFirst()
-            }
-            signalingLatencyMs.add(latencyMs)
-        }
+        appendLatency(signalingLatencyMs, latencyMs)
         telemetryExporter.recordLatency(METRIC_SIGNALING_LATENCY_MS, latencyMs)
     }
 
@@ -230,6 +300,77 @@ class MetricsRecorder(private val settings: AppSettings) {
     fun recordTurnFallback() {
         turnFallbacks.incrementAndGet()
         telemetryExporter.incrementCounter(METRIC_TURN_FALLBACKS)
+    }
+
+    // ── Local-loop recording helpers ──────────────────────────────────────────
+
+    /** Records the start of a new local-loop goal session. */
+    fun recordLocalLoopGoalStart() {
+        localLoopGoalTotal.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_GOAL_TOTAL)
+    }
+
+    /** Records a successful local-loop goal session. */
+    fun recordLocalLoopGoalSuccess() {
+        localLoopGoalSuccess.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_GOAL_SUCCESS)
+    }
+
+    /** Records a failed local-loop goal session. */
+    fun recordLocalLoopGoalFailure() {
+        localLoopGoalFailure.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_GOAL_FAILURE)
+    }
+
+    /** Records a replan event within the local loop. */
+    fun recordLocalLoopReplan() {
+        localLoopReplanCount.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_REPLAN_COUNT)
+    }
+
+    /** Records a fallback-tier activation within the local loop. */
+    fun recordLocalLoopFallback() {
+        localLoopFallbackCount.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_FALLBACK_COUNT)
+    }
+
+    /** Records a no-UI-change stagnation event in the local loop. */
+    fun recordLocalLoopNoUiChange() {
+        localLoopNoUiChangeCount.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_NO_UI_CHANGE_COUNT)
+    }
+
+    /** Records a local-loop session timeout. */
+    fun recordLocalLoopTimeout() {
+        localLoopTimeoutCount.incrementAndGet()
+        telemetryExporter.incrementCounter(METRIC_LOCAL_LOOP_TIMEOUT_COUNT)
+    }
+
+    /**
+     * Records the wall-clock latency for a single local-loop step.
+     * Bounded to [MAX_LATENCY_SAMPLES] entries.
+     */
+    fun recordLocalLoopStepLatency(latencyMs: Long) {
+        appendLatency(localLoopStepLatencyMs, latencyMs)
+        telemetryExporter.recordLatency(METRIC_LOCAL_LOOP_STEP_LATENCY_MS, latencyMs)
+    }
+
+    /**
+     * Records a planner inference latency within the local loop.
+     * Bounded to [MAX_LATENCY_SAMPLES] entries.
+     */
+    fun recordLocalLoopPlannerLatency(latencyMs: Long) {
+        appendLatency(localLoopPlannerLatencyMs, latencyMs)
+        telemetryExporter.recordLatency(METRIC_LOCAL_LOOP_PLANNER_LATENCY_MS, latencyMs)
+    }
+
+    /**
+     * Records a grounding engine latency within the local loop.
+     * Bounded to [MAX_LATENCY_SAMPLES] entries.
+     */
+    fun recordLocalLoopGroundingLatency(latencyMs: Long) {
+        appendLatency(localLoopGroundingLatencyMs, latencyMs)
+        telemetryExporter.recordLatency(METRIC_LOCAL_LOOP_GROUNDING_LATENCY_MS, latencyMs)
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────
@@ -249,6 +390,13 @@ class MetricsRecorder(private val settings: AppSettings) {
         put("handoff_successes", handoffSuccesses.get())
         put("handoff_failures", handoffFailures.get())
         put("handoff_fallbacks", handoffFallbacks.get())
+        put("local_loop_goal_total", localLoopGoalTotal.get())
+        put("local_loop_goal_success", localLoopGoalSuccess.get())
+        put("local_loop_goal_failure", localLoopGoalFailure.get())
+        put("local_loop_replan_count", localLoopReplanCount.get())
+        put("local_loop_fallback_count", localLoopFallbackCount.get())
+        put("local_loop_no_ui_change_count", localLoopNoUiChangeCount.get())
+        put("local_loop_timeout_count", localLoopTimeoutCount.get())
         put("uptime_ms", System.currentTimeMillis() - startTimeMs)
         put("ts", System.currentTimeMillis())
     }
@@ -270,6 +418,13 @@ class MetricsRecorder(private val settings: AppSettings) {
                 "handoff_ok=${handoffSuccesses.get()} " +
                 "handoff_fail=${handoffFailures.get()} " +
                 "handoff_fallback=${handoffFallbacks.get()} " +
+                "ll_goal_total=${localLoopGoalTotal.get()} " +
+                "ll_goal_ok=${localLoopGoalSuccess.get()} " +
+                "ll_goal_fail=${localLoopGoalFailure.get()} " +
+                "ll_replan=${localLoopReplanCount.get()} " +
+                "ll_fallback=${localLoopFallbackCount.get()} " +
+                "ll_no_ui=${localLoopNoUiChangeCount.get()} " +
+                "ll_timeout=${localLoopTimeoutCount.get()} " +
                 "uptime_ms=${snap.optLong("uptime_ms")}"
         )
         GalaxyLogger.log(TAG, mapOf(
@@ -284,7 +439,14 @@ class MetricsRecorder(private val settings: AppSettings) {
             "turn_fallbacks" to turnFallbacks.get(),
             "handoff_successes" to handoffSuccesses.get(),
             "handoff_failures" to handoffFailures.get(),
-            "handoff_fallbacks" to handoffFallbacks.get()
+            "handoff_fallbacks" to handoffFallbacks.get(),
+            "local_loop_goal_total" to localLoopGoalTotal.get(),
+            "local_loop_goal_success" to localLoopGoalSuccess.get(),
+            "local_loop_goal_failure" to localLoopGoalFailure.get(),
+            "local_loop_replan_count" to localLoopReplanCount.get(),
+            "local_loop_fallback_count" to localLoopFallbackCount.get(),
+            "local_loop_no_ui_change_count" to localLoopNoUiChangeCount.get(),
+            "local_loop_timeout_count" to localLoopTimeoutCount.get()
         ))
         val endpoint = settings.metricsEndpoint
         if (endpoint.isNotBlank()) {
@@ -305,6 +467,16 @@ class MetricsRecorder(private val settings: AppSettings) {
             } catch (e: Exception) {
                 Log.w(TAG, "Metrics POST failed: ${e.message}")
             }
+        }
+    }
+
+    /** Appends [value] to [list], evicting the oldest entry when [MAX_LATENCY_SAMPLES] is reached. */
+    private fun appendLatency(list: MutableList<Long>, value: Long) {
+        synchronized(list) {
+            if (list.size >= MAX_LATENCY_SAMPLES) {
+                (list as java.util.LinkedList).removeFirst()
+            }
+            list.add(value)
         }
     }
 }

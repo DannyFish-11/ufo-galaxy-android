@@ -38,6 +38,10 @@ import kotlin.concurrent.withLock
  * | `GALAXY:BRIDGE:HANDOFF`   | Bridge handoff to Agent Runtime initiated                   |
  * | `GALAXY:WEBRTC:TURN`      | TURN server config received or relay candidate applied      |
  * | `GALAXY:ERROR`            | Error event; always includes `trace_id` and `cause`        |
+ * | `GALAXY:LOCAL_LOOP:START` | Local-loop goal session started                             |
+ * | `GALAXY:LOCAL_LOOP:STEP`  | Single step completed within a local-loop session           |
+ * | `GALAXY:LOCAL_LOOP:PLAN`  | Planner produced an initial plan or replan                  |
+ * | `GALAXY:LOCAL_LOOP:DONE`  | Local-loop goal session ended (success / failure / cancel)  |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -84,6 +88,20 @@ object GalaxyLogger {
      * Optional fields: `task_id`, `session_id`, `device_id`.
      */
     const val TAG_ERROR = "GALAXY:ERROR"
+
+    // ── Local-loop lifecycle tags ─────────────────────────────────────────────
+
+    /** Fired when a local-loop goal session starts (instruction received). */
+    const val TAG_LOCAL_LOOP_START = "GALAXY:LOCAL_LOOP:START"
+
+    /** Fired after each completed step in the local loop (action dispatched + observed). */
+    const val TAG_LOCAL_LOOP_STEP = "GALAXY:LOCAL_LOOP:STEP"
+
+    /** Fired when the local loop produces a plan or replan output. */
+    const val TAG_LOCAL_LOOP_PLAN = "GALAXY:LOCAL_LOOP:PLAN"
+
+    /** Fired when a local-loop goal session ends (success, failure, or cancel). */
+    const val TAG_LOCAL_LOOP_DONE = "GALAXY:LOCAL_LOOP:DONE"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
