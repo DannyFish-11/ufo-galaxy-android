@@ -27,7 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.SharedPrefsAppSettings
-import com.ufo.galaxy.service.FloatingWindowService
+import com.ufo.galaxy.service.EnhancedFloatingService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
 import com.ufo.galaxy.ui.components.DiagnosticsScreen
@@ -163,10 +163,16 @@ class MainActivity : ComponentActivity() {
     }
     
     /**
-     * 启动悬浮窗服务
+     * Starts the canonical floating-island surface ([EnhancedFloatingService]).
+     *
+     * All floating-UI entry points — [MainActivity], [BootReceiver], and
+     * [FloatingIslandActivity] — must start [EnhancedFloatingService].
+     * The legacy [com.ufo.galaxy.service.FloatingWindowService] is retained in
+     * AndroidManifest.xml for compatibility only and is no longer started from
+     * any canonical path.
      */
     private fun startFloatingService() {
-        val floatingIntent = Intent(this, FloatingWindowService::class.java)
+        val floatingIntent = Intent(this, EnhancedFloatingService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(floatingIntent)
         } else {

@@ -19,9 +19,26 @@ import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.ui.MainActivity
 
 /**
- * 悬浮窗服务
- * 实现灵动岛式的悬浮交互界面
+ * **LEGACY floating-window service — not started by any canonical path.**
+ *
+ * The canonical floating-island surface is [EnhancedFloatingService], which is started
+ * from [com.ufo.galaxy.ui.MainActivity], [BootReceiver], and [com.ufo.galaxy.ui.FloatingIslandActivity].
+ * [EnhancedFloatingService] integrates [com.ufo.galaxy.input.InputRouter],
+ * [com.ufo.galaxy.loop.LoopController], [com.ufo.galaxy.network.GalaxyWebSocketClient],
+ * and the cross-device runtime, making it the sole authoritative floating UI entry surface.
+ *
+ * This class is retained in AndroidManifest.xml for backward compatibility (e.g., existing
+ * deep-links or device-management profiles that reference the legacy component name) but
+ * is **not** instantiated by any active runtime path. It must not be given new features;
+ * all floating-UI development belongs in [EnhancedFloatingService].
  */
+@Deprecated(
+    message = "Not started by any canonical path. EnhancedFloatingService is the sole " +
+        "authoritative floating-island surface. This class is retained for Manifest " +
+        "compatibility only.",
+    replaceWith = ReplaceWith("EnhancedFloatingService", "com.ufo.galaxy.service.EnhancedFloatingService"),
+    level = DeprecationLevel.WARNING
+)
 class FloatingWindowService : Service() {
     
     companion object {

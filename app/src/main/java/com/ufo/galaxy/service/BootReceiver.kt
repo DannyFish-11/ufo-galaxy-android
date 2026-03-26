@@ -7,8 +7,17 @@ import android.os.Build
 import android.util.Log
 
 /**
- * 开机启动接收器
- * 在设备启动时自动启动 Galaxy 服务与增强悬浮窗服务
+ * Boot-completed receiver.
+ *
+ * On [Intent.ACTION_BOOT_COMPLETED] (and the HTC/Qualcomm quick-boot equivalent)
+ * starts the two canonical background services so the device is ready to receive
+ * tasks without requiring the user to open the app:
+ *  1. [GalaxyConnectionService] — restores the cross-device WS connection if
+ *     [com.ufo.galaxy.data.AppSettings.crossDeviceEnabled] is `true`.
+ *  2. [EnhancedFloatingService] — the sole canonical floating-island surface.
+ *
+ * The legacy [FloatingWindowService] is **not** started here; all floating-UI
+ * boot paths must use [EnhancedFloatingService].
  */
 class BootReceiver : BroadcastReceiver() {
     
@@ -42,8 +51,16 @@ class BootReceiver : BroadcastReceiver() {
 }
 
 /**
- * 硬件按键接收器
- * 监听媒体按键用于唤醒
+ * Hardware media-button receiver stub.
+ *
+ * Declared in AndroidManifest.xml to receive [Intent.ACTION_MEDIA_BUTTON] broadcasts.
+ * This receiver is a **non-executing stub**: it logs the event but takes no action.
+ * It is **not** an active entry surface for the canonical runtime pipeline.
+ *
+ * Any future hardware wake-up feature must be wired through the canonical input
+ * path: [com.ufo.galaxy.speech.NaturalLanguageInputManager] →
+ * [com.ufo.galaxy.input.InputRouter] → [com.ufo.galaxy.network.GalaxyWebSocketClient]
+ * / [com.ufo.galaxy.loop.LoopController].
  */
 class HardwareKeyReceiver : BroadcastReceiver() {
     
@@ -53,8 +70,8 @@ class HardwareKeyReceiver : BroadcastReceiver() {
     
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_MEDIA_BUTTON) {
+            // Non-executing stub: log only. Hardware wake-up is not yet implemented.
             Log.d(TAG, "收到媒体按键事件")
-            // TODO: 处理硬件按键唤醒
         }
     }
 }
