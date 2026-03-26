@@ -2,6 +2,7 @@ package com.ufo.galaxy.local
 
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.observability.GalaxyLogger
+import java.util.UUID
 
 /**
  * Options controlling a single local loop execution request.
@@ -101,6 +102,13 @@ class DefaultLocalLoopExecutor(
 
     companion object {
         private const val TAG = "GALAXY:LOCAL:EXECUTOR"
+
+        /**
+         * Stop-reason used when execution is blocked because one or more critical
+         * subsystems are unavailable (accessibility service, screenshot capture, etc.).
+         * Corresponds to [LocalLoopState.UNAVAILABLE].
+         */
+        const val STOP_READINESS_UNAVAILABLE = "readiness_unavailable"
     }
 
     override suspend fun execute(options: LocalLoopOptions): LocalLoopResult {
@@ -114,6 +122,26 @@ class DefaultLocalLoopExecutor(
                 "blockers" to readiness.blockers.joinToString { it.name }
             )
         )
+
+        // Gate: block execution when one or more critical subsystems are unavailable.
+        if (readiness.state == LocalLoopState.UNAVAILABLE) {
+            val blockerList = readiness.blockers.joinToString { it.name }
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "execute_blocked",
+                    "reason" to STOP_READINESS_UNAVAILABLE,
+                    "blockers" to blockerList
+                )
+            )
+            return LocalLoopResult(
+                sessionId = UUID.randomUUID().toString(),
+                instruction = options.instruction,
+                status = LocalLoopResult.STATUS_FAILED,
+                stepCount = 0,
+                stopReason = STOP_READINESS_UNAVAILABLE,
+                error = "Local loop unavailable — blocked by: $blockerList"
+            )
+        }
 
         val loopResult = loopController.execute(options.instruction)
 
