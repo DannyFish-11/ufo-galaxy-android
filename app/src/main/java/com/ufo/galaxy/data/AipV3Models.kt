@@ -1,108 +1,78 @@
 package com.ufo.galaxy.data
 
 /**
- * AIP v3 message type identifiers for the cloud-edge task pipeline.
+ * AIP v3 类型重导出层（向后兼容）
+ * ============================================================
+ * 此文件保留用于旧代码兼容。所有活跃代码应直接从
+ * com.ufo.galaxy.protocol 导入类型。
  *
- * Step [3]  Android -> Gateway : TASK_SUBMIT
- * Step [6]  Gateway -> Android : TASK_ASSIGN
- * Step [8]  Android -> Gateway : TASK_RESULT / COMMAND_RESULT
- */
-enum class AipV3MessageType(val value: String) {
-    TASK_SUBMIT("task_submit"),
-    TASK_ASSIGN("task_assign"),
-    TASK_RESULT("task_result"),
-    COMMAND_RESULT("command_result")
-}
-
-/**
- * Execution status returned by the Android edge agent.
- */
-enum class TaskExecutionStatus(val value: String) {
-    SUCCESS("success"),
-    ERROR("error"),
-    TIMEOUT("timeout"),
-    CANCELLED("cancelled")
-}
-
-/**
- * Step [3] – Uplink payload: Android -> Gateway (AIP v3).
- * Carries the user's natural-language task text and session context.
- * No coordinate fields; the gateway is responsible only for intent understanding.
- */
-data class TaskSubmitPayload(
-    val task_text: String,
-    val device_id: String,
-    val session_id: String,
-    val context: Map<String, String> = emptyMap()
-)
-
-/**
- * Step [6] – Downlink payload: Gateway -> Android (AIP v3).
- * Carries the task goal and execution constraints.
- * Must NOT contain x/y coordinates; coordinate resolution is local-only.
+ * 已删除的重复类型（现统一从 protocol/ 导入）：
+ *   - AipV3MessageType       → 使用 protocol.MsgType
+ *   - TaskSubmitPayload      → 使用 protocol.TaskSubmitPayload
+ *   - TaskAssignPayload      → 使用 protocol.TaskAssignPayload
+ *   - TaskResultPayload      → 使用 protocol.TaskResultPayload
+ *   - CommandResultPayload   → 使用 protocol.CommandResultPayload
+ *   - AipV3Envelope         → 使用 protocol.AipMessage
  *
- * @param task_id          Unique task identifier.
- * @param goal             High-level natural-language objective for the local agent.
- * @param constraints      Optional list of natural-language constraint strings.
- * @param max_steps        Maximum number of action steps the local agent may attempt.
- * @param require_local_agent True when the edge device must execute locally via
- *                         its own Planner/Grounding/Runtime pipeline.
- */
-data class TaskAssignPayload(
-    val task_id: String,
-    val goal: String,
-    val constraints: List<String> = emptyList(),
-    val max_steps: Int,
-    val require_local_agent: Boolean
-)
-
-/**
- * Step [8] – Task-level result uplink: Android -> Gateway (AIP v3).
- * Reports the outcome of a full task execution attempt.
+ * 唯一保留的独立类型：
+ *   - TaskExecutionStatus（见下方 re-export）
  *
- * @param task_id   Echoed from the originating [TaskAssignPayload].
- * @param step_id   Index of the last executed step (1-based string).
- * @param status    Final execution status.
- * @param error     Human-readable error description, populated when status == ERROR.
- * @param snapshot  Optional Base64-encoded JPEG screenshot of the final UI state,
- *                  used by the gateway (step [9]) for cloud-side correction.
+ * 删除日期：2026-03-27
+ * 变更原因：P0 — Android 端 AIP 模型重复定义，protocol/ 为单一事实来源
  */
-data class TaskResultPayload(
-    val task_id: String,
-    val step_id: String,
-    val status: TaskExecutionStatus,
-    val error: String? = null,
-    val snapshot: String? = null
-)
+
+// ── Re-export TaskExecutionStatus from protocol package ─────────────────────
+// 旧代码（如 EdgeOrchestrator）从 com.ufo.galaxy.data.TaskExecutionStatus 导入，
+// 新代码应直接从 com.ufo.galaxy.protocol.TaskExecutionStatus 导入。
+// typealias 无法跨包使用，故此处保留独立定义（与 protocol/ 版本完全一致）。
+import com.ufo.galaxy.protocol.TaskExecutionStatus
+
+// ── 导入所有 protocol 包类型（替代本地重复定义）──────────────────────────────
+import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.protocol.TaskSubmitPayload
+import com.ufo.galaxy.protocol.TaskAssignPayload
+import com.ufo.galaxy.protocol.TaskResultPayload
+import com.ufo.galaxy.protocol.CommandResultPayload
+import com.ufo.galaxy.protocol.TaskSubmitContext
 
 /**
- * Step [8] – Command/step-level result uplink: Android -> Gateway (AIP v3).
- * Reports the outcome of a single action step within a task.
- *
- * @param task_id   Echoed from the originating [TaskAssignPayload].
- * @param step_id   Index of this individual step (1-based string).
- * @param action    Textual name of the action that was attempted.
- * @param status    Step-level execution status.
- * @param error     Human-readable error description when status == ERROR.
- * @param snapshot  Optional Base64-encoded JPEG screenshot captured after this step.
+ * 向后兼容类型别名（deprecated）
+ * 旧代码从 com.ufo.galaxy.data 包导入以下类型时可用。
+ * 新代码禁止使用，应直接从 com.ufo.galaxy.protocol 导入。
  */
-data class CommandResultPayload(
-    val task_id: String,
-    val step_id: String,
-    val action: String,
-    val status: TaskExecutionStatus,
-    val error: String? = null,
-    val snapshot: String? = null
+@Deprecated(
+    message = "Use com.ufo.galaxy.protocol.MsgType directly.",
+    replaceWith = ReplaceWith("com.ufo.galaxy.protocol.MsgType")
 )
+typealias AipV3MessageType = MsgType
 
-/**
- * Envelope wrapper for all AIP v3 messages exchanged over the WebSocket channel.
- */
-data class AipV3Envelope(
-    val version: String = "3.0",
-    val type: AipV3MessageType,
-    val payload: Any,
-    val timestamp: Long = System.currentTimeMillis(),
-    val session_id: String? = null,
-    val device_id: String? = null
+@Deprecated(
+    message = "Use com.ufo.galaxy.protocol.TaskSubmitPayload directly.",
+    replaceWith = ReplaceWith("com.ufo.galaxy.protocol.TaskSubmitPayload")
 )
+typealias TaskSubmitPayload = com.ufo.galaxy.protocol.TaskSubmitPayload
+
+@Deprecated(
+    message = "Use com.ufo.galaxy.protocol.TaskAssignPayload directly.",
+    replaceWith = ReplaceWith("com.ufo.galaxy.protocol.TaskAssignPayload")
+)
+typealias TaskAssignPayload = com.ufo.galaxy.protocol.TaskAssignPayload
+
+@Deprecated(
+    message = "Use com.ufo.galaxy.protocol.TaskResultPayload directly.",
+    replaceWith = ReplaceWith("com.ufo.galaxy.protocol.TaskResultPayload")
+)
+typealias TaskResultPayload = com.ufo.galaxy.protocol.TaskResultPayload
+
+@Deprecated(
+    message = "Use com.ufo.galaxy.protocol.CommandResultPayload directly.",
+    replaceWith = ReplaceWith("com.ufo.galaxy.protocol.CommandResultPayload")
+)
+typealias CommandResultPayload = com.ufo.galaxy.protocol.CommandResultPayload
+
+@Deprecated(
+    message = "Use com.ufo.galaxy.protocol.AipMessage directly.",
+    replaceWith = ReplaceWith("com.ufo.galaxy.protocol.AipMessage")
+)
+typealias AipV3Envelope = com.ufo.galaxy.protocol.AipMessage

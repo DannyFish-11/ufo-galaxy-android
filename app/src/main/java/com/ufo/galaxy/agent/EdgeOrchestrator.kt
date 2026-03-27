@@ -3,9 +3,9 @@ package com.ufo.galaxy.agent
 import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
-import com.ufo.galaxy.data.TaskAssignPayload
-import com.ufo.galaxy.data.TaskExecutionStatus
-import com.ufo.galaxy.data.TaskResultPayload
+import com.ufo.galaxy.protocol.TaskAssignPayload
+import com.ufo.galaxy.protocol.TaskExecutionStatus
+import com.ufo.galaxy.protocol.TaskResultPayload
 import java.io.ByteArrayOutputStream
 
 /**
