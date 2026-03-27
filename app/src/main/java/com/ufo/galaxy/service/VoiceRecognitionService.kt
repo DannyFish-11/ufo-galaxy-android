@@ -20,6 +20,17 @@ import android.util.Log
  * Any new voice-related feature must be wired through [SpeechInputManager] →
  * [InputRouter], not through this stub.
  */
+@Deprecated(
+    message = "Non-executing Manifest stub. All voice recognition is handled by " +
+        "SpeechInputManager (instantiated in MainViewModel) which feeds transcripts " +
+        "into InputRouter — the canonical input routing backbone. " +
+        "Do not add logic here; implement voice features in SpeechInputManager instead.",
+    replaceWith = ReplaceWith(
+        "SpeechInputManager(context)",
+        "com.ufo.galaxy.speech.SpeechInputManager"
+    ),
+    level = DeprecationLevel.WARNING
+)
 class VoiceRecognitionService : Service() {
 
     companion object {

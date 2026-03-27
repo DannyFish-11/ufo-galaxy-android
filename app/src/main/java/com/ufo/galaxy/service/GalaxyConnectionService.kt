@@ -159,12 +159,11 @@ class GalaxyConnectionService : Service() {
             if (savedCrossDevice) "跨设备模式已启用" else "本地模式"
         ))
 
-        // Pre-warm and then load models in background.
-        // Pre-warming sends a lightweight health ping + optional dry-run to reduce cold start
-        // latency on the first real inference call.
+        // Load models in background via LocalInferenceRuntimeManager (sole inference
+        // lifecycle authority).  Pre-warming is implicit: LocalInferenceRuntimeManager.start()
+        // calls warmupWithResult() on each service internally.
         serviceScope.launch {
             ensureModels()
-            prewarmServices()
             loadModels()
             // Re-run all readiness checks after models are loaded so the UI and
             // capability_report reflect the final state (including overlay/accessibility).
@@ -683,29 +682,46 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * Pre-warms the MobileVLM and SeeClick inference servers before full model loading.
-     * Sends a lightweight health ping to each server to establish a warm TCP connection
-     * and surface any startup failures early.
-     */
-    private fun prewarmServices() {
-        Log.i(TAG, "预热推理服务...")
-        val plannerReady = UFOGalaxyApplication.plannerService.prewarm()
-        val groundingReady = UFOGalaxyApplication.groundingService.prewarm()
-        Log.i(TAG, "预热完成: planner=$plannerReady grounding=$groundingReady")
-    }
-
-    /**
-     * 加载 MobileVLM 规划器和 SeeClick grounding 模型。
-     * 加载结果通过 setModelCapabilities 通知 gateway。
-     * Only advertises capabilities when both models are loaded.
+     * Loads the MobileVLM planner and SeeClick grounding models through the
+     * [com.ufo.galaxy.runtime.LocalInferenceRuntimeManager] — the single authority
+     * for inference runtime lifecycle on this device.
      *
-     * Persists [localModelEnabled] to [AppSettings] and updates [GalaxyWebSocketClient]
-     * device metadata so the capability_report reflects the real model state.
+     * **Canonical path**: all model start/stop decisions go through
+     * [LocalInferenceRuntimeManager]; direct calls to
+     * [com.ufo.galaxy.inference.LocalPlannerService.loadModel] and
+     * [com.ufo.galaxy.inference.LocalGroundingService.loadModel] are prohibited here
+     * to ensure state-machine transitions (Running / Degraded / Failed) are tracked by
+     * the authoritative manager and are observable in diagnostics/UI.
+     *
+     * After the manager start, model-loaded state is read back from
+     * [com.ufo.galaxy.inference.LocalPlannerService.isModelLoaded] and
+     * [com.ufo.galaxy.inference.LocalGroundingService.isModelLoaded], then the
+     * canonical metadata update (capability_report, AppSettings) is applied so the
+     * gateway capability_report reflects the real model state.
+     *
+     * Pre-warming is implicit: [LocalInferenceRuntimeManager.start] calls
+     * [LocalPlannerService.warmupWithResult] / [LocalGroundingService.warmupWithResult]
+     * internally, so no separate pre-warm step is needed before this call.
      */
-    private fun loadModels() {
-        Log.i(TAG, "开始加载本地模型...")
-        val plannerLoaded = UFOGalaxyApplication.plannerService.loadModel()
-        val groundingLoaded = UFOGalaxyApplication.groundingService.loadModel()
+    private suspend fun loadModels() {
+        Log.i(TAG, "开始加载本地模型（通过 LocalInferenceRuntimeManager）...")
+        val startResult = UFOGalaxyApplication.localInferenceRuntimeManager.start()
+        // Log a warning when the manager reports a non-usable state so that failures
+        // are surfaced in logcat without blocking the metadata update below.
+        // Metadata is always updated using isModelLoaded() so the capability_report
+        // accurately reflects the actual runtime state regardless of the start outcome.
+        when {
+            startResult.isSuccess ->
+                Log.i(TAG, "推理运行时已完全启动")
+            startResult.isUsable ->
+                Log.w(TAG, "推理运行时降级启动: managerResult=$startResult")
+            else ->
+                Log.e(TAG, "推理运行时启动失败，本地推理不可用: managerResult=$startResult")
+        }
+        // Read loaded state from the service interfaces so the metadata reflects
+        // what the manager actually achieved (Running / Degraded / Failed paths).
+        val plannerLoaded = UFOGalaxyApplication.plannerService.isModelLoaded()
+        val groundingLoaded = UFOGalaxyApplication.groundingService.isModelLoaded()
         Log.i(TAG, "模型加载完成: planner=$plannerLoaded grounding=$groundingLoaded")
 
         val assetManager = UFOGalaxyApplication.modelAssetManager
@@ -754,11 +770,15 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * 卸载本地模型以释放设备内存。
+     * Unloads the local inference models to release device memory.
+     *
+     * Delegates to [com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.stop] so that
+     * the manager's state machine transitions to [ManagerState.Stopped] and the change
+     * is observable by diagnostics / UI consumers. Asset registry is updated afterwards
+     * to keep file-level readiness in sync with runtime state.
      */
     private fun unloadModels() {
-        UFOGalaxyApplication.plannerService.unloadModel()
-        UFOGalaxyApplication.groundingService.unloadModel()
+        UFOGalaxyApplication.localInferenceRuntimeManager.stop()
         UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
         UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
         Log.i(TAG, "本地模型已卸载")

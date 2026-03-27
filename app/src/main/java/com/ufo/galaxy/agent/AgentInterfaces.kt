@@ -2,14 +2,43 @@ package com.ufo.galaxy.agent
 
 import android.graphics.Bitmap
 
+// ── Legacy agent-package interfaces ─────────────────────────────────────────
+//
+// All types below (PlannerContext, StepResult, ScreenshotCapture, LocalPlanner,
+// GUIGrounding, AgentRuntime) are LEGACY and are only referenced by the already-
+// deprecated [EdgeOrchestrator].  They are NOT part of the canonical Android
+// runtime pipeline.
+//
+// Canonical replacements:
+//  - Screenshot capture  → [com.ufo.galaxy.inference.LocalGroundingService] /
+//                          [com.ufo.galaxy.service.AccessibilityScreenshotProvider]
+//  - Task planning       → [com.ufo.galaxy.inference.LocalPlannerService] (base64-based,
+//                          JVM-testable) used by [com.ufo.galaxy.loop.LoopController]
+//  - GUI grounding       → [com.ufo.galaxy.inference.LocalGroundingService] used by
+//                          [com.ufo.galaxy.loop.ExecutorBridge]
+//  - Step execution      → [com.ufo.galaxy.agent.EdgeExecutor] (canonical task executor)
+//                          via [com.ufo.galaxy.agent.LocalGoalExecutor] →
+//                          [com.ufo.galaxy.agent.AutonomousExecutionPipeline]
+//
+// Note: [AccessibilityExecutor] is NOT deprecated — it remains the canonical interface
+// for accessibility-based device actions used by [com.ufo.galaxy.loop.ExecutorBridge].
+// ────────────────────────────────────────────────────────────────────────────
+
 /**
- * Context passed to the local planner for every planning / replanning call.
+ * **LEGACY** — only used by [EdgeOrchestrator], which is deprecated.
  *
- * @param task_id     Task identifier echoed from [TaskAssignPayload].
- * @param constraints Natural-language constraint strings from the gateway.
- * @param max_steps   Step budget remaining.
- * @param history     Ordered log of previously executed steps for replanning context.
+ * Context passed to the legacy bitmap-based [LocalPlanner] interface for every
+ * planning / replanning call.
+ *
+ * Canonical replacement: [com.ufo.galaxy.inference.LocalPlannerService] accepts
+ * goal, constraints, and an optional Base64 screenshot string directly without
+ * a wrapper context object.
  */
+@Deprecated(
+    message = "Only used by the deprecated EdgeOrchestrator. " +
+        "Use LocalPlannerService for task planning in the canonical pipeline.",
+    level = DeprecationLevel.WARNING
+)
 data class PlannerContext(
     val task_id: String,
     val constraints: List<String>,
@@ -18,13 +47,20 @@ data class PlannerContext(
 )
 
 /**
- * Result produced by a single action step executed through [AgentRuntime].
+ * **LEGACY** — only used by [AgentRuntime], which is deprecated.
  *
- * @param success       Whether the action completed without error.
- * @param action_taken  Human-readable description of the action that ran.
- * @param error         Error description when [success] is false.
- * @param snapshot      Optional Base64-encoded JPEG screenshot captured after execution.
+ * Result produced by a single action step executed through the legacy [AgentRuntime]
+ * interface.
+ *
+ * Canonical replacement: [com.ufo.galaxy.loop.ActionStep] (with [com.ufo.galaxy.loop.StepStatus])
+ * is the structured step result used by [com.ufo.galaxy.loop.LoopController] and
+ * [com.ufo.galaxy.loop.ExecutorBridge] in the canonical pipeline.
  */
+@Deprecated(
+    message = "Only used by the deprecated AgentRuntime interface. " +
+        "Use loop.ActionStep with StepStatus in the canonical pipeline.",
+    level = DeprecationLevel.WARNING
+)
 data class StepResult(
     val success: Boolean,
     val action_taken: String,
@@ -33,10 +69,23 @@ data class StepResult(
 )
 
 /**
- * Captures the current device screen.
- * Implementations must handle permission requirements and surface any
- * hardware or permission errors as exceptions.
+ * **LEGACY** — only referenced by [EdgeOrchestrator], which is deprecated.
+ *
+ * Bitmap-based screenshot capture interface. Not part of the canonical pipeline.
+ *
+ * Canonical replacement: [com.ufo.galaxy.service.AccessibilityScreenshotProvider]
+ * implements [com.ufo.galaxy.agent.EdgeExecutor.ScreenshotProvider] and returns
+ * JPEG-encoded byte arrays consumed directly by [com.ufo.galaxy.loop.LoopController].
  */
+@Deprecated(
+    message = "Not part of the canonical pipeline. " +
+        "Use AccessibilityScreenshotProvider (implements EdgeExecutor.ScreenshotProvider) instead.",
+    replaceWith = ReplaceWith(
+        "AccessibilityScreenshotProvider()",
+        "com.ufo.galaxy.service.AccessibilityScreenshotProvider"
+    ),
+    level = DeprecationLevel.WARNING
+)
 interface ScreenshotCapture {
     /**
      * Returns a [Bitmap] of the current screen.
@@ -47,9 +96,23 @@ interface ScreenshotCapture {
 }
 
 /**
- * Local task planner abstraction (Qwen2.5-7B on-device).
- * Produces ordered action steps from a high-level goal; replans when a step fails.
+ * **LEGACY** — bitmap-based planning interface only used by [EdgeOrchestrator], which is
+ * deprecated.  Not part of the canonical Android runtime pipeline.
+ *
+ * Canonical replacement: [com.ufo.galaxy.inference.LocalPlannerService] — accepts
+ * Base64-encoded screenshots, is JVM-testable, and is used by
+ * [com.ufo.galaxy.loop.LoopController] via [com.ufo.galaxy.loop.LocalPlanner].
+ *
+ * Note: this interface shares the short name `LocalPlanner` with the
+ * [com.ufo.galaxy.loop.LocalPlanner] **class** (which wraps [LocalPlannerService]
+ * for the canonical loop pipeline). They are distinct — this interface belongs to
+ * the legacy agent package; the canonical class is in the loop package.
  */
+@Deprecated(
+    message = "Bitmap-based planning interface used only by the deprecated EdgeOrchestrator. " +
+        "Use LocalPlannerService (inference package) via loop.LocalPlanner in the canonical pipeline.",
+    level = DeprecationLevel.WARNING
+)
 interface LocalPlanner {
 
     /**
@@ -87,10 +150,18 @@ interface LocalPlanner {
 }
 
 /**
- * GUI grounding abstraction (GUI-Owl-7B on-device).
- * Maps a natural-language intent and a live screenshot to physical screen coordinates.
- * Coordinates are produced exclusively on-device; the gateway never supplies x/y values.
+ * **LEGACY** — bitmap-based grounding interface only used by [EdgeOrchestrator], which is
+ * deprecated.  Not part of the canonical Android runtime pipeline.
+ *
+ * Canonical replacement: [com.ufo.galaxy.inference.LocalGroundingService] — accepts
+ * Base64-encoded screenshots, is JVM-testable, and is used by
+ * [com.ufo.galaxy.loop.ExecutorBridge] via [com.ufo.galaxy.local.GroundingFallbackLadder].
  */
+@Deprecated(
+    message = "Bitmap-based grounding interface used only by the deprecated EdgeOrchestrator. " +
+        "Use LocalGroundingService (inference package) via loop.ExecutorBridge in the canonical pipeline.",
+    level = DeprecationLevel.WARNING
+)
 interface GUIGrounding {
 
     /**
@@ -116,7 +187,12 @@ interface GUIGrounding {
 }
 
 /**
- * Accessibility action executor (Mobile-Agent → AccessibilityService).
+ * Accessibility action executor — the canonical interface for accessibility-based
+ * device actions.
+ *
+ * This interface is **not deprecated** and remains in active use by
+ * [com.ufo.galaxy.loop.ExecutorBridge] (canonical execution path) and
+ * [com.ufo.galaxy.service.AccessibilityActionExecutor] (canonical implementation).
  * All physical interactions with the device UI are routed through this interface.
  */
 interface AccessibilityExecutor {
@@ -150,13 +226,32 @@ interface AccessibilityExecutor {
 }
 
 /**
- * High-level runtime that combines [LocalPlanner], [GUIGrounding], and
- * [AccessibilityExecutor] to execute a single planned step end-to-end.
+ * **LEGACY** — not implemented by any active class; only referenced in [EdgeOrchestrator],
+ * which is deprecated.  Not part of the canonical Android runtime pipeline.
+ *
+ * Canonical replacement: [com.ufo.galaxy.agent.EdgeExecutor] handles the full
+ * `task_assign` lifecycle (screenshot → plan → ground → execute) and is the sole
+ * canonical task executor wired through [com.ufo.galaxy.service.GalaxyConnectionService]
+ * → [com.ufo.galaxy.agent.LocalGoalExecutor] → [com.ufo.galaxy.agent.AutonomousExecutionPipeline].
  */
+@Deprecated(
+    message = "Not implemented by any active class. " +
+        "Use EdgeExecutor (via LocalGoalExecutor / AutonomousExecutionPipeline) for the canonical pipeline.",
+    replaceWith = ReplaceWith(
+        "EdgeExecutor",
+        "com.ufo.galaxy.agent.EdgeExecutor"
+    ),
+    level = DeprecationLevel.WARNING
+)
 interface AgentRuntime {
     /**
      * Executes [step] using [screenshot] as the current UI state.
      * Returns a [StepResult] describing the outcome.
      */
+    // @Suppress: both parameter type LocalPlanner.PlanStep and return type StepResult
+    // are deprecated (legacy agent-package types used only by EdgeOrchestrator).
+    // The suppression keeps this deprecated interface self-consistent without
+    // cascading warnings onto each implementation site.
+    @Suppress("DEPRECATION")
     fun executeStep(step: LocalPlanner.PlanStep, screenshot: Bitmap): StepResult
 }

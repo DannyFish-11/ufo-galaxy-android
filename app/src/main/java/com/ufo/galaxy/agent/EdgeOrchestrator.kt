@@ -35,6 +35,7 @@ import java.io.ByteArrayOutputStream
         "Use EdgeExecutor (via LocalGoalExecutor / AutonomousExecutionPipeline) instead.",
     level = DeprecationLevel.WARNING
 )
+@Suppress("DEPRECATION") // Class uses deprecated AgentInterfaces (ScreenshotCapture, LocalPlanner, GUIGrounding)
 class EdgeOrchestrator(
     private val screenshotCapture: ScreenshotCapture,
     private val localPlanner: LocalPlanner,
