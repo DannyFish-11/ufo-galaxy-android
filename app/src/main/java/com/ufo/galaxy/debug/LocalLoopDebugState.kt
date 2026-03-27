@@ -1,6 +1,7 @@
 package com.ufo.galaxy.debug
 
 import com.ufo.galaxy.config.LocalLoopConfig
+import com.ufo.galaxy.history.SessionHistorySummary
 import com.ufo.galaxy.local.LocalLoopReadiness
 import com.ufo.galaxy.trace.LocalLoopTrace
 import com.ufo.galaxy.trace.TerminalResult
@@ -29,6 +30,10 @@ import com.ufo.galaxy.trace.TerminalResult
  * @property debugFlagsEnabled   Opaque map of debug-only flag names → current values.
  *                               Only flags that are supported by the active runtime are
  *                               included. Consumers must not assume any particular key.
+ * @property sessionHistory      Ordered list of recent completed sessions loaded from
+ *                               [com.ufo.galaxy.history.SessionHistoryStore] (newest-first).
+ *                               Empty when no history store is wired or the store is empty.
+ * @property historyCount        Total number of entries in the persistent session history store.
  */
 data class LocalLoopDebugState(
     val readinessSnapshot: LocalLoopReadiness? = null,
@@ -39,5 +44,7 @@ data class LocalLoopDebugState(
     val traceCount: Int = 0,
     val isRefreshing: Boolean = false,
     val diagnosticSnapshot: String? = null,
-    val debugFlagsEnabled: Map<String, Boolean> = emptyMap()
+    val debugFlagsEnabled: Map<String, Boolean> = emptyMap(),
+    val sessionHistory: List<SessionHistorySummary> = emptyList(),
+    val historyCount: Int = 0
 )

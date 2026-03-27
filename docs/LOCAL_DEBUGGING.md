@@ -130,6 +130,60 @@ The refresh icon (↻) in the top bar performs a full refresh of all fields.
 
 ---
 
+## Session History (PR-H)
+
+The debug panel now surfaces **persistent session history**: a chronological record of completed local-loop sessions that survives app restarts.
+
+### What is stored
+
+When a local-loop session ends (success, failure, or cancellation) a lightweight [SessionHistorySummary] is written to the `SessionHistoryStore`. Each summary contains:
+
+| Field | Description |
+|---|---|
+| `sessionId` | Unique identifier (UUID) |
+| `originalGoal` | Natural-language goal string |
+| `startTimeMs` / `endTimeMs` | Wall-clock session timestamps |
+| `durationMs` | Total session duration |
+| `stepCount` | Number of completed steps |
+| `status` | `success`, `failed`, or `cancelled` |
+| `stopReason` | Machine-readable stop reason (e.g. `timeout`) |
+| `error` | Human-readable error (null on success) |
+| `planCount` | Number of plans generated |
+| `actionCount` | Total actions dispatched |
+
+No raw screenshots, plan text, or large blobs are persisted — the footprint is small.
+
+### Storage details
+
+- **Persistence**: SharedPreferences key `session_history` in the `ufo_galaxy_session_history` file.
+- **Capacity**: up to 100 entries (drop-oldest when exceeded).
+- **TTL**: entries older than 7 days are automatically evicted.
+- **In-memory fallback**: if SharedPreferences is unavailable the store operates in memory only (no persistence across restarts).
+
+### Viewing session history
+
+The "Session History (N persisted)" card in the debug panel shows the most recent sessions (up to 10 by default), newest-first.
+
+### Clearing session history
+
+Tap **Clear Session History (N)** in the Developer Actions section to wipe all persisted entries. The button is disabled when the store is empty.
+
+### Integration point
+
+To persist a completed session from production code, call:
+
+```kotlin
+UFOGalaxyApplication.instance.let { app ->
+    val debugVm = (app as? UFOGalaxyApplication)?.let { ... }
+}
+// Or via the MainViewModel:
+viewModel.localLoopDebugViewModel.persistCompletedTrace(completedTrace)
+```
+
+The `SessionHistoryStore` singleton is exposed as `UFOGalaxyApplication.sessionHistoryStore` for direct access.
+
+---
+
 ## Implementation Notes
 
 ### Key classes
@@ -137,11 +191,13 @@ The refresh icon (↻) in the top bar performs a full refresh of all fields.
 | Class | Package | Purpose |
 |---|---|---|
 | `LocalLoopDebugState` | `com.ufo.galaxy.debug` | Immutable data model for the debug panel state |
-| `LocalLoopDebugViewModel` | `com.ufo.galaxy.debug` | Aggregates readiness, trace, and config; owns developer actions |
+| `LocalLoopDebugViewModel` | `com.ufo.galaxy.debug` | Aggregates readiness, trace, config, and history; owns developer actions |
 | `LocalLoopDebugPanel` | `com.ufo.galaxy.ui.components` | Composable debug panel UI |
 | `LocalLoopReadinessProvider` | `com.ufo.galaxy.local` | Source of the six-subsystem readiness snapshot (PR-E) |
 | `LocalLoopTraceStore` | `com.ufo.galaxy.trace` | In-memory store of recent execution traces (PR-E) |
 | `LocalLoopConfig` | `com.ufo.galaxy.config` | Active pipeline configuration (PR-E) |
+| `SessionHistorySummary` | `com.ufo.galaxy.history` | Serializable summary of a completed session (PR-H) |
+| `SessionHistoryStore` | `com.ufo.galaxy.history` | SharedPreferences-backed persistent session history store (PR-H) |
 
 ### Guard considerations
 

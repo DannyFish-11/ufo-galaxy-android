@@ -1,6 +1,8 @@
 package com.ufo.galaxy.debug
 
 import com.ufo.galaxy.config.LocalLoopConfig
+import com.ufo.galaxy.history.SessionHistoryStore
+import com.ufo.galaxy.history.SessionHistorySummary
 import com.ufo.galaxy.local.LocalLoopReadinessProvider
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.trace.LocalLoopTraceStore
@@ -33,6 +35,9 @@ import java.util.Locale
  * @param readinessProvider  Source of current [com.ufo.galaxy.local.LocalLoopReadiness].
  * @param traceStore         In-memory store of recent [com.ufo.galaxy.trace.LocalLoopTrace]s.
  * @param configProvider     Returns the active [LocalLoopConfig]; `null` if not wired.
+ * @param historyStore       Optional persistent session history store. When provided,
+ *                           completed traces are automatically saved on [persistCompletedTrace]
+ *                           and session history is loaded during [refresh].
  * @param coroutineScope     Scope used for launched coroutines. Defaults to a new
  *                           [CoroutineScope] bound to [Dispatchers.Main].
  * @param ioDispatcher       Dispatcher for blocking work (readiness check). Defaults to
@@ -46,6 +51,7 @@ class LocalLoopDebugViewModel(
     private val readinessProvider: LocalLoopReadinessProvider,
     private val traceStore: LocalLoopTraceStore,
     private val configProvider: (() -> LocalLoopConfig?)? = null,
+    private val historyStore: SessionHistoryStore? = null,
     private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Main),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val lastGoalProvider: (() -> String?)? = null,
@@ -78,12 +84,15 @@ class LocalLoopDebugViewModel(
                 val traces = traceStore.allTraces()
                 val latestTrace = traces.firstOrNull()
                 val lastGoal = lastGoalProvider?.invoke() ?: latestTrace?.originalGoal
+                val history = historyStore?.all() ?: emptyList()
+                val historyCount = historyStore?.size() ?: 0
 
                 GalaxyLogger.log(
                     TAG, mapOf(
                         "event" to "debug_refresh",
                         "readiness_state" to readiness.state.name,
-                        "trace_count" to traces.size
+                        "trace_count" to traces.size,
+                        "history_count" to historyCount
                     )
                 )
 
@@ -95,7 +104,9 @@ class LocalLoopDebugViewModel(
                         latestTrace = latestTrace,
                         lastTerminalResult = latestTrace?.terminalResult,
                         lastGoal = lastGoal,
-                        traceCount = traces.size
+                        traceCount = traces.size,
+                        sessionHistory = history,
+                        historyCount = historyCount
                     )
                 }
             } catch (e: Exception) {
@@ -133,6 +144,53 @@ class LocalLoopDebugViewModel(
         traceStore.clear()
         GalaxyLogger.log(TAG, mapOf("event" to "clear_trace_state"))
         _state.update { it.copy(latestTrace = null, lastTerminalResult = null, traceCount = 0) }
+    }
+
+    /**
+     * Persists a completed [com.ufo.galaxy.trace.LocalLoopTrace] to the [historyStore].
+     *
+     * Creates a [SessionHistorySummary] from the trace and saves it. No-op when
+     * [historyStore] is not wired or the trace has no terminal result.
+     *
+     * Call this from the trace completion site (e.g. [LocalLoopTraceStore.completeTrace]) to
+     * automatically capture completed sessions in the history store.
+     *
+     * @param trace The completed trace to persist.
+     */
+    fun persistCompletedTrace(trace: com.ufo.galaxy.trace.LocalLoopTrace) {
+        val store = historyStore ?: return
+        val summary = SessionHistorySummary.fromTrace(trace) ?: run {
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "persist_trace_skipped",
+                "session_id" to trace.sessionId,
+                "reason" to "no_terminal_result"
+            ))
+            return
+        }
+        store.save(summary)
+        GalaxyLogger.log(TAG, mapOf(
+            "event" to "trace_persisted_to_history",
+            "session_id" to trace.sessionId,
+            "status" to summary.status
+        ))
+        _state.update { it.copy(historyCount = store.size()) }
+    }
+
+    /**
+     * Clears all entries from the persistent [historyStore] and resets the history fields
+     * in [state].
+     *
+     * No-op (with a log) when [historyStore] is not wired.
+     */
+    fun clearSessionHistory() {
+        val store = historyStore
+        if (store == null) {
+            GalaxyLogger.log(TAG, mapOf("event" to "clear_history_skipped", "reason" to "no_history_store"))
+            return
+        }
+        store.clear()
+        GalaxyLogger.log(TAG, mapOf("event" to "session_history_cleared"))
+        _state.update { it.copy(sessionHistory = emptyList(), historyCount = 0) }
     }
 
     /**
@@ -229,6 +287,18 @@ class LocalLoopDebugViewModel(
 
             appendLine("-- Trace Store --")
             appendLine("  Retained traces: ${s.traceCount}")
+            appendLine()
+
+            appendLine("-- Session History --")
+            appendLine("  Persisted sessions: ${s.historyCount}")
+            if (s.sessionHistory.isNotEmpty()) {
+                s.sessionHistory.take(5).forEachIndexed { i, h ->
+                    appendLine("  [${i + 1}] ${h.sessionId.take(12)}… | ${h.status} | steps=${h.stepCount} | ${h.durationMs}ms")
+                }
+                if (s.sessionHistory.size > 5) {
+                    appendLine("  … and ${s.sessionHistory.size - 5} more")
+                }
+            }
         }.trimEnd()
 
         GalaxyLogger.log(

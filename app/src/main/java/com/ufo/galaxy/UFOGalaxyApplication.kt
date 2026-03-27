@@ -41,6 +41,7 @@ import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
 import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.service.ReadinessState
+import com.ufo.galaxy.history.SessionHistoryStore
 import com.ufo.galaxy.trace.LocalLoopTraceStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,6 +112,18 @@ class UFOGalaxyApplication : Application() {
 
         // LocalLoopTraceStore: in-memory store of recent local-loop execution traces (PR-E / PR-G)
         val localLoopTraceStore: LocalLoopTraceStore = LocalLoopTraceStore()
+
+        /**
+         * Persistent session history store (PR-H).
+         *
+         * Retains lightweight [com.ufo.galaxy.history.SessionHistorySummary] records for
+         * completed local-loop sessions across app restarts. Backed by SharedPreferences
+         * (initialised in [initSessionHistoryStore]); falls back to in-memory mode before
+         * [onCreate] completes.
+         */
+        @Volatile
+        var sessionHistoryStore: SessionHistoryStore = SessionHistoryStore()
+            private set
 
         /**
          * Active [LocalLoopConfig] for the local-loop pipeline; `null` before initialisation.
@@ -207,6 +220,9 @@ class UFOGalaxyApplication : Application() {
 
         // Initialise AgentRuntimeBridge (requires webSocketClient, appSettings, metricsRecorder).
         initAgentRuntimeBridge()
+
+        // Initialise persistent session history store (PR-H).
+        initSessionHistoryStore()
 
         // Ensure model files are present at startup so that local loop and cross-device
         // runtime are both ready regardless of whether GalaxyConnectionService has started.
@@ -511,6 +527,19 @@ class UFOGalaxyApplication : Application() {
             metricsRecorder = metricsRecorder
         )
         Log.d(TAG, "AgentRuntimeBridge 已初始化")
+    }
+
+    /**
+     * Initialises the [SessionHistoryStore] singleton backed by SharedPreferences (PR-H).
+     *
+     * Called after [initConfig] so that [getSharedPreferences] is available. The
+     * in-memory-only default assigned at companion-object init time is replaced with the
+     * SharedPreferences-backed instance here.
+     */
+    private fun initSessionHistoryStore() {
+        val prefs = getSharedPreferences("ufo_galaxy_session_history", Context.MODE_PRIVATE)
+        sessionHistoryStore = SessionHistoryStore(prefs = prefs)
+        Log.d(TAG, "SessionHistoryStore 已初始化 (${sessionHistoryStore.size()} entries loaded)")
     }
 
     /**
