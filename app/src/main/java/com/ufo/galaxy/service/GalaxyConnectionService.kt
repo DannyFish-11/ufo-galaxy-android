@@ -297,48 +297,69 @@ class GalaxyConnectionService : Service() {
         traceId: String,
         routeMode: String
     ) {
-        var taskResult: com.ufo.galaxy.protocol.TaskResultPayload? = null
+        var goalResult: GoalResultPayload? = null
         try {
             updateNotification("执行任务 ${taskId.take(8)}…")
-            val rawResult = UFOGalaxyApplication.edgeExecutor.handleTaskAssign(payload)
-            // Augment the result with envelope-level fields required by v3 task_result contract.
-            val resultSummary = "task execution: ${rawResult.steps.size} step(s) " +
-                "status=${rawResult.status}"
-            val result = rawResult.copy(
-                trace_id = traceId,
-                device_id = localDeviceId,
-                result_summary = resultSummary
-            )
-            taskResult = result
 
-            val envelope = AipMessage(
-                type = MsgType.TASK_RESULT,
-                payload = result,
+            // ── 统一通过 LocalGoalExecutor 处理（与 goal_execution 路径一致）─────────
+            // 将 TaskAssignPayload 规范化为 GoalExecutionPayload，
+            // 经过 GoalNormalizer.normalize() 清洗自然语言指令 + 合并 constraints，
+            // 保证 task_assign 和 goal_execution 执行相同的规范化逻辑。
+            val goalPayload = GoalExecutionPayload(
+                goal = payload.goal,
+                task_id = taskId,
+                group_id = null,
+                subtask_index = null,
+                max_steps = payload.max_steps,
+                timeout_ms = 0L,
+                constraints = payload.constraints,
+            )
+            val rawResult = UFOGalaxyApplication.localGoalExecutor.executeGoal(goalPayload)
+            goalResult = rawResult.copy(
                 correlation_id = taskId,
                 device_id = localDeviceId,
-                trace_id = traceId,
-                route_mode = routeMode
+                device_role = settings.deviceRole,
+                latency_ms = rawResult.latency_ms ?: 0L,
             )
-            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+
+            // ── 通过 GOAL_EXECUTION_RESULT 回传（与 goal_execution 路径一致）────────
+            // Android → Gateway 的结果回传统一使用 GOAL_EXECUTION_RESULT，
+            // 与 goal_execution / parallel_subtask 共用同一 handler（_handle_goal_execution_result）。
+            sendGoalResult(goalResult, traceId, routeMode)
             Log.i(
                 TAG,
-                "task_result 已回传 task_id=$taskId status=${result.status} " +
-                    "steps=${result.steps.size} trace_id=$traceId route_mode=$routeMode sent=$sent"
+                "GOAL_EXECUTION_RESULT(task_assign) 已回传 task_id=$taskId " +
+                    "status=${goalResult.status} latency=${goalResult.latency_ms}ms " +
+                    "trace_id=$traceId route_mode=$routeMode"
             )
-            updateNotification("任务 ${taskId.take(8)}: ${result.status}")
+            updateNotification("任务 ${taskId.take(8)}: ${goalResult.status}")
+        } catch (err: Exception) {
+            Log.e(TAG, "executeLocalTaskAssign 执行失败 task_id=$taskId", err)
+            val errorResult = GoalResultPayload(
+                task_id = taskId,
+                correlation_id = taskId,
+                status = EdgeExecutor.STATUS_ERROR,
+                error = err.message ?: "unknown",
+                group_id = null,
+                subtask_index = null,
+                latency_ms = 0L,
+                device_id = localDeviceId,
+                device_role = settings.deviceRole
+            )
+            sendGoalResult(errorResult, traceId, routeMode)
         } finally {
             // Unblock local loop: always called even if edgeExecutor throws.
             UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
         }
 
         // Persist result to OpenClawd memory.
-        taskResult?.let { result ->
+        goalResult?.let { result ->
             serviceScope.launch(Dispatchers.IO) {
                 storeMemoryEntry(
                     taskId = taskId,
                     goal = payload.goal,
                     status = result.status,
-                    summary = "task_assign: ${result.steps.size} step(s) executed",
+                    summary = "task_assign (via LocalGoalExecutor): ${result.steps.size} step(s) executed",
                     steps = result.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
                     routeMode = routeMode
                 )
@@ -562,6 +583,27 @@ class GalaxyConnectionService : Service() {
             payload = result,
             correlation_id = result.task_id,
             device_id = result.device_id.ifEmpty { localDeviceId }
+        )
+        webSocketClient.sendJson(gson.toJson(envelope))
+    }
+
+    /**
+     * Sends a [GoalResultPayload] as a [MsgType.GOAL_EXECUTION_RESULT] envelope with
+     * full trace context (trace_id + route_mode).
+     *
+     * Used for:
+     * - task_assign → GOAL_EXECUTION_RESULT（与 goal_execution / parallel_subtask 统一）
+     * - goal_execution → GOAL_EXECUTION_RESULT
+     * - parallel_subtask → GOAL_EXECUTION_RESULT
+     */
+    private fun sendGoalResult(result: GoalResultPayload, traceId: String, routeMode: String) {
+        val envelope = AipMessage(
+            type = MsgType.GOAL_EXECUTION_RESULT,
+            payload = result,
+            correlation_id = result.correlation_id ?: result.task_id,
+            device_id = result.device_id.ifEmpty { localDeviceId },
+            trace_id = traceId,
+            route_mode = routeMode
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }

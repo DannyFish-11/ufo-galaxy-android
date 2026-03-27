@@ -16,6 +16,11 @@ enum class MsgType(val value: String) {
     GOAL_EXECUTION("goal_execution"),
     PARALLEL_SUBTASK("parallel_subtask"),
     GOAL_RESULT("goal_result"),
+    /**
+     * Uplink: device reports the result of a goal_execution / task_assign / parallel_subtask.
+     * 对应 Python 侧 _handle_goal_execution_result。
+     */
+    GOAL_EXECUTION_RESULT("goal_execution_result"),
     /** Downlink: server requests cancellation of a running task or parallel subtask. */
     TASK_CANCEL("task_cancel"),
     /** Uplink: device acknowledges the cancellation request. */
