@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -31,6 +32,7 @@ import com.ufo.galaxy.service.EnhancedFloatingService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
 import com.ufo.galaxy.ui.components.DiagnosticsScreen
+import com.ufo.galaxy.ui.components.LocalLoopDebugPanel
 import com.ufo.galaxy.ui.components.ScrollPaperContainer
 import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
@@ -373,6 +375,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
         return
     }
 
+    // Show local-loop debug panel (debug-only entry point, PR-G)
+    if (uiState.showLocalLoopDebug) {
+        val debugVm = viewModel.localLoopDebugViewModel
+        val debugState by debugVm.state.collectAsState()
+        LocalLoopDebugPanel(
+            state = debugState,
+            onClose = { viewModel.closeLocalLoopDebug() },
+            onRefresh = { debugVm.refresh() },
+            onRerunGoal = { debugVm.rerunLastGoal() },
+            onClearTrace = { debugVm.clearTraceState() },
+            onForceReadiness = { debugVm.forceReadinessRefresh() },
+            onEmitSnapshot = { debugVm.emitDiagnosticSnapshot() }
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -385,6 +403,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         // Diagnostics button (PR15)
                         IconButton(onClick = { viewModel.toggleDiagnostics() }) {
                             Icon(Icons.Default.Info, contentDescription = "Diagnostics")
+                        }
+                        // Local-loop debug panel button (PR-G, debug-only)
+                        IconButton(onClick = { viewModel.openLocalLoopDebug() }) {
+                            Icon(Icons.Default.BugReport, contentDescription = "Local-Loop Debug")
                         }
                         // Network settings button (网络与诊断增强包)
                         IconButton(onClick = { viewModel.openNetworkSettings() }) {

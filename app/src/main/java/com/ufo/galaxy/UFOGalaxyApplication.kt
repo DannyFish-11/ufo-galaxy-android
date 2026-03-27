@@ -11,6 +11,7 @@ import com.ufo.galaxy.agent.AgentRuntimeBridge
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.LocalCollaborationAgent
 import com.ufo.galaxy.agent.LocalGoalExecutor
+import com.ufo.galaxy.config.LocalLoopConfig
 import com.ufo.galaxy.data.AppConfig
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
@@ -40,6 +41,7 @@ import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
 import com.ufo.galaxy.service.ReadinessChecker
 import com.ufo.galaxy.service.ReadinessState
+import com.ufo.galaxy.trace.LocalLoopTraceStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -105,6 +107,17 @@ class UFOGalaxyApplication : Application() {
 
         // LocalLoopReadinessProvider: single source of truth for local-loop subsystem readiness
         lateinit var localLoopReadinessProvider: LocalLoopReadinessProvider
+            private set
+
+        // LocalLoopTraceStore: in-memory store of recent local-loop execution traces (PR-E / PR-G)
+        val localLoopTraceStore: LocalLoopTraceStore = LocalLoopTraceStore()
+
+        /**
+         * Active [LocalLoopConfig] for the local-loop pipeline; `null` before initialisation.
+         * Exposed for the debug panel to inspect the current config at runtime.
+         */
+        @Volatile
+        var localLoopConfig: LocalLoopConfig? = null
             private set
 
         // LocalLoopExecutor: canonical entrypoint for UI/voice-driven local goal execution.
@@ -438,6 +451,8 @@ class UFOGalaxyApplication : Application() {
             plannerService = plannerService,
             groundingService = groundingService
         )
+        // Capture the active config so the debug panel can surface it.
+        localLoopConfig = LocalLoopConfig.defaults()
         localLoopExecutor = DefaultLocalLoopExecutor(
             loopController = loopController,
             goalExecutor = localGoalExecutor,

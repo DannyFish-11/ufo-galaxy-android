@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
+import com.ufo.galaxy.debug.LocalLoopDebugViewModel
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.local.LocalLoopOptions
 import com.ufo.galaxy.local.LocalLoopResult
@@ -100,7 +101,10 @@ data class MainUiState(
     /** True while a network diagnostics run is in progress. */
     val isDiagnosticsRunning: Boolean = false,
     /** Text of the last completed diagnostics run; null if not yet run. */
-    val diagnosticsReport: String? = null
+    val diagnosticsReport: String? = null,
+    // ── Local-loop debug panel (PR-G) ─────────────────────────────────────────
+    /** True while the local-loop debug panel is visible. Debug-only entry point. */
+    val showLocalLoopDebug: Boolean = false
 )
 
 /**
@@ -352,6 +356,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         Log.d(TAG, "发送消息: $messageText")
+
+        // Track the last submitted goal for the local-loop debug panel re-run action.
+        _lastGoal = messageText
 
         // 添加用户消息
         val userMessage = ChatMessage(
@@ -818,6 +825,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun formatDiagTs(ts: Long): String =
         SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(ts))
+
+    // ── Local-loop debug panel (PR-G) ─────────────────────────────────────────
+
+    /**
+     * Debug-only ViewModel for the local-loop debug panel.
+     *
+     * Lazily constructed the first time [openLocalLoopDebug] is called so that it
+     * has zero overhead in normal (non-debug) usage.
+     */
+    val localLoopDebugViewModel: LocalLoopDebugViewModel by lazy {
+        LocalLoopDebugViewModel(
+            readinessProvider = UFOGalaxyApplication.localLoopReadinessProvider,
+            traceStore = UFOGalaxyApplication.localLoopTraceStore,
+            configProvider = { UFOGalaxyApplication.localLoopConfig },
+            coroutineScope = viewModelScope,
+            lastGoalProvider = { _lastGoal },
+            rerunGoalAction = { goal -> sendMessage(goal) }
+        )
+    }
+
+    /** Stores the most recently submitted goal so the debug panel can offer "Re-run". */
+    private var _lastGoal: String? = null
+
+    /** Shows the local-loop debug panel and triggers an initial data refresh. */
+    fun openLocalLoopDebug() {
+        _uiState.update { it.copy(showLocalLoopDebug = true) }
+        localLoopDebugViewModel.refresh()
+    }
+
+    /** Hides the local-loop debug panel. */
+    fun closeLocalLoopDebug() {
+        _uiState.update { it.copy(showLocalLoopDebug = false) }
+    }
 
     /**
      * Returns true when [url] looks like a real, configured URL (not a placeholder).
