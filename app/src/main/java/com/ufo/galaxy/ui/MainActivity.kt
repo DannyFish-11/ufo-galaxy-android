@@ -375,7 +375,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
         return
     }
 
-    // Show local-loop debug panel (debug-only entry point, PR-G)
+    // Show local-loop debug panel (debug-only entry point, PR-G / PR-H)
     if (uiState.showLocalLoopDebug) {
         val debugVm = viewModel.localLoopDebugViewModel
         val debugState by debugVm.state.collectAsState()
@@ -386,7 +386,8 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             onRerunGoal = { debugVm.rerunLastGoal() },
             onClearTrace = { debugVm.clearTraceState() },
             onForceReadiness = { debugVm.forceReadinessRefresh() },
-            onEmitSnapshot = { debugVm.emitDiagnosticSnapshot() }
+            onEmitSnapshot = { debugVm.emitDiagnosticSnapshot() },
+            onClearHistory = { debugVm.clearSessionHistory() }
         )
         return
     }

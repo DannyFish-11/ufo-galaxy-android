@@ -57,12 +57,14 @@ class LocalLoopDebugViewModelTest {
         readiness: LocalLoopReadiness = readyReadiness(),
         store: LocalLoopTraceStore = LocalLoopTraceStore(),
         config: LocalLoopConfig? = null,
+        historyStore: com.ufo.galaxy.history.SessionHistoryStore? = null,
         lastGoal: String? = null,
         rerunAction: ((String) -> Unit)? = null
     ) = LocalLoopDebugViewModel(
         readinessProvider = fakeProvider(readiness),
         traceStore = store,
         configProvider = if (config != null) ({ config }) else null,
+        historyStore = historyStore,
         coroutineScope = CoroutineScope(Dispatchers.Unconfined),
         ioDispatcher = Dispatchers.Unconfined,
         lastGoalProvider = if (lastGoal != null) ({ lastGoal }) else null,
@@ -277,4 +279,105 @@ class LocalLoopDebugViewModelTest {
         val snapshot = vm.state.value.diagnosticSnapshot!!
         assertTrue(snapshot.contains("failed"))
     }
+
+    // ── session history (PR-H) ─────────────────────────────────────────────────
+
+    @Test
+    fun `refresh loads sessionHistory from historyStore`() = runBlocking {
+        val historyStore = com.ufo.galaxy.history.SessionHistoryStore(prefs = null)
+        historyStore.save(makeSummary("h1"))
+        historyStore.save(makeSummary("h2"))
+        val vm = viewModel(historyStore = historyStore)
+        vm.refresh()
+        assertEquals(2, vm.state.value.sessionHistory.size)
+        assertEquals(2, vm.state.value.historyCount)
+    }
+
+    @Test
+    fun `refresh without historyStore leaves sessionHistory empty`() = runBlocking {
+        val vm = viewModel(historyStore = null)
+        vm.refresh()
+        assertTrue(vm.state.value.sessionHistory.isEmpty())
+        assertEquals(0, vm.state.value.historyCount)
+    }
+
+    @Test
+    fun `persistCompletedTrace saves to historyStore`() = runBlocking {
+        val historyStore = com.ufo.galaxy.history.SessionHistoryStore(prefs = null)
+        val vm = viewModel(historyStore = historyStore)
+        val trace = LocalLoopTrace(sessionId = "pt1", originalGoal = "open camera")
+        trace.complete(TerminalResult(TerminalResult.STATUS_SUCCESS, null, null, 2))
+        vm.persistCompletedTrace(trace)
+        assertEquals(1, historyStore.size())
+        assertEquals(1, vm.state.value.historyCount)
+    }
+
+    @Test
+    fun `persistCompletedTrace is no-op for running trace`() = runBlocking {
+        val historyStore = com.ufo.galaxy.history.SessionHistoryStore(prefs = null)
+        val vm = viewModel(historyStore = historyStore)
+        val trace = LocalLoopTrace(sessionId = "pt2", originalGoal = "running goal")
+        // no complete() → still running
+        vm.persistCompletedTrace(trace)
+        assertEquals(0, historyStore.size())
+    }
+
+    @Test
+    fun `persistCompletedTrace is no-op when historyStore not wired`() = runBlocking {
+        val vm = viewModel(historyStore = null)
+        val trace = LocalLoopTrace(sessionId = "pt3", originalGoal = "goal")
+        trace.complete(TerminalResult(TerminalResult.STATUS_SUCCESS, null, null, 0))
+        vm.persistCompletedTrace(trace)  // must not throw
+    }
+
+    @Test
+    fun `clearSessionHistory empties historyStore and resets state`() = runBlocking {
+        val historyStore = com.ufo.galaxy.history.SessionHistoryStore(prefs = null)
+        historyStore.save(makeSummary("h1"))
+        val vm = viewModel(historyStore = historyStore)
+        vm.refresh()
+        assertEquals(1, vm.state.value.historyCount)
+
+        vm.clearSessionHistory()
+
+        assertEquals(0, historyStore.size())
+        assertTrue(vm.state.value.sessionHistory.isEmpty())
+        assertEquals(0, vm.state.value.historyCount)
+    }
+
+    @Test
+    fun `clearSessionHistory is no-op when historyStore not wired`() = runBlocking {
+        val vm = viewModel(historyStore = null)
+        vm.clearSessionHistory()  // must not throw
+        assertTrue(vm.state.value.sessionHistory.isEmpty())
+    }
+
+    @Test
+    fun `emitDiagnosticSnapshot includes historyCount`() = runBlocking {
+        val historyStore = com.ufo.galaxy.history.SessionHistoryStore(prefs = null)
+        historyStore.save(makeSummary("h1"))
+        val vm = viewModel(historyStore = historyStore)
+        vm.refresh()
+        vm.emitDiagnosticSnapshot()
+        val snapshot = vm.state.value.diagnosticSnapshot!!
+        assertTrue(snapshot.contains("Session History"))
+        assertTrue(snapshot.contains("1"))
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun makeSummary(sessionId: String) =
+        com.ufo.galaxy.history.SessionHistorySummary(
+            sessionId = sessionId,
+            originalGoal = "goal for $sessionId",
+            startTimeMs = 1000L,
+            endTimeMs = 2000L,
+            durationMs = 1000L,
+            stepCount = 2,
+            status = TerminalResult.STATUS_SUCCESS,
+            stopReason = null,
+            error = null,
+            planCount = 1,
+            actionCount = 2
+        )
 }

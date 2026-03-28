@@ -839,6 +839,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             readinessProvider = UFOGalaxyApplication.localLoopReadinessProvider,
             traceStore = UFOGalaxyApplication.localLoopTraceStore,
             configProvider = { UFOGalaxyApplication.localLoopConfig },
+            historyStore = UFOGalaxyApplication.sessionHistoryStore,
             coroutineScope = viewModelScope,
             lastGoalProvider = { _lastGoal },
             rerunGoalAction = { goal -> sendMessage(goal) }

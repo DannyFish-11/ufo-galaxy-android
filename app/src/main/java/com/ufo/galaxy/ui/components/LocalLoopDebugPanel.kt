@@ -13,25 +13,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ufo.galaxy.debug.LocalLoopDebugState
+import com.ufo.galaxy.history.SessionHistorySummary
 import com.ufo.galaxy.local.LocalLoopReadiness
 import com.ufo.galaxy.trace.LocalLoopTrace
 import com.ufo.galaxy.trace.TerminalResult
 
 /**
- * Debug-only panel that surfaces local-loop readiness, config, and trace information
- * for developers during local development and testing.
+ * Debug-only panel that surfaces local-loop readiness, config, trace information,
+ * and persistent session history for developers during local development and testing.
  *
  * This composable is **not** shown in production UI flows. It is surfaced only when
  * [com.ufo.galaxy.ui.viewmodel.MainUiState.showLocalLoopDebug] is `true`, which is
  * toggled via a debug-only entry point in [com.ufo.galaxy.ui.MainActivity].
  *
- * @param state          Current [LocalLoopDebugState] to display.
- * @param onClose        Called when the user taps the close button.
- * @param onRefresh      Called when the user taps the "Refresh" action.
- * @param onRerunGoal    Called when the user taps "Re-run Last Goal".
- * @param onClearTrace   Called when the user taps "Clear Trace State".
+ * @param state            Current [LocalLoopDebugState] to display.
+ * @param onClose          Called when the user taps the close button.
+ * @param onRefresh        Called when the user taps the "Refresh" action.
+ * @param onRerunGoal      Called when the user taps "Re-run Last Goal".
+ * @param onClearTrace     Called when the user taps "Clear Trace State".
  * @param onForceReadiness Called when the user taps "Force Readiness Refresh".
- * @param onEmitSnapshot Called when the user taps "Emit Snapshot".
+ * @param onEmitSnapshot   Called when the user taps "Emit Snapshot".
+ * @param onClearHistory   Called when the user taps "Clear History". No-op when `null`.
+ * @param historyMaxShown  Maximum number of history entries to display. Defaults to 10.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,7 +45,9 @@ fun LocalLoopDebugPanel(
     onRerunGoal: () -> Unit,
     onClearTrace: () -> Unit,
     onForceReadiness: () -> Unit,
-    onEmitSnapshot: () -> Unit
+    onEmitSnapshot: () -> Unit,
+    onClearHistory: (() -> Unit)? = null,
+    historyMaxShown: Int = 10
 ) {
     Scaffold(
         topBar = {
@@ -110,6 +115,14 @@ fun LocalLoopDebugPanel(
                 }
             }
 
+            // ── Session history ───────────────────────────────────────────────
+            DebugSection(title = "Session History (${state.historyCount} persisted)") {
+                SessionHistoryContent(
+                    history = state.sessionHistory,
+                    maxShown = historyMaxShown
+                )
+            }
+
             Spacer(Modifier.height(4.dp))
 
             // ── Developer actions ─────────────────────────────────────────────
@@ -141,6 +154,13 @@ fun LocalLoopDebugPanel(
                             onClick = onEmitSnapshot,
                             modifier = Modifier.weight(1f)
                         ) { Text("Emit\nSnapshot", style = MaterialTheme.typography.labelSmall) }
+                    }
+                    if (onClearHistory != null) {
+                        OutlinedButton(
+                            onClick = onClearHistory,
+                            enabled = state.historyCount > 0,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Clear Session History (${state.historyCount})", style = MaterialTheme.typography.labelSmall) }
                     }
                 }
             }
@@ -248,3 +268,34 @@ private fun TraceContent(trace: LocalLoopTrace?, terminal: TerminalResult?) {
 }
 
 private fun boolLabel(value: Boolean) = if (value) "✓ true" else "✗ false"
+
+@Composable
+private fun SessionHistoryContent(history: List<SessionHistorySummary>, maxShown: Int) {
+    if (history.isEmpty()) {
+        DebugRow("History", "(no persisted sessions)")
+        return
+    }
+    val shown = history.take(maxShown)
+    shown.forEachIndexed { index, entry ->
+        if (index > 0) {
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 4.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+        }
+        DebugRow("Session", entry.sessionId.take(16) + "…")
+        DebugRow("Status", entry.status)
+        DebugRow("Steps", entry.stepCount.toString())
+        DebugRow("Duration ms", entry.durationMs.toString())
+        if (entry.stopReason != null) DebugRow("Stop reason", entry.stopReason)
+        if (entry.error != null) DebugRow("Error", entry.error)
+    }
+    if (history.size > maxShown) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "… and ${history.size - maxShown} more",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
