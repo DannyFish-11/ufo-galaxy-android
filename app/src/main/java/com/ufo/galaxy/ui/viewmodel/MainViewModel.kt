@@ -127,7 +127,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Unified input router shared by this ViewModel and [com.ufo.galaxy.service.EnhancedFloatingService].
-     *  - crossDeviceEnabled=false → local; [LoopController.execute] runs in [viewModelScope] and
+     *  - crossDeviceEnabled=false → local; [LocalLoopExecutor.execute] runs in [viewModelScope] and
      *    [onLocalResult] updates the chat and clears isLoading.
      *  - crossDeviceEnabled=true + WS connected → AIP v3 task_submit uplink; isLoading cleared
      *    later by [handleServerMessage] / [wsListener].
@@ -138,16 +138,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         InputRouter(
             settings = UFOGalaxyApplication.appSettings,
             webSocketClient = webSocketClient,
-            loopController = UFOGalaxyApplication.loopController,
+            localLoopExecutor = UFOGalaxyApplication.localLoopExecutor,
             coroutineScope = viewModelScope,
             onLocalResult = { result ->
                 // Record the outcome for the diagnostics panel.
                 pushTaskId(result.sessionId, result.status)
 
                 val summary = when (result.status) {
-                    LoopController.STATUS_SUCCESS ->
-                        "任务完成（${result.steps.size} 步）"
-                    LoopController.STATUS_CANCELLED ->
+                    LocalLoopResult.STATUS_SUCCESS ->
+                        "任务完成（${result.stepCount} 步）"
+                    LocalLoopResult.STATUS_CANCELLED ->
                         "任务取消: ${result.error ?: ""}"
                     else ->
                         "任务失败: ${result.error ?: result.stopReason ?: "未知错误"}"
@@ -391,7 +391,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      *
      * Retained for edge cases where direct local execution is needed outside of
      * [inputRouter]. Normal code paths use [inputRouter.route] which launches
-     * [LoopController.execute] internally and delivers the result via [onLocalResult].
+     * [LocalLoopExecutor.execute] internally and delivers the result via [onLocalResult].
      */
     private suspend fun executeLocally(goal: String) {
         val result = UFOGalaxyApplication.localLoopExecutor.execute(LocalLoopOptions(instruction = goal))

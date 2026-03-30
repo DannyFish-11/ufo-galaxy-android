@@ -4,8 +4,9 @@ import android.os.Build
 import android.util.Log
 import com.google.gson.Gson
 import com.ufo.galaxy.data.AppSettings
-import com.ufo.galaxy.loop.LoopController
-import com.ufo.galaxy.loop.LoopResult
+import com.ufo.galaxy.local.LocalLoopExecutor
+import com.ufo.galaxy.local.LocalLoopOptions
+import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -18,12 +19,16 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Unified input router used by both [com.ufo.galaxy.ui.viewmodel.MainViewModel] and
- * [com.ufo.galaxy.service.EnhancedFloatingService] to dispatch text and voice input.
+ * **Single authoritative task/input dispatch point** for all user-originated input.
  *
- * Routing rules (P2 strong-consistency):
+ * Used by both [com.ufo.galaxy.ui.viewmodel.MainViewModel] and
+ * [com.ufo.galaxy.service.EnhancedFloatingService] to dispatch text and voice input.
+ * Voice input from [com.ufo.galaxy.speech.NaturalLanguageInputManager] also routes
+ * through this class — it must not bypass it to send input directly.
+ *
+ * ## Routing rules (canonical mode semantics):
  *  - [AppSettings.crossDeviceEnabled] = false →
- *    **always** local; [LoopController.execute] is launched in [coroutineScope];
+ *    **always** local; [LocalLoopExecutor.execute] is launched in [coroutineScope];
  *    result delivered to [onLocalResult]. Task-submit uplink is strictly forbidden.
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS connected →
  *    wraps [text] in a [TaskSubmitPayload] AIP v3 envelope and sends it uplink via
@@ -31,26 +36,37 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS NOT connected →
  *    [onError] is invoked with a human-readable reason; does NOT silently fall back to local.
  *
+ * ## Entry points that MUST route through this class:
+ *  - Main UI text input ([com.ufo.galaxy.ui.viewmodel.MainViewModel])
+ *  - Floating window text input ([com.ufo.galaxy.service.EnhancedFloatingService])
+ *  - Voice/NLP input ([com.ufo.galaxy.speech.NaturalLanguageInputManager])
+ *
+ * Gateway-delivered inbound tasks (task_assign, goal_execution, parallel_subtask) arrive
+ * from the server; they follow a separate inbound path through
+ * [com.ufo.galaxy.service.GalaxyConnectionService] and are NOT dispatched through this class.
+ *
  * Both entry points must route all user input (text and voice) through **this single class**
  * to guarantee consistent behaviour and avoid duplicate remote-handoff logic.
  *
- * @param settings        Persistent settings; [AppSettings.crossDeviceEnabled] gates the WS path.
- * @param webSocketClient Live gateway client; used to check connectivity and send messages.
- *                        [com.ufo.galaxy.network.GalaxyWebSocketClient] implements this interface;
- *                        tests inject a lightweight fake.
- * @param loopController  Local closed-loop automation controller; invoked when cross-device is OFF.
- * @param coroutineScope  Scope in which local [LoopController.execute] is launched (e.g. viewModelScope).
- * @param onLocalResult   Called on the IO thread when a local task completes or fails.
- *                        Use to update UI or log results. Optional.
- * @param onError         Called with a human-readable reason when cross-device routing fails
- *                        (WS unavailable or send error). Callers must surface this in the UI.
+ * @param settings          Persistent settings; [AppSettings.crossDeviceEnabled] gates the WS path.
+ * @param webSocketClient   Live gateway client; used to check connectivity and send messages.
+ *                          [com.ufo.galaxy.network.GalaxyWebSocketClient] implements this interface;
+ *                          tests inject a lightweight fake.
+ * @param localLoopExecutor Canonical local execution entrypoint; invoked when cross-device is OFF.
+ *                          Must be [com.ufo.galaxy.local.DefaultLocalLoopExecutor] in production,
+ *                          which enforces readiness checks before delegating to [LoopController].
+ * @param coroutineScope    Scope in which local [LocalLoopExecutor.execute] is launched (e.g. viewModelScope).
+ * @param onLocalResult     Called on the IO thread when a local task completes or fails.
+ *                          Use to update UI or log results. Optional.
+ * @param onError           Called with a human-readable reason when cross-device routing fails
+ *                          (WS unavailable or send error). Callers must surface this in the UI.
  */
 class InputRouter(
     private val settings: AppSettings,
     private val webSocketClient: GatewayClient,
-    private val loopController: LoopController,
+    private val localLoopExecutor: LocalLoopExecutor,
     private val coroutineScope: CoroutineScope,
-    private val onLocalResult: ((LoopResult) -> Unit)? = null,
+    private val onLocalResult: ((LocalLoopResult) -> Unit)? = null,
     private val onError: ((reason: String) -> Unit)? = null
 ) {
     private val gson = Gson()
@@ -147,19 +163,22 @@ class InputRouter(
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
-     * Launches [LoopController.execute] for [text] in [coroutineScope] on [Dispatchers.IO].
-     * On completion, [onLocalResult] is invoked with the [LoopResult].
+     * Launches [LocalLoopExecutor.execute] for [text] in [coroutineScope] on [Dispatchers.IO].
+     *
+     * Routes through [localLoopExecutor] (the canonical local execution entrypoint) which
+     * enforces a readiness check before delegating to [com.ufo.galaxy.loop.LoopController].
+     * On completion, [onLocalResult] is invoked with the [LocalLoopResult].
      */
     private fun launchLocal(text: String) {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val result = loopController.execute(text)
+                val result = localLoopExecutor.execute(LocalLoopOptions(instruction = text))
                 GalaxyLogger.log(
                     TAG, mapOf(
                         "event" to "local_done",
                         "session_id" to result.sessionId,
                         "status" to result.status,
-                        "steps" to result.steps.size
+                        "steps" to result.stepCount
                     )
                 )
                 onLocalResult?.invoke(result)

@@ -33,7 +33,7 @@ import androidx.core.app.NotificationCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
-import com.ufo.galaxy.loop.LoopController
+import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
@@ -123,7 +123,8 @@ class EnhancedFloatingService : Service() {
 
     /**
      * Unified input router: cross-device enabled + WS connected → AIP v3 task_submit uplink;
-     * local (cross-device OFF) → [LoopController] closed-loop pipeline launched in [serviceScope].
+     * local (cross-device OFF) → [com.ufo.galaxy.local.LocalLoopExecutor] closed-loop pipeline
+     * launched in [serviceScope].
      * [onError] surfaces WS-unavailable errors directly in the floating status label.
      * [onLocalResult] updates status and hides the loading indicator on task completion.
      */
@@ -131,16 +132,16 @@ class EnhancedFloatingService : Service() {
         InputRouter(
             settings = UFOGalaxyApplication.appSettings,
             webSocketClient = webSocketClient,
-            loopController = UFOGalaxyApplication.loopController,
+            localLoopExecutor = UFOGalaxyApplication.localLoopExecutor,
             coroutineScope = serviceScope,
             onLocalResult = { result ->
                 lastTaskId = result.sessionId.take(8)
-                taskStatus = if (result.status == LoopController.STATUS_SUCCESS) {
+                taskStatus = if (result.status == LocalLoopResult.STATUS_SUCCESS) {
                     STATUS_SUCCESS
                 } else {
                     STATUS_ERROR
                 }
-                Log.i(TAG, "[FLOAT] local loop done status=${result.status} steps=${result.steps.size}")
+                Log.i(TAG, "[FLOAT] local loop done status=${result.status} steps=${result.stepCount}")
                 updateStatusLabel()
                 loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
             },
