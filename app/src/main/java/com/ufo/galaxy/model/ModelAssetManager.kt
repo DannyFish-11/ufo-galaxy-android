@@ -69,12 +69,20 @@ class ModelAssetManager(val modelsDir: File) {
 
         /**
          * Expected SHA-256 checksums for each model file.
-         * Set to null to skip verification (useful during development).
-         * Update these constants when deploying new model weights.
+         *
+         * When non-null, [verifyModel] computes the file's SHA-256 digest and rejects any file
+         * whose digest does not match, returning [ModelStatus.CORRUPTED].
+         *
+         * When null, verification is **explicitly bypassed** and a warning is emitted to logcat.
+         * This bypass is intentional during development/prototyping only. Before shipping a
+         * production build, replace these nulls with the actual digests of the deployed model
+         * files so that [verifyModel] can detect corrupted or tampered weights.
+         *
+         * Update these constants whenever new model weights are deployed.
          */
-        val MOBILEVLM_SHA256: String? = null
-        val SEECLICK_SHA256: String? = null
-        val SEECLICK_BIN_SHA256: String? = null
+        val MOBILEVLM_SHA256: String? = null   // TODO: set before production deployment
+        val SEECLICK_SHA256: String? = null    // TODO: set before production deployment
+        val SEECLICK_BIN_SHA256: String? = null // TODO: set before production deployment
 
         /**
          * Remote download URLs for each model file.
@@ -136,9 +144,16 @@ class ModelAssetManager(val modelsDir: File) {
                 Log.e(TAG, "Model '$modelId' checksum mismatch — expected=${info.expectedSha256} actual=$actual")
                 return ModelStatus.CORRUPTED
             }
+        } else {
+            // Verification is explicitly bypassed because no expected SHA-256 is configured.
+            // This is acceptable during development but MUST be addressed before production
+            // deployment. Set the corresponding *_SHA256 constant in the companion object to
+            // enable integrity checking.
+            Log.w(TAG, "Model '$modelId' SHA-256 verification SKIPPED — expectedSha256 is null. " +
+                "Set the corresponding SHA-256 constant to enable integrity checking.")
         }
         info.status = ModelStatus.READY
-        Log.i(TAG, "Model '$modelId' verified at ${file.absolutePath}")
+        Log.i(TAG, "Model '$modelId' ready at ${file.absolutePath}")
         return ModelStatus.READY
     }
 
