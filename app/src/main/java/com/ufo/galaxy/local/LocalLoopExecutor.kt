@@ -1,5 +1,6 @@
 package com.ufo.galaxy.local
 
+import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.observability.GalaxyLogger
 import java.util.UUID
@@ -92,11 +93,27 @@ interface LocalLoopExecutor {
  * This class is **exclusively the UI/voice-driven local path**. For gateway-delivered
  * goal execution see [com.ufo.galaxy.agent.AutonomousExecutionPipeline].
  *
+ * ## Authority model
+ * - [loopController] owns the full closed-loop natural-language session pipeline.
+ * - [goalExecutor] is the canonical step-level execution core for gateway-style structured
+ *   tasks executed locally (goal_execution / parallel_subtask / task_assign). It is held
+ *   here so that both local-loop and gateway-local paths share the same execution authority
+ *   root. Gateway tasks continue to flow through [AutonomousExecutionPipeline] → [goalExecutor];
+ *   this field is available for any future unification of the two paths.
+ * - [readinessProvider] gates execution: if critical subsystems are unavailable the
+ *   request is rejected with a structured [LocalLoopResult.STATUS_FAILED] result before
+ *   any model inference is attempted.
+ *
  * @param loopController     Closed-loop orchestrator for natural-language instructions.
- * @param readinessProvider  Used to log the readiness state before execution starts.
+ * @param goalExecutor       Canonical local execution core for structured (gateway-style) goals.
+ *                           Gateway tasks must always go through [AutonomousExecutionPipeline] →
+ *                           [goalExecutor]; this reference is stored here to make the shared
+ *                           authority boundary explicit.
+ * @param readinessProvider  Used to log and gate the readiness state before execution starts.
  */
 class DefaultLocalLoopExecutor(
     private val loopController: LoopController,
+    private val goalExecutor: LocalGoalExecutor,
     private val readinessProvider: LocalLoopReadinessProvider
 ) : LocalLoopExecutor {
 
