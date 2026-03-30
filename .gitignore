@@ -14,6 +14,16 @@ local.properties
 *.aab
 app/build/
 
-# Keystore
+# Keystore files and signing secrets — never commit these
 *.jks
 *.keystore
+keystore.env
+signing.properties
+
+# NDK / native build
+.cxx/
+.externalNativeBuild/
+
+# Profiling / captures
+*.hprof
+captures/
