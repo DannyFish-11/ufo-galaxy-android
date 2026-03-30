@@ -289,4 +289,92 @@ class AppSettingsTest {
         val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true)
         assertEquals("https://100.64.0.1:8765", settings.effectiveRestBaseUrl())
     }
+
+    // ── Local-chain execution settings (PR-B) ────────────────────────────────
+
+    @Test
+    fun `default plannerMaxTokens matches compile-time fallback`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS, settings.plannerMaxTokens)
+    }
+
+    @Test
+    fun `default plannerTemperature matches compile-time fallback`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE, settings.plannerTemperature, 0.0001)
+    }
+
+    @Test
+    fun `default plannerTimeoutMs matches compile-time fallback`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_PLANNER_TIMEOUT_MS, settings.plannerTimeoutMs)
+    }
+
+    @Test
+    fun `default groundingTimeoutMs matches compile-time fallback`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_GROUNDING_TIMEOUT_MS, settings.groundingTimeoutMs)
+    }
+
+    @Test
+    fun `default scaledMaxEdge matches compile-time fallback`() {
+        val settings = InMemoryAppSettings()
+        assertEquals(SharedPrefsAppSettings.DEFAULT_SCALED_MAX_EDGE, settings.scaledMaxEdge)
+    }
+
+    @Test
+    fun `plannerMaxTokens can be overridden`() {
+        val settings = InMemoryAppSettings()
+        settings.plannerMaxTokens = 1024
+        assertEquals(1024, settings.plannerMaxTokens)
+    }
+
+    @Test
+    fun `plannerTemperature can be overridden`() {
+        val settings = InMemoryAppSettings()
+        settings.plannerTemperature = 0.7
+        assertEquals(0.7, settings.plannerTemperature, 0.0001)
+    }
+
+    @Test
+    fun `groundingTimeoutMs can be overridden`() {
+        val settings = InMemoryAppSettings()
+        settings.groundingTimeoutMs = 5000
+        assertEquals(5000, settings.groundingTimeoutMs)
+    }
+
+    @Test
+    fun `scaledMaxEdge zero disables downscaling`() {
+        val settings = InMemoryAppSettings(scaledMaxEdge = 0)
+        assertEquals(0, settings.scaledMaxEdge)
+    }
+
+    @Test
+    fun `SharedPrefsAppSettings local-chain key constants are stable`() {
+        assertEquals("planner_max_tokens", SharedPrefsAppSettings.KEY_PLANNER_MAX_TOKENS)
+        assertEquals("planner_temperature", SharedPrefsAppSettings.KEY_PLANNER_TEMPERATURE)
+        assertEquals("planner_timeout_ms", SharedPrefsAppSettings.KEY_PLANNER_TIMEOUT_MS)
+        assertEquals("grounding_timeout_ms", SharedPrefsAppSettings.KEY_GROUNDING_TIMEOUT_MS)
+        assertEquals("scaled_max_edge", SharedPrefsAppSettings.KEY_SCALED_MAX_EDGE)
+    }
+
+    @Test
+    fun `compile-time fallback DEFAULT_PLANNER_MAX_TOKENS is 512`() {
+        assertEquals(512, SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS)
+    }
+
+    @Test
+    fun `compile-time fallback DEFAULT_PLANNER_TIMEOUT_MS is 30000`() {
+        assertEquals(30_000, SharedPrefsAppSettings.DEFAULT_PLANNER_TIMEOUT_MS)
+    }
+
+    @Test
+    fun `compile-time fallback DEFAULT_GROUNDING_TIMEOUT_MS is 15000`() {
+        assertEquals(15_000, SharedPrefsAppSettings.DEFAULT_GROUNDING_TIMEOUT_MS)
+    }
+
+    @Test
+    fun `compile-time fallback DEFAULT_SCALED_MAX_EDGE is 720`() {
+        assertEquals(720, SharedPrefsAppSettings.DEFAULT_SCALED_MAX_EDGE)
+    }
 }

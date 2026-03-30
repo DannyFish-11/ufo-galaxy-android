@@ -251,8 +251,11 @@ class UFOGalaxyApplication : Application() {
      *
      * [appSettings] is initialised first so that the persisted [AppSettings.crossDeviceEnabled]
      * value (default: false) can be used to populate [AppConfig] and the WebSocket client.
-     * Build-time [BuildConfig.CROSS_DEVICE_ENABLED] serves only as a compile-time default;
-     * the runtime toggle stored in [SharedPrefsAppSettings] takes precedence.
+     *
+     * [AppConfig] now holds only build-time / identity fields.  All local-chain execution
+     * settings (planner tokens, timeouts, scaling) are read from [appSettings], which seeds
+     * its defaults from `assets/config.properties` and falls back to compile-time constants.
+     * Build-time [BuildConfig] fields for those settings serve as last-resort fallbacks only.
      */
     private fun initConfig() {
         appSettings = SharedPrefsAppSettings(this)
@@ -260,12 +263,7 @@ class UFOGalaxyApplication : Application() {
             serverUrl = BuildConfig.GALAXY_SERVER_URL,
             apiVersion = BuildConfig.API_VERSION,
             isDebug = BuildConfig.DEBUG,
-            crossDeviceEnabled = appSettings.crossDeviceEnabled,
-            plannerMaxTokens = BuildConfig.PLANNER_MAX_TOKENS,
-            plannerTemperature = BuildConfig.PLANNER_TEMPERATURE,
-            plannerTimeoutMs = BuildConfig.PLANNER_TIMEOUT_MS,
-            groundingTimeoutMs = BuildConfig.GROUNDING_TIMEOUT_MS,
-            scaledMaxEdge = BuildConfig.SCALED_MAX_EDGE
+            crossDeviceEnabled = appSettings.crossDeviceEnabled
         )
         Log.d(TAG, "配置已加载: serverUrl=${appConfig.serverUrl} crossDevice=${appSettings.crossDeviceEnabled}")
     }
@@ -416,18 +414,21 @@ class UFOGalaxyApplication : Application() {
      * Model loading (server ping / prewarm) is performed by GalaxyConnectionService on start.
      * Model file paths from ModelAssetManager are passed to each engine so that the
      * inference server can locate the weight files on first launch.
+     *
+     * All local-chain execution settings are sourced from [appSettings] — the single
+     * effective settings authority — rather than from [AppConfig] or [BuildConfig] directly.
      */
     private fun initInferenceServices() {
         plannerService = MobileVlmPlanner(
             modelPath = modelAssetManager.mobileVlmPath,
-            maxTokens = appConfig.plannerMaxTokens,
-            temperature = appConfig.plannerTemperature,
-            timeoutMs = appConfig.plannerTimeoutMs
+            maxTokens = appSettings.plannerMaxTokens,
+            temperature = appSettings.plannerTemperature,
+            timeoutMs = appSettings.plannerTimeoutMs
         )
         groundingService = SeeClickGroundingEngine(
             modelParamPath = modelAssetManager.seeClickParamPath,
             modelBinPath = modelAssetManager.seeClickBinPath,
-            timeoutMs = appConfig.groundingTimeoutMs
+            timeoutMs = appSettings.groundingTimeoutMs
         )
         edgeExecutor = EdgeExecutor(
             screenshotProvider = AccessibilityScreenshotProvider(),
@@ -435,7 +436,7 @@ class UFOGalaxyApplication : Application() {
             groundingService = groundingService,
             accessibilityExecutor = AccessibilityActionExecutor(),
             imageScaler = AndroidBitmapScaler(),
-            scaledMaxEdge = appConfig.scaledMaxEdge
+            scaledMaxEdge = appSettings.scaledMaxEdge
         )
         val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
         localGoalExecutor = LocalGoalExecutor(
@@ -456,7 +457,7 @@ class UFOGalaxyApplication : Application() {
                 groundingService = groundingService,
                 accessibilityExecutor = AccessibilityActionExecutor(),
                 imageScaler = AndroidBitmapScaler(),
-                scaledMaxEdge = appConfig.scaledMaxEdge
+                scaledMaxEdge = appSettings.scaledMaxEdge
             ),
             screenshotProvider = AccessibilityScreenshotProvider(),
             modelAssetManager = modelAssetManager,
@@ -467,8 +468,9 @@ class UFOGalaxyApplication : Application() {
             plannerService = plannerService,
             groundingService = groundingService
         )
-        // Capture the active config so the debug panel can surface it.
-        localLoopConfig = LocalLoopConfig.defaults()
+        // Build LocalLoopConfig from the effective settings authority so that runtime
+        // planner/grounding parameters reflect the full configuration hierarchy.
+        localLoopConfig = LocalLoopConfig.from(appSettings)
         localLoopExecutor = DefaultLocalLoopExecutor(
             loopController = loopController,
             goalExecutor = localGoalExecutor,

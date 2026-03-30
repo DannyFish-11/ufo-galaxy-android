@@ -151,4 +151,49 @@ class LocalLoopConfigTest {
         val cfg = LocalLoopConfig(planner = PlannerConfig(maxTokens = 256))
         assertEquals(256, cfg.planner.maxTokens)
     }
+
+    // ── LocalLoopConfig.from(settings) factory (PR-B) ───────────────────────
+
+    @Test
+    fun `from settings produces PlannerConfig from AppSettings`() {
+        val settings = com.ufo.galaxy.data.InMemoryAppSettings(
+            plannerMaxTokens = 1024,
+            plannerTemperature = 0.5,
+            plannerTimeoutMs = 60_000
+        )
+        val cfg = LocalLoopConfig.from(settings)
+        assertEquals(1024, cfg.planner.maxTokens)
+        assertEquals(0.5, cfg.planner.temperature, 0.0001)
+        assertEquals(60_000, cfg.planner.timeoutMs)
+    }
+
+    @Test
+    fun `from settings produces GroundingConfig from AppSettings`() {
+        val settings = com.ufo.galaxy.data.InMemoryAppSettings(
+            groundingTimeoutMs = 5_000,
+            scaledMaxEdge = 480
+        )
+        val cfg = LocalLoopConfig.from(settings)
+        assertEquals(5_000, cfg.grounding.timeoutMs)
+        assertEquals(480, cfg.grounding.scaledMaxEdge)
+    }
+
+    @Test
+    fun `from settings with default AppSettings equals LocalLoopConfig defaults`() {
+        val settings = com.ufo.galaxy.data.InMemoryAppSettings()
+        val fromSettings = LocalLoopConfig.from(settings)
+        assertEquals(fromSettings.planner, LocalLoopConfig().planner)
+        assertEquals(fromSettings.grounding, LocalLoopConfig().grounding)
+    }
+
+    @Test
+    fun `from settings preserves loop-level defaults`() {
+        val settings = com.ufo.galaxy.data.InMemoryAppSettings()
+        val cfg = LocalLoopConfig.from(settings)
+        assertEquals(LocalLoopConfig.DEFAULT_MAX_STEPS, cfg.maxSteps)
+        assertEquals(LocalLoopConfig.DEFAULT_MAX_RETRIES_PER_STEP, cfg.maxRetriesPerStep)
+        assertEquals(LocalLoopConfig.DEFAULT_STEP_TIMEOUT_MS, cfg.stepTimeoutMs)
+        assertEquals(LocalLoopConfig.DEFAULT_GOAL_TIMEOUT_MS, cfg.goalTimeoutMs)
+        assertEquals(FallbackConfig(), cfg.fallback)
+    }
 }
