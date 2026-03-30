@@ -22,9 +22,16 @@ android {
         }
         
         // 构建配置字段
+        // NOTE: GALAXY_SERVER_URL is used only as the last-resort runtime fallback for
+        // AppConfig.serverUrl (build-time identity).  Effective runtime gateway URLs are
+        // sourced from AppSettings (SharedPreferences → assets/config.properties → here).
         buildConfigField "String", "GALAXY_SERVER_URL", '"ws://192.168.1.100:8765"'
         buildConfigField "String", "API_VERSION", '"v2.0"'
         buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "false"
+        // NOTE: PLANNER_* / GROUNDING_* / SCALED_MAX_EDGE are last-resort fallback constants.
+        // Effective runtime values are owned by AppSettings:
+        //   SharedPreferences override → assets/config.properties → these BuildConfig values.
+        // Do not read these BuildConfig fields directly in business logic.
         buildConfigField "int", "PLANNER_MAX_TOKENS", "512"
         buildConfigField "double", "PLANNER_TEMPERATURE", "0.1"
         buildConfigField "int", "PLANNER_TIMEOUT_MS", "30000"

@@ -112,6 +112,39 @@ interface AppSettings {
      */
     var metricsEndpoint: String
 
+    // ── Local-chain execution settings (planner / grounding) ─────────────────
+
+    /**
+     * Maximum tokens the MobileVLM planner may generate per call.
+     * Default is read from `assets/config.properties` key `planner_max_tokens`.
+     */
+    var plannerMaxTokens: Int
+
+    /**
+     * Sampling temperature for the MobileVLM planner (lower = more deterministic).
+     * Default is read from `assets/config.properties` key `planner_temperature`.
+     */
+    var plannerTemperature: Double
+
+    /**
+     * HTTP connect+read timeout for MobileVLM inference calls (milliseconds).
+     * Default is read from `assets/config.properties` key `planner_timeout_ms`.
+     */
+    var plannerTimeoutMs: Int
+
+    /**
+     * HTTP connect+read timeout for SeeClick grounding calls (milliseconds).
+     * Default is read from `assets/config.properties` key `grounding_timeout_ms`.
+     */
+    var groundingTimeoutMs: Int
+
+    /**
+     * Longest edge (pixels) for screenshot downscaling before grounding.
+     * 0 = disabled (pass full-resolution image to grounding engine).
+     * Default is read from `assets/config.properties` key `scaled_max_edge`.
+     */
+    var scaledMaxEdge: Int
+
     /**
      * Builds the effective WebSocket base URL from the fine-grained fields when
      * [gatewayHost] is set, otherwise falls back to [galaxyGatewayUrl].
@@ -192,7 +225,13 @@ class InMemoryAppSettings(
     override var useTls: Boolean = false,
     override var allowSelfSigned: Boolean = false,
     override var deviceId: String = "",
-    override var metricsEndpoint: String = ""
+    override var metricsEndpoint: String = "",
+    // Local-chain execution settings
+    override var plannerMaxTokens: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS,
+    override var plannerTemperature: Double = SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE,
+    override var plannerTimeoutMs: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_TIMEOUT_MS,
+    override var groundingTimeoutMs: Int = SharedPrefsAppSettings.DEFAULT_GROUNDING_TIMEOUT_MS,
+    override var scaledMaxEdge: Int = SharedPrefsAppSettings.DEFAULT_SCALED_MAX_EDGE
 ) : AppSettings
 
 /**
@@ -204,6 +243,12 @@ class InMemoryAppSettings(
  * Default values for [galaxyGatewayUrl] and [restBaseUrl] are read once from
  * `assets/config.properties` (keys `galaxy_gateway_url` / `rest_base_url`) on first
  * construction, so the gateway address can be adjusted without a recompile.
+ *
+ * Default values for local-chain execution settings ([plannerMaxTokens], [plannerTemperature],
+ * [plannerTimeoutMs], [groundingTimeoutMs], [scaledMaxEdge]) are likewise read from
+ * `assets/config.properties` on first construction, so tuning values can be adjusted
+ * without a recompile.  Build-time [BuildConfig] constants serve as the last-resort
+ * fallback only — they are never the authoritative runtime source.
  *
  * Default values for other settings:
  * - [crossDeviceEnabled]: `false` — device starts in local-only mode until the user
@@ -224,11 +269,26 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
     // Defaults loaded once from assets/config.properties; fall back to compile-time constants.
     private val defaultGatewayUrl: String
     private val defaultRestBaseUrl: String
+    private val defaultPlannerMaxTokens: Int
+    private val defaultPlannerTemperature: Double
+    private val defaultPlannerTimeoutMs: Int
+    private val defaultGroundingTimeoutMs: Int
+    private val defaultScaledMaxEdge: Int
 
     init {
         val props = loadConfigProperties(context)
         defaultGatewayUrl = props.getProperty("galaxy_gateway_url", DEFAULT_GATEWAY_URL)
         defaultRestBaseUrl = props.getProperty("rest_base_url", DEFAULT_REST_BASE_URL)
+        defaultPlannerMaxTokens =
+            props.getProperty("planner_max_tokens")?.toIntOrNull() ?: DEFAULT_PLANNER_MAX_TOKENS
+        defaultPlannerTemperature =
+            props.getProperty("planner_temperature")?.toDoubleOrNull() ?: DEFAULT_PLANNER_TEMPERATURE
+        defaultPlannerTimeoutMs =
+            props.getProperty("planner_timeout_ms")?.toIntOrNull() ?: DEFAULT_PLANNER_TIMEOUT_MS
+        defaultGroundingTimeoutMs =
+            props.getProperty("grounding_timeout_ms")?.toIntOrNull() ?: DEFAULT_GROUNDING_TIMEOUT_MS
+        defaultScaledMaxEdge =
+            props.getProperty("scaled_max_edge")?.toIntOrNull() ?: DEFAULT_SCALED_MAX_EDGE
     }
 
     override var crossDeviceEnabled: Boolean
@@ -297,6 +357,32 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getString(KEY_METRICS_ENDPOINT, "") ?: ""
         set(value) { prefs.edit().putString(KEY_METRICS_ENDPOINT, value).apply() }
 
+    // ── Local-chain execution settings ───────────────────────────────────────
+
+    override var plannerMaxTokens: Int
+        get() = prefs.getInt(KEY_PLANNER_MAX_TOKENS, defaultPlannerMaxTokens)
+        set(value) { prefs.edit().putInt(KEY_PLANNER_MAX_TOKENS, value).apply() }
+
+    override var plannerTemperature: Double
+        get() = java.lang.Double.longBitsToDouble(
+            prefs.getLong(KEY_PLANNER_TEMPERATURE, java.lang.Double.doubleToRawLongBits(defaultPlannerTemperature))
+        )
+        set(value) {
+            prefs.edit().putLong(KEY_PLANNER_TEMPERATURE, java.lang.Double.doubleToRawLongBits(value)).apply()
+        }
+
+    override var plannerTimeoutMs: Int
+        get() = prefs.getInt(KEY_PLANNER_TIMEOUT_MS, defaultPlannerTimeoutMs)
+        set(value) { prefs.edit().putInt(KEY_PLANNER_TIMEOUT_MS, value).apply() }
+
+    override var groundingTimeoutMs: Int
+        get() = prefs.getInt(KEY_GROUNDING_TIMEOUT_MS, defaultGroundingTimeoutMs)
+        set(value) { prefs.edit().putInt(KEY_GROUNDING_TIMEOUT_MS, value).apply() }
+
+    override var scaledMaxEdge: Int
+        get() = prefs.getInt(KEY_SCALED_MAX_EDGE, defaultScaledMaxEdge)
+        set(value) { prefs.edit().putInt(KEY_SCALED_MAX_EDGE, value).apply() }
+
     companion object {
         /** SharedPreferences file name. */
         const val PREFS_NAME = "ufo_galaxy_settings"
@@ -320,6 +406,13 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_METRICS_ENDPOINT = "metrics_endpoint"
 
+        // Local-chain execution keys
+        const val KEY_PLANNER_MAX_TOKENS = "planner_max_tokens"
+        const val KEY_PLANNER_TEMPERATURE = "planner_temperature"
+        const val KEY_PLANNER_TIMEOUT_MS = "planner_timeout_ms"
+        const val KEY_GROUNDING_TIMEOUT_MS = "grounding_timeout_ms"
+        const val KEY_SCALED_MAX_EDGE = "scaled_max_edge"
+
         /** Default device role sent in capability reports. */
         const val DEFAULT_DEVICE_ROLE = "phone"
 
@@ -331,6 +424,26 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
         /** Compile-time fallback REST base URL. */
         const val DEFAULT_REST_BASE_URL = "http://100.x.x.x:8765"
+
+        // ── Local-chain compile-time fallbacks ────────────────────────────────
+        // These are the last-resort defaults used only when assets/config.properties
+        // is absent and no SharedPreferences override exists. They mirror the
+        // BuildConfig constants in app/build.gradle and must stay in sync.
+
+        /** Compile-time fallback: maximum planner tokens. */
+        const val DEFAULT_PLANNER_MAX_TOKENS = 512
+
+        /** Compile-time fallback: planner sampling temperature. */
+        const val DEFAULT_PLANNER_TEMPERATURE = 0.1
+
+        /** Compile-time fallback: planner HTTP timeout (ms). */
+        const val DEFAULT_PLANNER_TIMEOUT_MS = 30_000
+
+        /** Compile-time fallback: grounding HTTP timeout (ms). */
+        const val DEFAULT_GROUNDING_TIMEOUT_MS = 15_000
+
+        /** Compile-time fallback: screenshot downscaling longest edge (px). */
+        const val DEFAULT_SCALED_MAX_EDGE = 720
 
         /**
          * Loads `assets/config.properties` and returns the parsed [Properties].

@@ -1,5 +1,7 @@
 package com.ufo.galaxy.config
 
+import com.ufo.galaxy.data.AppSettings
+
 /**
  * Central configuration model for the local closed-loop execution pipeline.
  *
@@ -35,6 +37,31 @@ data class LocalLoopConfig(
 
         /** Returns a [LocalLoopConfig] with all default values. */
         fun defaults(): LocalLoopConfig = LocalLoopConfig()
+
+        /**
+         * Creates a [LocalLoopConfig] whose planner and grounding sub-configs are
+         * sourced from the effective [AppSettings] authority.
+         *
+         * Configuration precedence (handled by [AppSettings]):
+         *   SharedPreferences runtime override →
+         *   `assets/config.properties` packaged defaults →
+         *   compile-time [SharedPrefsAppSettings] constants.
+         *
+         * Loop-level parameters ([maxSteps], [maxRetriesPerStep], [stepTimeoutMs],
+         * [goalTimeoutMs]) and [FallbackConfig] retain their defaults; those are
+         * not yet exposed in [AppSettings] and can be added in a later PR.
+         */
+        fun from(settings: AppSettings): LocalLoopConfig = LocalLoopConfig(
+            planner = PlannerConfig(
+                maxTokens = settings.plannerMaxTokens,
+                temperature = settings.plannerTemperature,
+                timeoutMs = settings.plannerTimeoutMs
+            ),
+            grounding = GroundingConfig(
+                timeoutMs = settings.groundingTimeoutMs,
+                scaledMaxEdge = settings.scaledMaxEdge
+            )
+        )
     }
 }
 
