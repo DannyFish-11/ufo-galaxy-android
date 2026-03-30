@@ -4,8 +4,9 @@ import android.os.Build
 import android.util.Log
 import com.google.gson.Gson
 import com.ufo.galaxy.data.AppSettings
-import com.ufo.galaxy.loop.LoopController
-import com.ufo.galaxy.loop.LoopResult
+import com.ufo.galaxy.local.LocalLoopExecutor
+import com.ufo.galaxy.local.LocalLoopOptions
+import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -18,12 +19,17 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Unified input router used by both [com.ufo.galaxy.ui.viewmodel.MainViewModel] and
- * [com.ufo.galaxy.service.EnhancedFloatingService] to dispatch text and voice input.
+ * **Unified task/input dispatch authority** for both [com.ufo.galaxy.ui.viewmodel.MainViewModel]
+ * and [com.ufo.galaxy.service.EnhancedFloatingService].
+ *
+ * This class is the **single point where the local-vs-cross-device mode decision is made**.
+ * All user input — text and voice — must pass through [route]; no component may bypass it
+ * to call [LocalLoopExecutor.execute] or [GatewayClient.sendJson] directly for user-initiated
+ * task submission.
  *
  * Routing rules (P2 strong-consistency):
  *  - [AppSettings.crossDeviceEnabled] = false →
- *    **always** local; [LoopController.execute] is launched in [coroutineScope];
+ *    **always** local; [LocalLoopExecutor.execute] is launched in [coroutineScope];
  *    result delivered to [onLocalResult]. Task-submit uplink is strictly forbidden.
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS connected →
  *    wraps [text] in a [TaskSubmitPayload] AIP v3 envelope and sends it uplink via
@@ -34,23 +40,26 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Both entry points must route all user input (text and voice) through **this single class**
  * to guarantee consistent behaviour and avoid duplicate remote-handoff logic.
  *
- * @param settings        Persistent settings; [AppSettings.crossDeviceEnabled] gates the WS path.
- * @param webSocketClient Live gateway client; used to check connectivity and send messages.
- *                        [com.ufo.galaxy.network.GalaxyWebSocketClient] implements this interface;
- *                        tests inject a lightweight fake.
- * @param loopController  Local closed-loop automation controller; invoked when cross-device is OFF.
- * @param coroutineScope  Scope in which local [LoopController.execute] is launched (e.g. viewModelScope).
- * @param onLocalResult   Called on the IO thread when a local task completes or fails.
- *                        Use to update UI or log results. Optional.
- * @param onError         Called with a human-readable reason when cross-device routing fails
- *                        (WS unavailable or send error). Callers must surface this in the UI.
+ * @param settings           Persistent settings; [AppSettings.crossDeviceEnabled] gates the WS path.
+ * @param webSocketClient    Live gateway client; used to check connectivity and send messages.
+ *                           [com.ufo.galaxy.network.GalaxyWebSocketClient] implements this interface;
+ *                           tests inject a lightweight fake.
+ * @param localLoopExecutor  Canonical local execution entrypoint; invoked when cross-device is OFF.
+ *                           The production implementation is [com.ufo.galaxy.local.DefaultLocalLoopExecutor]
+ *                           (wired in [com.ufo.galaxy.UFOGalaxyApplication]).
+ * @param coroutineScope     Scope in which local [LocalLoopExecutor.execute] is launched
+ *                           (e.g. viewModelScope).
+ * @param onLocalResult      Called on the IO thread when a local task completes or fails.
+ *                           Use to update UI or log results. Optional.
+ * @param onError            Called with a human-readable reason when cross-device routing fails
+ *                           (WS unavailable or send error). Callers must surface this in the UI.
  */
 class InputRouter(
     private val settings: AppSettings,
     private val webSocketClient: GatewayClient,
-    private val loopController: LoopController,
+    private val localLoopExecutor: LocalLoopExecutor,
     private val coroutineScope: CoroutineScope,
-    private val onLocalResult: ((LoopResult) -> Unit)? = null,
+    private val onLocalResult: ((LocalLoopResult) -> Unit)? = null,
     private val onError: ((reason: String) -> Unit)? = null
 ) {
     private val gson = Gson()
@@ -63,7 +72,7 @@ class InputRouter(
      * rather than racing on [AppSettings.crossDeviceEnabled] or [GatewayClient.sendJson].
      *
      * The guard is held only for the duration of the synchronous routing logic; the async
-     * [LoopController.execute] coroutine launched for LOCAL paths runs outside the guard so it
+     * [LocalLoopExecutor.execute] coroutine launched for LOCAL paths runs outside the guard so it
      * does not prevent the callers' own in-flight check (e.g. [MainViewModel] `isLoading`)
      * from working correctly.
      */
@@ -73,7 +82,7 @@ class InputRouter(
      * Describes which routing path was taken by [route].
      */
     enum class RouteMode {
-        /** Input was dispatched to local [LoopController] (crossDeviceEnabled=false). */
+        /** Input was dispatched to the canonical [LocalLoopExecutor] (crossDeviceEnabled=false). */
         LOCAL,
         /** Input was sent uplink via WebSocket as an AIP v3 task_submit (crossDeviceEnabled=true, WS connected). */
         CROSS_DEVICE,
@@ -84,7 +93,7 @@ class InputRouter(
     /**
      * Routes [text] to the correct execution path.
      *
-     * - `crossDeviceEnabled=false` → local only; launches [LoopController.execute] in [coroutineScope];
+     * - `crossDeviceEnabled=false` → local only; launches [LocalLoopExecutor.execute] in [coroutineScope];
      *   returns [RouteMode.LOCAL].
      * - `crossDeviceEnabled=true && connected` → AIP v3 task_submit WS uplink; returns [RouteMode.CROSS_DEVICE].
      * - `crossDeviceEnabled=true && !connected` → [onError] invoked; returns [RouteMode.ERROR].
@@ -147,19 +156,19 @@ class InputRouter(
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
-     * Launches [LoopController.execute] for [text] in [coroutineScope] on [Dispatchers.IO].
-     * On completion, [onLocalResult] is invoked with the [LoopResult].
+     * Launches [LocalLoopExecutor.execute] for [text] in [coroutineScope] on [Dispatchers.IO].
+     * On completion, [onLocalResult] is invoked with the [LocalLoopResult].
      */
     private fun launchLocal(text: String) {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val result = loopController.execute(text)
+                val result = localLoopExecutor.execute(LocalLoopOptions(instruction = text))
                 GalaxyLogger.log(
                     TAG, mapOf(
                         "event" to "local_done",
                         "session_id" to result.sessionId,
                         "status" to result.status,
-                        "steps" to result.steps.size
+                        "steps" to result.stepCount
                     )
                 )
                 onLocalResult?.invoke(result)

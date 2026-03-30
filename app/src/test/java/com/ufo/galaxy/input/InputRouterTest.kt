@@ -6,10 +6,13 @@ import com.ufo.galaxy.agent.NoOpImageScaler
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.local.DefaultLocalLoopExecutor
+import com.ufo.galaxy.local.FakeReadinessProvider
+import com.ufo.galaxy.local.LocalLoopExecutor
+import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.loop.ExecutorBridge
 import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
-import com.ufo.galaxy.loop.LoopResult
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GatewayClient
@@ -31,8 +34,8 @@ import org.junit.rules.TemporaryFolder
  *  - ERROR routing when cross-device is enabled but WS is not connected.
  *  - CROSS_DEVICE routing when cross-device is enabled, WS connected, and sendJson succeeds.
  *  - ERROR routing when cross-device is enabled, WS connected, but sendJson fails.
- *  - [LoopController.execute] is invoked (via the coroutineScope) in LOCAL mode.
- *  - [onLocalResult] callback delivers the [LoopResult] on completion.
+ *  - [LocalLoopExecutor.execute] is invoked (via the coroutineScope) in LOCAL mode.
+ *  - [onLocalResult] callback delivers the [LocalLoopResult] on completion.
  *  - Blank/whitespace-only input is silently ignored.
  *  - [onError] is invoked when WS is unavailable in cross-device mode; no silent local fallback.
  *  - AtomicBoolean double-submit guard drops concurrent route() calls gracefully.
@@ -68,7 +71,7 @@ class InputRouterTest {
         }
     }
 
-    // ── Fake LoopController dependencies ─────────────────────────────────────
+    // ── Fake LocalLoopExecutor dependencies ──────────────────────────────────
 
     /** Planner that always returns a single tap step. */
     private class SingleStepPlanner : LocalPlannerService {
@@ -122,19 +125,32 @@ class InputRouterTest {
         )
     }
 
+    /**
+     * Builds a [DefaultLocalLoopExecutor] wrapping [loopController] with a fully-ready
+     * readiness provider. Tests that need to control [LoopController] state (e.g., remote-task
+     * blocking) should create the [LoopController] first and pass it here as well as to
+     * their own reference for direct control.
+     */
+    private fun buildLoopExecutor(
+        loopController: LoopController = buildLoopController()
+    ): LocalLoopExecutor = DefaultLocalLoopExecutor(
+        loopController = loopController,
+        readinessProvider = FakeReadinessProvider.fullyReady()
+    )
+
     private fun buildRouter(
         crossDeviceEnabled: Boolean = false,
         gatewayClient: FakeGatewayClient = FakeGatewayClient(connected = false),
-        loopController: LoopController = buildLoopController(),
+        localLoopExecutor: LocalLoopExecutor = buildLoopExecutor(),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob()),
-        onLocalResult: ((LoopResult) -> Unit)? = null,
+        onLocalResult: ((LocalLoopResult) -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ): InputRouter {
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
         return InputRouter(
             settings = settings,
             webSocketClient = gatewayClient,
-            loopController = loopController,
+            localLoopExecutor = localLoopExecutor,
             coroutineScope = scope,
             onLocalResult = onLocalResult,
             onError = onError
@@ -166,14 +182,14 @@ class InputRouterTest {
     }
 
     @Test
-    fun `route LOCAL invokes LoopController execute and delivers result to onLocalResult`() = runBlocking {
-        var receivedResult: LoopResult? = null
+    fun `route LOCAL invokes LocalLoopExecutor execute and delivers result to onLocalResult`() = runBlocking {
+        var receivedResult: LocalLoopResult? = null
         val loopController = buildLoopController()
         val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
 
         val router = buildRouter(
             crossDeviceEnabled = false,
-            loopController = loopController,
+            localLoopExecutor = buildLoopExecutor(loopController),
             scope = scope,
             onLocalResult = { receivedResult = it }
         )
@@ -182,24 +198,24 @@ class InputRouterTest {
         // Dispatchers.Unconfined executes coroutines eagerly; give it a moment to complete.
         delay(200)
 
-        assertNotNull("onLocalResult must be called with the LoopResult", receivedResult)
+        assertNotNull("onLocalResult must be called with the LocalLoopResult", receivedResult)
         assertEquals(
-            "LoopController should succeed with single-step planner",
-            LoopController.STATUS_SUCCESS,
+            "LocalLoopExecutor should succeed with single-step planner",
+            LocalLoopResult.STATUS_SUCCESS,
             receivedResult!!.status
         )
     }
 
     @Test
     fun `route LOCAL with blocked LoopController delivers CANCELLED result to onLocalResult`() = runBlocking {
-        var receivedResult: LoopResult? = null
+        var receivedResult: LocalLoopResult? = null
         val loopController = buildLoopController()
         loopController.cancelForRemoteTask() // simulate remote task active → loop is blocked
 
         val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
         val router = buildRouter(
             crossDeviceEnabled = false,
-            loopController = loopController,
+            localLoopExecutor = buildLoopExecutor(loopController),
             scope = scope,
             onLocalResult = { receivedResult = it }
         )
@@ -210,7 +226,7 @@ class InputRouterTest {
         assertNotNull("onLocalResult must be called even when loop is blocked", receivedResult)
         assertEquals(
             "LoopController must return CANCELLED when remote task is active",
-            LoopController.STATUS_CANCELLED,
+            LocalLoopResult.STATUS_CANCELLED,
             receivedResult!!.status
         )
         assertEquals(LoopController.STOP_BLOCKED_BY_REMOTE, receivedResult!!.stopReason)
@@ -298,7 +314,7 @@ class InputRouterTest {
 
         assertEquals("Must return ERROR when WS unavailable", InputRouter.RouteMode.ERROR, result)
         assertFalse(
-            "onLocalResult (LoopController) must NOT be called when WS is unavailable in cross-device mode",
+            "onLocalResult (LocalLoopExecutor) must NOT be called when WS is unavailable in cross-device mode",
             localResultCalled
         )
         assertTrue("onError callback must be invoked when WS unavailable", errorCalled)
@@ -369,14 +385,14 @@ class InputRouterTest {
     @Test
     fun `InputRouter LOCAL is blocked when RuntimeController onRemoteTaskStarted is called`() = runBlocking {
         val loopController = buildLoopController()
-        var receivedResult: LoopResult? = null
+        var receivedResult: LocalLoopResult? = null
         val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
 
         val settings = InMemoryAppSettings(crossDeviceEnabled = false)
         val router = InputRouter(
             settings = settings,
             webSocketClient = FakeGatewayClient(connected = false),
-            loopController = loopController,
+            localLoopExecutor = buildLoopExecutor(loopController),
             coroutineScope = scope,
             onLocalResult = { receivedResult = it }
         )
@@ -388,17 +404,17 @@ class InputRouterTest {
         delay(100)
 
         assertNotNull("onLocalResult must still be called (with CANCELLED)", receivedResult)
-        assertEquals(LoopController.STATUS_CANCELLED, receivedResult!!.status)
+        assertEquals(LocalLoopResult.STATUS_CANCELLED, receivedResult!!.status)
         assertEquals(LoopController.STOP_BLOCKED_BY_REMOTE, receivedResult!!.stopReason)
 
         // After remote task completes, local loop is unblocked.
         loopController.clearRemoteTaskBlock()
 
-        var secondResult: LoopResult? = null
+        var secondResult: LocalLoopResult? = null
         val router2 = InputRouter(
             settings = settings,
             webSocketClient = FakeGatewayClient(connected = false),
-            loopController = loopController,
+            localLoopExecutor = buildLoopExecutor(loopController),
             coroutineScope = scope,
             onLocalResult = { secondResult = it }
         )
@@ -408,7 +424,7 @@ class InputRouterTest {
         assertNotNull("Second route must produce a result", secondResult)
         assertEquals(
             "Local loop must succeed after remote task block is cleared",
-            LoopController.STATUS_SUCCESS,
+            LocalLoopResult.STATUS_SUCCESS,
             secondResult!!.status
         )
     }
