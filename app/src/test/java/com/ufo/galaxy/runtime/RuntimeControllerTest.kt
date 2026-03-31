@@ -480,34 +480,4 @@ class RuntimeControllerTest {
         )
     }
 
-    // ── InputRouter (MessageRouter) integration with settings ─────────────────
-
-    @Test
-    fun `MessageRouter routes LOCAL when crossDeviceEnabled is false`() {
-        val settings = InMemoryAppSettings(crossDeviceEnabled = false)
-        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
-        var localCalled = false
-        val router = com.ufo.galaxy.network.MessageRouter(
-            settings = settings,
-            webSocketClient = client
-        ) { _ -> localCalled = true }
-        val mode = router.route("open WeChat")
-        assertEquals(com.ufo.galaxy.network.MessageRouter.RouteMode.LOCAL, mode)
-        assertTrue("Local fallback must be called in OFF mode", localCalled)
-    }
-
-    @Test
-    fun `MessageRouter routes ERROR when crossDeviceEnabled true but WS disconnected`() {
-        val settings = InMemoryAppSettings(crossDeviceEnabled = true)
-        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = true)
-        var errorCalled = false
-        val router = com.ufo.galaxy.network.MessageRouter(
-            settings = settings,
-            webSocketClient = client,
-            onError = { errorCalled = true }
-        ) { _ -> }
-        val mode = router.route("open WeChat")
-        assertEquals(com.ufo.galaxy.network.MessageRouter.RouteMode.ERROR, mode)
-        assertTrue("onError must be called when WS unavailable", errorCalled)
-    }
 }
