@@ -1,11 +1,11 @@
-# Android Device-Side Observability & Tracing (Round 7 + PR-E)
+# Android Device-Side Observability & Tracing
 
 This document describes the structured logging, trace propagation, metrics, and
-sampling controls added incrementally across Android PRs.
+sampling controls for the UFO Galaxy Android runtime.
 
 ---
 
-## Trace Context (Round 7)
+## Trace Context
 
 Every outbound AIP v3 message carries two trace identifiers for end-to-end
 log correlation:
@@ -67,7 +67,7 @@ All structured log entries are identified by one of the following stable tag con
 | `GALAXY:TASK:TIMEOUT` | `GalaxyLogger.TAG_TASK_TIMEOUT` | Running task exceeded configured timeout budget |
 | `GALAXY:TASK:CANCEL` | `GalaxyLogger.TAG_TASK_CANCEL` | `task_cancel` instruction received and processed |
 
-### WebRTC / signaling lifecycle (Round 7)
+### WebRTC / signaling lifecycle
 
 | Tag | Constant | When emitted |
 |-----|----------|--------------|
@@ -75,14 +75,14 @@ All structured log entries are identified by one of the following stable tag con
 | `GALAXY:SIGNAL:STOP` | `GalaxyLogger.TAG_SIGNAL_STOP` | WebRTC signaling WS closed or disconnected |
 | `GALAXY:WEBRTC:TURN` | `GalaxyLogger.TAG_WEBRTC_TURN` | TURN config received, relay candidates applied, or TURN fallback triggered |
 
-### Dispatcher / bridge (Round 7)
+### Dispatcher / bridge
 
 | Tag | Constant | When emitted |
 |-----|----------|--------------|
 | `GALAXY:DISPATCHER:SELECT` | `GalaxyLogger.TAG_DISPATCHER_SELECT` | Dispatcher selected for a task (route_mode + exec_mode resolved) |
 | `GALAXY:BRIDGE:HANDOFF` | `GalaxyLogger.TAG_BRIDGE_HANDOFF` | Bridge handoff to Agent Runtime initiated |
 
-### Errors (Round 7)
+### Errors
 
 | Tag | Constant | When emitted |
 |-----|----------|--------------|
@@ -95,7 +95,7 @@ All structured log entries are identified by one of the following stable tag con
 | `GALAXY:READINESS` | `GalaxyLogger.TAG_READINESS` | Readiness self-check completed (`ReadinessChecker`) |
 | `GALAXY:DEGRADED` | `GalaxyLogger.TAG_DEGRADED` | Device is in degraded mode (any readiness flag is false) |
 
-### Local loop lifecycle (PR-E)
+### Local loop lifecycle
 
 | Tag | Constant | When emitted |
 |-----|----------|--------------|
@@ -161,7 +161,7 @@ Every `GALAXY:ERROR` entry **must** include:
 
 ---
 
-## Sampling Controls (Round 7)
+## Sampling Controls
 
 High-frequency production environments can use `SamplingConfig` to reduce log noise
 while preserving full fidelity for critical events.
@@ -207,7 +207,7 @@ GalaxyLogger.samplingConfig = SamplingConfig(
 
 ---
 
-## Metrics / Telemetry (Round 7)
+## Metrics / Telemetry
 
 `MetricsRecorder` tracks the following counters. All metric names use the
 `galaxy.*` prefix for namespace isolation in external pipelines.
@@ -228,7 +228,7 @@ GalaxyLogger.samplingConfig = SamplingConfig(
 | `galaxy.handoff.failures` | Bridge handoffs exhausting all retries |
 | `galaxy.handoff.fallbacks` | Local executions following a failed bridge handoff |
 
-### Local-loop counter metrics (PR-E)
+### Local-loop counter metrics
 
 | Metric name | Description |
 |-------------|-------------|
@@ -246,7 +246,7 @@ GalaxyLogger.samplingConfig = SamplingConfig(
 |-------------|-------------|
 | `galaxy.signaling.latency_ms` | Observed signaling session duration in ms |
 
-### Local-loop latency metrics (PR-E)
+### Local-loop latency metrics
 
 | Metric name | Description |
 |-------------|-------------|
@@ -353,7 +353,7 @@ a live snapshot of:
 
 ---
 
-## Session Trace / Replay Scaffold (PR-E)
+## Session Trace / Replay Scaffold
 
 The `trace` package provides a lightweight model to record individual local-loop
 execution sessions for diagnostics and post-mortem replay analysis.
@@ -405,7 +405,7 @@ Use `GalaxyLogger` / the log file for durable session history.
 
 ---
 
-## Local-Loop Config Centralization (PR-E)
+## Local-Loop Config Centralization
 
 `LocalLoopConfig` is the central configuration model for the local execution
 pipeline, consolidating values that were previously scattered across call sites.
@@ -447,16 +447,16 @@ val config = LocalLoopConfig(
 | `app/src/main/java/com/ufo/galaxy/agent/AgentRuntimeBridge.kt` | Dispatcher-select + bridge-handoff logs; span_id support |
 | `app/src/main/java/com/ufo/galaxy/ui/components/DiagnosticsScreen.kt` | Diagnostics Composable + `shareLogs()` helper |
 | `app/src/main/res/xml/file_provider_paths.xml` | FileProvider path config for log sharing |
-| `app/src/main/java/com/ufo/galaxy/config/LocalLoopConfig.kt` | Central local-loop config model (PR-E) |
-| `app/src/main/java/com/ufo/galaxy/trace/LocalLoopTrace.kt` | Session trace model with append helpers (PR-E) |
-| `app/src/main/java/com/ufo/galaxy/trace/LocalLoopTraceStore.kt` | Bounded in-memory trace store (PR-E) |
+| `app/src/main/java/com/ufo/galaxy/config/LocalLoopConfig.kt` | Central local-loop config model |
+| `app/src/main/java/com/ufo/galaxy/trace/LocalLoopTrace.kt` | Session trace model with append helpers |
+| `app/src/main/java/com/ufo/galaxy/trace/LocalLoopTraceStore.kt` | Bounded in-memory trace store |
 | `app/src/test/java/com/ufo/galaxy/observability/GalaxyLoggerTest.kt` | JVM unit tests for GalaxyLogger |
 | `app/src/test/java/com/ufo/galaxy/observability/TracePropagationTest.kt` | JVM unit tests for TraceContext |
 | `app/src/test/java/com/ufo/galaxy/observability/SamplingConfigTest.kt` | JVM unit tests for SamplingConfig + logSampled/logError |
-| `app/src/test/java/com/ufo/galaxy/observability/ObservabilityMetricsTest.kt` | JVM unit tests for Round-7 counters and TelemetryExporter |
-| `app/src/test/java/com/ufo/galaxy/observability/LocalLoopMetricsTest.kt` | JVM unit tests for local-loop metrics (PR-E) |
-| `app/src/test/java/com/ufo/galaxy/trace/LocalLoopTraceTest.kt` | JVM unit tests for LocalLoopTrace (PR-E) |
-| `app/src/test/java/com/ufo/galaxy/trace/LocalLoopTraceStoreTest.kt` | JVM unit tests for LocalLoopTraceStore (PR-E) |
-| `app/src/test/java/com/ufo/galaxy/config/LocalLoopConfigTest.kt` | JVM unit tests for LocalLoopConfig (PR-E) |
+| `app/src/test/java/com/ufo/galaxy/observability/ObservabilityMetricsTest.kt` | JVM unit tests for cross-device counters and TelemetryExporter |
+| `app/src/test/java/com/ufo/galaxy/observability/LocalLoopMetricsTest.kt` | JVM unit tests for local-loop metrics |
+| `app/src/test/java/com/ufo/galaxy/trace/LocalLoopTraceTest.kt` | JVM unit tests for LocalLoopTrace |
+| `app/src/test/java/com/ufo/galaxy/trace/LocalLoopTraceStoreTest.kt` | JVM unit tests for LocalLoopTraceStore |
+| `app/src/test/java/com/ufo/galaxy/config/LocalLoopConfigTest.kt` | JVM unit tests for LocalLoopConfig |
 | `docs/OBSERVABILITY.md` | This document |
 

@@ -1,6 +1,6 @@
 # Local-Loop Debugging Guide
 
-This guide explains how to use the local-loop debug surface introduced in **PR-G** to inspect and troubleshoot the on-device inference pipeline during local development.
+This guide explains how to use the local-loop debug panel to inspect and troubleshoot the on-device inference pipeline during local development.
 
 ---
 

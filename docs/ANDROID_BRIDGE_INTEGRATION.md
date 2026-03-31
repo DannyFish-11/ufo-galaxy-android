@@ -1,11 +1,15 @@
-# Android Bridge Integration Guide – Round 5
+# Android Bridge Integration Guide
+
+> **Note:** This document uses "Round N" labels (Round 5, Round 6, Round 7, Round 8) which are
+> internal development sequence identifiers, not product version numbers. For the current
+> canonical architecture description see [`docs/architecture.md`](architecture.md).
 
 ## Overview
 
-This document describes the **Agent bridge & runtime takeover** feature added in Round 5
-of the UFO Galaxy Android client. When the cross-device switch is **ON**, eligible tasks
-arriving via the Gateway are delegated to **Agent Runtime / OpenClawd** through a
-dedicated bridge layer instead of executing entirely on-device.
+This document describes the **Agent bridge & runtime takeover** feature in the UFO Galaxy
+Android client. When the cross-device switch is **ON**, eligible tasks arriving via the
+Gateway are delegated to **Agent Runtime / OpenClawd** through a dedicated bridge layer
+instead of executing entirely on-device.
 
 ---
 

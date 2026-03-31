@@ -114,7 +114,7 @@ These components are present in the codebase for backward compatibility or diagn
 |-----------|---------|--------|-------|
 | `GalaxyApiClient.registerDevice` | `api` | `@Deprecated` | REST-based device registration; superseded by WS `capability_report` on connect. Retained for diagnostic REST endpoint checks only. |
 | `GalaxyApiClient.sendHeartbeat` | `api` | `@Deprecated` | REST heartbeat; superseded by WS `heartbeat` messages every 30 s. |
-| `MessageRouter` | `network` (if present) | `@Deprecated` | Was superseded by `InputRouter`. |
+| `MessageRouter` | `network` | Removed | Was superseded by `InputRouter`; no longer present in the codebase. |
 
 If you encounter code that calls these deprecated methods for anything other than diagnostics, prefer the canonical WS-based paths documented above.
 

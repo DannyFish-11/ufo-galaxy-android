@@ -1,6 +1,6 @@
 # Local-Loop Testing Guide
 
-This document describes the local-loop test harness introduced in PR-F and explains
+This document describes the local-loop test harness and explains
 how to add new regression scenarios as the on-device execution pipeline evolves.
 
 ---
