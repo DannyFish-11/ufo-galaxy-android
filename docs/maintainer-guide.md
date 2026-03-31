@@ -109,9 +109,9 @@ metricsRecorder.recordLocalLoopStep()
 |-----------|---------------|---------------------|
 | `GalaxyApiClient.registerDevice` | Legacy REST registration | `GalaxyWebSocketClient` sends `capability_report` on connect automatically |
 | `GalaxyApiClient.sendHeartbeat` | Legacy REST heartbeat | `GalaxyWebSocketClient` sends `heartbeat` every 30 s automatically |
-| `MessageRouter` (if present) | Was an earlier routing layer | `InputRouter` |
+| `MessageRouter` | Was an earlier routing layer; no longer present in the codebase | `InputRouter` |
 
-These classes are retained because they serve valid diagnostic or compatibility purposes. They are annotated `@Deprecated` in source. Do not add new call sites.
+These classes (`GalaxyApiClient.registerDevice`, `GalaxyApiClient.sendHeartbeat`) are retained because they serve valid diagnostic or compatibility purposes. They are annotated `@Deprecated` in source. Do not add new call sites. `MessageRouter` has been removed from the codebase entirely.
 
 ---
 

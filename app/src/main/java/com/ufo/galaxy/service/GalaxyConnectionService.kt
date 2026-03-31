@@ -41,10 +41,30 @@ import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 
 /**
- * Galaxy 连接服务
- * 后台维护与 Galaxy 服务器的 WebSocket 连接
+ * **Canonical inbound gateway-message dispatcher** for the cross-device pipeline.
  *
- * On start: loads MobileVLM and SeeClick models; updates [GalaxyWebSocketClient.setModelCapabilities].
+ * This Android [Service] owns the **inbound WebSocket message loop**: it registers a
+ * [GalaxyWebSocketClient.Listener] and dispatches every inbound AIP v3 message to the
+ * correct handler. It is the sole component that processes gateway-originated tasks on
+ * behalf of this device.
+ *
+ * ## Ownership boundaries
+ *  - **Runtime lifecycle**: all WS connect/disconnect and `crossDeviceEnabled` changes go
+ *    through [com.ufo.galaxy.runtime.RuntimeController] (the sole lifecycle authority).
+ *    This service calls [RuntimeController.connectIfEnabled] on start and never touches
+ *    the WebSocket client directly for connection management.
+ *  - **Inbound dispatch**: parses each [AipMessage] and routes by type:
+ *    - `task_assign`      → [AgentRuntimeBridge.handoff] (when eligible) or [EdgeExecutor]
+ *    - `goal_execution`   → [AutonomousExecutionPipeline.handleGoalExecution]
+ *    - `parallel_subtask` → [AutonomousExecutionPipeline.handleParallelSubtask]
+ *    - `task_cancel`      → [TaskCancelRegistry.cancel]
+ *  - **Cancellation**: every goal/subtask coroutine is registered in [TaskCancelRegistry]
+ *    so in-flight tasks can be cooperatively cancelled via `task_cancel`.
+ *  - **Remote task handoff**: calls [RuntimeController.onRemoteTaskStarted] when a
+ *    gateway task arrives (blocking the local [LoopController]) and
+ *    [RuntimeController.onRemoteTaskFinished] when the result is sent back.
+ *
+ * On start: loads MobileVLM and SeeClick models via [GalaxyWebSocketClient.setModelCapabilities].
  * On destroy: unloads models and removes the WS listener.
  */
 class GalaxyConnectionService : Service() {

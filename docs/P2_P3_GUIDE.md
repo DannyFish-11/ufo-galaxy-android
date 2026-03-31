@@ -1,9 +1,18 @@
 # P2 + P3 Implementation Guide
 
-This document describes the P2 (Route Strong Consistency, Local Loop Observability, Floating
-Task Summary, Keep-alive & Boot Recovery, V2 Integration Hooks) and P3 (Cross-repo Integration
-Validation, Multi-device Concurrency, OpenClawd Memory Backflow) work that is present in the
-`main` branch.
+> **Historical document.** "P2" and "P3" are internal development-phase labels; they are
+> not product feature names. For the current canonical architecture see
+> [`docs/architecture.md`](architecture.md). For canonical component descriptions and
+> maintainer guidance see [`docs/maintainer-guide.md`](maintainer-guide.md).
+>
+> **Note on `MessageRouter`**: the routing component described in the P2 section as
+> `network/MessageRouter` was superseded by `input/InputRouter` during canonicalization.
+> `InputRouter` is now the sole user-input dispatch gate. Any reference to `MessageRouter`
+> in this document is historical; the file is no longer present in the codebase.
+
+This document records the implementation history for P2 (Route Strong Consistency, Local Loop
+Observability, Floating Task Summary, Keep-alive & Boot Recovery, V2 Integration Hooks) and P3
+(Cross-repo Integration Validation, Multi-device Concurrency, OpenClawd Memory Backflow).
 
 ---
 
@@ -269,4 +278,4 @@ thread or IO coroutine.
 | `CrossRepoIntegrationValidatorTest` | WS URL format, HTTP check pass/fail, `ValidationReport.summary()` |
 | `MultiDeviceCoordinatorTest` | Parallel dispatch, subtask ID format, exception capture, empty device list |
 | `OpenClawdMemoryBackflowTest` | `store()` happy/error paths, `queryByTaskId()` JSON parsing, `MemoryEntry` Gson contract |
-| `MessageRouterTest` | P2 routing rules: LOCAL / CROSS_DEVICE / ERROR modes |
+| `InputRouterTest` | Routing rules: LOCAL / CROSS_DEVICE / ERROR modes (successor to the P2 MessageRouter) |
