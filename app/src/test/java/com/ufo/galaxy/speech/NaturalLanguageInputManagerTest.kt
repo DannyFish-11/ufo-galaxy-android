@@ -7,6 +7,8 @@ import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.input.InputRouter
+import com.ufo.galaxy.local.DefaultLocalLoopExecutor
+import com.ufo.galaxy.local.FakeReadinessProvider
 import com.ufo.galaxy.loop.ExecutorBridge
 import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
@@ -57,7 +59,7 @@ class NaturalLanguageInputManagerTest {
         }
     }
 
-    // ── Fake LoopController dependencies ─────────────────────────────────────
+    // ── Fake LocalLoopExecutor dependencies ──────────────────────────────────
 
     private class FakePlannerService : LocalPlannerService {
         override fun loadModel() = true
@@ -116,10 +118,14 @@ class NaturalLanguageInputManagerTest {
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     ): InputRouter {
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
+        val localLoopExecutor = DefaultLocalLoopExecutor(
+            loopController = buildLoopController(),
+            readinessProvider = FakeReadinessProvider.fullyReady()
+        )
         return InputRouter(
             settings = settings,
             webSocketClient = gateway,
-            loopController = buildLoopController(),
+            localLoopExecutor = localLoopExecutor,
             coroutineScope = scope
         )
     }

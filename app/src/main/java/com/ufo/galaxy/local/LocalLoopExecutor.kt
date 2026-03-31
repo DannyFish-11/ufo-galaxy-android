@@ -1,8 +1,13 @@
 package com.ufo.galaxy.local
 
+import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.protocol.GoalExecutionPayload
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Options controlling a single local loop execution request.
@@ -55,8 +60,9 @@ data class LocalLoopResult(
 /**
  * Canonical entrypoint for **UI/voice-driven** local loop execution.
  *
- * Handles natural-language instructions that originate from the UI or voice input
- * and routes them through the local closed-loop pipeline ([LoopController]).
+ * All user-facing task dispatch (from UI or voice input) passes through this interface.
+ * Implementations decide which underlying execution pipeline to use (rich closed-loop or
+ * canonical goal executor), while callers remain insulated from that detail.
  *
  * **Gateway goal execution is NOT routed through this interface.** Messages of type
  * `goal_execution` and `parallel_subtask` arrive over the WebSocket and are dispatched
@@ -84,20 +90,31 @@ interface LocalLoopExecutor {
 }
 
 /**
- * Default [LocalLoopExecutor] that delegates [execute] → [LoopController.execute].
+ * Default [LocalLoopExecutor] that delegates [execute] to the canonical local execution path.
+ *
+ * ## Execution strategy
+ * When [goalExecutor] is provided (the production path wired in
+ * [com.ufo.galaxy.UFOGalaxyApplication]), execution is delegated to
+ * [com.ufo.galaxy.agent.LocalGoalExecutor.executeGoal] — the same step-level pipeline
+ * used by gateway-delivered `task_assign` and `goal_execution` messages. This ensures
+ * **one canonical local execution core** regardless of how the task originated.
+ *
+ * When [goalExecutor] is `null` (tests or backward-compatible callers that only supply
+ * [loopController]), execution falls back to the rich [LoopController] pipeline
+ * (stagnation detection, fallback planners, retries, etc.).
  *
  * A readiness snapshot is logged before each execution so that diagnostics capture
  * the subsystem state at the time the request was received.
  *
- * This class is **exclusively the UI/voice-driven local path**. For gateway-delivered
- * goal execution see [com.ufo.galaxy.agent.AutonomousExecutionPipeline].
- *
- * @param loopController     Closed-loop orchestrator for natural-language instructions.
- * @param readinessProvider  Used to log the readiness state before execution starts.
+ * @param loopController     Rich closed-loop orchestrator; used as fallback when [goalExecutor] is null.
+ * @param readinessProvider  Used to check and log readiness before execution starts.
+ * @param goalExecutor       Canonical AIP v3 step executor (screenshot → plan → ground → action).
+ *                           When non-null, [execute] delegates to this instead of [loopController].
  */
 class DefaultLocalLoopExecutor(
     private val loopController: LoopController,
-    private val readinessProvider: LocalLoopReadinessProvider
+    private val readinessProvider: LocalLoopReadinessProvider,
+    private val goalExecutor: LocalGoalExecutor? = null
 ) : LocalLoopExecutor {
 
     companion object {
@@ -143,6 +160,12 @@ class DefaultLocalLoopExecutor(
             )
         }
 
+        // ── Canonical path: delegate to LocalGoalExecutor (same pipeline as gateway tasks) ──
+        if (goalExecutor != null) {
+            return executeViaGoalExecutor(options)
+        }
+
+        // ── Fallback path: rich LoopController pipeline (used in tests / no-goalExecutor callers) ──
         val loopResult = loopController.execute(options.instruction)
 
         GalaxyLogger.log(
@@ -164,4 +187,56 @@ class DefaultLocalLoopExecutor(
             error = loopResult.error
         )
     }
+
+    /**
+     * Executes [options] through the canonical [goalExecutor] pipeline.
+     *
+     * Converts [LocalLoopOptions] to a [GoalExecutionPayload], delegates to
+     * [LocalGoalExecutor.executeGoal], and maps the result back to [LocalLoopResult].
+     *
+     * This is the **production execution path** that ensures both UI-driven and
+     * gateway-assigned local tasks use the same step-level core (screenshot → plan →
+     * ground → action via [com.ufo.galaxy.agent.EdgeExecutor]).
+     */
+    private suspend fun executeViaGoalExecutor(options: LocalLoopOptions): LocalLoopResult =
+        withContext(Dispatchers.IO) {
+            val taskId = UUID.randomUUID().toString()
+            val payload = GoalExecutionPayload(
+                goal = options.instruction,
+                task_id = taskId,
+                group_id = null,
+                subtask_index = null,
+                max_steps = options.maxSteps ?: LoopController.DEFAULT_MAX_STEPS,
+                timeout_ms = 0L,
+                constraints = emptyList()
+            )
+
+            val goalResult = goalExecutor!!.executeGoal(payload)
+
+            // Map EdgeExecutor / AutonomousExecutionPipeline status values to LocalLoopResult values.
+            val mappedStatus = when (goalResult.status) {
+                EdgeExecutor.STATUS_SUCCESS -> LocalLoopResult.STATUS_SUCCESS
+                EdgeExecutor.STATUS_CANCELLED -> LocalLoopResult.STATUS_CANCELLED
+                else -> LocalLoopResult.STATUS_FAILED // covers STATUS_ERROR, STATUS_TIMEOUT, "disabled"
+            }
+
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "execute_done",
+                    "session_id" to taskId,
+                    "status" to mappedStatus,
+                    "steps" to goalResult.steps.size,
+                    "stop_reason" to (goalResult.status.takeUnless { it == EdgeExecutor.STATUS_SUCCESS } ?: "")
+                )
+            )
+
+            LocalLoopResult(
+                sessionId = taskId,
+                instruction = options.instruction,
+                status = mappedStatus,
+                stepCount = goalResult.steps.size,
+                stopReason = goalResult.status.takeUnless { it == EdgeExecutor.STATUS_SUCCESS },
+                error = goalResult.error
+            )
+        }
 }
