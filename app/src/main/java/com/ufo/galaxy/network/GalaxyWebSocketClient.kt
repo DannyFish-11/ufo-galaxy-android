@@ -7,6 +7,7 @@ import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.protocol.MsgType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,7 +80,8 @@ class GalaxyWebSocketClient(
     private val serverUrl: String,
     crossDeviceEnabled: Boolean = true,
     val offlineQueue: OfflineTaskQueue = OfflineTaskQueue(),
-    private val allowSelfSigned: Boolean = false
+    private val allowSelfSigned: Boolean = false,
+    private val gatewayToken: String = ""
 ) : GatewayClient {
     companion object {
         private const val TAG = "GalaxyWebSocket"
@@ -381,6 +383,7 @@ class GalaxyWebSocketClient(
         
         val request = Request.Builder()
             .url(serverUrl)
+            .apply { if (gatewayToken.isNotBlank()) addHeader("Authorization", "Bearer $gatewayToken") }
             .build()
         
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -610,6 +613,19 @@ class GalaxyWebSocketClient(
      */
     private fun sendHandshake() {
         val deviceId = getDeviceId()
+
+        // Step 1: device_register — server expects this before capability_report (H2)
+        val register = JsonObject().apply {
+            addProperty("type", MsgType.DEVICE_REGISTER.value)
+            addProperty("protocol", "AIP/1.0")
+            addProperty("version", "3.0")
+            addProperty("device_id", deviceId)
+            addProperty("device_type", "Android_Agent")
+            addProperty("trace_id", sessionTraceId)
+            addProperty("timestamp", System.currentTimeMillis())
+        }
+        sendJson(gson.toJson(register))
+        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId")
 
         val baseActions = listOf(
             "location", "camera", "sensor_data", "automation",

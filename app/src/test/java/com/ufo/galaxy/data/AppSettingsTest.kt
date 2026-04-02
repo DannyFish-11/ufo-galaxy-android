@@ -263,19 +263,19 @@ class AppSettingsTest {
     @Test
     fun `effectiveGatewayWsUrl falls back to galaxyGatewayUrl when host is blank`() {
         val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000")
-        assertEquals("ws://10.0.0.1:9000", settings.effectiveGatewayWsUrl())
+        assertEquals("ws://10.0.0.1:9000/ws/android", settings.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl uses host+port when gatewayHost is set`() {
         val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765)
-        assertEquals("ws://100.64.0.1:8765", settings.effectiveGatewayWsUrl())
+        assertEquals("ws://100.64.0.1:8765/ws/android", settings.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl uses wss scheme when useTls is true`() {
         val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true)
-        assertEquals("wss://100.64.0.1:8765", settings.effectiveGatewayWsUrl())
+        assertEquals("wss://100.64.0.1:8765/ws/android", settings.effectiveGatewayWsUrl())
     }
 
     @Test
@@ -376,5 +376,39 @@ class AppSettingsTest {
     @Test
     fun `compile-time fallback DEFAULT_SCALED_MAX_EDGE is 720`() {
         assertEquals(720, SharedPrefsAppSettings.DEFAULT_SCALED_MAX_EDGE)
+    }
+
+    // ── H1: /ws/android path appending ───────────────────────────────────────
+
+    @Test
+    fun `effectiveGatewayWsUrl does not duplicate path when already present`() {
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000/ws/android")
+        assertEquals("ws://10.0.0.1:9000/ws/android", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `effectiveGatewayWsUrl respects custom path configured by user`() {
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000/custom/path")
+        assertEquals("ws://10.0.0.1:9000/custom/path", settings.effectiveGatewayWsUrl())
+    }
+
+    // ── H3: gatewayToken key constant ─────────────────────────────────────────
+
+    @Test
+    fun `SharedPrefsAppSettings gateway token key constant is stable`() {
+        assertEquals("gateway_token", SharedPrefsAppSettings.KEY_GATEWAY_TOKEN)
+    }
+
+    @Test
+    fun `default gatewayToken is blank`() {
+        val settings = InMemoryAppSettings()
+        assertEquals("", settings.gatewayToken)
+    }
+
+    @Test
+    fun `gatewayToken can be set`() {
+        val settings = InMemoryAppSettings()
+        settings.gatewayToken = "test-token-abc"
+        assertEquals("test-token-abc", settings.gatewayToken)
     }
 }
