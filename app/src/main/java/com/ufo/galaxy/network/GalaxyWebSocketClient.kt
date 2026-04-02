@@ -7,6 +7,12 @@ import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.DiagnosticsPayload
+import com.ufo.galaxy.protocol.MeshJoinPayload
+import com.ufo.galaxy.protocol.MeshLeavePayload
+import com.ufo.galaxy.protocol.MeshResultPayload
+import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.MsgType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -209,6 +215,9 @@ class GalaxyWebSocketClient(
 
     /** Returns the trace identifier for the current WS session. */
     fun getTraceId(): String = sessionTraceId
+
+    /** Mesh session ID currently joined; null if not participating in any mesh. Set by [sendMeshJoin]. */
+    @Volatile private var currentMeshId: String? = null
 
     /** Derives route_mode from the cross-device switch state. */
     private fun currentRouteMode(): String =
@@ -446,8 +455,14 @@ class GalaxyWebSocketClient(
     /**
      * 断开连接
      * Sets [shouldReconnect] to false so the automatic backoff loop stops.
+     * If the device is currently participating in a mesh session, a [MsgType.MESH_LEAVE]
+     * message is sent before the connection is torn down.
      */
     fun disconnect() {
+        // Notify the mesh coordinator before closing the WebSocket.
+        // Capture into a local val to avoid a TOCTOU race between the null-check and the call.
+        val meshId = currentMeshId
+        if (meshId != null) sendMeshLeave(meshId, "disconnect")
         Log.i(TAG, "[WS:DISCONNECT] Explicit disconnect requested")
         shouldReconnect = false
         reconnectJob?.cancel()
@@ -698,20 +713,133 @@ class GalaxyWebSocketClient(
     ): Boolean {
         val deviceId = getDeviceId()
 
-        val diagnostics = JsonObject().apply {
-            addProperty("type", "diagnostics_payload")
-            addProperty("device_id", deviceId)
-            addProperty("error_type", errorType)
-            addProperty("error_context", errorContext)
-            addProperty("task_id", taskId)
-            addProperty("node_name", nodeName)
-        }
+        val diagnosticsPayload = DiagnosticsPayload(
+            task_id = taskId,
+            device_id = deviceId,
+            node_name = nodeName,
+            error_type = errorType,
+            error_context = errorContext
+        )
+        val envelope = AipMessage(
+            type = MsgType.DIAGNOSTICS_PAYLOAD,
+            payload = diagnosticsPayload,
+            device_id = deviceId,
+            trace_id = sessionTraceId
+        )
 
         // Route through sendJson() so the cross-device gate and connection check
         // are applied uniformly — the same as every other cross-device uplink message.
-        return sendJson(gson.toJson(diagnostics))
+        return sendJson(gson.toJson(envelope))
     }
-    
+
+    /**
+     * Sends a [MsgType.MESH_JOIN] message to report that this device is joining a mesh session.
+     *
+     * The [meshId] is tracked internally so that [sendMeshLeave] is called automatically
+     * when [disconnect] is invoked while participating in a mesh.
+     *
+     * @param meshId       Stable mesh session identifier shared by all participants.
+     * @param role         Role of this device in the mesh ("participant" or "coordinator").
+     * @param capabilities Capability names this device contributes to the mesh.
+     * @return true if the message was sent immediately; false if blocked or disconnected.
+     */
+    fun sendMeshJoin(
+        meshId: String,
+        role: String = "participant",
+        capabilities: List<String> = emptyList()
+    ): Boolean {
+        val deviceId = getDeviceId()
+        val payload = MeshJoinPayload(
+            mesh_id = meshId,
+            device_id = deviceId,
+            role = role,
+            capabilities = capabilities
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_JOIN,
+            payload = payload,
+            device_id = deviceId,
+            trace_id = sessionTraceId
+        )
+        val sent = sendJson(gson.toJson(envelope))
+        if (sent) {
+            currentMeshId = meshId
+            Log.i(TAG, "[MESH:JOIN] mesh_id=$meshId role=$role device_id=$deviceId trace_id=$sessionTraceId")
+        }
+        return sent
+    }
+
+    /**
+     * Sends a [MsgType.MESH_LEAVE] message to notify the server that this device is leaving
+     * the mesh session. Clears the tracked [currentMeshId] after sending.
+     *
+     * @param meshId Mesh session identifier to leave.
+     * @param reason Reason for leaving: "disconnect", "task_complete", or "error".
+     * @return true if the message was sent immediately; false if blocked or disconnected.
+     */
+    fun sendMeshLeave(
+        meshId: String,
+        reason: String = "disconnect"
+    ): Boolean {
+        val deviceId = getDeviceId()
+        val payload = MeshLeavePayload(
+            mesh_id = meshId,
+            device_id = deviceId,
+            reason = reason
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_LEAVE,
+            payload = payload,
+            device_id = deviceId,
+            trace_id = sessionTraceId
+        )
+        val sent = sendJson(gson.toJson(envelope))
+        currentMeshId = null
+        Log.i(TAG, "[MESH:LEAVE] mesh_id=$meshId reason=$reason device_id=$deviceId sent=$sent")
+        return sent
+    }
+
+    /**
+     * Sends a [MsgType.MESH_RESULT] message reporting aggregated parallel-subtask results
+     * for a mesh session.
+     *
+     * @param meshId     Mesh session identifier.
+     * @param taskId     Top-level task identifier associated with the mesh execution.
+     * @param status     Aggregate status: "success", "partial", or "error".
+     * @param results    Per-device subtask result summaries.
+     * @param summary    Human-readable one-line aggregate outcome (optional).
+     * @param latencyMs  Wall-clock time from first dispatch to last result (ms).
+     * @return true if the message was sent immediately; false if blocked or disconnected.
+     */
+    fun sendMeshResult(
+        meshId: String,
+        taskId: String,
+        status: String,
+        results: List<MeshSubtaskResult> = emptyList(),
+        summary: String? = null,
+        latencyMs: Long = 0L
+    ): Boolean {
+        val deviceId = getDeviceId()
+        val payload = MeshResultPayload(
+            mesh_id = meshId,
+            task_id = taskId,
+            device_id = deviceId,
+            status = status,
+            results = results,
+            summary = summary,
+            latency_ms = latencyMs
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_RESULT,
+            payload = payload,
+            correlation_id = taskId,
+            device_id = deviceId,
+            trace_id = sessionTraceId
+        )
+        Log.i(TAG, "[MESH:RESULT] mesh_id=$meshId task_id=$taskId status=$status results=${results.size} trace_id=$sessionTraceId")
+        return sendJson(gson.toJson(envelope))
+    }
+
     /**
      * 处理收到的消息
      */
