@@ -32,7 +32,80 @@ enum class MsgType(val value: String) {
     /** Uplink: device reports aggregated parallel-subtask results for a mesh session. */
     MESH_RESULT("mesh_result"),
     /** Uplink: structured diagnostic payload for task failure classification (Loop 1/2). */
-    DIAGNOSTICS_PAYLOAD("diagnostics_payload");
+    DIAGNOSTICS_PAYLOAD("diagnostics_payload"),
+
+    // ── Advanced / low-priority capability channels (PR-4 minimal-compat stubs) ──────────
+    // These types are recognised by the AIP v3 model so inbound messages are never silently
+    // dropped or treated as raw text. Full business-logic implementations are TODO; each
+    // currently triggers a structured log entry and, where relevant, an ack reply.
+
+    /** Downlink: gateway relays a message from another node to this device.
+     *  @status minimal-compat — logged + ack sent; no relay-chain logic yet. */
+    RELAY("relay"),
+    /** Downlink: gateway requests this device to forward a task to another peer.
+     *  @status minimal-compat — logged; no peer-routing logic yet. */
+    FORWARD("forward"),
+    /** Downlink: gateway sends a directed reply to a previous device-originated request.
+     *  @status minimal-compat — logged; no reply-state machine yet. */
+    REPLY("reply"),
+    /** Downlink/Uplink: delivery acknowledgement for critical protocol messages.
+     *  @status minimal-compat — inbound logged; outbound [AckPayload] available for callers. */
+    ACK("ack"),
+
+    /** Downlink: gateway requests hybrid (partial-local / partial-remote) task execution.
+     *  @status minimal-compat — payload parsed into [HybridExecutePayload]; logged; degrade
+     *  reply sent because full hybrid executor is not yet implemented. */
+    HYBRID_EXECUTE("hybrid_execute"),
+    /** Uplink: device reports the result of a hybrid execution task.
+     *  @status minimal-compat — [HybridResultPayload] model available; send path present. */
+    HYBRID_RESULT("hybrid_result"),
+    /** Uplink: device signals that a hybrid task was downgraded (e.g. to pure local mode).
+     *  @status minimal-compat — [HybridDegradePayload] model available; send path present. */
+    HYBRID_DEGRADE("hybrid_degrade"),
+
+    /** Downlink: gateway sends a retrieval-augmented generation query to the device.
+     *  @status minimal-compat — logged; empty result returned; full RAG pipeline TODO. */
+    RAG_QUERY("rag_query"),
+    /** Uplink: device returns the result of a RAG query.
+     *  @status minimal-compat — model available; send path present. */
+    RAG_RESULT("rag_result"),
+
+    /** Downlink: gateway requests on-device code execution (e.g. Python snippet).
+     *  @status minimal-compat — logged; error result returned; sandbox TODO. */
+    CODE_EXECUTE("code_execute"),
+    /** Uplink: device returns the result of a code execution request.
+     *  @status minimal-compat — model available; send path present. */
+    CODE_RESULT("code_result"),
+
+    /** Downlink: gateway announces a new peer device joining the session.
+     *  @status minimal-compat — logged; no peer-state tracking yet. */
+    PEER_ANNOUNCE("peer_announce"),
+    /** Downlink/Uplink: peer capability exchange between devices.
+     *  @status minimal-compat — logged; no capability-negotiation logic yet. */
+    PEER_EXCHANGE("peer_exchange"),
+    /** Downlink: gateway pushes a mesh topology update (node list / adjacency).
+     *  @status minimal-compat — logged; no topology-aware routing yet. */
+    MESH_TOPOLOGY("mesh_topology"),
+
+    /** Downlink: gateway sends a wake event to resume an idle or suspended device.
+     *  @status minimal-compat — logged; ack sent; no suspend/resume state machine yet. */
+    WAKE_EVENT("wake_event"),
+    /** Downlink: gateway requests session state migration to another device.
+     *  @status minimal-compat — logged; degrade/reject reply sent; full migration TODO. */
+    SESSION_MIGRATE("session_migrate"),
+
+    /** Downlink/Uplink: coordination synchronisation tick between coordinator and participants.
+     *  @status minimal-compat — logged; ack sent; no sync-state machine yet. */
+    COORD_SYNC("coord_sync"),
+    /** Downlink: gateway broadcasts a message to all devices in a session.
+     *  @status minimal-compat — logged; no broadcast fan-out yet. */
+    BROADCAST("broadcast"),
+    /** Downlink: gateway requests a distributed resource lock.
+     *  @status minimal-compat — logged; ack sent; no lock-manager yet. */
+    LOCK("lock"),
+    /** Downlink: gateway releases a distributed resource lock.
+     *  @status minimal-compat — logged; ack sent; no lock-manager yet. */
+    UNLOCK("unlock");
 
     companion object {
         /**
@@ -72,6 +145,41 @@ enum class MsgType(val value: String) {
          * [LEGACY_TYPE_MAP].
          */
         fun toV3Type(legacyType: String): String = LEGACY_TYPE_MAP[legacyType] ?: legacyType
+
+        /**
+         * Looks up a [MsgType] by its wire-format [value] string.
+         *
+         * Returns `null` when [value] does not match any known type. Callers should
+         * treat `null` as an unknown/future type and route to the fallback handler
+         * rather than crashing or silently discarding the message.
+         */
+        fun fromValue(value: String): MsgType? = entries.firstOrNull { it.value == value }
+
+        /**
+         * Set of advanced / low-priority message types added in PR-4.
+         * These types receive minimal-compat handling (log + optional ack) in
+         * [GalaxyWebSocketClient] and [GalaxyConnectionService].
+         *
+         * TODO(PR-5+): promote individual types to dedicated handlers as business
+         * requirements are confirmed.
+         */
+        val ADVANCED_TYPES: Set<MsgType> = setOf(
+            RELAY, FORWARD, REPLY, ACK,
+            HYBRID_EXECUTE, HYBRID_RESULT, HYBRID_DEGRADE,
+            RAG_QUERY, RAG_RESULT,
+            CODE_EXECUTE, CODE_RESULT,
+            PEER_ANNOUNCE, PEER_EXCHANGE, MESH_TOPOLOGY,
+            WAKE_EVENT, SESSION_MIGRATE,
+            COORD_SYNC, BROADCAST, LOCK, UNLOCK
+        )
+
+        /**
+         * Advanced types for which the device should send an [AckPayload] reply
+         * to confirm receipt, even though full business logic is not yet implemented.
+         */
+        val ACK_ON_RECEIPT_TYPES: Set<MsgType> = setOf(
+            RELAY, WAKE_EVENT, COORD_SYNC, LOCK, UNLOCK
+        )
     }
 }
 
@@ -481,4 +589,87 @@ data class MeshResultPayload(
     val results: List<MeshSubtaskResult> = emptyList(),
     val summary: String? = null,
     val latency_ms: Long = 0L
+)
+
+// ── PR-4 advanced-capability minimal payload models ───────────────────────────────────────
+// These classes represent the AIP v3 wire format for the new low-priority capability
+// channels.  Full business implementations are TODO; each class is intentionally minimal
+// (only the fields required for correct ack/logging are mandatory).
+
+/**
+ * Uplink/Downlink acknowledgement payload for [MsgType.ACK].
+ * Sent by the device to confirm receipt of a critical protocol message.
+ *
+ * @param message_id  Identifier of the message being acknowledged (mirrors the inbound
+ *                    `message_id` envelope field, or the `task_id` when absent).
+ * @param type_acked  The [MsgType.value] string of the message being acknowledged.
+ * @param device_id   Acknowledging device identifier.
+ * @param status      Always `"received"` for a simple receipt ack.
+ */
+data class AckPayload(
+    val message_id: String,
+    val type_acked: String,
+    val device_id: String,
+    val status: String = "received"
+)
+
+/**
+ * Downlink payload for [MsgType.HYBRID_EXECUTE].
+ * Requests partial-local / partial-remote execution of a task.
+ *
+ * @param task_id      Unique task identifier.
+ * @param goal         Natural-language objective.
+ * @param local_steps  Steps to be executed locally on the device.
+ * @param remote_steps Steps to be delegated to the cloud/Agent Runtime.
+ * @param timeout_ms   Per-task execution timeout (0 = use server default).
+ */
+data class HybridExecutePayload(
+    val task_id: String,
+    val goal: String,
+    val local_steps: List<String> = emptyList(),
+    val remote_steps: List<String> = emptyList(),
+    val timeout_ms: Long = 0L
+)
+
+/**
+ * Uplink payload for [MsgType.HYBRID_RESULT].
+ * Reports the outcome of a [MsgType.HYBRID_EXECUTE] request.
+ *
+ * @param task_id        Echoed from [HybridExecutePayload].
+ * @param correlation_id Set to [task_id] for reply routing.
+ * @param status         "success" | "error" | "degraded".
+ * @param local_result   Summary of locally-executed steps.
+ * @param remote_result  Summary of remotely-executed steps.
+ * @param device_id      Reporting device identifier.
+ * @param error          Error description when status is "error".
+ * @param latency_ms     Wall-clock execution time in milliseconds.
+ */
+data class HybridResultPayload(
+    val task_id: String,
+    val correlation_id: String? = null,
+    val status: String,
+    val local_result: String? = null,
+    val remote_result: String? = null,
+    val device_id: String = "",
+    val error: String? = null,
+    val latency_ms: Long = 0L
+)
+
+/**
+ * Uplink payload for [MsgType.HYBRID_DEGRADE].
+ * Signals that a [MsgType.HYBRID_EXECUTE] request was downgraded (e.g. to pure local
+ * execution) because the remote component was unavailable.
+ *
+ * @param task_id       Echoed from [HybridExecutePayload].
+ * @param correlation_id Set to [task_id] for reply routing.
+ * @param reason        Human-readable reason for degradation.
+ * @param fallback_mode Mode adopted after degradation: "local_only" or "remote_only".
+ * @param device_id     Reporting device identifier.
+ */
+data class HybridDegradePayload(
+    val task_id: String,
+    val correlation_id: String? = null,
+    val reason: String,
+    val fallback_mode: String = "local_only",
+    val device_id: String = ""
 )

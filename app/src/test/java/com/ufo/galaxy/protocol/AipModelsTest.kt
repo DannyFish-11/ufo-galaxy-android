@@ -585,4 +585,182 @@ class AipModelsTest {
         assertEquals("open settings completed", result.output)
         assertNull(result.error)
     }
+
+    // ── MsgType — PR-4 advanced-capability entries ────────────────────────────
+
+    @Test
+    fun `MsgType PR-4 relay forward reply ack map to correct wire strings`() {
+        assertEquals("relay",   MsgType.RELAY.value)
+        assertEquals("forward", MsgType.FORWARD.value)
+        assertEquals("reply",   MsgType.REPLY.value)
+        assertEquals("ack",     MsgType.ACK.value)
+    }
+
+    @Test
+    fun `MsgType PR-4 hybrid types map to correct wire strings`() {
+        assertEquals("hybrid_execute", MsgType.HYBRID_EXECUTE.value)
+        assertEquals("hybrid_result",  MsgType.HYBRID_RESULT.value)
+        assertEquals("hybrid_degrade", MsgType.HYBRID_DEGRADE.value)
+    }
+
+    @Test
+    fun `MsgType PR-4 rag and code types map to correct wire strings`() {
+        assertEquals("rag_query",    MsgType.RAG_QUERY.value)
+        assertEquals("rag_result",   MsgType.RAG_RESULT.value)
+        assertEquals("code_execute", MsgType.CODE_EXECUTE.value)
+        assertEquals("code_result",  MsgType.CODE_RESULT.value)
+    }
+
+    @Test
+    fun `MsgType PR-4 peer and mesh topology types map to correct wire strings`() {
+        assertEquals("peer_announce",  MsgType.PEER_ANNOUNCE.value)
+        assertEquals("peer_exchange",  MsgType.PEER_EXCHANGE.value)
+        assertEquals("mesh_topology",  MsgType.MESH_TOPOLOGY.value)
+    }
+
+    @Test
+    fun `MsgType PR-4 session and coordination types map to correct wire strings`() {
+        assertEquals("wake_event",      MsgType.WAKE_EVENT.value)
+        assertEquals("session_migrate", MsgType.SESSION_MIGRATE.value)
+        assertEquals("coord_sync",      MsgType.COORD_SYNC.value)
+        assertEquals("broadcast",       MsgType.BROADCAST.value)
+        assertEquals("lock",            MsgType.LOCK.value)
+        assertEquals("unlock",          MsgType.UNLOCK.value)
+    }
+
+    @Test
+    fun `MsgType fromValue returns correct entry for all PR-4 types`() {
+        assertEquals(MsgType.RELAY,           MsgType.fromValue("relay"))
+        assertEquals(MsgType.FORWARD,         MsgType.fromValue("forward"))
+        assertEquals(MsgType.HYBRID_EXECUTE,  MsgType.fromValue("hybrid_execute"))
+        assertEquals(MsgType.RAG_QUERY,       MsgType.fromValue("rag_query"))
+        assertEquals(MsgType.CODE_EXECUTE,    MsgType.fromValue("code_execute"))
+        assertEquals(MsgType.PEER_ANNOUNCE,   MsgType.fromValue("peer_announce"))
+        assertEquals(MsgType.MESH_TOPOLOGY,   MsgType.fromValue("mesh_topology"))
+        assertEquals(MsgType.WAKE_EVENT,      MsgType.fromValue("wake_event"))
+        assertEquals(MsgType.SESSION_MIGRATE, MsgType.fromValue("session_migrate"))
+        assertEquals(MsgType.COORD_SYNC,      MsgType.fromValue("coord_sync"))
+        assertEquals(MsgType.LOCK,            MsgType.fromValue("lock"))
+        assertEquals(MsgType.UNLOCK,          MsgType.fromValue("unlock"))
+    }
+
+    @Test
+    fun `MsgType fromValue returns null for unknown type strings`() {
+        assertNull(MsgType.fromValue("totally_unknown_type"))
+        assertNull(MsgType.fromValue(""))
+        assertNull(MsgType.fromValue("TASK_ASSIGN")) // wrong case
+    }
+
+    @Test
+    fun `MsgType ADVANCED_TYPES contains all PR-4 advanced entries`() {
+        val advanced = MsgType.ADVANCED_TYPES
+        assertTrue(advanced.contains(MsgType.RELAY))
+        assertTrue(advanced.contains(MsgType.HYBRID_EXECUTE))
+        assertTrue(advanced.contains(MsgType.RAG_QUERY))
+        assertTrue(advanced.contains(MsgType.CODE_EXECUTE))
+        assertTrue(advanced.contains(MsgType.PEER_ANNOUNCE))
+        assertTrue(advanced.contains(MsgType.WAKE_EVENT))
+        assertTrue(advanced.contains(MsgType.SESSION_MIGRATE))
+        assertTrue(advanced.contains(MsgType.LOCK))
+        assertTrue(advanced.contains(MsgType.UNLOCK))
+        // Core types must NOT be in the advanced set
+        assertFalse(advanced.contains(MsgType.TASK_ASSIGN))
+        assertFalse(advanced.contains(MsgType.GOAL_EXECUTION))
+        assertFalse(advanced.contains(MsgType.TASK_CANCEL))
+    }
+
+    @Test
+    fun `MsgType ACK_ON_RECEIPT_TYPES contains relay wake_event coord_sync lock unlock`() {
+        val ackSet = MsgType.ACK_ON_RECEIPT_TYPES
+        assertTrue(ackSet.contains(MsgType.RELAY))
+        assertTrue(ackSet.contains(MsgType.WAKE_EVENT))
+        assertTrue(ackSet.contains(MsgType.COORD_SYNC))
+        assertTrue(ackSet.contains(MsgType.LOCK))
+        assertTrue(ackSet.contains(MsgType.UNLOCK))
+    }
+
+    // ── AckPayload (PR-4) ─────────────────────────────────────────────────────
+
+    @Test
+    fun `AckPayload defaults status to received`() {
+        val payload = AckPayload(
+            message_id = "msg-001",
+            type_acked = "relay",
+            device_id = "dev-1"
+        )
+
+        assertEquals("msg-001", payload.message_id)
+        assertEquals("relay",   payload.type_acked)
+        assertEquals("dev-1",   payload.device_id)
+        assertEquals("received", payload.status)
+    }
+
+    @Test
+    fun `AckPayload wraps in AipMessage with ACK type`() {
+        val payload = AckPayload(message_id = "m", type_acked = "wake_event", device_id = "d")
+        val envelope = AipMessage(type = MsgType.ACK, payload = payload)
+
+        assertEquals(MsgType.ACK, envelope.type)
+        assertEquals("AIP/1.0", envelope.protocol)
+    }
+
+    // ── HybridExecutePayload (PR-4) ───────────────────────────────────────────
+
+    @Test
+    fun `HybridExecutePayload accepts local and remote steps with defaults`() {
+        val payload = HybridExecutePayload(
+            task_id = "task-h1",
+            goal = "book meeting"
+        )
+
+        assertEquals("task-h1", payload.task_id)
+        assertEquals("book meeting", payload.goal)
+        assertTrue(payload.local_steps.isEmpty())
+        assertTrue(payload.remote_steps.isEmpty())
+        assertEquals(0L, payload.timeout_ms)
+    }
+
+    @Test
+    fun `HybridExecutePayload carries separate local and remote step lists`() {
+        val payload = HybridExecutePayload(
+            task_id = "task-h2",
+            goal = "check email and tap reply",
+            local_steps = listOf("tap reply button"),
+            remote_steps = listOf("fetch emails from server"),
+            timeout_ms = 10000L
+        )
+
+        assertEquals(1, payload.local_steps.size)
+        assertEquals(1, payload.remote_steps.size)
+        assertEquals(10000L, payload.timeout_ms)
+    }
+
+    // ── HybridResultPayload (PR-4) ────────────────────────────────────────────
+
+    @Test
+    fun `HybridResultPayload defaults to empty device and null results`() {
+        val payload = HybridResultPayload(task_id = "task-r1", status = "success")
+
+        assertEquals("task-r1", payload.task_id)
+        assertEquals("success", payload.status)
+        assertEquals("", payload.device_id)
+        assertNull(payload.error)
+        assertEquals(0L, payload.latency_ms)
+    }
+
+    // ── HybridDegradePayload (PR-4) ───────────────────────────────────────────
+
+    @Test
+    fun `HybridDegradePayload defaults fallback_mode to local_only`() {
+        val payload = HybridDegradePayload(
+            task_id = "task-d1",
+            reason = "hybrid_executor_not_implemented"
+        )
+
+        assertEquals("task-d1", payload.task_id)
+        assertEquals("hybrid_executor_not_implemented", payload.reason)
+        assertEquals("local_only", payload.fallback_mode)
+        assertEquals("", payload.device_id)
+        assertNull(payload.correlation_id)
+    }
 }
