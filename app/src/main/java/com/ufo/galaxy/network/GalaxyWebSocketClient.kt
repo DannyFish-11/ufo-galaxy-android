@@ -189,6 +189,31 @@ class GalaxyWebSocketClient(
          * Default implementation is a no-op for backward compatibility.
          */
         fun onTaskCancel(taskId: String, cancelPayloadJson: String) = Unit
+
+        /**
+         * Called for any inbound message whose type belongs to
+         * [com.ufo.galaxy.protocol.MsgType.ADVANCED_TYPES] (PR-4 minimal-compat channels).
+         *
+         * These channels are recognised by the AIP v3 model and will not be silently
+         * dropped, but their full business logic is not yet implemented.
+         * The default implementation is a no-op; override to add custom handling.
+         *
+         * @param type       The parsed [MsgType] of the inbound message.
+         * @param messageId  Optional `message_id` field from the AIP v3 envelope.
+         * @param rawJson    Full raw JSON of the inbound envelope (for logging/debugging).
+         */
+        fun onAdvancedMessage(type: com.ufo.galaxy.protocol.MsgType, messageId: String?, rawJson: String) = Unit
+
+        /**
+         * Called when a message with a completely unrecognised type string is received.
+         *
+         * This is the last-resort fallback to prevent silent failures. The default
+         * implementation is a no-op; override to add structured error reporting.
+         *
+         * @param rawType  The raw `type` string from the inbound JSON.
+         * @param rawJson  Full raw JSON of the inbound envelope.
+         */
+        fun onUnknownMessage(rawType: String?, rawJson: String) = Unit
     }
     
     private val client = buildOkHttpClient(allowSelfSigned)
@@ -919,10 +944,38 @@ class GalaxyWebSocketClient(
                     listeners.forEach { it.onError(error) }
                 }
                 else -> {
-                    // 默认作为文本消息处理
-                    val content = json.getAsJsonObject("payload")
-                        ?.get("content")?.asString ?: text
-                    listeners.forEach { it.onMessage(content) }
+                    // ── Unified fallback for unrecognised inbound message types ───────────
+                    // First check whether the type belongs to the PR-4 advanced-capability
+                    // set. If so, dispatch to onAdvancedMessage() (structured log + optional
+                    // ack). If the type is genuinely unknown (not in MsgType at all), dispatch
+                    // to onUnknownMessage() so it can be logged and reported without crashing.
+                    val rawType = json.get("type")?.asString
+                    val messageId = json.get("message_id")?.asString
+                    val knownType = rawType?.let { MsgType.fromValue(it) }
+                    when {
+                        knownType != null && knownType in MsgType.ADVANCED_TYPES -> {
+                            Log.i(TAG, "[WS:ADVANCED] type=${knownType.value} message_id=$messageId — minimal-compat handler")
+                            GalaxyLogger.log(TAG, mapOf(
+                                "event" to "advanced_message_received",
+                                "type" to knownType.value,
+                                "message_id" to (messageId ?: ""),
+                                "status" to "minimal_compat"
+                            ))
+                            listeners.forEach { it.onAdvancedMessage(knownType, messageId, text) }
+                        }
+                        else -> {
+                            // Truly unknown type — log a structured warning instead of silently
+                            // treating the message as plain text (which would hide protocol errors).
+                            Log.w(TAG, "[WS:UNKNOWN] type=$rawType message_id=$messageId — unrecognised; routing to onUnknownMessage")
+                            GalaxyLogger.log(TAG, mapOf(
+                                "event" to "unknown_message_received",
+                                "type" to (rawType ?: "null"),
+                                "message_id" to (messageId ?: ""),
+                                "status" to "unrecognised"
+                            ))
+                            listeners.forEach { it.onUnknownMessage(rawType, text) }
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {

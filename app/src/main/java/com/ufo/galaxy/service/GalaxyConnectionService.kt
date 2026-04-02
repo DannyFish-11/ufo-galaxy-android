@@ -18,9 +18,11 @@ import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.AckPayload
 import com.ufo.galaxy.protocol.CancelResultPayload
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.protocol.HybridDegradePayload
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
@@ -157,6 +159,57 @@ class GalaxyConnectionService : Service() {
                 serviceScope.launch {
                     handleTaskCancel(taskId, cancelPayloadJson)
                 }
+            }
+
+            /**
+             * Minimal-compat handler for PR-4 advanced capability channels.
+             *
+             * For types in [MsgType.ACK_ON_RECEIPT_TYPES] a structured ack is sent back so
+             * the server knows the message was received. All other advanced types are logged
+             * only.  Full business-logic implementations are deferred to future PRs.
+             */
+            override fun onAdvancedMessage(
+                type: MsgType,
+                messageId: String?,
+                rawJson: String
+            ) {
+                Log.i(TAG, "[ADVANCED:RECV] type=${type.value} message_id=$messageId")
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "advanced_message_handled",
+                        "type" to type.value,
+                        "message_id" to (messageId ?: ""),
+                        "handler" to "minimal_compat"
+                    )
+                )
+                // Send ack for types that require delivery confirmation.
+                if (type in MsgType.ACK_ON_RECEIPT_TYPES) {
+                    serviceScope.launch {
+                        sendAdvancedAck(type, messageId)
+                    }
+                }
+                // HYBRID_EXECUTE: respond with a degrade payload because the full hybrid
+                // executor is not yet implemented.
+                if (type == MsgType.HYBRID_EXECUTE) {
+                    serviceScope.launch {
+                        sendHybridDegrade(rawJson)
+                    }
+                }
+            }
+
+            /**
+             * Fallback for completely unrecognised message types.
+             * Logs a structured warning so failures are never silent.
+             */
+            override fun onUnknownMessage(rawType: String?, rawJson: String) {
+                Log.w(TAG, "[UNKNOWN:RECV] type=$rawType — unrecognised AIP v3 message type; ignored")
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "unknown_message_ignored",
+                        "type" to (rawType ?: "null"),
+                        "handler" to "fallback"
+                    )
+                )
             }
         }
         webSocketClient.addListener(wsListener)
@@ -673,6 +726,79 @@ class GalaxyConnectionService : Service() {
         latency_ms = timeoutMs,
         device_id = localDeviceId
     )
+
+    // ── PR-4 advanced-capability minimal helpers ──────────────────────────────────────────
+
+    /**
+     * Sends an [AckPayload] confirming receipt of an advanced-capability message.
+     *
+     * Called for message types in [MsgType.ACK_ON_RECEIPT_TYPES] that require delivery
+     * confirmation even though full business logic is not yet implemented.
+     *
+     * @param type      The type of the inbound message being acknowledged.
+     * @param messageId The `message_id` from the inbound AIP v3 envelope; used as the
+     *                  payload's [AckPayload.message_id]. Falls back to a new UUID when null.
+     */
+    private fun sendAdvancedAck(type: MsgType, messageId: String?) {
+        val ackPayload = AckPayload(
+            message_id = messageId ?: java.util.UUID.randomUUID().toString(),
+            type_acked = type.value,
+            device_id = localDeviceId
+        )
+        val envelope = AipMessage(
+            type = MsgType.ACK,
+            payload = ackPayload,
+            device_id = localDeviceId,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        Log.d(TAG, "[ADVANCED:ACK] type_acked=${type.value} message_id=${ackPayload.message_id} sent=$sent")
+    }
+
+    /**
+     * Sends a [HybridDegradePayload] in response to a [MsgType.HYBRID_EXECUTE] message.
+     *
+     * Called when the full hybrid executor is not yet implemented; informs the gateway that
+     * the device has downgraded to local-only mode for this task.
+     *
+     * @param rawHybridJson The raw JSON of the inbound hybrid_execute envelope, used to
+     *                      extract [task_id] for the degrade reply.
+     */
+    private fun sendHybridDegrade(rawHybridJson: String) {
+        val taskId = try {
+            gson.fromJson(rawHybridJson, com.google.gson.JsonObject::class.java)
+                ?.getAsJsonObject("payload")?.get("task_id")?.asString ?: ""
+        } catch (e: Exception) {
+            Log.w(TAG, "[ADVANCED:HYBRID_DEGRADE] failed to extract task_id from hybrid_execute payload: ${e.message}")
+            ""
+        }
+
+        val degradePayload = HybridDegradePayload(
+            task_id = taskId,
+            correlation_id = taskId.ifEmpty { null },
+            reason = "hybrid_executor_not_implemented",
+            fallback_mode = "local_only",
+            device_id = localDeviceId
+        )
+        val envelope = AipMessage(
+            type = MsgType.HYBRID_DEGRADE,
+            payload = degradePayload,
+            correlation_id = taskId.ifEmpty { null },
+            device_id = localDeviceId,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent")
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "hybrid_degrade_sent",
+                "task_id" to taskId,
+                "reason" to "hybrid_executor_not_implemented"
+            )
+        )
+    }
 
     /**
      * 回传 task_result 错误（payload 解析失败时使用）。
