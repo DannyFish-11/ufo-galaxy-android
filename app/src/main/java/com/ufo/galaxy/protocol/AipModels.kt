@@ -146,6 +146,9 @@ enum class MsgType(val value: String) {
          */
         fun toV3Type(legacyType: String): String = LEGACY_TYPE_MAP[legacyType] ?: legacyType
 
+        /** Backing O(1) lookup map for [fromValue]. Built once at class-load time. */
+        private val VALUE_MAP: Map<String, MsgType> = entries.associateBy { it.value }
+
         /**
          * Looks up a [MsgType] by its wire-format [value] string.
          *
@@ -153,7 +156,7 @@ enum class MsgType(val value: String) {
          * treat `null` as an unknown/future type and route to the fallback handler
          * rather than crashing or silently discarding the message.
          */
-        fun fromValue(value: String): MsgType? = entries.firstOrNull { it.value == value }
+        fun fromValue(value: String): MsgType? = VALUE_MAP[value]
 
         /**
          * Set of advanced / low-priority message types added in PR-4.

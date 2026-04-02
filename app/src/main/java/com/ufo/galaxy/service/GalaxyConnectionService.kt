@@ -769,7 +769,10 @@ class GalaxyConnectionService : Service() {
         val taskId = try {
             gson.fromJson(rawHybridJson, com.google.gson.JsonObject::class.java)
                 ?.getAsJsonObject("payload")?.get("task_id")?.asString ?: ""
-        } catch (_: Exception) { "" }
+        } catch (e: Exception) {
+            Log.w(TAG, "[ADVANCED:HYBRID_DEGRADE] failed to extract task_id from hybrid_execute payload: ${e.message}")
+            ""
+        }
 
         val degradePayload = HybridDegradePayload(
             task_id = taskId,
