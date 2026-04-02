@@ -421,4 +421,168 @@ class AipModelsTest {
         assertEquals("element not found", payload.error)
         assertNotNull(payload.snapshot)
     }
+
+    // ── MsgType — new entries (PR-3) ──────────────────────────────────────────
+
+    @Test
+    fun `MsgType MESH_JOIN LEAVE RESULT and DIAGNOSTICS_PAYLOAD map to correct wire strings`() {
+        assertEquals("mesh_join", MsgType.MESH_JOIN.value)
+        assertEquals("mesh_leave", MsgType.MESH_LEAVE.value)
+        assertEquals("mesh_result", MsgType.MESH_RESULT.value)
+        assertEquals("diagnostics_payload", MsgType.DIAGNOSTICS_PAYLOAD.value)
+    }
+
+    // ── DiagnosticsPayload (M2) ───────────────────────────────────────────────
+
+    @Test
+    fun `DiagnosticsPayload contains required fields`() {
+        val before = System.currentTimeMillis()
+        val payload = DiagnosticsPayload(
+            task_id = "task-diag-001",
+            device_id = "device-001",
+            node_name = "android_edge",
+            error_type = "network_timeout",
+            error_context = "connect timed out after 30s"
+        )
+        val after = System.currentTimeMillis()
+
+        assertEquals("task-diag-001", payload.task_id)
+        assertEquals("device-001", payload.device_id)
+        assertEquals("android_edge", payload.node_name)
+        assertEquals("network_timeout", payload.error_type)
+        assertEquals("connect timed out after 30s", payload.error_context)
+        assertTrue(payload.timestamp in before..after)
+    }
+
+    @Test
+    fun `DiagnosticsPayload wraps in AipMessage with DIAGNOSTICS_PAYLOAD type`() {
+        val payload = DiagnosticsPayload(
+            task_id = "t1",
+            device_id = "d1",
+            node_name = "n1",
+            error_type = "permission_denied",
+            error_context = "camera access denied"
+        )
+        val envelope = AipMessage(
+            type = MsgType.DIAGNOSTICS_PAYLOAD,
+            payload = payload,
+            device_id = "d1",
+            trace_id = "trace-001"
+        )
+
+        assertEquals(MsgType.DIAGNOSTICS_PAYLOAD, envelope.type)
+        assertEquals("AIP/1.0", envelope.protocol)
+        assertEquals("3.0", envelope.version)
+        assertEquals("trace-001", envelope.trace_id)
+    }
+
+    // ── MeshJoinPayload (H5) ──────────────────────────────────────────────────
+
+    @Test
+    fun `MeshJoinPayload contains required fields with defaults`() {
+        val payload = MeshJoinPayload(
+            mesh_id = "mesh-abc-001",
+            device_id = "phone-1"
+        )
+
+        assertEquals("mesh-abc-001", payload.mesh_id)
+        assertEquals("phone-1", payload.device_id)
+        assertEquals("participant", payload.role)
+        assertTrue(payload.capabilities.isEmpty())
+    }
+
+    @Test
+    fun `MeshJoinPayload accepts coordinator role and capabilities`() {
+        val payload = MeshJoinPayload(
+            mesh_id = "mesh-xyz",
+            device_id = "tablet-1",
+            role = "coordinator",
+            capabilities = listOf("local_task_planning", "autonomous_goal_execution")
+        )
+
+        assertEquals("coordinator", payload.role)
+        assertEquals(2, payload.capabilities.size)
+        assertTrue(payload.capabilities.contains("local_task_planning"))
+    }
+
+    // ── MeshLeavePayload (H5) ─────────────────────────────────────────────────
+
+    @Test
+    fun `MeshLeavePayload contains required fields with default reason`() {
+        val payload = MeshLeavePayload(
+            mesh_id = "mesh-abc-001",
+            device_id = "phone-1"
+        )
+
+        assertEquals("mesh-abc-001", payload.mesh_id)
+        assertEquals("phone-1", payload.device_id)
+        assertEquals("disconnect", payload.reason)
+    }
+
+    @Test
+    fun `MeshLeavePayload accepts task_complete and error reasons`() {
+        val complete = MeshLeavePayload(mesh_id = "m", device_id = "d", reason = "task_complete")
+        val error = MeshLeavePayload(mesh_id = "m", device_id = "d", reason = "error")
+
+        assertEquals("task_complete", complete.reason)
+        assertEquals("error", error.reason)
+    }
+
+    // ── MeshResultPayload (H5) ────────────────────────────────────────────────
+
+    @Test
+    fun `MeshResultPayload contains required fields with defaults`() {
+        val payload = MeshResultPayload(
+            mesh_id = "mesh-001",
+            task_id = "task-001",
+            device_id = "phone-1",
+            status = "success"
+        )
+
+        assertEquals("mesh-001", payload.mesh_id)
+        assertEquals("task-001", payload.task_id)
+        assertEquals("phone-1", payload.device_id)
+        assertEquals("success", payload.status)
+        assertTrue(payload.results.isEmpty())
+        assertNull(payload.summary)
+        assertEquals(0L, payload.latency_ms)
+    }
+
+    @Test
+    fun `MeshResultPayload aggregates MeshSubtaskResult entries`() {
+        val subtasks = listOf(
+            MeshSubtaskResult(device_id = "phone-1", subtask_id = "grp_sub_0", status = "success", output = "done"),
+            MeshSubtaskResult(device_id = "tablet-1", subtask_id = "grp_sub_1", status = "error", error = "timeout")
+        )
+        val payload = MeshResultPayload(
+            mesh_id = "mesh-001",
+            task_id = "task-001",
+            device_id = "phone-1",
+            status = "partial",
+            results = subtasks,
+            summary = "1 succeeded, 1 failed",
+            latency_ms = 1500L
+        )
+
+        assertEquals(2, payload.results.size)
+        assertEquals("partial", payload.status)
+        assertEquals("1 succeeded, 1 failed", payload.summary)
+        assertEquals(1500L, payload.latency_ms)
+    }
+
+    @Test
+    fun `MeshSubtaskResult contains device and subtask identifiers`() {
+        val result = MeshSubtaskResult(
+            device_id = "dev-a",
+            subtask_id = "grp-123_sub_0",
+            status = "success",
+            output = "open settings completed"
+        )
+
+        assertEquals("dev-a", result.device_id)
+        assertEquals("grp-123_sub_0", result.subtask_id)
+        assertEquals("success", result.status)
+        assertEquals("open settings completed", result.output)
+        assertNull(result.error)
+    }
 }

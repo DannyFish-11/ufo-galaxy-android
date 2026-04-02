@@ -24,7 +24,15 @@ enum class MsgType(val value: String) {
     /** Downlink: server requests cancellation of a running task or parallel subtask. */
     TASK_CANCEL("task_cancel"),
     /** Uplink: device acknowledges the cancellation request. */
-    CANCEL_RESULT("cancel_result");
+    CANCEL_RESULT("cancel_result"),
+    /** Uplink: device reports joining a mesh session. */
+    MESH_JOIN("mesh_join"),
+    /** Uplink: device reports leaving a mesh session. */
+    MESH_LEAVE("mesh_leave"),
+    /** Uplink: device reports aggregated parallel-subtask results for a mesh session. */
+    MESH_RESULT("mesh_result"),
+    /** Uplink: structured diagnostic payload for task failure classification (Loop 1/2). */
+    DIAGNOSTICS_PAYLOAD("diagnostics_payload");
 
     companion object {
         /**
@@ -382,4 +390,95 @@ data class CancelResultPayload(
     val subtask_index: Int? = null,
     val device_id: String = "",
     val error: String? = null
+)
+
+/**
+ * Uplink payload for [MsgType.DIAGNOSTICS_PAYLOAD].
+ * Carries structured failure information for server-side Loop 1 (self-repair) and
+ * Loop 2 (learning feedback) classification.
+ *
+ * @param task_id       Failing task's unique identifier.
+ * @param device_id     Reporting device identifier.
+ * @param node_name     Name of the reporting node.
+ * @param error_type    Error classification (e.g., "network_timeout", "permission_denied").
+ * @param error_context Specific error description or stack summary.
+ * @param timestamp     Unix epoch millis at the time of the failure.
+ */
+data class DiagnosticsPayload(
+    val task_id: String,
+    val device_id: String,
+    val node_name: String,
+    val error_type: String,
+    val error_context: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
+ * Uplink payload for [MsgType.MESH_JOIN].
+ * Sent when the device joins a mesh session to report participation readiness.
+ *
+ * @param mesh_id      Stable mesh session identifier shared by all participants.
+ * @param device_id    Joining device identifier.
+ * @param role         Role of this device in the mesh: "participant" or "coordinator".
+ * @param capabilities Capability names this device contributes to the mesh.
+ */
+data class MeshJoinPayload(
+    val mesh_id: String,
+    val device_id: String,
+    val role: String = "participant",
+    val capabilities: List<String> = emptyList()
+)
+
+/**
+ * Uplink payload for [MsgType.MESH_LEAVE].
+ * Sent when the device leaves a mesh session (on disconnect or task completion).
+ *
+ * @param mesh_id   Mesh session identifier.
+ * @param device_id Leaving device identifier.
+ * @param reason    Reason for leaving: "disconnect", "task_complete", or "error".
+ */
+data class MeshLeavePayload(
+    val mesh_id: String,
+    val device_id: String,
+    val reason: String = "disconnect"
+)
+
+/**
+ * Per-device subtask summary included in [MeshResultPayload].
+ *
+ * @param device_id   Device that executed this subtask.
+ * @param subtask_id  Subtask identifier (<groupId>_sub_<index>).
+ * @param status      "success" or "error".
+ * @param output      Optional result payload string from the device.
+ * @param error       Error description when [status] is "error".
+ */
+data class MeshSubtaskResult(
+    val device_id: String,
+    val subtask_id: String,
+    val status: String,
+    val output: String? = null,
+    val error: String? = null
+)
+
+/**
+ * Uplink payload for [MsgType.MESH_RESULT].
+ * Reports aggregated parallel-subtask results when all participants in a mesh session
+ * have completed their subtasks.
+ *
+ * @param mesh_id     Mesh session identifier.
+ * @param task_id     Associated top-level task identifier.
+ * @param device_id   Device reporting the aggregation (usually the coordinator).
+ * @param status      Aggregate status: "success", "partial", or "error".
+ * @param results     Per-device subtask result summaries.
+ * @param summary     Human-readable one-line aggregate outcome.
+ * @param latency_ms  Wall-clock time from first subtask dispatch to last result (ms).
+ */
+data class MeshResultPayload(
+    val mesh_id: String,
+    val task_id: String,
+    val device_id: String,
+    val status: String,
+    val results: List<MeshSubtaskResult> = emptyList(),
+    val summary: String? = null,
+    val latency_ms: Long = 0L
 )
