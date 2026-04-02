@@ -267,3 +267,4 @@ See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md) for the full observability refer
 - `AgentRuntimeBridge` uses `GatewayClient` interface — inject a fake to test handoff logic without network.
 - Integration tests: see [`docs/LOCAL_LOOP_TESTING.md`](LOCAL_LOOP_TESTING.md) and [`docs/e2e-verification.md`](e2e-verification.md).
 - Regression checklist: [`docs/android-regression-checklist.md`](android-regression-checklist.md).
+- Fix-PR workflow: [`docs/PR_FIX_WORKFLOW.md`](PR_FIX_WORKFLOW.md).
