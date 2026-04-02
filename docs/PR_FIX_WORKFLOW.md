@@ -36,7 +36,7 @@ Rules:
 Start from the repository baseline before making changes.
 
 ```bash
-cd /home/runner/work/ufo-galaxy-android/ufo-galaxy-android
+cd <repo-root>
 ./gradlew assembleDebug
 ./gradlew :app:test --tests "com.ufo.galaxy.*" --info
 ```
@@ -140,7 +140,7 @@ specific checklist rows in
 Minimum verification for a fix PR:
 
 ```bash
-cd /home/runner/work/ufo-galaxy-android/ufo-galaxy-android
+cd <repo-root>
 ./gradlew assembleDebug
 ./gradlew :app:test --tests "com.ufo.galaxy.*" --info
 ```

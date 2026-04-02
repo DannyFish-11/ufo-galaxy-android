@@ -17,8 +17,8 @@
 
 ## Validation
 
-- [ ] `/home/runner/work/ufo-galaxy-android/ufo-galaxy-android/gradlew assembleDebug`
-- [ ] `/home/runner/work/ufo-galaxy-android/ufo-galaxy-android/gradlew :app:test --tests "com.ufo.galaxy.*" --info`
+- [ ] `./gradlew assembleDebug`
+- [ ] `./gradlew :app:test --tests "com.ufo.galaxy.*" --info`
 - [ ] Relevant manual regression checklist items were exercised
 
 ### Manual / targeted verification
