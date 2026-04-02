@@ -348,22 +348,29 @@ class AgentRuntimeBridge(
 
     /**
      * Builds the JSON payload for a `bridge_handoff` message.
-     * All required fields are always present; optional fields are omitted when blank/empty.
+     *
+     * The payload is serialised as a [HandoffEnvelopeV2] (H4) so that the gateway
+     * bridge endpoint receives the full server-contract structure, including
+     * [HandoffEnvelopeV2.runtime_session_id] and [HandoffEnvelopeV2.idempotency_key].
+     * All required fields are always present; optional fields are omitted when null/blank/empty.
      */
     internal fun buildBridgeJson(request: HandoffRequest): String {
+        val env = request.toEnvelopeV2()
         return JSONObject().apply {
             put("type", MSG_TYPE_BRIDGE_HANDOFF)
-            put("trace_id", request.traceId)
-            put("task_id", request.taskId)
-            put("exec_mode", request.execMode)
-            put("route_mode", request.routeMode)
-            put("goal", request.goal)
-            if (!request.capability.isNullOrBlank()) put("capability", request.capability)
-            if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
-            if (request.context.isNotEmpty()) put("context", JSONObject(request.context as Map<*, *>))
-            if (request.constraints.isNotEmpty()) {
+            put("trace_id", env.trace_id)
+            put("task_id", env.task_id)
+            put("exec_mode", env.exec_mode)
+            put("route_mode", env.route_mode)
+            put("goal", env.goal)
+            if (!env.capability.isNullOrBlank()) put("capability", env.capability)
+            if (!env.session_id.isNullOrBlank()) put("session_id", env.session_id)
+            if (!env.runtime_session_id.isNullOrBlank()) put("runtime_session_id", env.runtime_session_id)
+            if (!env.idempotency_key.isNullOrBlank()) put("idempotency_key", env.idempotency_key)
+            if (env.context.isNotEmpty()) put("context", JSONObject(env.context as Map<*, *>))
+            if (env.constraints.isNotEmpty()) {
                 val arr = org.json.JSONArray()
-                request.constraints.forEach { arr.put(it) }
+                env.constraints.forEach { arr.put(it) }
                 put("constraints", arr)
             }
         }.toString()

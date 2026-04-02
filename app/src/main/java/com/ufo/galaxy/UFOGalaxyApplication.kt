@@ -12,6 +12,7 @@ import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.LocalCollaborationAgent
 import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.config.LocalLoopConfig
+import com.ufo.galaxy.config.RemoteConfigFetcher
 import com.ufo.galaxy.data.AppConfig
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
@@ -114,6 +115,16 @@ class UFOGalaxyApplication : Application() {
         val localLoopTraceStore: LocalLoopTraceStore = LocalLoopTraceStore()
 
         /**
+         * Stable per-app-launch runtime session identifier (M1).
+         *
+         * Generated once when the application process starts via [java.util.UUID.randomUUID] and
+         * remains constant for the lifetime of the process.  Propagated as [AipMessage.runtime_session_id]
+         * on every outbound AIP v3 message so the gateway can correlate all messages that
+         * originate from the same device run without relying on `session_id` or `trace_id`.
+         */
+        val runtimeSessionId: String = java.util.UUID.randomUUID().toString()
+
+        /**
          * Persistent session history store (PR-H).
          *
          * Retains lightweight [com.ufo.galaxy.history.SessionHistorySummary] records for
@@ -196,6 +207,10 @@ class UFOGalaxyApplication : Application() {
         
         // 初始化配置
         initConfig()
+
+        // Fetch gateway config from /api/v1/config to auto-fill WS URL (M3).
+        // Runs in the background; failures keep the local config intact.
+        initRemoteGatewayConfig()
         
         // 初始化模型资产管理器
         initModelAssetManager()
@@ -246,6 +261,39 @@ class UFOGalaxyApplication : Application() {
         Log.i(TAG, "UFO Galaxy Application 终止")
     }
     
+    /**
+     * Fetches `/api/v1/config` from the gateway in the background (M3 – config discovery).
+     *
+     * Uses [RemoteConfigFetcher] with a v1-first, 404-fallback strategy. On success, the
+     * returned [org.json.JSONObject] is passed to [AppSettings.applyGatewayConfig] so that
+     * `galaxyGatewayUrl` / `gatewayHost` / `gatewayPort` are updated before the WebSocket
+     * connection is established. On any failure, the local config is preserved unchanged.
+     *
+     * The fetch is intentionally asynchronous and does **not** block the main thread; the WS
+     * client is initialised with whatever URL is current at [initWebSocketClient] time.
+     */
+    private fun initRemoteGatewayConfig() {
+        // One-shot background fetch; intentionally uses a throwaway scope (same as
+        // ensureModelsAtStartup). The fetch completes quickly (≤15 s total timeout
+        // via RemoteConfigFetcher.defaultClient) so the scope is eligible for GC
+        // as soon as the coroutine finishes. If the app is destroyed mid-flight
+        // OkHttp's connection teardown will complete without blocking anything.
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            try {
+                val fetcher = RemoteConfigFetcher(restBaseUrl = appSettings.effectiveRestBaseUrl())
+                val config = fetcher.fetchConfig()
+                if (config != null) {
+                    appSettings.applyGatewayConfig(config)
+                    Log.i(TAG, "Remote gateway config applied: $config")
+                } else {
+                    Log.d(TAG, "Remote gateway config not available; keeping local config")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "initRemoteGatewayConfig failed — keeping local config: ${e.message}")
+            }
+        }
+    }
+
     /**
      * 初始化配置
      *

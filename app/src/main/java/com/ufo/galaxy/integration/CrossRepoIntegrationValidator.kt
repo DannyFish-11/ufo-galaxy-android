@@ -17,9 +17,10 @@ import java.util.regex.Pattern
  *
  * Checks performed:
  *  1. `GET  /api/v1/health`         — gateway liveness ping.
- *  2. `GET  /api/v1/devices/list`   — device registry reachability.
- *  3. `POST /api/v1/memory/store`   — memory endpoint write access (dry-run body).
- *  4. WS URL format validation      — [wsUrl] must be a valid ws:// or wss:// URL.
+ *  2. `GET  /api/v1/config`         — config discovery endpoint (M3/M7).
+ *  3. `GET  /api/v1/devices/list`   — device registry reachability.
+ *  4. `POST /api/v1/memory/store`   — memory endpoint write access (dry-run body).
+ *  5. WS URL format validation      — [wsUrl] must be a valid ws:// or wss:// URL.
  *
  * Usage:
  * ```kotlin
@@ -49,6 +50,7 @@ class CrossRepoIntegrationValidator(
     fun validate(): ValidationReport {
         val results = mutableListOf<CheckResult>()
         results += checkHealth()
+        results += checkConfig()
         results += checkDevicesList()
         results += checkMemoryStore()
         results += checkWsUrlFormat()
@@ -59,12 +61,20 @@ class CrossRepoIntegrationValidator(
 
     private fun checkHealth(): CheckResult {
         val url = "${restBaseUrl.trimEnd('/')}/api/v1/health"
-        return runGetCheck(name = "GET /api/v1/health", url = url)
+        return runGetCheck(name = "GET /api/v1/health", url = url,
+            missingHint = "Server liveness ping failed — ensure gateway is running")
+    }
+
+    private fun checkConfig(): CheckResult {
+        val url = "${restBaseUrl.trimEnd('/')}/api/v1/config"
+        return runGetCheck(name = "GET /api/v1/config", url = url,
+            missingHint = "Config discovery endpoint missing — server may not expose /api/v1/config")
     }
 
     private fun checkDevicesList(): CheckResult {
         val url = "${restBaseUrl.trimEnd('/')}/api/v1/devices/list"
-        return runGetCheck(name = "GET /api/v1/devices/list", url = url)
+        return runGetCheck(name = "GET /api/v1/devices/list", url = url,
+            missingHint = "Device registry endpoint unreachable — check /api/v1/devices/* routes on server")
     }
 
     private fun checkMemoryStore(): CheckResult {
@@ -97,27 +107,33 @@ class CrossRepoIntegrationValidator(
     private fun checkWsUrlFormat(): CheckResult {
         val valid = WS_URL_PATTERN.matcher(wsUrl).matches()
         return if (valid) {
-            CheckResult(name = "WS URL format", passed = true)
+            CheckResult(name = "WS URL format (/ws/android)", passed = true)
         } else {
-            CheckResult(name = "WS URL format", passed = false,
-                error = "URL must start with ws:// or wss:// — got: $wsUrl")
+            CheckResult(name = "WS URL format (/ws/android)", passed = false,
+                error = "URL must start with ws:// or wss:// and should include /ws/android path — got: $wsUrl")
         }
     }
 
-    private fun runGetCheck(name: String, url: String): CheckResult {
+    private fun runGetCheck(name: String, url: String, missingHint: String? = null): CheckResult {
         return try {
             val request = Request.Builder().url(url).get().build()
             httpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     CheckResult(name = name, passed = true, httpStatus = response.code)
                 } else {
-                    CheckResult(name = name, passed = false, httpStatus = response.code,
-                        error = "unexpected HTTP ${response.code}")
+                    val baseError = "unexpected HTTP ${response.code}"
+                    val error = if (missingHint != null && response.code == 404)
+                        "$baseError — $missingHint"
+                    else baseError
+                    CheckResult(name = name, passed = false, httpStatus = response.code, error = error)
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "$name failed: ${e.message}")
-            CheckResult(name = name, passed = false, error = e.message ?: "unknown error")
+            CheckResult(name = name, passed = false,
+                error = (e.message ?: "unknown error").let {
+                    if (missingHint != null) "$it — $missingHint" else it
+                })
         }
     }
 
