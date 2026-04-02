@@ -2,6 +2,7 @@ package com.ufo.galaxy.data
 
 import android.content.Context
 import java.util.Properties
+import org.json.JSONObject
 
 /**
  * Abstraction over persistent application settings.
@@ -183,6 +184,33 @@ interface AppSettings {
             val scheme = if (useTls) "https" else "http"
             "$scheme://$gatewayHost:$gatewayPort"
         } else restBaseUrl
+
+    /**
+     * Applies a gateway config [JSONObject] returned by `/api/v1/config` to this settings
+     * instance (M3 – config discovery).
+     *
+     * Recognised keys (all optional; unrecognised keys are silently ignored):
+     * - `ws_url`        / `gateway_ws_url`   – full WebSocket URL (updates [galaxyGatewayUrl]).
+     * - `gateway_host`                        – gateway hostname or IP (updates [gatewayHost]).
+     * - `gateway_port`                        – gateway port number (updates [gatewayPort]).
+     * - `use_tls`                             – TLS toggle (updates [useTls]).
+     *
+     * Failure to parse any individual key is silently ignored; the remaining keys are still
+     * applied. The caller is responsible for triggering a reconnect if the WS URL changed.
+     */
+    fun applyGatewayConfig(config: JSONObject) {
+        val wsUrl = config.optString("ws_url").takeIf { it.isNotBlank() }
+            ?: config.optString("gateway_ws_url").takeIf { it.isNotBlank() }
+        if (wsUrl != null) galaxyGatewayUrl = wsUrl
+
+        val host = config.optString("gateway_host").takeIf { it.isNotBlank() }
+        if (host != null) gatewayHost = host
+
+        val port = config.optInt("gateway_port", -1).takeIf { it > 0 }
+        if (port != null) gatewayPort = port
+
+        if (config.has("use_tls")) useTls = config.optBoolean("use_tls", useTls)
+    }
 
     /**
      * Returns all eight canonical runtime-identity fields as a [Map] suitable for

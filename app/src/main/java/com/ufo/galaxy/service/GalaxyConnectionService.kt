@@ -591,7 +591,9 @@ class GalaxyConnectionService : Service() {
             type = MsgType.CANCEL_RESULT,
             payload = cancelResult,
             correlation_id = taskId,
-            device_id = localDeviceId
+            device_id = localDeviceId,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -602,7 +604,9 @@ class GalaxyConnectionService : Service() {
             type = MsgType.GOAL_RESULT,
             payload = result,
             correlation_id = result.task_id,
-            device_id = result.device_id.ifEmpty { localDeviceId }
+            device_id = result.device_id.ifEmpty { localDeviceId },
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -623,7 +627,9 @@ class GalaxyConnectionService : Service() {
             correlation_id = result.correlation_id ?: result.task_id,
             device_id = result.device_id.ifEmpty { localDeviceId },
             trace_id = traceId,
-            route_mode = routeMode
+            route_mode = routeMode,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -686,7 +692,9 @@ class GalaxyConnectionService : Service() {
             payload = errorResult,
             correlation_id = taskId,
             device_id = localDeviceId,
-            trace_id = traceId
+            trace_id = traceId,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }

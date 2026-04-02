@@ -20,7 +20,7 @@ import org.junit.Test
  *  - One endpoint returns a non-2xx response → corresponding check fails.
  *  - WS URL with valid scheme (ws://) → passes.
  *  - WS URL with invalid scheme → fails with descriptive error.
- *  - All checks fail → failedCount == 4, summary reports all failures.
+ *  - All checks fail → failedCount == 5, summary reports all failures.
  */
 class CrossRepoIntegrationValidatorTest {
 
@@ -59,7 +59,7 @@ class CrossRepoIntegrationValidatorTest {
         val report = validator(fakeClient(200), "ws://100.0.0.1:8765").validate()
 
         assertTrue("allPassed must be true when all checks succeed", report.allPassed)
-        assertEquals("All 4 checks should pass", 4, report.passedCount)
+        assertEquals("All 5 checks should pass", 5, report.passedCount)
         assertEquals(0, report.failedCount)
         assertTrue("summary should end with OK", report.summary().endsWith("OK"))
     }
@@ -67,7 +67,7 @@ class CrossRepoIntegrationValidatorTest {
     @Test
     fun `summary reports correct passed count on full success`() {
         val report = validator().validate()
-        assertTrue(report.summary().startsWith("Integration: 4/4 passed"))
+        assertTrue(report.summary().startsWith("Integration: 5/5 passed"))
     }
 
     // ── Partial failures ───────────────────────────────────────────────────────
@@ -104,14 +104,14 @@ class CrossRepoIntegrationValidatorTest {
     @Test
     fun `WS URL format check passes for ws scheme`() {
         val report = validator(wsUrl = "ws://192.168.1.1:8765").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
         assertTrue("ws:// URL should pass format check", wsCheck.passed)
     }
 
     @Test
     fun `WS URL format check passes for wss scheme`() {
         val report = validator(wsUrl = "wss://example.com/ws").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
         assertTrue("wss:// URL should pass format check", wsCheck.passed)
     }
 
@@ -119,14 +119,14 @@ class CrossRepoIntegrationValidatorTest {
     fun `WS URL format check passes for short host`() {
         // Regression: old pattern required >=2 chars after scheme; fixed to accept any non-empty host.
         val report = validator(wsUrl = "ws://a").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
         assertTrue("short ws:// URL should pass format check", wsCheck.passed)
     }
 
     @Test
     fun `WS URL format check fails for http scheme`() {
         val report = validator(wsUrl = "http://100.0.0.1:8765").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
         assertFalse("http:// URL should fail WS format check", wsCheck.passed)
         assertNotNull("error should describe the problem", wsCheck.error)
         assertTrue("error should mention ws://", wsCheck.error!!.contains("ws://"))
@@ -135,7 +135,7 @@ class CrossRepoIntegrationValidatorTest {
     @Test
     fun `WS URL format check fails for blank URL`() {
         val report = validator(wsUrl = "").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
         assertFalse("blank URL should fail WS format check", wsCheck.passed)
     }
 
@@ -158,9 +158,9 @@ class CrossRepoIntegrationValidatorTest {
     }
 
     @Test
-    fun `results list has exactly 4 entries`() {
+    fun `results list has exactly 5 entries`() {
         val report = validator().validate()
-        assertEquals("validate() must always produce exactly 4 check results", 4, report.results.size)
+        assertEquals("validate() must always produce exactly 5 check results", 5, report.results.size)
     }
 
     // ── CheckResult fields ─────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ class CrossRepoIntegrationValidatorTest {
     @Test
     fun `CheckResult httpStatus is null for non-HTTP checks`() {
         val report = validator(wsUrl = "ws://ok").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
         assertNull("WS format check has no HTTP status", wsCheck.httpStatus)
     }
 

@@ -3,6 +3,7 @@ package com.ufo.galaxy.input
 import android.os.Build
 import android.util.Log
 import com.google.gson.Gson
+import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.local.LocalLoopExecutor
 import com.ufo.galaxy.local.LocalLoopOptions
@@ -214,7 +215,9 @@ class InputRouter(
             correlation_id = taskId,
             device_id = deviceId,
             trace_id = taskId,      // use task_id as the initial trace_id for this submission
-            route_mode = "cross_device"
+            route_mode = "cross_device",
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString()
         )
         val json = gson.toJson(envelope)
         val sent = webSocketClient.sendJson(json)

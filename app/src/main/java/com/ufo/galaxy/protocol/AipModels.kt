@@ -83,9 +83,17 @@ enum class MsgType(val value: String) {
  *                       Gateway → Agent Runtime and back). Generated once per task; echoed
  *                       unchanged in every message that belongs to the same execution chain.
  *                       Consumers may use this for full-chain observability and log correlation.
- * @param route_mode     Routing path taken for this message: `"local"` (cross-device OFF, or
- *                       local execution only) or `"cross_device"` (delegated to Gateway /
- *                       Agent Runtime). Preserved in every hop of the AIP v3 pipeline.
+ * @param route_mode          Routing path taken for this message: `"local"` (cross-device OFF,
+ *                            or local execution only) or `"cross_device"` (delegated to Gateway
+ *                            / Agent Runtime). Preserved in every hop of the AIP v3 pipeline.
+ * @param runtime_session_id  Stable per-app-launch session identifier.  Generated once at
+ *                            application startup via [java.util.UUID.randomUUID] and propagated
+ *                            unchanged across every message in the same runtime session.
+ *                            Consumers may use this to correlate all messages originating from
+ *                            a single device run without relying on `session_id` or `trace_id`.
+ * @param idempotency_key     Per-send unique key for safe message deduplication.  Should be
+ *                            derived from `task_id + timestamp` (or a UUID) so that duplicate
+ *                            sends can be detected and discarded by the gateway.
  */
 data class AipMessage(
     val type: MsgType,
@@ -97,7 +105,9 @@ data class AipMessage(
     val session_id: String? = null,
     val device_id: String? = null,
     val trace_id: String? = null,
-    val route_mode: String? = null
+    val route_mode: String? = null,
+    val runtime_session_id: String? = null,
+    val idempotency_key: String? = null
 )
 
 /**
