@@ -376,7 +376,8 @@ class UFOGalaxyApplication : Application() {
             serverUrl = wsUrl,
             crossDeviceEnabled = appSettings.crossDeviceEnabled,
             offlineQueue = offlineQueue,
-            allowSelfSigned = appSettings.allowSelfSigned
+            allowSelfSigned = appSettings.allowSelfSigned,
+            gatewayToken = appSettings.gatewayToken
         )
         webSocketClient.setDeviceMetadata(appSettings.toMetadataMap())
         Log.d(TAG, "WebSocket 客户端已初始化: url=$wsUrl allowSelfSigned=${appSettings.allowSelfSigned} (offlineQueue restored size=${offlineQueue.size})")

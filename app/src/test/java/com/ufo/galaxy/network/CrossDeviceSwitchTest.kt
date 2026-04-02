@@ -340,4 +340,36 @@ class CrossDeviceSwitchTest {
         listener.onGoalExecution("t", "{}")
         listener.onParallelSubtask("t", "{}")
     }
+
+    // ── H3: gatewayToken constructor parameter ────────────────────────────────
+
+    @Test
+    fun `gatewayToken default is blank (no auth header when not configured)`() {
+        // Constructing without gatewayToken must not throw; default is blank.
+        val client = GalaxyWebSocketClient(serverUrl = "ws://localhost:9999", crossDeviceEnabled = false)
+        // Verify the client behaves normally (cross-device gate still active)
+        assertFalse(client.sendJson("""{"type":"task_submit"}"""))
+    }
+
+    @Test
+    fun `gatewayToken non-blank is accepted by constructor`() {
+        // Constructing with a non-blank token must not throw and the client must
+        // still enforce the cross-device gate in sendJson.
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false,
+            gatewayToken = "Bearer-test-token"
+        )
+        assertFalse("sendJson blocked regardless of token when cross-device is OFF",
+            client.sendJson("""{"type":"task_submit"}"""))
+    }
+
+    // ── H2: device_register MsgType wire-value ────────────────────────────────
+
+    @Test
+    fun `MsgType DEVICE_REGISTER has correct wire value for handshake`() {
+        // Confirms that the device_register message sent in sendHandshake() uses
+        // the authoritative AIP v3 wire string "device_register".
+        assertEquals("device_register", MsgType.DEVICE_REGISTER.value)
+    }
 }

@@ -112,6 +112,14 @@ interface AppSettings {
      */
     var metricsEndpoint: String
 
+    /**
+     * Bearer token used to authenticate the WebSocket connection to the gateway.
+     * Corresponds to `GALAXY_API_TOKEN` / `gatewayToken` in server configuration.
+     * When non-blank, the value is sent as `Authorization: Bearer <token>` during WS handshake.
+     * When blank, no Authorization header is added.
+     */
+    var gatewayToken: String
+
     // ── Local-chain execution settings (planner / grounding) ─────────────────
 
     /**
@@ -151,12 +159,20 @@ interface AppSettings {
      *
      * Priority: gatewayHost/port/tls (SharedPrefs) → galaxyGatewayUrl (SharedPrefs or
      * assets/config.properties default) → compile-time default.
+     *
+     * The server-required `/ws/android` path is appended automatically unless the
+     * URL already carries a path component (i.e. the part after `://` contains a `/`),
+     * which lets users who have configured a full URL keep their path unchanged.
      */
-    fun effectiveGatewayWsUrl(): String =
-        if (gatewayHost.isNotBlank()) {
+    fun effectiveGatewayWsUrl(): String {
+        val base = if (gatewayHost.isNotBlank()) {
             val scheme = if (useTls) "wss" else "ws"
             "$scheme://$gatewayHost:$gatewayPort"
         } else galaxyGatewayUrl
+        // Append /ws/android only when the URL has no explicit path after the host:port.
+        val afterScheme = base.substringAfter("://")
+        return if (afterScheme.contains('/')) base else "$base/ws/android"
+    }
 
     /**
      * Builds the effective REST base URL from the fine-grained fields when
@@ -226,6 +242,7 @@ class InMemoryAppSettings(
     override var allowSelfSigned: Boolean = false,
     override var deviceId: String = "",
     override var metricsEndpoint: String = "",
+    override var gatewayToken: String = "",
     // Local-chain execution settings
     override var plannerMaxTokens: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS,
     override var plannerTemperature: Double = SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE,
@@ -357,6 +374,10 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getString(KEY_METRICS_ENDPOINT, "") ?: ""
         set(value) { prefs.edit().putString(KEY_METRICS_ENDPOINT, value).apply() }
 
+    override var gatewayToken: String
+        get() = prefs.getString(KEY_GATEWAY_TOKEN, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_GATEWAY_TOKEN, value).apply() }
+
     // ── Local-chain execution settings ───────────────────────────────────────
 
     override var plannerMaxTokens: Int
@@ -405,6 +426,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_ALLOW_SELF_SIGNED = "allow_self_signed"
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_METRICS_ENDPOINT = "metrics_endpoint"
+        const val KEY_GATEWAY_TOKEN = "gateway_token"
 
         // Local-chain execution keys
         const val KEY_PLANNER_MAX_TOKENS = "planner_max_tokens"
