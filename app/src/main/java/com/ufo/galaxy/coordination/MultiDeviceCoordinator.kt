@@ -58,13 +58,18 @@ class MultiDeviceCoordinator(
      * `success=false` and `error="cross_device_disabled"`. No [dispatch] calls are
      * made and no WS/network activity is initiated.
      *
-     * @param goal    Natural-language goal description to dispatch to every device.
-     * @param groupId Stable group identifier for this batch; auto-generated if not supplied.
+     * @param goal                 Natural-language goal description to dispatch to every device.
+     * @param groupId              Stable group identifier for this batch; auto-generated if not supplied.
+     * @param sourceRuntimePosture Optional canonical source-device participation posture from PR #533.
+     *                             Propagated unchanged into [ParallelGroupResult] so callers can
+     *                             correlate the group's result back to the originating posture context.
+     *                             Valid values: `"control_only"` or `"join_runtime"`. Null = legacy default.
      * @return [ParallelGroupResult] aggregating all subtask outcomes.
      */
     suspend fun dispatchParallel(
         goal: String,
-        groupId: String = "grp_${UUID.randomUUID()}"
+        groupId: String = "grp_${UUID.randomUUID()}",
+        sourceRuntimePosture: String? = null
     ): ParallelGroupResult = coroutineScope {
         // Hard constraint: cross-device switch OFF must block ALL multi-device dispatch.
         if (!crossDeviceEnabled) {
@@ -79,7 +84,12 @@ class MultiDeviceCoordinator(
                     error = reason
                 )
             }
-            return@coroutineScope ParallelGroupResult(groupId = groupId, goal = goal, subtaskResults = blockedResults)
+            return@coroutineScope ParallelGroupResult(
+                groupId = groupId,
+                goal = goal,
+                subtaskResults = blockedResults,
+                sourceRuntimePosture = sourceRuntimePosture
+            )
         }
 
         Log.i(TAG, "[COORD] dispatchParallel group_id=$groupId devices=${deviceIds.size} goal=${goal.take(60)}")
@@ -104,7 +114,12 @@ class MultiDeviceCoordinator(
         }
 
         val results = deferreds.awaitAll()
-        ParallelGroupResult(groupId = groupId, goal = goal, subtaskResults = results).also { group ->
+        ParallelGroupResult(
+            groupId = groupId,
+            goal = goal,
+            subtaskResults = results,
+            sourceRuntimePosture = sourceRuntimePosture
+        ).also { group ->
             Log.i(TAG, "[COORD] group_done group_id=$groupId succeeded=${group.succeededCount} failed=${group.failedCount}")
         }
     }
@@ -133,14 +148,19 @@ class MultiDeviceCoordinator(
     /**
      * Aggregated result for a parallel dispatch group.
      *
-     * @param groupId        Stable group identifier shared across all subtasks.
-     * @param goal           Original goal dispatched to all devices.
-     * @param subtaskResults Ordered list of per-device subtask results.
+     * @param groupId             Stable group identifier shared across all subtasks.
+     * @param goal                Original goal dispatched to all devices.
+     * @param subtaskResults      Ordered list of per-device subtask results.
+     * @param sourceRuntimePosture Optional canonical source-device participation posture from
+     *                            PR #533. Propagated from [dispatchParallel] so callers can
+     *                            correlate the group's result back to the originating posture
+     *                            context. Null = legacy default (backwards-safe).
      */
     data class ParallelGroupResult(
         val groupId: String,
         val goal: String,
-        val subtaskResults: List<SubtaskResult>
+        val subtaskResults: List<SubtaskResult>,
+        val sourceRuntimePosture: String? = null
     ) {
         /** Number of subtasks that completed successfully. */
         val succeededCount: Int get() = subtaskResults.count { it.success }

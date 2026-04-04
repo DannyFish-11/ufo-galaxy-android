@@ -15,6 +15,10 @@ import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.agent.AgentRuntimeBridge
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.TaskCancelRegistry
+import com.ufo.galaxy.agent.TakeoverRequestEnvelope
+import com.ufo.galaxy.agent.TakeoverResponseEnvelope
+import com.ufo.galaxy.agent.TakeoverHandlingResult
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -167,6 +171,11 @@ class GalaxyConnectionService : Service() {
              * For types in [MsgType.ACK_ON_RECEIPT_TYPES] a structured ack is sent back so
              * the server knows the message was received. All other advanced types are logged
              * only.  Full business-logic implementations are deferred to future PRs.
+             *
+             * PR-3 addition: [MsgType.TAKEOVER_REQUEST] is dispatched to
+             * [handleTakeoverRequest] which parses the canonical [TakeoverRequestEnvelope],
+             * sends an ack, and returns a [TakeoverResponseEnvelope] rejection (full takeover
+             * executor is deferred to PR-5).
              */
             override fun onAdvancedMessage(
                 type: MsgType,
@@ -193,6 +202,13 @@ class GalaxyConnectionService : Service() {
                 if (type == MsgType.HYBRID_EXECUTE) {
                     serviceScope.launch {
                         sendHybridDegrade(rawJson)
+                    }
+                }
+                // TAKEOVER_REQUEST (PR-3): parse the canonical TakeoverRequestEnvelope and
+                // send a structured TakeoverResponseEnvelope back. Full executor is TODO(PR-5).
+                if (type == MsgType.TAKEOVER_REQUEST) {
+                    serviceScope.launch {
+                        handleTakeoverRequest(messageId, rawJson)
                     }
                 }
             }
@@ -319,7 +335,8 @@ class GalaxyConnectionService : Service() {
                 execMode = AgentRuntimeBridge.EXEC_MODE_REMOTE,
                 routeMode = routeMode,
                 capability = "task_execution",
-                constraints = payload.constraints
+                constraints = payload.constraints,
+                sourceRuntimePosture = SourceRuntimePosture.fromValue(payload.source_runtime_posture)
             )
             val handoffResult = UFOGalaxyApplication.agentRuntimeBridge.handoff(handoffRequest)
 
@@ -386,13 +403,15 @@ class GalaxyConnectionService : Service() {
                 max_steps = payload.max_steps,
                 timeout_ms = 0L,
                 constraints = payload.constraints,
+                source_runtime_posture = payload.source_runtime_posture
             )
             val rawResult = UFOGalaxyApplication.localGoalExecutor.executeGoal(goalPayload)
             goalResult = rawResult.copy(
                 correlation_id = taskId,
                 device_id = localDeviceId,
-                device_role = settings.deviceRole,
+                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 latency_ms = rawResult.latency_ms ?: 0L,
+                source_runtime_posture = payload.source_runtime_posture
             )
 
             // ── 通过 GOAL_EXECUTION_RESULT 回传（与 goal_execution 路径一致）────────
@@ -417,7 +436,7 @@ class GalaxyConnectionService : Service() {
                 subtask_index = null,
                 latency_ms = 0L,
                 device_id = localDeviceId,
-                device_role = settings.deviceRole
+                device_role = UFOGalaxyApplication.appSettings.deviceRole
             )
             sendGoalResult(errorResult, traceId, routeMode)
         } finally {
@@ -796,6 +815,154 @@ class GalaxyConnectionService : Service() {
                 "event" to "hybrid_degrade_sent",
                 "task_id" to taskId,
                 "reason" to "hybrid_executor_not_implemented"
+            )
+        )
+    }
+
+    // ── PR-3: Canonical takeover request/response path ────────────────────────────────────
+
+    /**
+     * Handles an inbound [MsgType.TAKEOVER_REQUEST] message.
+     *
+     * Parses the raw JSON into a [TakeoverRequestEnvelope], logs structured metadata
+     * (including [TakeoverRequestEnvelope.source_runtime_posture] for posture correlation),
+     * and sends a [TakeoverResponseEnvelope] back to the gateway.
+     *
+     * ## PR-3 scope
+     * The ack is sent by the generic [MsgType.ACK_ON_RECEIPT_TYPES] path in
+     * [onAdvancedMessage] before this function is called.  This function sends the
+     * richer [MsgType.TAKEOVER_RESPONSE] envelope which carries structured metadata
+     * (accepted/rejected + reason + posture echo) so the main runtime can update its
+     * session truth.
+     *
+     * Full takeover execution (accepting the task and running it locally) is deferred
+     * to PR-5 when Android is promoted to first-class runtime host.  Until then, every
+     * takeover request is **rejected** with reason `"takeover_executor_not_implemented"`.
+     *
+     * @param messageId Optional message_id from the inbound AIP v3 envelope.
+     * @param rawJson   Raw JSON string of the inbound takeover_request message.
+     */
+    private fun handleTakeoverRequest(messageId: String?, rawJson: String): TakeoverHandlingResult {
+        val envelope = try {
+            val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
+            val payload = jsonObj?.getAsJsonObject("payload") ?: jsonObj
+            TakeoverRequestEnvelope(
+                takeover_id = payload?.get("takeover_id")?.asString
+                    ?: (messageId ?: java.util.UUID.randomUUID().toString()),
+                task_id = payload?.get("task_id")?.asString ?: "",
+                trace_id = payload?.get("trace_id")?.asString ?: java.util.UUID.randomUUID().toString(),
+                goal = payload?.get("goal")?.asString ?: "",
+                source_device_id = payload?.get("source_device_id")?.asString,
+                source_runtime_posture = payload?.get("source_runtime_posture")?.asString,
+                exec_mode = payload?.get("exec_mode")?.asString ?: AgentRuntimeBridge.EXEC_MODE_REMOTE,
+                route_mode = payload?.get("route_mode")?.asString ?: AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE,
+                session_id = payload?.get("session_id")?.asString,
+                runtime_session_id = payload?.get("runtime_session_id")?.asString,
+                checkpoint = payload?.get("checkpoint")?.asString
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "[PR3:TAKEOVER] Failed to parse takeover_request: ${e.message}")
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "takeover_request_parse_error",
+                    "error" to (e.message ?: "unknown"),
+                    "message_id" to (messageId ?: "")
+                )
+            )
+            // Return a safe failure result; ack was already sent by the generic path.
+            return TakeoverHandlingResult(
+                takeoverId = messageId ?: "unknown",
+                taskId = "",
+                traceId = "",
+                accepted = false,
+                reason = "parse_error: ${e.message}"
+            )
+        }
+
+        val resolvedPosture = envelope.resolvedPosture
+        Log.i(
+            TAG,
+            "[PR3:TAKEOVER] takeover_request received takeover_id=${envelope.takeover_id} " +
+                "task_id=${envelope.task_id} trace_id=${envelope.trace_id} " +
+                "source_device=${envelope.source_device_id} posture=$resolvedPosture"
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "takeover_request_received",
+                "takeover_id" to envelope.takeover_id,
+                "task_id" to envelope.task_id,
+                "trace_id" to envelope.trace_id,
+                "source_device_id" to (envelope.source_device_id ?: ""),
+                "source_runtime_posture" to resolvedPosture,
+                "exec_mode" to envelope.exec_mode,
+                "route_mode" to envelope.route_mode
+            )
+        )
+
+        // PR-3 scope: full takeover executor is deferred to PR-5.  Reject with a structured
+        // response so the main runtime can fall back cleanly.
+        val rejectionReason = "takeover_executor_not_implemented"
+        sendTakeoverResponse(
+            TakeoverResponseEnvelope(
+                takeover_id = envelope.takeover_id,
+                task_id = envelope.task_id,
+                trace_id = envelope.trace_id,
+                accepted = false,
+                rejection_reason = rejectionReason,
+                device_id = localDeviceId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                source_runtime_posture = envelope.source_runtime_posture,
+                exec_mode = envelope.exec_mode
+            )
+        )
+
+        return TakeoverHandlingResult(
+            takeoverId = envelope.takeover_id,
+            taskId = envelope.task_id,
+            traceId = envelope.trace_id,
+            accepted = false,
+            reason = rejectionReason
+        )
+    }
+
+    /**
+     * Sends a [TakeoverResponseEnvelope] wrapped in an AIP v3 [MsgType.TAKEOVER_RESPONSE]
+     * envelope to the gateway.
+     *
+     * The response carries the takeover decision (accepted / rejected), rejection reason,
+     * and echoes [TakeoverResponseEnvelope.source_runtime_posture] for posture correlation
+     * on the main-runtime side.
+     *
+     * @param response The populated [TakeoverResponseEnvelope] to send.
+     */
+    private fun sendTakeoverResponse(response: TakeoverResponseEnvelope) {
+        val envelope = AipMessage(
+            type = MsgType.TAKEOVER_RESPONSE,
+            payload = response,
+            correlation_id = response.task_id.ifEmpty { null },
+            device_id = localDeviceId,
+            trace_id = response.trace_id,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = java.util.UUID.randomUUID().toString(),
+            source_runtime_posture = response.source_runtime_posture
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        Log.i(
+            TAG,
+            "[PR3:TAKEOVER] takeover_response sent takeover_id=${response.takeover_id} " +
+                "task_id=${response.task_id} accepted=${response.accepted} " +
+                "reason=${response.rejection_reason} sent=$sent"
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "takeover_response_sent",
+                "takeover_id" to response.takeover_id,
+                "task_id" to response.task_id,
+                "trace_id" to response.trace_id,
+                "accepted" to response.accepted,
+                "rejection_reason" to (response.rejection_reason ?: ""),
+                "source_runtime_posture" to (response.source_runtime_posture ?: ""),
+                "sent" to sent
             )
         )
     }
