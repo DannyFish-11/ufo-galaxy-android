@@ -82,9 +82,13 @@ class GalaxyConnectionService : Service() {
 
         // ── Route-mode constants ──────────────────────────────────────────────
         /**
-         * Route mode for gateway-delivered tasks (goal_execution, parallel_subtask).
-         * All results from these paths must carry this value for consistent downstream
-         * session-truth correlation.
+         * Route mode for gateway-delivered tasks (goal_execution, parallel_subtask, task_assign
+         * via bridge). All results from these paths carry this value so the main-repo
+         * session-truth layer can correlate results by route without re-parsing envelopes.
+         *
+         * Aliased from [AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE] to keep intra-class
+         * usages concise and to document that this service always treats its inbound
+         * gateway tasks as cross-device-routed.
          */
         const val ROUTE_MODE_CROSS_DEVICE = AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE
 

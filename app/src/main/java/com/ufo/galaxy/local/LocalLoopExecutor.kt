@@ -274,10 +274,12 @@ class DefaultLocalLoopExecutor(
             val goalResult = goalExecutor!!.executeGoal(payload)
 
             // Map EdgeExecutor / AutonomousExecutionPipeline status values to LocalLoopResult values.
+            // "disabled" (from AutonomousExecutionPipeline posture/feature gate) is surfaced as
+            // STATUS_DISABLED rather than collapsing it into STATUS_FAILED — callers can then
+            // distinguish "device tried and failed" from "device refused by policy".
             val mappedStatus = when (goalResult.status) {
                 EdgeExecutor.STATUS_SUCCESS -> LocalLoopResult.STATUS_SUCCESS
                 EdgeExecutor.STATUS_CANCELLED -> LocalLoopResult.STATUS_CANCELLED
-                // "disabled" from AutonomousExecutionPipeline posture/feature gate
                 LocalLoopResult.STATUS_DISABLED -> LocalLoopResult.STATUS_DISABLED
                 else -> LocalLoopResult.STATUS_FAILED // covers STATUS_ERROR, STATUS_TIMEOUT
             }

@@ -158,10 +158,13 @@ data class AndroidSessionContribution(
          * Creates an [AndroidSessionContribution] from a [CancelResultPayload].
          *
          * [Kind] is determined by [CancelResultPayload.was_running]:
-         * - `true`  → [Kind.CANCELLATION]: a running task was actively stopped.
-         * - `false` → [Kind.DISABLED]: task was not found (already completed or never started);
-         *   this is a no-op cancel, treated as [Kind.DISABLED] to distinguish it from an
-         *   actual cancellation event.
+         * - `true`  → [Kind.CANCELLATION]: a running task was actively interrupted.
+         * - `false` → [Kind.DISABLED]: the cancel was a no-op because the task was not
+         *   found (already completed or never started).  From the main-repo session-truth
+         *   perspective, no active cancellation event occurred; the contribution is treated
+         *   as [Kind.DISABLED] to signal "no state change" rather than conflating it with
+         *   an actual cancellation.  Callers that need to distinguish these sub-cases can
+         *   inspect [AndroidSessionContribution.status] (`"cancelled"` vs `"no_op"`).
          *
          * @param result    The [CancelResultPayload] to wrap.
          * @param traceId   Trace identifier for correlation.
