@@ -79,6 +79,22 @@ class GalaxyConnectionService : Service() {
     companion object {
         private const val TAG = "GalaxyConnectionService"
         private const val NOTIFICATION_ID = 1001
+
+        // ── PR-3: Canonical takeover defaults ─────────────────────────────────
+        /**
+         * Default maximum number of goal-execution steps allowed inside a single
+         * takeover session.  Consumers may override this per-request; this constant
+         * acts as the safe fallback when no explicit limit is supplied.
+         */
+        const val TAKEOVER_DEFAULT_MAX_STEPS = 10
+
+        /**
+         * Default timeout in milliseconds for a single takeover session.
+         * `0L` means "no timeout" — the takeover runs until it completes or is
+         * cancelled externally.  Consumers may supply a positive value to impose a
+         * wall-clock limit.
+         */
+        const val TAKEOVER_DEFAULT_TIMEOUT_MS = 0L
     }
     
     private val binder = LocalBinder()
@@ -93,6 +109,25 @@ class GalaxyConnectionService : Service() {
 
     /** Tracks active goal_execution / parallel_subtask coroutine jobs for cancel support. */
     private val taskCancelRegistry = TaskCancelRegistry()
+
+    // ── PR-3: Canonical takeover state ────────────────────────────────────────
+
+    /**
+     * The `takeover_id` of the takeover request currently being processed, or `null`
+     * when no takeover is active.  Written on the service's IO dispatcher; volatile
+     * for safe reads from any thread.
+     *
+     * Used by [TakeoverEligibilityAssessor] to block concurrent takeovers: the main
+     * runtime must receive a [TakeoverResponseEnvelope] (accepted or rejected) before
+     * a new [MsgType.TAKEOVER_REQUEST] will be accepted.
+     */
+    @Volatile
+    private var activeTakeoverId: String? = null
+
+    /** Canonical assessor that evaluates takeover eligibility based on device readiness. */
+    private val takeoverEligibilityAssessor: TakeoverEligibilityAssessor by lazy {
+        TakeoverEligibilityAssessor(UFOGalaxyApplication.appSettings)
+    }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
@@ -843,22 +878,29 @@ class GalaxyConnectionService : Service() {
     // ── PR-3: Canonical takeover request/response path ────────────────────────────────────
 
     /**
-     * Handles an inbound [MsgType.TAKEOVER_REQUEST] message.
+     * Handles an inbound [MsgType.TAKEOVER_REQUEST] message via the canonical path.
      *
-     * Parses the raw JSON into a [TakeoverRequestEnvelope], logs structured metadata
-     * (including [TakeoverRequestEnvelope.source_runtime_posture] for posture correlation),
-     * and sends a [TakeoverResponseEnvelope] back to the gateway.
+     * Parses the raw JSON into a [TakeoverRequestEnvelope], evaluates device eligibility
+     * via [TakeoverEligibilityAssessor], logs structured metadata (including posture for
+     * correlation), and sends a [TakeoverResponseEnvelope] back to the gateway.
+     *
+     * ## Decision flow
+     * 1. Parse the inbound JSON into a [TakeoverRequestEnvelope].
+     * 2. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
+     * 3. If **not eligible**: send rejection with the assessor's structured reason and return.
+     * 4. If **eligible** but full takeover executor is deferred: send rejection with
+     *    `"takeover_executor_not_implemented"` (PR-5 TODO) and return.
+     *
+     * ## Concurrent-takeover protection
+     * [activeTakeoverId] is set to the incoming `takeover_id` while the request is being
+     * processed and cleared when the response has been sent.  This prevents a second inbound
+     * [MsgType.TAKEOVER_REQUEST] from being accepted while one is already in progress.
      *
      * ## PR-3 scope
-     * The ack is sent by the generic [MsgType.ACK_ON_RECEIPT_TYPES] path in
+     * The delivery ack is sent by the generic [MsgType.ACK_ON_RECEIPT_TYPES] path in
      * [onAdvancedMessage] before this function is called.  This function sends the
-     * richer [MsgType.TAKEOVER_RESPONSE] envelope which carries structured metadata
-     * (accepted/rejected + reason + posture echo) so the main runtime can update its
-     * session truth.
-     *
-     * Full takeover execution (accepting the task and running it locally) is deferred
-     * to PR-5 when Android is promoted to first-class runtime host.  Until then, every
-     * takeover request is **rejected** with reason `"takeover_executor_not_implemented"`.
+     * richer [MsgType.TAKEOVER_RESPONSE] envelope which carries the structured decision
+     * so the main runtime can update its session truth immediately.
      *
      * @param messageId Optional message_id from the inbound AIP v3 envelope.
      * @param rawJson   Raw JSON string of the inbound takeover_request message.
@@ -901,49 +943,95 @@ class GalaxyConnectionService : Service() {
         }
 
         val resolvedPosture = envelope.resolvedPosture
-        Log.i(
-            TAG,
-            "[PR3:TAKEOVER] takeover_request received takeover_id=${envelope.takeover_id} " +
-                "task_id=${envelope.task_id} trace_id=${envelope.trace_id} " +
-                "source_device=${envelope.source_device_id} posture=$resolvedPosture"
-        )
-        GalaxyLogger.log(
-            TAG, mapOf(
-                "event" to "takeover_request_received",
-                "takeover_id" to envelope.takeover_id,
-                "task_id" to envelope.task_id,
-                "trace_id" to envelope.trace_id,
-                "source_device_id" to (envelope.source_device_id ?: ""),
-                "source_runtime_posture" to resolvedPosture,
-                "exec_mode" to envelope.exec_mode,
-                "route_mode" to envelope.route_mode
-            )
-        )
 
-        // PR-3 scope: full takeover executor is deferred to PR-5.  Reject with a structured
-        // response so the main runtime can fall back cleanly.
-        val rejectionReason = "takeover_executor_not_implemented"
-        sendTakeoverResponse(
-            TakeoverResponseEnvelope(
-                takeover_id = envelope.takeover_id,
-                task_id = envelope.task_id,
-                trace_id = envelope.trace_id,
+        // ── Eligibility assessment (canonical PR-3 path) ──────────────────────
+        // Capture the existing active takeover before setting the new one.
+        // The assessor uses the captured value to detect concurrent takeovers.
+        val existingActiveTakeoverId = activeTakeoverId
+        // Mark this request as in-flight so any concurrent inbound request is blocked.
+        activeTakeoverId = envelope.takeover_id
+        try {
+            val eligibility = takeoverEligibilityAssessor.assess(
+                envelope = envelope,
+                activeTakeoverId = existingActiveTakeoverId
+            )
+
+            Log.i(
+                TAG,
+                "[PR3:TAKEOVER] takeover_request received takeover_id=${envelope.takeover_id} " +
+                    "task_id=${envelope.task_id} trace_id=${envelope.trace_id} " +
+                    "source_device=${envelope.source_device_id} posture=$resolvedPosture " +
+                    "eligible=${eligibility.eligible} reason=${eligibility.reason}"
+            )
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "takeover_request_received",
+                    "takeover_id" to envelope.takeover_id,
+                    "task_id" to envelope.task_id,
+                    "trace_id" to envelope.trace_id,
+                    "source_device_id" to (envelope.source_device_id ?: ""),
+                    "source_runtime_posture" to resolvedPosture,
+                    "exec_mode" to envelope.exec_mode,
+                    "route_mode" to envelope.route_mode,
+                    "eligible" to eligibility.eligible,
+                    "eligibility_reason" to eligibility.reason
+                )
+            )
+
+            // If the device is not eligible, reject with the assessor's specific reason so
+            // the main runtime can distinguish device-not-ready from executor-not-implemented.
+            if (!eligibility.eligible) {
+                sendTakeoverResponse(
+                    TakeoverResponseEnvelope(
+                        takeover_id = envelope.takeover_id,
+                        task_id = envelope.task_id,
+                        trace_id = envelope.trace_id,
+                        accepted = false,
+                        rejection_reason = eligibility.reason,
+                        device_id = localDeviceId,
+                        runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                        source_runtime_posture = envelope.source_runtime_posture,
+                        exec_mode = envelope.exec_mode
+                    )
+                )
+                return TakeoverHandlingResult(
+                    takeoverId = envelope.takeover_id,
+                    taskId = envelope.task_id,
+                    traceId = envelope.trace_id,
+                    accepted = false,
+                    reason = eligibility.reason
+                )
+            }
+
+            // Device is eligible but full takeover execution is deferred to a future PR.
+            // Reject with "takeover_executor_not_implemented" so the main runtime knows
+            // the device is ready but the executor path is not yet wired up.
+            val rejectionReason = "takeover_executor_not_implemented"
+            sendTakeoverResponse(
+                TakeoverResponseEnvelope(
+                    takeover_id = envelope.takeover_id,
+                    task_id = envelope.task_id,
+                    trace_id = envelope.trace_id,
+                    accepted = false,
+                    rejection_reason = rejectionReason,
+                    device_id = localDeviceId,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    source_runtime_posture = envelope.source_runtime_posture,
+                    exec_mode = envelope.exec_mode
+                )
+            )
+            return TakeoverHandlingResult(
+                takeoverId = envelope.takeover_id,
+                taskId = envelope.task_id,
+                traceId = envelope.trace_id,
                 accepted = false,
-                rejection_reason = rejectionReason,
-                device_id = localDeviceId,
-                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                source_runtime_posture = envelope.source_runtime_posture,
-                exec_mode = envelope.exec_mode
+                reason = rejectionReason
             )
-        )
-
-        return TakeoverHandlingResult(
-            takeoverId = envelope.takeover_id,
-            taskId = envelope.task_id,
-            traceId = envelope.trace_id,
-            accepted = false,
-            reason = rejectionReason
-        )
+        } finally {
+            // Always clear the active takeover ID once we have sent our response so
+            // subsequent requests are not incorrectly blocked.
+            activeTakeoverId = null
+        }
     }
 
     /**
