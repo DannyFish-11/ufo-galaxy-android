@@ -135,6 +135,22 @@ class DefaultLocalLoopExecutor(
          * Corresponds to [LocalLoopState.UNAVAILABLE].
          */
         const val STOP_READINESS_UNAVAILABLE = "readiness_unavailable"
+
+        /**
+         * Stop-reason used when local execution is blocked because the canonical
+         * `source_runtime_posture` is [SourceRuntimePosture.CONTROL_ONLY].
+         *
+         * A `control_only` posture means the source device (Android, for locally-initiated
+         * tasks) is acting only as a controller/initiator and must **not** join the local
+         * runtime as an executor for this task.  Callers that want Android to execute
+         * locally must explicitly set [LocalLoopOptions.sourceRuntimePosture] to
+         * [SourceRuntimePosture.JOIN_RUNTIME], or use [InputRouter] which sets the
+         * correct posture automatically for the local routing path.
+         *
+         * This gate enforces the PR-2A posture contract: Android-local execution
+         * participation requires an explicit `join_runtime` posture.
+         */
+        const val STOP_POSTURE_CONTROL_ONLY = "posture_control_only"
     }
 
     override suspend fun execute(options: LocalLoopOptions): LocalLoopResult {
@@ -145,9 +161,38 @@ class DefaultLocalLoopExecutor(
                 "instruction_len" to options.instruction.length,
                 "readiness_state" to readiness.state.name,
                 "blocker_count" to readiness.blockers.size,
-                "blockers" to readiness.blockers.joinToString { it.name }
+                "blockers" to readiness.blockers.joinToString { it.name },
+                "posture" to options.sourceRuntimePosture
             )
         )
+
+        // Posture gate: block local execution when the source-device posture is control_only.
+        //
+        // A control_only posture signals that the source (this device, for locally-initiated
+        // tasks) is a pure controller/initiator and must NOT participate as a runtime executor.
+        // Local execution is only permitted when the posture is explicitly join_runtime.
+        //
+        // This enforces the canonical PR-2A contract: Android-local execution participation
+        // requires an explicit join_runtime posture. Callers using InputRouter are shielded
+        // from this gate because InputRouter sets JOIN_RUNTIME when routing locally.
+        if (SourceRuntimePosture.isControlOnly(options.sourceRuntimePosture)) {
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "execute_blocked",
+                    "reason" to STOP_POSTURE_CONTROL_ONLY,
+                    "posture" to options.sourceRuntimePosture
+                )
+            )
+            return LocalLoopResult(
+                sessionId = UUID.randomUUID().toString(),
+                instruction = options.instruction,
+                status = LocalLoopResult.STATUS_FAILED,
+                stepCount = 0,
+                stopReason = STOP_POSTURE_CONTROL_ONLY,
+                error = "Local execution blocked: source posture is '${options.sourceRuntimePosture}' " +
+                    "(control_only). Set sourceRuntimePosture=join_runtime to allow local execution."
+            )
+        }
 
         // Gate: block execution when one or more critical subsystems are unavailable.
         if (readiness.state == LocalLoopState.UNAVAILABLE) {

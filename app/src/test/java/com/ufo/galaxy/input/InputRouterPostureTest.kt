@@ -30,8 +30,9 @@ import com.ufo.galaxy.local.LocalLoopResult
  *  - Explicit `CONTROL_ONLY` posture is present in the outbound envelope.
  *  - Unknown / blank posture values are normalised to `CONTROL_ONLY` before being
  *    included in the outbound JSON — never left as raw unknown strings.
- *  - For the local path, posture is forwarded in [LocalLoopOptions] received
- *    by the executor.
+ *  - For the local path, posture is always [SourceRuntimePosture.JOIN_RUNTIME]
+ *    regardless of what the caller passed. Android IS the runtime executor for
+ *    locally-routed tasks (PR-2A posture gate contract).
  *  - `source_runtime_posture` appears in BOTH the payload body AND the AipMessage
  *    envelope (dual-field contract matching main-repo PR #533).
  */
@@ -282,7 +283,7 @@ class InputRouterPostureTest {
     }
 
     @Test
-    fun `local route forwards control_only posture in LocalLoopOptions by default`() = runBlocking {
+    fun `local route uses join_runtime posture in LocalLoopOptions by default`() = runBlocking {
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
@@ -291,14 +292,33 @@ class InputRouterPostureTest {
         delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
-            "LocalLoopOptions must carry control_only posture by default",
-            SourceRuntimePosture.CONTROL_ONLY,
+            "LocalLoopOptions must carry join_runtime posture for local execution (Android IS the executor)",
+            SourceRuntimePosture.JOIN_RUNTIME,
             capturing.capturedOptions.first().sourceRuntimePosture
         )
     }
 
     @Test
-    fun `local route normalises unknown posture to control_only in LocalLoopOptions`() = runBlocking {
+    fun `local route always uses join_runtime posture even when caller passes control_only`() = runBlocking {
+        // When routing locally, the caller's posture param is intended for the cross-device
+        // uplink path. The local execution path overrides it to JOIN_RUNTIME so that
+        // DefaultLocalLoopExecutor's posture gate is satisfied (PR-2A contract).
+        val capturing = CapturingLocalLoopExecutor()
+        val router = buildLocalRouter(localExecutor = capturing)
+
+        router.route("do something", sourceRuntimePosture = SourceRuntimePosture.CONTROL_ONLY)
+
+        delay(100)
+        assertEquals(1, capturing.capturedOptions.size)
+        assertEquals(
+            "Local path must use join_runtime regardless of caller posture",
+            SourceRuntimePosture.JOIN_RUNTIME,
+            capturing.capturedOptions.first().sourceRuntimePosture
+        )
+    }
+
+    @Test
+    fun `local route always uses join_runtime posture even when caller passes unknown value`() = runBlocking {
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
@@ -307,8 +327,8 @@ class InputRouterPostureTest {
         delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
-            "Unknown posture must be normalised to control_only for local executor",
-            SourceRuntimePosture.CONTROL_ONLY,
+            "Unknown posture must yield join_runtime on the local execution path",
+            SourceRuntimePosture.JOIN_RUNTIME,
             capturing.capturedOptions.first().sourceRuntimePosture
         )
     }

@@ -7,6 +7,7 @@ import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -503,7 +504,7 @@ class LocalLoopCorrectnessTest {
             readinessProvider = FakeReadinessProvider.fullyReady()
         )
         val result = runBlocking {
-            executor.execute(LocalLoopOptions("blocked instruction"))
+            executor.execute(LocalLoopOptions("blocked instruction", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME))
         }
 
         assertEquals(LocalLoopResult.STATUS_CANCELLED, result.status)
@@ -533,7 +534,7 @@ class LocalLoopCorrectnessTest {
             readinessProvider = FakeReadinessProvider.fullyReady()
         )
         val result = runBlocking {
-            executor.execute(LocalLoopOptions("resumed instruction"))
+            executor.execute(LocalLoopOptions("resumed instruction", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME))
         }
         assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
     }
