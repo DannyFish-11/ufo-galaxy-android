@@ -76,13 +76,13 @@ class AndroidRuntimeHostRepresentationTest {
         hostId = hostId
     ).withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
 
-    private fun takeover(posture: String? = SourceRuntimePosture.JOIN_RUNTIME) =
+    private fun takeover(sourceRuntimePosture: String? = SourceRuntimePosture.JOIN_RUNTIME) =
         TakeoverRequestEnvelope(
             takeover_id = "to-test",
             task_id = "t-test",
             trace_id = "tr-test",
             goal = "send message",
-            source_runtime_posture = posture
+            source_runtime_posture = sourceRuntimePosture
         )
 
     // ── Host descriptor creation ──────────────────────────────────────────────
