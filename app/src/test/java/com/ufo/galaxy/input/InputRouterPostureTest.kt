@@ -1,12 +1,13 @@
 package com.ufo.galaxy.input
 
-import com.google.gson.Gson
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -264,14 +265,14 @@ class InputRouterPostureTest {
     // ── Local path: posture forwarded in LocalLoopOptions ─────────────────────
 
     @Test
-    fun `local route forwards join_runtime posture in LocalLoopOptions`() {
+    fun `local route forwards join_runtime posture in LocalLoopOptions`() = runBlocking {
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
         router.route("tap the button", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
 
-        // Give Dispatchers.Unconfined time to complete
-        Thread.sleep(50)
+        // Dispatchers.Unconfined executes coroutines eagerly; give it a moment to complete.
+        delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
             "LocalLoopOptions must carry join_runtime posture",
@@ -281,13 +282,13 @@ class InputRouterPostureTest {
     }
 
     @Test
-    fun `local route forwards control_only posture in LocalLoopOptions by default`() {
+    fun `local route forwards control_only posture in LocalLoopOptions by default`() = runBlocking {
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
         router.route("open settings")
 
-        Thread.sleep(50)
+        delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
             "LocalLoopOptions must carry control_only posture by default",
@@ -297,13 +298,13 @@ class InputRouterPostureTest {
     }
 
     @Test
-    fun `local route normalises unknown posture to control_only in LocalLoopOptions`() {
+    fun `local route normalises unknown posture to control_only in LocalLoopOptions`() = runBlocking {
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
         router.route("do something", sourceRuntimePosture = "unknown_value")
 
-        Thread.sleep(50)
+        delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
             "Unknown posture must be normalised to control_only for local executor",
