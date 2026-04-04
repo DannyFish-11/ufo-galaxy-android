@@ -80,6 +80,18 @@ class GalaxyConnectionService : Service() {
         private const val TAG = "GalaxyConnectionService"
         private const val NOTIFICATION_ID = 1001
 
+        // ── Route-mode constants ──────────────────────────────────────────────
+        /**
+         * Route mode for gateway-delivered tasks (goal_execution, parallel_subtask, task_assign
+         * via bridge). All results from these paths carry this value so the main-repo
+         * session-truth layer can correlate results by route without re-parsing envelopes.
+         *
+         * Aliased from [AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE] to keep intra-class
+         * usages concise and to document that this service always treats its inbound
+         * gateway tasks as cross-device-routed.
+         */
+        const val ROUTE_MODE_CROSS_DEVICE = AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE
+
         // ── PR-3: Canonical takeover defaults ─────────────────────────────────
         /**
          * Default maximum number of goal-execution steps allowed inside a single
@@ -176,21 +188,21 @@ class GalaxyConnectionService : Service() {
                 }
             }
 
-            override fun onGoalExecution(taskId: String, goalPayloadJson: String) {
-                Log.i(TAG, "收到 goal_execution: task_id=$taskId")
-                GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "goal_execution"))
+            override fun onGoalExecution(taskId: String, goalPayloadJson: String, traceId: String?) {
+                Log.i(TAG, "收到 goal_execution: task_id=$taskId trace_id=$traceId")
+                GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "goal_execution", "trace_id" to (traceId ?: "")))
                 serviceScope.launch {
                     // Register inside the coroutine to avoid any race between launch and register.
                     taskCancelRegistry.register(taskId, coroutineContext[Job]!!)
-                    handleGoalExecution(taskId, goalPayloadJson)
+                    handleGoalExecution(taskId, goalPayloadJson, traceId)
                 }
             }
 
-            override fun onParallelSubtask(taskId: String, subtaskPayloadJson: String) {
-                Log.i(TAG, "收到 parallel_subtask: task_id=$taskId")
+            override fun onParallelSubtask(taskId: String, subtaskPayloadJson: String, traceId: String?) {
+                Log.i(TAG, "收到 parallel_subtask: task_id=$taskId trace_id=$traceId")
                 serviceScope.launch {
                     taskCancelRegistry.register(taskId, coroutineContext[Job]!!)
-                    handleParallelSubtask(taskId, subtaskPayloadJson)
+                    handleParallelSubtask(taskId, subtaskPayloadJson, traceId)
                 }
             }
 
@@ -526,22 +538,35 @@ class GalaxyConnectionService : Service() {
      * still perform correct aggregation. Deregisters the task from [taskCancelRegistry]
      * in its `finally` block.
      *
+     * Result envelopes are sent as [MsgType.GOAL_EXECUTION_RESULT] with full trace context
+     * ([traceId] from the inbound envelope, route_mode="cross_device") so every hop in the
+     * AIP v3 pipeline carries consistent correlation metadata.
+     *
      * Runs on [serviceScope] (IO dispatcher); all exceptions inside
      * [AutonomousExecutionPipeline] and [LocalGoalExecutor] are already mapped to
      * ERROR status.
+     *
+     * @param taskId       task_id extracted from the inbound payload.
+     * @param payloadJson  Raw JSON of the [GoalExecutionPayload].
+     * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
      */
-    private suspend fun handleGoalExecution(taskId: String, payloadJson: String) {
+    private suspend fun handleGoalExecution(taskId: String, payloadJson: String, inboundTraceId: String?) {
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
             Log.e(TAG, "goal_execution payload 解析失败: ${e.message}", e)
-            sendGoalError(taskId, null, null, "bad_payload: ${e.message}")
+            val traceId = inboundTraceId ?: java.util.UUID.randomUUID().toString()
+            sendGoalError(taskId, null, null, "bad_payload: ${e.message}", traceId, ROUTE_MODE_CROSS_DEVICE)
             taskCancelRegistry.deregister(taskId)
             return
         }
 
         // Pause any running local LoopController session.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+
+        // Preserve inbound trace_id for full-chain correlation; generate only when absent.
+        val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.randomUUID().toString()
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
@@ -550,9 +575,12 @@ class GalaxyConnectionService : Service() {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
             }
             if (isActive) {
-                sendGoalResult(result)
-                finalResult = result
-                Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${result.status} latency=${result.latency_ms}ms")
+                // Enrich result with posture and send with full trace context.
+                val enriched = result.takeIf { it.source_runtime_posture != null }
+                    ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
+                sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
+                finalResult = enriched
+                Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${enriched.status} latency=${enriched.latency_ms}ms trace_id=$traceId")
             }
         } catch (e: TimeoutCancellationException) {
             GalaxyLogger.log(
@@ -561,7 +589,7 @@ class GalaxyConnectionService : Service() {
             )
             Log.w(TAG, "[TASK:TIMEOUT] goal_execution timed out task_id=$taskId timeout_ms=$timeoutMs")
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
-            sendGoalResult(timeoutResult)
+            sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
         } finally {
             taskCancelRegistry.deregister(taskId)
@@ -578,7 +606,7 @@ class GalaxyConnectionService : Service() {
                     status = r.status,
                     summary = "goal_execution: latency=${r.latency_ms}ms",
                     steps = r.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
-                    routeMode = "cross_device"
+                    routeMode = ROUTE_MODE_CROSS_DEVICE
                 )
             }
         }
@@ -594,22 +622,35 @@ class GalaxyConnectionService : Service() {
      * a structured [EdgeExecutor.STATUS_TIMEOUT] result is returned. Deregisters the
      * task from [taskCancelRegistry] in its `finally` block.
      *
+     * Result envelopes are sent as [MsgType.GOAL_EXECUTION_RESULT] with full trace context
+     * ([traceId] from the inbound envelope, route_mode="cross_device") so every hop in the
+     * AIP v3 pipeline carries consistent correlation metadata.
+     *
      * Runs on [serviceScope] (IO dispatcher); all exceptions inside
      * [AutonomousExecutionPipeline] and [LocalGoalExecutor] are already mapped to
      * ERROR status.
+     *
+     * @param taskId       task_id extracted from the inbound payload.
+     * @param payloadJson  Raw JSON of the [GoalExecutionPayload].
+     * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
      */
-    private suspend fun handleParallelSubtask(taskId: String, payloadJson: String) {
+    private suspend fun handleParallelSubtask(taskId: String, payloadJson: String, inboundTraceId: String?) {
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
             Log.e(TAG, "parallel_subtask payload 解析失败: ${e.message}", e)
-            sendGoalError(taskId, null, null, "bad_payload: ${e.message}")
+            val traceId = inboundTraceId ?: java.util.UUID.randomUUID().toString()
+            sendGoalError(taskId, null, null, "bad_payload: ${e.message}", traceId, ROUTE_MODE_CROSS_DEVICE)
             taskCancelRegistry.deregister(taskId)
             return
         }
 
         // Pause any running local LoopController session.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+
+        // Preserve inbound trace_id for full-chain correlation; generate only when absent.
+        val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.randomUUID().toString()
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
@@ -618,13 +659,16 @@ class GalaxyConnectionService : Service() {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
             }
             if (isActive) {
-                sendGoalResult(result)
-                finalResult = result
+                // Enrich result with posture and send with full trace context.
+                val enriched = result.takeIf { it.source_runtime_posture != null }
+                    ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
+                sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
+                finalResult = enriched
                 Log.i(
                     TAG,
-                    "goal_result (parallel) 已回传 task_id=$taskId status=${result.status} " +
-                        "group_id=${result.group_id} subtask_index=${result.subtask_index} " +
-                        "latency=${result.latency_ms}ms"
+                    "goal_result (parallel) 已回传 task_id=$taskId status=${enriched.status} " +
+                        "group_id=${enriched.group_id} subtask_index=${enriched.subtask_index} " +
+                        "latency=${enriched.latency_ms}ms trace_id=$traceId"
                 )
             }
         } catch (e: TimeoutCancellationException) {
@@ -642,7 +686,7 @@ class GalaxyConnectionService : Service() {
                     "group_id=${payload.group_id} subtask_index=${payload.subtask_index} timeout_ms=$timeoutMs"
             )
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
-            sendGoalResult(timeoutResult)
+            sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
         } finally {
             taskCancelRegistry.deregister(taskId)
@@ -659,7 +703,7 @@ class GalaxyConnectionService : Service() {
                     status = r.status,
                     summary = "parallel_subtask idx=${payload.subtask_index}: latency=${r.latency_ms}ms",
                     steps = r.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
-                    routeMode = "cross_device"
+                    routeMode = ROUTE_MODE_CROSS_DEVICE
                 )
             }
         }
@@ -767,7 +811,9 @@ class GalaxyConnectionService : Service() {
         taskId: String,
         groupId: String?,
         subtaskIndex: Int?,
-        errorMsg: String
+        errorMsg: String,
+        traceId: String? = null,
+        routeMode: String? = null
     ) {
         val errorResult = GoalResultPayload(
             task_id = taskId,
@@ -779,13 +825,18 @@ class GalaxyConnectionService : Service() {
             latency_ms = 0L,
             device_id = localDeviceId
         )
-        sendGoalResult(errorResult)
+        if (traceId != null && routeMode != null) {
+            sendGoalResult(errorResult, traceId, routeMode)
+        } else {
+            sendGoalResult(errorResult)
+        }
     }
 
     /**
      * Builds a standardised timeout [GoalResultPayload].
      * All required aggregation fields (correlation_id, device_id, group_id,
-     * subtask_index) are populated so the gateway can still converge results.
+     * subtask_index, source_runtime_posture) are populated so the gateway can
+     * still converge results and correlate them with the originating request.
      */
     private fun buildTimeoutGoalResult(
         taskId: String,
@@ -799,7 +850,8 @@ class GalaxyConnectionService : Service() {
         group_id = payload.group_id,
         subtask_index = payload.subtask_index,
         latency_ms = timeoutMs,
-        device_id = localDeviceId
+        device_id = localDeviceId,
+        source_runtime_posture = payload.source_runtime_posture
     )
 
     // ── PR-4 advanced-capability minimal helpers ──────────────────────────────────────────

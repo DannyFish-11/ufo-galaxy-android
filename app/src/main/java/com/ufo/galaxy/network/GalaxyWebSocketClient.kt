@@ -163,10 +163,12 @@ class GalaxyWebSocketClient(
          * [taskId] is the task_id from the payload.
          * [goalPayloadJson] is the raw JSON of the payload, ready for deserialization
          * into [com.ufo.galaxy.protocol.GoalExecutionPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should echo [traceId] in the reply envelope for full-chain correlation.
          *
          * Default implementation is a no-op for backward compatibility.
          */
-        fun onGoalExecution(taskId: String, goalPayloadJson: String) = Unit
+        fun onGoalExecution(taskId: String, goalPayloadJson: String, traceId: String? = null) = Unit
 
         /**
          * Called when a [com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK] message is received.
@@ -174,10 +176,12 @@ class GalaxyWebSocketClient(
          * [taskId] is the task_id from the payload.
          * [subtaskPayloadJson] is the raw JSON of the payload, ready for deserialization
          * into [com.ufo.galaxy.protocol.GoalExecutionPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should echo [traceId] in the reply envelope for full-chain correlation.
          *
          * Default implementation is a no-op for backward compatibility.
          */
-        fun onParallelSubtask(taskId: String, subtaskPayloadJson: String) = Unit
+        fun onParallelSubtask(taskId: String, subtaskPayloadJson: String, traceId: String? = null) = Unit
 
         /**
          * Called when a [com.ufo.galaxy.protocol.MsgType.TASK_CANCEL] message is received.
@@ -914,18 +918,20 @@ class GalaxyWebSocketClient(
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
                     val correlationId = json.get("correlation_id")?.asString ?: taskId
                     val groupId = payloadObj?.get("group_id")?.asString ?: ""
+                    val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "[WS:DOWNLINK] type=goal_execution task_id=$taskId correlation_id=$correlationId group_id=$groupId")
-                    listeners.forEach { it.onGoalExecution(taskId, payloadJson) }
+                    Log.i(TAG, "[WS:DOWNLINK] type=goal_execution task_id=$taskId correlation_id=$correlationId group_id=$groupId trace_id=$traceId")
+                    listeners.forEach { it.onGoalExecution(taskId, payloadJson, traceId) }
                 }
                 "parallel_subtask" -> {
                     val payloadObj = json.getAsJsonObject("payload")
                     val taskId = payloadObj?.get("task_id")?.asString ?: ""
                     val groupId = payloadObj?.get("group_id")?.asString ?: ""
                     val subtaskIndex = payloadObj?.get("subtask_index")?.asString ?: ""
+                    val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
                     val payloadJson = payloadObj?.toString() ?: "{}"
-                    Log.i(TAG, "[WS:DOWNLINK] type=parallel_subtask task_id=$taskId group_id=$groupId subtask_index=$subtaskIndex")
-                    listeners.forEach { it.onParallelSubtask(taskId, payloadJson) }
+                    Log.i(TAG, "[WS:DOWNLINK] type=parallel_subtask task_id=$taskId group_id=$groupId subtask_index=$subtaskIndex trace_id=$traceId")
+                    listeners.forEach { it.onParallelSubtask(taskId, payloadJson, traceId) }
                 }
                 "task_cancel" -> {
                     val payloadObj = json.getAsJsonObject("payload")
