@@ -219,7 +219,7 @@ data class AndroidCapabilityVector(
          * | [ExecutionDimension.CROSS_DEVICE_COORDINATION] | `settings.crossDeviceEnabled && settings.goalExecutionEnabled` |
          *
          * When [hostDescriptor] is `null` the vector defaults to
-         * [RuntimeHostDescriptor.FormationRole.DEFAULT] formation role and
+         * [RuntimeHostDescriptor.FormationRole.PRIMARY] formation role and
          * [RuntimeHostDescriptor.HostParticipationState.INACTIVE] participation state.
          *
          * @param settings        Live [AppSettings] snapshot used to derive execution dimensions.
@@ -247,7 +247,7 @@ data class AndroidCapabilityVector(
             return AndroidCapabilityVector(
                 executionDimensions = dimensions,
                 formationRole = hostDescriptor?.formationRole
-                    ?: RuntimeHostDescriptor.FormationRole.DEFAULT,
+                    ?: RuntimeHostDescriptor.FormationRole.PRIMARY,
                 participationState = hostDescriptor?.participationState
                     ?: RuntimeHostDescriptor.HostParticipationState.INACTIVE,
                 deviceRole = settings.deviceRole,
