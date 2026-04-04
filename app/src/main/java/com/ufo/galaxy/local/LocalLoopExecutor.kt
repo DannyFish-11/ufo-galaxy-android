@@ -135,9 +135,46 @@ class DefaultLocalLoopExecutor(
          * Corresponds to [LocalLoopState.UNAVAILABLE].
          */
         const val STOP_READINESS_UNAVAILABLE = "readiness_unavailable"
+
+        /**
+         * Stop-reason used when execution is blocked because [LocalLoopOptions.sourceRuntimePosture]
+         * is [com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY].
+         *
+         * A `control_only` posture declares that the source device is acting purely as a
+         * control/initiator endpoint and must not join local runtime execution. This gate
+         * enforces the canonical posture contract from the main-repo PR #533 on the Android
+         * execution-entry side.
+         *
+         * Callers that intend to run a task locally must supply
+         * [com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME] in [LocalLoopOptions].
+         */
+        const val STOP_POSTURE_CONTROL_ONLY = "posture_control_only"
     }
 
     override suspend fun execute(options: LocalLoopOptions): LocalLoopResult {
+        // ── Posture gate (checked first, before readiness) ─────────────────────
+        // A `control_only` posture means the source device must NOT join local runtime
+        // execution.  Reject the request immediately so that downstream subsystems
+        // (readiness check, goal executor, LoopController) are never invoked.
+        if (SourceRuntimePosture.isControlOnly(options.sourceRuntimePosture)) {
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "execute_blocked",
+                    "reason" to STOP_POSTURE_CONTROL_ONLY,
+                    "posture" to options.sourceRuntimePosture
+                )
+            )
+            return LocalLoopResult(
+                sessionId = UUID.randomUUID().toString(),
+                instruction = options.instruction,
+                status = LocalLoopResult.STATUS_FAILED,
+                stepCount = 0,
+                stopReason = STOP_POSTURE_CONTROL_ONLY,
+                error = "Local execution blocked: source_runtime_posture is '${options.sourceRuntimePosture}' " +
+                    "(control_only). Supply SourceRuntimePosture.JOIN_RUNTIME to participate in local execution."
+            )
+        }
+
         val readiness = readinessProvider.getReadiness()
         GalaxyLogger.log(
             TAG, mapOf(

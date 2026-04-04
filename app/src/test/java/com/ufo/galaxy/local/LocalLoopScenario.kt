@@ -4,6 +4,7 @@ import com.ufo.galaxy.agent.AccessibilityExecutor
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
  * Descriptor for a single local-loop execution scenario.
@@ -87,6 +88,12 @@ import com.ufo.galaxy.inference.LocalPlannerService
  * @property stepTimeoutMs     Per-step wall-clock timeout (0 = disabled).
  * @property goalTimeoutMs     Total-goal wall-clock timeout (0 = disabled).
  * @property stagnationDetector Stagnation detector; override for custom thresholds.
+ * @property sourceRuntimePosture Canonical source-device participation posture for this scenario,
+ *                             aligned with the PR #533 / PR #106 posture contract.
+ *                             Defaults to [SourceRuntimePosture.JOIN_RUNTIME] so that existing
+ *                             scenario-based tests proceed through the posture gate in
+ *                             [DefaultLocalLoopExecutor].  Set to [SourceRuntimePosture.CONTROL_ONLY]
+ *                             explicitly to test posture-blocked behaviour.
  */
 data class LocalLoopScenario(
     val name: String,
@@ -100,5 +107,6 @@ data class LocalLoopScenario(
     val maxRetriesPerStep: Int = 2,
     val stepTimeoutMs: Long = 0L,
     val goalTimeoutMs: Long = 0L,
-    val stagnationDetector: StagnationDetector = StagnationDetector()
+    val stagnationDetector: StagnationDetector = StagnationDetector(),
+    val sourceRuntimePosture: String = SourceRuntimePosture.JOIN_RUNTIME
 )
