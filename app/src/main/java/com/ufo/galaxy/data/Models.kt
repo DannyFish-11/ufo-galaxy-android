@@ -110,6 +110,23 @@ data class CapabilityReport(
      */
     fun missingMetadataKeys(): Set<String> = REQUIRED_METADATA_KEYS - metadata.keys
 
+    /**
+     * Returns `true` when [metadata] contains all keys in [SCHEDULING_BASIS_METADATA_KEYS].
+     *
+     * Scheduling-basis keys are populated by
+     * [com.ufo.galaxy.capability.AndroidCapabilityVector.toSchedulingMetadata] and merged
+     * into the payload before sending.  Call this (in addition to [validate]) when the
+     * sender should include full scheduling signals for placement decisions.
+     */
+    fun validateSchedulingBasis(): Boolean =
+        SCHEDULING_BASIS_METADATA_KEYS.all { metadata.containsKey(it) }
+
+    /**
+     * Returns the set of missing scheduling-basis metadata keys, or an empty set when all
+     * scheduling keys are present. Intended for logging / diagnostics only.
+     */
+    fun missingSchedulingBasisKeys(): Set<String> = SCHEDULING_BASIS_METADATA_KEYS - metadata.keys
+
     companion object {
         /**
          * The canonical set of metadata keys that every `capability_report` payload
@@ -138,6 +155,34 @@ data class CapabilityReport(
             "model_ready",
             "accessibility_ready",
             "overlay_ready"
+        )
+
+        /**
+         * The canonical set of scheduling-basis metadata keys introduced in PR-6
+         * (post-#533 dual-repo runtime unification — Canonical Device Capability &
+         * Scheduling Basis).
+         *
+         * These keys are produced by
+         * [com.ufo.galaxy.capability.AndroidCapabilityVector.toSchedulingMetadata] and are
+         * distinct from (non-overlapping with) both [REQUIRED_METADATA_KEYS] and the
+         * runtime-host keys defined on
+         * [com.ufo.galaxy.runtime.RuntimeHostDescriptor].
+         *
+         * | Key                                | Type    | Meaning |
+         * |------------------------------------|---------|---------|
+         * | `scheduling_local_eligible`        | Boolean | Device is eligible for local autonomous execution. |
+         * | `scheduling_cross_device_eligible` | Boolean | Device is eligible for cross-device participation. |
+         * | `scheduling_parallel_subtask_eligible` | Boolean | Device can accept parallel subtask assignments. |
+         * | `scheduling_execution_dimensions`  | String  | Comma-separated active [com.ufo.galaxy.capability.AndroidCapabilityVector.ExecutionDimension] wire values. |
+         *
+         * When present, these keys give the gateway a pre-computed, Android-side scheduling
+         * signal that avoids re-deriving eligibility from raw flags on the server side.
+         */
+        val SCHEDULING_BASIS_METADATA_KEYS: Set<String> = setOf(
+            "scheduling_local_eligible",
+            "scheduling_cross_device_eligible",
+            "scheduling_parallel_subtask_eligible",
+            "scheduling_execution_dimensions"
         )
     }
 }
