@@ -853,6 +853,13 @@ class GalaxyConnectionService : Service() {
      * When the device is not eligible (missing permissions, goal execution disabled, etc.)
      * it rejects with a specific reason so the main runtime can fall back cleanly.
      *
+     * ## Suspension semantics
+     * This function is a `suspend fun`. It suspends while awaiting [executeTakeoverTask]
+     * which performs blocking goal execution. The [TakeoverHandlingResult] returned reflects
+     * the **acceptance decision** — `accepted=true` means Android committed to execute the
+     * task, not that execution has completed successfully. Execution errors are handled
+     * internally by [executeTakeoverTask] and reported back to the gateway separately.
+     *
      * @param messageId Optional message_id from the inbound AIP v3 envelope.
      * @param rawJson   Raw JSON string of the inbound takeover_request message.
      */

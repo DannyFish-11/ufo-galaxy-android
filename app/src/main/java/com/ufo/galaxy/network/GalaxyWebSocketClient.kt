@@ -704,8 +704,10 @@ class GalaxyWebSocketClient(
             }
         }
         sendJson(gson.toJson(register))
-        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId" +
-            (runtimeHostDescriptor?.let { " runtime_host=true role=${it.formationRole.wireValue}" } ?: ""))
+        val hostLogSuffix = runtimeHostDescriptor
+            ?.let { " runtime_host=true role=${it.formationRole.wireValue} state=${it.participationState.wireValue}" }
+            ?: " runtime_host=false"
+        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId$hostLogSuffix")
 
         val baseActions = listOf(
             "location", "camera", "sensor_data", "automation",
@@ -760,10 +762,12 @@ class GalaxyWebSocketClient(
         // Route through sendJson() so the cross-device gate is uniformly enforced
         // across all uplink message types, including the initial capability_report.
         sendJson(handshakeJson)
+        val capabilityHostLogSuffix = runtimeHostDescriptor
+            ?.let { " runtime_host=true role=${it.formationRole.wireValue} state=${it.participationState.wireValue}" }
+            ?: " runtime_host=false"
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
-                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
-                (runtimeHostDescriptor?.let { " runtime_host=true role=${it.formationRole.wireValue} state=${it.participationState.wireValue}" } ?: ""))
+                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}$capabilityHostLogSuffix")
     }
 
     /**
