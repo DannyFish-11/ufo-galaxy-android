@@ -213,6 +213,13 @@ enum class MsgType(val value: String) {
  * @param idempotency_key     Per-send unique key for safe message deduplication.  Should be
  *                            derived from `task_id + timestamp` (or a UUID) so that duplicate
  *                            sends can be detected and discarded by the gateway.
+ * @param source_runtime_posture  Canonical source-device participation posture, aligned with
+ *                            the server-side semantics from PR #533.  Valid values are defined
+ *                            in [com.ufo.galaxy.runtime.SourceRuntimePosture]:
+ *                            `"control_only"` (source is a control/initiator only) or
+ *                            `"join_runtime"` (source also participates as a runtime executor).
+ *                            Defaults to `null` for backwards compatibility; consumers must
+ *                            treat `null` as equivalent to `"control_only"`.
  */
 data class AipMessage(
     val type: MsgType,
@@ -226,7 +233,8 @@ data class AipMessage(
     val trace_id: String? = null,
     val route_mode: String? = null,
     val runtime_session_id: String? = null,
-    val idempotency_key: String? = null
+    val idempotency_key: String? = null,
+    val source_runtime_posture: String? = null
 )
 
 /**
@@ -271,13 +279,19 @@ data class TaskSubmitContext(
  *                   Defaults to an empty string when the caller does not supply one (e.g. in
  *                   tests), but **must** be populated for every real outbound message.
  * @param context    Optional device and session context.
+ * @param source_runtime_posture  Canonical source-device participation posture carried from
+ *                   the initiating context. Valid values: `"control_only"` (default, source is
+ *                   a pure control/initiator) or `"join_runtime"` (source also participates as
+ *                   a runtime executor). Defaults to `null`; the gateway treats `null` as
+ *                   `"control_only"` for backwards compatibility.
  */
 data class TaskSubmitPayload(
     val task_text: String,
     val device_id: String,
     val session_id: String,
     val task_id: String = "",
-    val context: TaskSubmitContext = TaskSubmitContext()
+    val context: TaskSubmitContext = TaskSubmitContext(),
+    val source_runtime_posture: String? = null
 ) {
     /**
      * Returns `true` when all required fields are non-blank.
@@ -310,13 +324,18 @@ data class TaskSubmitPayload(
  * @param constraints         Optional list of natural-language constraint strings.
  * @param max_steps           Maximum number of action steps the local agent may attempt.
  * @param require_local_agent True when the edge device must execute locally.
+ * @param source_runtime_posture  Canonical source-device participation posture forwarded from
+ *                            the originating task_submit. Valid values: `"control_only"` or
+ *                            `"join_runtime"`. Defaults to `null`; treat `null` as
+ *                            `"control_only"` for backwards compatibility.
  */
 data class TaskAssignPayload(
     val task_id: String,
     val goal: String,
     val constraints: List<String> = emptyList(),
     val max_steps: Int,
-    val require_local_agent: Boolean
+    val require_local_agent: Boolean,
+    val source_runtime_posture: String? = null
 )
 
 /**
@@ -404,6 +423,10 @@ data class CommandResultPayload(
  * @param subtask_index Zero-based index of this subtask within the group.
  * @param timeout_ms    Per-task execution timeout in milliseconds. 0 = use default
  *                      ([DEFAULT_TIMEOUT_MS]). Capped at [MAX_TIMEOUT_MS].
+ * @param source_runtime_posture  Canonical source-device participation posture forwarded from
+ *                      the originating request. Valid values: `"control_only"` or
+ *                      `"join_runtime"`. Defaults to `null`; treat `null` as `"control_only"`
+ *                      for backwards compatibility.
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -412,7 +435,8 @@ data class GoalExecutionPayload(
     val max_steps: Int = 10,
     val group_id: String? = null,
     val subtask_index: Int? = null,
-    val timeout_ms: Long = 0L
+    val timeout_ms: Long = 0L,
+    val source_runtime_posture: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -447,6 +471,9 @@ data class GoalExecutionPayload(
  * @param steps          Step-level results accumulated during execution.
  * @param outputs        High-level string outputs collected during execution (gateway aggregation).
  * @param error          Human-readable error when status is "error" or "disabled".
+ * @param source_runtime_posture  Echoed from [GoalExecutionPayload.source_runtime_posture] so
+ *                       the gateway can associate the result with the originating posture context.
+ *                       Defaults to `null` for backwards compatibility.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -461,7 +488,8 @@ data class GoalResultPayload(
     val device_role: String = "",
     val steps: List<StepResult> = emptyList(),
     val outputs: List<String> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val source_runtime_posture: String? = null
 )
 
 /**

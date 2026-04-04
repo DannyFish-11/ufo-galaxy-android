@@ -9,19 +9,21 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * `ufo-galaxy-realization-v2` gateway bridge endpoint.  It carries every field
  * required for full-chain task delegation:
  *
- * | Field                | Server contract role                                         |
- * |----------------------|--------------------------------------------------------------|
- * | [trace_id]           | End-to-end observability identifier (propagated unchanged)   |
- * | [task_id]            | Unique task identifier; echoed on every reply               |
- * | [goal]               | Natural-language objective for Agent Runtime                 |
- * | [exec_mode]          | Execution mode: "local" / "remote" / "both"                  |
- * | [route_mode]         | Routing path: "local" / "cross_device"                      |
- * | [capability]         | Optional capability name required for execution             |
- * | [session_id]         | Session-level grouping identifier                           |
- * | [context]            | Arbitrary key-value context forwarded to Agent Runtime      |
- * | [constraints]        | Natural-language constraint strings from task_assign        |
- * | [runtime_session_id] | Stable per-app-launch session ID (see [UFOGalaxyApplication.runtimeSessionId]) |
- * | [idempotency_key]    | Per-send deduplication key (task_id + timestamp)            |
+ * | Field                    | Server contract role                                                    |
+ * |--------------------------|-------------------------------------------------------------------------|
+ * | [trace_id]               | End-to-end observability identifier (propagated unchanged)              |
+ * | [task_id]                | Unique task identifier; echoed on every reply                           |
+ * | [goal]                   | Natural-language objective for Agent Runtime                            |
+ * | [exec_mode]              | Execution mode: "local" / "remote" / "both"                             |
+ * | [route_mode]             | Routing path: "local" / "cross_device"                                  |
+ * | [capability]             | Optional capability name required for execution                         |
+ * | [session_id]             | Session-level grouping identifier                                       |
+ * | [context]                | Arbitrary key-value context forwarded to Agent Runtime                  |
+ * | [constraints]            | Natural-language constraint strings from task_assign                    |
+ * | [runtime_session_id]     | Stable per-app-launch session ID (see [UFOGalaxyApplication.runtimeSessionId]) |
+ * | [idempotency_key]        | Per-send deduplication key (task_id + timestamp)                        |
+ * | [source_runtime_posture] | Canonical source-device participation posture (PR #533 contract):       |
+ * |                          | `"control_only"` or `"join_runtime"`. Null = backwards-compat default.  |
  *
  * ## Backward compatibility
  * The existing [AgentRuntimeBridge.HandoffRequest] / [AgentRuntimeBridge.buildBridgeJson]
@@ -29,17 +31,19 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * can convert a [AgentRuntimeBridge.HandoffRequest] via [AgentRuntimeBridge.HandoffRequest.toEnvelopeV2]
  * and serialise it independently when they need to send a V2-compliant payload.
  *
- * @param trace_id           End-to-end trace identifier.
- * @param task_id            Unique task identifier.
- * @param goal               Natural-language objective.
- * @param exec_mode          Execution mode constant.
- * @param route_mode         Routing path constant.
- * @param capability         Optional capability name.
- * @param session_id         Optional session identifier.
- * @param context            Arbitrary key-value context map.
- * @param constraints        Constraint string list.
- * @param runtime_session_id Stable per-app-launch session identifier.
- * @param idempotency_key    Per-send unique deduplication key.
+ * @param trace_id               End-to-end trace identifier.
+ * @param task_id                Unique task identifier.
+ * @param goal                   Natural-language objective.
+ * @param exec_mode              Execution mode constant.
+ * @param route_mode             Routing path constant.
+ * @param capability             Optional capability name.
+ * @param session_id             Optional session identifier.
+ * @param context                Arbitrary key-value context map.
+ * @param constraints            Constraint string list.
+ * @param runtime_session_id     Stable per-app-launch session identifier.
+ * @param idempotency_key        Per-send unique deduplication key.
+ * @param source_runtime_posture Canonical source-device participation posture; see
+ *                               [com.ufo.galaxy.runtime.SourceRuntimePosture].
  */
 data class HandoffEnvelopeV2(
     val trace_id: String,
@@ -52,7 +56,8 @@ data class HandoffEnvelopeV2(
     val context: Map<String, String> = emptyMap(),
     val constraints: List<String> = emptyList(),
     val runtime_session_id: String? = null,
-    val idempotency_key: String? = null
+    val idempotency_key: String? = null,
+    val source_runtime_posture: String? = null
 )
 
 /**
@@ -62,6 +67,8 @@ data class HandoffEnvelopeV2(
  *   [UFOGalaxyApplication.runtimeSessionId] (stable for the lifetime of the process).
  * - [HandoffEnvelopeV2.idempotency_key] is derived from `task_id + "_" + currentTimeMillis`
  *   to produce a per-send unique key suitable for gateway-side deduplication.
+ * - [HandoffEnvelopeV2.source_runtime_posture] is mapped directly from
+ *   [AgentRuntimeBridge.HandoffRequest.sourceRuntimePosture].
  *
  * All other fields are mapped 1:1 from the source request.
  */
@@ -76,5 +83,6 @@ fun AgentRuntimeBridge.HandoffRequest.toEnvelopeV2(): HandoffEnvelopeV2 = Handof
     context = context,
     constraints = constraints,
     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-    idempotency_key = java.util.UUID.randomUUID().toString()
+    idempotency_key = java.util.UUID.randomUUID().toString(),
+    source_runtime_posture = sourceRuntimePosture
 )

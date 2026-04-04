@@ -79,6 +79,14 @@ class AgentRuntimeBridge(
      * @param sessionId  Optional session-level identifier for grouping steps.
      * @param context    Arbitrary additional context forwarded to the Agent Runtime.
      * @param constraints Natural-language constraint strings from the task_assign payload.
+     * @param sourceRuntimePosture Canonical source-device participation posture, aligned with the
+     *                   server-side semantics from PR #533. Valid values are defined in
+     *                   [com.ufo.galaxy.runtime.SourceRuntimePosture]: `"control_only"` (source
+     *                   acts purely as a control/initiator) or `"join_runtime"` (source also
+     *                   participates as a runtime executor). Defaults to `null`; the gateway
+     *                   and Agent Runtime treat `null` as `"control_only"` for backwards
+     *                   compatibility. Propagated unchanged into [HandoffEnvelopeV2] and the
+     *                   `bridge_handoff` JSON payload.
      */
     data class HandoffRequest(
         val traceId: String,
@@ -96,7 +104,8 @@ class AgentRuntimeBridge(
          * finally block.  Pass a pre-existing span ID to nest this handoff under an
          * outer span (e.g. a task execution span).
          */
-        val spanId: String = ""
+        val spanId: String = "",
+        val sourceRuntimePosture: String? = null
     )
 
     /**
@@ -150,6 +159,7 @@ class AgentRuntimeBridge(
                 if (!request.capability.isNullOrBlank()) put("capability", request.capability)
                 if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
                 put("cross_device_on", settings.crossDeviceEnabled)
+                if (!request.sourceRuntimePosture.isNullOrBlank()) put("source_runtime_posture", request.sourceRuntimePosture)
             }
         )
 
@@ -209,6 +219,7 @@ class AgentRuntimeBridge(
                 put("route_mode", request.routeMode)
                 if (!request.capability.isNullOrBlank()) put("capability", request.capability)
                 if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
+                if (!request.sourceRuntimePosture.isNullOrBlank()) put("source_runtime_posture", request.sourceRuntimePosture)
             }
         )
 
@@ -367,6 +378,7 @@ class AgentRuntimeBridge(
             if (!env.session_id.isNullOrBlank()) put("session_id", env.session_id)
             if (!env.runtime_session_id.isNullOrBlank()) put("runtime_session_id", env.runtime_session_id)
             if (!env.idempotency_key.isNullOrBlank()) put("idempotency_key", env.idempotency_key)
+            if (!env.source_runtime_posture.isNullOrBlank()) put("source_runtime_posture", env.source_runtime_posture)
             if (env.context.isNotEmpty()) put("context", JSONObject(env.context as Map<*, *>))
             if (env.constraints.isNotEmpty()) {
                 val arr = org.json.JSONArray()
