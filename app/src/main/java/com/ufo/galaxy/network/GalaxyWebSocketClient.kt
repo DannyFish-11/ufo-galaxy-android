@@ -7,6 +7,7 @@ import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
@@ -395,7 +396,35 @@ class GalaxyWebSocketClient(
     fun setDeviceMetadata(metadata: Map<String, Any>) {
         deviceMetadata = metadata
     }
-    
+
+    /**
+     * Runtime host identity descriptor for this Android device.
+     *
+     * When set, [sendHandshake] merges [RuntimeHostDescriptor.toRegistrationMap] into
+     * both the `device_register` and `capability_report` payloads so the gateway can
+     * register this device as a first-class runtime host participant rather than a
+     * mere connected-device endpoint.
+     *
+     * Build via [RuntimeHostDescriptor.fromSettings] and call this before [connect].
+     * Gateways that do not yet understand the runtime host fields will ignore them.
+     *
+     * @see RuntimeHostDescriptor
+     */
+    private var runtimeHostDescriptor: RuntimeHostDescriptor? = null
+
+    /**
+     * Sets the [RuntimeHostDescriptor] that is included in the next handshake.
+     *
+     * Call this (using [RuntimeHostDescriptor.fromSettings]) before [connect] to
+     * promote Android from a connected-device endpoint to a first-class runtime host
+     * participant in the gateway's runtime host pool.
+     *
+     * @param descriptor The host identity to advertise; `null` to reset (device-only mode).
+     */
+    fun setRuntimeHostDescriptor(descriptor: RuntimeHostDescriptor?) {
+        runtimeHostDescriptor = descriptor
+    }
+
     /**
      * 连接到服务器
      * No-op when [crossDeviceEnabled] is false (local-only mode).
@@ -663,9 +692,20 @@ class GalaxyWebSocketClient(
             addProperty("device_type", "Android_Agent")
             addProperty("trace_id", sessionTraceId)
             addProperty("timestamp", System.currentTimeMillis())
+            // PR-5: Include runtime host identity fields so the gateway can register
+            // this device as a first-class runtime host participant rather than a mere
+            // connected-device endpoint.
+            val hostDescriptor = runtimeHostDescriptor
+            if (hostDescriptor != null) {
+                addProperty("runtime_host_eligible", true)
+                addProperty("host_formation_role", hostDescriptor.formationRole.wireValue)
+                addProperty("host_participation_state", hostDescriptor.participationState.wireValue)
+                addProperty("host_id", hostDescriptor.hostId)
+            }
         }
         sendJson(gson.toJson(register))
-        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId")
+        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId" +
+            (runtimeHostDescriptor?.let { " runtime_host=true role=${it.formationRole.wireValue}" } ?: ""))
 
         val baseActions = listOf(
             "location", "camera", "sensor_data", "automation",
@@ -690,6 +730,10 @@ class GalaxyWebSocketClient(
             },
             metadata = deviceMetadata.toMutableMap().also { m ->
                 m["cross_device_enabled"] = crossDeviceEnabled
+                // PR-5: Merge runtime host identity fields into capability_report metadata
+                // so the gateway can treat this device as a first-class runtime host.
+                // These are additive and do not affect REQUIRED_METADATA_KEYS validation.
+                runtimeHostDescriptor?.toRegistrationMap()?.forEach { (k, v) -> m[k] = v }
             }
         )
 
@@ -718,7 +762,8 @@ class GalaxyWebSocketClient(
         sendJson(handshakeJson)
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
-                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}")
+                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
+                (runtimeHostDescriptor?.let { " runtime_host=true role=${it.formationRole.wireValue} state=${it.participationState.wireValue}" } ?: ""))
     }
 
     /**
