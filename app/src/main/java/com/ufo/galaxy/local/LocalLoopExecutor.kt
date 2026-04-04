@@ -36,12 +36,17 @@ data class LocalLoopOptions(
  * (UI, tests, future components) do not depend on the internal [LoopController] model
  * directly.
  *
- * @property sessionId    Unique session identifier.
- * @property instruction  The goal that was executed.
- * @property status       Outcome: [STATUS_SUCCESS], [STATUS_FAILED], or [STATUS_CANCELLED].
- * @property stepCount    Number of action steps executed.
- * @property stopReason   Machine-readable stop reason (echoed from [LoopController]).
- * @property error        Human-readable error description, or `null` on success.
+ * @property sessionId              Unique session identifier.
+ * @property instruction            The goal that was executed.
+ * @property status                 Outcome: [STATUS_SUCCESS], [STATUS_FAILED], [STATUS_CANCELLED],
+ *                                  or [STATUS_DISABLED].
+ * @property stepCount              Number of action steps executed.
+ * @property stopReason             Machine-readable stop reason (echoed from [LoopController]).
+ * @property error                  Human-readable error description, or `null` on success.
+ * @property source_runtime_posture The source-device participation posture that was in effect
+ *                                  when this result was produced.  Aligned with the PR #533 /
+ *                                  PR #106 posture contract.  Null when the caller did not
+ *                                  supply a posture (legacy paths).
  */
 data class LocalLoopResult(
     val sessionId: String,
@@ -49,7 +54,8 @@ data class LocalLoopResult(
     val status: String,
     val stepCount: Int,
     val stopReason: String?,
-    val error: String?
+    val error: String?,
+    val source_runtime_posture: String? = null
 ) {
     companion object {
         /** Execution completed successfully. */
@@ -60,6 +66,13 @@ data class LocalLoopResult(
 
         /** Execution was cancelled (remote task preemption, etc.). */
         const val STATUS_CANCELLED = LoopController.STATUS_CANCELLED
+
+        /**
+         * Execution was administratively disabled (e.g. posture gate blocked it, or the
+         * cross-device runtime was inactive). Distinct from [STATUS_FAILED] so callers
+         * can cleanly distinguish "device refused by policy" from "device tried and failed".
+         */
+        const val STATUS_DISABLED = "disabled"
     }
 
     /** True when this result represents a successful execution. */
@@ -264,7 +277,9 @@ class DefaultLocalLoopExecutor(
             val mappedStatus = when (goalResult.status) {
                 EdgeExecutor.STATUS_SUCCESS -> LocalLoopResult.STATUS_SUCCESS
                 EdgeExecutor.STATUS_CANCELLED -> LocalLoopResult.STATUS_CANCELLED
-                else -> LocalLoopResult.STATUS_FAILED // covers STATUS_ERROR, STATUS_TIMEOUT, "disabled"
+                // "disabled" from AutonomousExecutionPipeline posture/feature gate
+                LocalLoopResult.STATUS_DISABLED -> LocalLoopResult.STATUS_DISABLED
+                else -> LocalLoopResult.STATUS_FAILED // covers STATUS_ERROR, STATUS_TIMEOUT
             }
 
             GalaxyLogger.log(
@@ -283,7 +298,9 @@ class DefaultLocalLoopExecutor(
                 status = mappedStatus,
                 stepCount = goalResult.steps.size,
                 stopReason = goalResult.status.takeUnless { it == EdgeExecutor.STATUS_SUCCESS },
-                error = goalResult.error
+                error = goalResult.error,
+                source_runtime_posture = goalResult.source_runtime_posture
+                    ?: options.sourceRuntimePosture
             )
         }
 }
