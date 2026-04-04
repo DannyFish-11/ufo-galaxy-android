@@ -13,6 +13,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskSubmitPayload
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,13 +104,21 @@ class InputRouter(
      * Blank / whitespace-only input is ignored and [RouteMode.LOCAL] is returned without
      * invoking any callbacks.
      *
-     * @param text     Natural-language input from the user (text or voice transcript).
-     * @param deviceId Stable device identifier. Defaults to the Android build identity.
+     * @param text                 Natural-language input from the user (text or voice transcript).
+     * @param deviceId             Stable device identifier. Defaults to the Android build identity.
+     * @param sourceRuntimePosture Canonical source-device participation posture for this task,
+     *                             aligned with the PR #533 / PR #106 posture contract.
+     *                             Valid values: [SourceRuntimePosture.CONTROL_ONLY] or
+     *                             [SourceRuntimePosture.JOIN_RUNTIME]. Unknown or blank values are
+     *                             normalised to [SourceRuntimePosture.DEFAULT] (`"control_only"`).
+     *                             Defaults to [SourceRuntimePosture.DEFAULT] — callers that do not
+     *                             specify posture are treated as control-only for backwards safety.
      * @return The [RouteMode] describing which path was taken.
      */
     fun route(
         text: String,
-        deviceId: String = "${Build.MANUFACTURER}_${Build.MODEL}"
+        deviceId: String = "${Build.MANUFACTURER}_${Build.MODEL}",
+        sourceRuntimePosture: String = SourceRuntimePosture.DEFAULT
     ): RouteMode {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return RouteMode.LOCAL
@@ -122,26 +131,26 @@ class InputRouter(
         }
 
         return try {
-            routeInternal(trimmed, deviceId)
+            routeInternal(trimmed, deviceId, SourceRuntimePosture.fromValue(sourceRuntimePosture))
         } finally {
             _isRouting.set(false)
         }
     }
 
-    private fun routeInternal(trimmed: String, deviceId: String): RouteMode {
+    private fun routeInternal(trimmed: String, deviceId: String, posture: String): RouteMode {
         val taskId = UUID.randomUUID().toString()
         val crossDevice = settings.crossDeviceEnabled
         val wsConnected = webSocketClient.isConnected()
 
         return when {
             !crossDevice -> {
-                Log.i(TAG, "[ROUTE] route_mode=local task_id=$taskId device_id=$deviceId")
-                GalaxyLogger.log(TAG, mapOf("event" to "route_local", "task_id" to taskId))
-                launchLocal(trimmed)
+                Log.i(TAG, "[ROUTE] route_mode=local task_id=$taskId device_id=$deviceId posture=$posture")
+                GalaxyLogger.log(TAG, mapOf("event" to "route_local", "task_id" to taskId, "posture" to posture))
+                launchLocal(trimmed, posture)
                 RouteMode.LOCAL
             }
             wsConnected -> {
-                sendViaWebSocket(trimmed, deviceId, taskId)
+                sendViaWebSocket(trimmed, deviceId, taskId, posture)
             }
             else -> {
                 // crossDeviceEnabled=true but WS not connected → explicit error, no silent fallback.
@@ -160,10 +169,12 @@ class InputRouter(
      * Launches [LocalLoopExecutor.execute] for [text] in [coroutineScope] on [Dispatchers.IO].
      * On completion, [onLocalResult] is invoked with the [LocalLoopResult].
      */
-    private fun launchLocal(text: String) {
+    private fun launchLocal(text: String, posture: String) {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val result = localLoopExecutor.execute(LocalLoopOptions(instruction = text))
+                val result = localLoopExecutor.execute(
+                    LocalLoopOptions(instruction = text, sourceRuntimePosture = posture)
+                )
                 GalaxyLogger.log(
                     TAG, mapOf(
                         "event" to "local_done",
@@ -190,16 +201,22 @@ class InputRouter(
      *  - `sessionId`: the session-level identifier in [TaskSubmitPayload.session_id] that the
      *    Gateway uses to group steps within a single user request.
      *
+     * [posture] is propagated into both [TaskSubmitPayload.source_runtime_posture] and the
+     * [AipMessage] envelope's `source_runtime_posture` field so the gateway receives it at both
+     * the payload level and the envelope level — matching the dual-field convention established
+     * by the main-repo PR #533 contract.
+     *
      * The payload is validated via [TaskSubmitPayload.validate] before sending; a validation
      * failure is treated as an internal error and surfaced via [onError].
      */
-    private fun sendViaWebSocket(text: String, deviceId: String, taskId: String): RouteMode {
+    private fun sendViaWebSocket(text: String, deviceId: String, taskId: String, posture: String): RouteMode {
         val sessionId = UUID.randomUUID().toString() // session-level ID within the payload
         val payload = TaskSubmitPayload(
             task_text = text,
             device_id = deviceId,
             session_id = sessionId,
-            task_id = taskId
+            task_id = taskId,
+            source_runtime_posture = posture
         )
         if (!payload.validate()) {
             val fieldError = payload.validationError() ?: "unknown field"
@@ -217,17 +234,19 @@ class InputRouter(
             trace_id = taskId,      // use task_id as the initial trace_id for this submission
             route_mode = "cross_device",
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = java.util.UUID.randomUUID().toString(),
+            source_runtime_posture = posture
         )
         val json = gson.toJson(envelope)
         val sent = webSocketClient.sendJson(json)
         return if (sent) {
-            Log.i(TAG, "[ROUTE] route_mode=cross_device task_id=$taskId device_id=$deviceId text=${text.take(60)}")
+            Log.i(TAG, "[ROUTE] route_mode=cross_device task_id=$taskId device_id=$deviceId posture=$posture text=${text.take(60)}")
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "route_cross_device",
                     "task_id" to taskId,
-                    "session_id" to sessionId
+                    "session_id" to sessionId,
+                    "posture" to posture
                 )
             )
             RouteMode.CROSS_DEVICE

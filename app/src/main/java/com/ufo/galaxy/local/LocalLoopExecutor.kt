@@ -5,6 +5,7 @@ import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.GoalExecutionPayload
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,12 +13,20 @@ import kotlinx.coroutines.withContext
 /**
  * Options controlling a single local loop execution request.
  *
- * @property instruction  Natural-language goal passed to the local loop.
- * @property maxSteps     Optional step-budget override. `null` uses the executor's default.
+ * @property instruction          Natural-language goal passed to the local loop.
+ * @property maxSteps             Optional step-budget override. `null` uses the executor's default.
+ * @property sourceRuntimePosture Canonical source-device participation posture for this
+ *                                execution, aligned with the PR #533 / PR #106 posture contract.
+ *                                Defaults to [SourceRuntimePosture.DEFAULT] (`"control_only"`)
+ *                                so that UI-driven local tasks are always treated as
+ *                                control-only unless the caller explicitly opts in to `join_runtime`.
+ *                                Use [SourceRuntimePosture.fromValue] when setting this from an
+ *                                inbound payload to guarantee safe unknown-value normalisation.
  */
 data class LocalLoopOptions(
     val instruction: String,
-    val maxSteps: Int? = null
+    val maxSteps: Int? = null,
+    val sourceRuntimePosture: String = SourceRuntimePosture.DEFAULT
 )
 
 /**
@@ -208,7 +217,8 @@ class DefaultLocalLoopExecutor(
                 subtask_index = null,
                 max_steps = options.maxSteps ?: LoopController.DEFAULT_MAX_STEPS,
                 timeout_ms = 0L,
-                constraints = emptyList()
+                constraints = emptyList(),
+                source_runtime_posture = options.sourceRuntimePosture
             )
 
             val goalResult = goalExecutor!!.executeGoal(payload)

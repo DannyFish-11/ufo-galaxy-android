@@ -19,6 +19,7 @@ import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.SourceRuntimePosture
+import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -387,6 +388,26 @@ class GalaxyConnectionService : Service() {
         traceId: String,
         routeMode: String
     ) {
+        // Build a canonical LocalRuntimeContext at the ingress point so posture is
+        // available as a typed, normalised value throughout this execution scope.
+        val runtimeContext = LocalRuntimeContext.of(
+            taskId = taskId,
+            sessionId = null,
+            sourceRuntimePosture = payload.source_runtime_posture,
+            traceId = traceId,
+            deviceRole = UFOGalaxyApplication.appSettings.deviceRole
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "local_task_assign_ingress",
+                "task_id" to taskId,
+                "posture" to runtimeContext.sourceRuntimePosture,
+                "is_join_runtime" to runtimeContext.isJoinRuntime,
+                "trace_id" to traceId,
+                "route_mode" to routeMode
+            )
+        )
+
         var goalResult: GoalResultPayload? = null
         try {
             updateNotification("执行任务 ${taskId.take(8)}…")
