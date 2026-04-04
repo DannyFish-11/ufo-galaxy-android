@@ -78,6 +78,12 @@ class GalaxyConnectionService : Service() {
     companion object {
         private const val TAG = "GalaxyConnectionService"
         private const val NOTIFICATION_ID = 1001
+
+        /** Default maximum steps for a takeover-accepted task execution (PR-5). */
+        private const val TAKEOVER_DEFAULT_MAX_STEPS = 10
+
+        /** Default timeout_ms for a takeover-accepted task (0 = use EdgeExecutor's internal step budget). */
+        private const val TAKEOVER_DEFAULT_TIMEOUT_MS = 0L
     }
     
     private val binder = LocalBinder()
@@ -1001,7 +1007,7 @@ class GalaxyConnectionService : Service() {
      *
      * @param envelope The accepted [TakeoverRequestEnvelope] to execute.
      */
-    private fun executeTakeoverTask(envelope: TakeoverRequestEnvelope) {
+    private suspend fun executeTakeoverTask(envelope: TakeoverRequestEnvelope) {
         // Block local loop while executing the remote takeover task.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
         var goalResult: GoalResultPayload? = null
@@ -1011,8 +1017,8 @@ class GalaxyConnectionService : Service() {
                 task_id = envelope.task_id,
                 group_id = null,
                 subtask_index = null,
-                max_steps = 10,
-                timeout_ms = 0L,
+                max_steps = TAKEOVER_DEFAULT_MAX_STEPS,
+                timeout_ms = TAKEOVER_DEFAULT_TIMEOUT_MS,
                 constraints = envelope.constraints,
                 source_runtime_posture = envelope.source_runtime_posture
             )
