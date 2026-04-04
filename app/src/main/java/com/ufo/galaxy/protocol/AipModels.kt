@@ -105,7 +105,23 @@ enum class MsgType(val value: String) {
     LOCK("lock"),
     /** Downlink: gateway releases a distributed resource lock.
      *  @status minimal-compat — logged; ack sent; no lock-manager yet. */
-    UNLOCK("unlock");
+    UNLOCK("unlock"),
+
+    // ── PR-3: Canonical cross-device handoff / takeover contract ─────────────────────────────
+    // These two types canonicalise the Android ↔ main-runtime takeover path introduced in
+    // the post-#533 dual-repo unification track.  A TAKEOVER_REQUEST arrives when the main
+    // runtime (PC/OpenClawd) wants Android to accept and continue executing an in-flight task.
+    // TAKEOVER_RESPONSE is the Android-side acknowledgement / rejection reply.
+
+    /** Downlink: main runtime asks Android to take over execution of an in-flight task.
+     *  Payload model: [com.ufo.galaxy.agent.TakeoverRequestEnvelope].
+     *  @status pr3 — payload parsed; ack sent; full takeover executor deferred to PR-5. */
+    TAKEOVER_REQUEST("takeover_request"),
+
+    /** Uplink: Android responds to a [TAKEOVER_REQUEST] with acceptance or rejection.
+     *  Payload model: [com.ufo.galaxy.agent.TakeoverResponseEnvelope].
+     *  @status pr3 — model available; send path present via GalaxyConnectionService. */
+    TAKEOVER_RESPONSE("takeover_response");
 
     companion object {
         /**
@@ -173,7 +189,8 @@ enum class MsgType(val value: String) {
             CODE_EXECUTE, CODE_RESULT,
             PEER_ANNOUNCE, PEER_EXCHANGE, MESH_TOPOLOGY,
             WAKE_EVENT, SESSION_MIGRATE,
-            COORD_SYNC, BROADCAST, LOCK, UNLOCK
+            COORD_SYNC, BROADCAST, LOCK, UNLOCK,
+            TAKEOVER_REQUEST, TAKEOVER_RESPONSE
         )
 
         /**
@@ -181,7 +198,8 @@ enum class MsgType(val value: String) {
          * to confirm receipt, even though full business logic is not yet implemented.
          */
         val ACK_ON_RECEIPT_TYPES: Set<MsgType> = setOf(
-            RELAY, WAKE_EVENT, COORD_SYNC, LOCK, UNLOCK
+            RELAY, WAKE_EVENT, COORD_SYNC, LOCK, UNLOCK,
+            TAKEOVER_REQUEST
         )
     }
 }
