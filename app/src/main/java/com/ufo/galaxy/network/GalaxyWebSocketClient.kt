@@ -8,6 +8,7 @@ import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
 import com.ufo.galaxy.protocol.MeshLeavePayload
@@ -399,6 +400,37 @@ class GalaxyWebSocketClient(
     fun setDeviceMetadata(metadata: Map<String, Any>) {
         deviceMetadata = metadata
     }
+
+    /**
+     * The canonical runtime-host descriptor for this Android instance.
+     *
+     * When set, its metadata (host_id, formation_role, participation_state,
+     * registered_at_ms) is merged into both the `device_register` and `capability_report`
+     * payloads sent during [sendHandshake], allowing the gateway to treat this device
+     * as a first-class runtime host rather than a generic connected endpoint.
+     *
+     * Call this once at startup via [com.ufo.galaxy.UFOGalaxyApplication] before the
+     * WebSocket connects; the descriptor is immutable after construction.
+     */
+    @Volatile
+    private var runtimeHostDescriptor: RuntimeHostDescriptor? = null
+
+    /**
+     * Registers the [RuntimeHostDescriptor] that represents this Android instance as
+     * a first-class runtime host in the Galaxy formation.
+     *
+     * The descriptor metadata is merged into subsequent [sendHandshake] payloads.
+     * Must be called before [connect] to ensure the initial registration message
+     * carries complete host identity.
+     *
+     * @param descriptor Canonical host identity for this Android runtime instance.
+     */
+    fun setRuntimeHostDescriptor(descriptor: RuntimeHostDescriptor) {
+        runtimeHostDescriptor = descriptor
+        Log.i(TAG, "[WS:HOST] RuntimeHostDescriptor set: host_id=${descriptor.hostId} " +
+                "role=${descriptor.formationRole.wireValue} " +
+                "state=${descriptor.participationState.wireValue}")
+    }
     
     /**
      * 连接到服务器
@@ -657,6 +689,8 @@ class GalaxyWebSocketClient(
      */
     private fun sendHandshake() {
         val deviceId = getDeviceId()
+        val hostDescriptor = runtimeHostDescriptor
+        val hostMeta: Map<String, Any> = hostDescriptor?.toMetadataMap() ?: emptyMap()
 
         // Step 1: device_register — server expects this before capability_report (H2)
         val register = JsonObject().apply {
@@ -667,9 +701,20 @@ class GalaxyWebSocketClient(
             addProperty("device_type", "Android_Agent")
             addProperty("trace_id", sessionTraceId)
             addProperty("timestamp", System.currentTimeMillis())
+            // PR-5: include runtime-host identity in device_register so the gateway
+            // can immediately classify this device as a formal runtime host rather than
+            // a generic endpoint.
+            if (hostDescriptor != null) {
+                addProperty(RuntimeHostDescriptor.KEY_HOST_ID, hostDescriptor.hostId)
+                addProperty(RuntimeHostDescriptor.KEY_FORMATION_ROLE, hostDescriptor.formationRole.wireValue)
+                addProperty(RuntimeHostDescriptor.KEY_PARTICIPATION_STATE, hostDescriptor.participationState.wireValue)
+            }
         }
         sendJson(gson.toJson(register))
-        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId")
+        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId" +
+                if (hostDescriptor != null) " host_id=${hostDescriptor.hostId} " +
+                    "formation_role=${hostDescriptor.formationRole.wireValue} " +
+                    "participation_state=${hostDescriptor.participationState.wireValue}" else "")
 
         val baseActions = listOf(
             "location", "camera", "sensor_data", "automation",
@@ -677,6 +722,13 @@ class GalaxyWebSocketClient(
             "calendar", "voice_input", "screen_capture", "app_control"
         )
         val allActions = (baseActions + modelCapabilities).distinct()
+
+        // PR-5: merge runtime-host identity metadata into the capability_report so the
+        // gateway session-truth layer has complete host representation on the first report.
+        val mergedMetadata = deviceMetadata.toMutableMap().also { m ->
+            m["cross_device_enabled"] = crossDeviceEnabled
+            m.putAll(hostMeta)
+        }
 
         val report = CapabilityReport(
             platform = "android",
@@ -692,9 +744,7 @@ class GalaxyWebSocketClient(
                     "local_model_inference"
                 )
             },
-            metadata = deviceMetadata.toMutableMap().also { m ->
-                m["cross_device_enabled"] = crossDeviceEnabled
-            }
+            metadata = mergedMetadata
         )
 
         val handshake = JsonObject().apply {
@@ -722,7 +772,8 @@ class GalaxyWebSocketClient(
         sendJson(handshakeJson)
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
-                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}")
+                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
+                if (hostDescriptor != null) " host_id=${hostDescriptor.hostId}" else "")
     }
 
     /**

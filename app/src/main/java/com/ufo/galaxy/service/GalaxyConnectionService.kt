@@ -20,6 +20,7 @@ import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
+import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -252,8 +253,11 @@ class GalaxyConnectionService : Service() {
                         sendHybridDegrade(rawJson)
                     }
                 }
-                // TAKEOVER_REQUEST (PR-3): parse the canonical TakeoverRequestEnvelope and
-                // send a structured TakeoverResponseEnvelope back. Full executor is TODO(PR-5).
+                // TAKEOVER_REQUEST (PR-5): parse the canonical TakeoverRequestEnvelope,
+                // evaluate eligibility, and accept when all readiness conditions are met.
+                // When accepted, dispatches the takeover goal to the execution pipeline
+                // and includes runtime_host_id/formation_role in the acceptance response.
+                // When not eligible, sends a structured rejection.
                 if (type == MsgType.TAKEOVER_REQUEST) {
                     serviceScope.launch {
                         handleTakeoverRequest(messageId, rawJson)
@@ -1055,29 +1059,93 @@ class GalaxyConnectionService : Service() {
                 )
             }
 
-            // Device is eligible but full takeover execution is deferred to a future PR.
-            // Reject with "takeover_executor_not_implemented" so the main runtime knows
-            // the device is ready but the executor path is not yet wired up.
-            val rejectionReason = "takeover_executor_not_implemented"
-            sendTakeoverResponse(
-                TakeoverResponseEnvelope(
-                    takeover_id = envelope.takeover_id,
-                    task_id = envelope.task_id,
-                    trace_id = envelope.trace_id,
-                    accepted = false,
-                    rejection_reason = rejectionReason,
-                    device_id = localDeviceId,
-                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    source_runtime_posture = envelope.source_runtime_posture,
-                    exec_mode = envelope.exec_mode
+            // PR-5: Device is eligible — accept the takeover as a first-class runtime host.
+            // Include runtime_host_id and formation_role in the acceptance response so the
+            // main runtime can record this Android instance as a formal execution surface.
+            val hostDescriptor = UFOGalaxyApplication.runtimeHostDescriptor
+            val acceptanceResponse = TakeoverResponseEnvelope(
+                takeover_id = envelope.takeover_id,
+                task_id = envelope.task_id,
+                trace_id = envelope.trace_id,
+                accepted = true,
+                rejection_reason = null,
+                device_id = localDeviceId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                source_runtime_posture = envelope.source_runtime_posture,
+                exec_mode = envelope.exec_mode,
+                runtime_host_id = hostDescriptor?.hostId,
+                formation_role = hostDescriptor?.formationRole?.wireValue
+            )
+            sendTakeoverResponse(acceptanceResponse)
+
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "takeover_accepted",
+                    "takeover_id" to envelope.takeover_id,
+                    "task_id" to envelope.task_id,
+                    "trace_id" to envelope.trace_id,
+                    "runtime_host_id" to (hostDescriptor?.hostId ?: ""),
+                    "formation_role" to (hostDescriptor?.formationRole?.wireValue ?: "")
                 )
             )
+
+            // Dispatch the takeover goal through the canonical execution pipeline.
+            // Build a GoalExecutionPayload from the TakeoverRequestEnvelope so the same
+            // posture-aware execution path applies without duplicating gate logic.
+            // Takeover goals always use JOIN_RUNTIME posture since they are explicitly
+            // directed at this device as an active runtime host.
+            val goalPayload = GoalExecutionPayload(
+                task_id = envelope.task_id,
+                goal = envelope.goal,
+                constraints = envelope.constraints,
+                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
+            )
+
+            UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+            serviceScope.launch {
+                try {
+                    val timeoutMs = goalPayload.effectiveTimeoutMs
+                    val result = withTimeout(timeoutMs) {
+                        UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(goalPayload)
+                    }
+                    val enriched = result.copy(source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME)
+                    sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
+                    Log.i(
+                        TAG,
+                        "[PR5:TAKEOVER] goal_result 已回传 takeover_id=${envelope.takeover_id} " +
+                            "task_id=${envelope.task_id} status=${enriched.status} trace_id=${envelope.trace_id}"
+                    )
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(
+                        TAG,
+                        "[PR5:TAKEOVER] takeover goal timed out takeover_id=${envelope.takeover_id} " +
+                            "task_id=${envelope.task_id}"
+                    )
+                    sendGoalError(
+                        envelope.task_id, null, null,
+                        "takeover_timeout", envelope.trace_id, ROUTE_MODE_CROSS_DEVICE
+                    )
+                } catch (e: Exception) {
+                    Log.e(
+                        TAG,
+                        "[PR5:TAKEOVER] takeover execution error task_id=${envelope.task_id}: ${e.message}",
+                        e
+                    )
+                    sendGoalError(
+                        envelope.task_id, null, null,
+                        "takeover_error: ${e.message}", envelope.trace_id, ROUTE_MODE_CROSS_DEVICE
+                    )
+                } finally {
+                    UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+                }
+            }
+
             return TakeoverHandlingResult(
                 takeoverId = envelope.takeover_id,
                 taskId = envelope.task_id,
                 traceId = envelope.trace_id,
-                accepted = false,
-                reason = rejectionReason
+                accepted = true,
+                reason = "accepted"
             )
         } finally {
             // Always clear the active takeover ID once we have sent our response so
