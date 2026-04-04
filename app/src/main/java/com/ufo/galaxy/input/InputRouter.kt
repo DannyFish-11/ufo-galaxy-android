@@ -168,12 +168,23 @@ class InputRouter(
     /**
      * Launches [LocalLoopExecutor.execute] for [text] in [coroutineScope] on [Dispatchers.IO].
      * On completion, [onLocalResult] is invoked with the [LocalLoopResult].
+     *
+     * The posture is always set to [SourceRuntimePosture.JOIN_RUNTIME] for the local execution
+     * path regardless of what the caller passed.  When Android routes a task locally it IS the
+     * runtime host and IS joining the execution pool — the caller's `sourceRuntimePosture`
+     * parameter is relevant for the cross-device uplink (included in [TaskSubmitPayload]) but has
+     * no meaningful semantics for a device-local task.  Forcing [JOIN_RUNTIME] here ensures the
+     * [com.ufo.galaxy.local.DefaultLocalLoopExecutor] posture gate is always satisfied for
+     * legitimate locally-routed tasks (PR-2A contract).
      */
-    private fun launchLocal(text: String, posture: String) {
+    private fun launchLocal(text: String, @Suppress("UNUSED_PARAMETER") posture: String) {
         coroutineScope.launch(Dispatchers.IO) {
             try {
                 val result = localLoopExecutor.execute(
-                    LocalLoopOptions(instruction = text, sourceRuntimePosture = posture)
+                    LocalLoopOptions(
+                        instruction = text,
+                        sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME
+                    )
                 )
                 GalaxyLogger.log(
                     TAG, mapOf(

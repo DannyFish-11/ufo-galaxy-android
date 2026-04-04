@@ -77,6 +77,13 @@ import com.ufo.galaxy.inference.LocalPlannerService
  *
  * @property name              Human-readable name for this scenario (used in assertion messages).
  * @property instruction       Natural-language task instruction forwarded to the local loop.
+ * @property sourceRuntimePosture Canonical source-device participation posture for this scenario.
+ *                             Defaults to [com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME]
+ *                             because scenario-based tests represent Android acting as the local
+ *                             runtime executor, which requires an explicit join_runtime posture
+ *                             (PR-2A posture gate).  Set to
+ *                             [com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY] to test
+ *                             the posture-blocked path.
  * @property planner           Planner service fake.
  * @property grounder          Grounding service fake.
  * @property screenshotProvider Screenshot capture fake.
@@ -91,6 +98,7 @@ import com.ufo.galaxy.inference.LocalPlannerService
 data class LocalLoopScenario(
     val name: String,
     val instruction: String = "test the scenario",
+    val sourceRuntimePosture: String = com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME,
     val planner: LocalPlannerService = FakePlannerService.singleStep(),
     val grounder: LocalGroundingService = FakeGroundingService.alwaysSucceed(),
     val screenshotProvider: EdgeExecutor.ScreenshotProvider = FakeScreenshotProvider.varying(),

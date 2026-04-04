@@ -4,6 +4,7 @@ import android.util.Log
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
  * Autonomous execution pipeline that gates [goal_execution] and [parallel_subtask]
@@ -63,15 +64,21 @@ class AutonomousExecutionPipeline(
     /**
      * Handles a [goal_execution] message.
      *
-     * Two gates are evaluated in order:
+     * Three gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [goal_execution] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
      * 2. **Feature gate**: returns [STATUS_DISABLED] when [AppSettings.goalExecutionEnabled]
      *    is `false`.
+     * 3. **Posture log**: the `source_runtime_posture` from [payload] is resolved and logged
+     *    before execution so that posture context is visible in diagnostics.  When the source
+     *    posture is [SourceRuntimePosture.CONTROL_ONLY] Android executes as the **sole**
+     *    runtime executor for this task; when [SourceRuntimePosture.JOIN_RUNTIME] Android
+     *    executes as a **co-executor** alongside the source device.  Both paths proceed to
+     *    execution — the distinction is expressed in the echoed [GoalResultPayload.source_runtime_posture].
      *
      * When both gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
-     * the result with [device_role].
+     * the result with [device_role] and the resolved posture.
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -82,22 +89,37 @@ class AutonomousExecutionPipeline(
             Log.i(TAG, "goal_execution disabled by settings; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "goal_execution_enabled is false")
         }
-        Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
-        return goalExecutor.executeGoal(payload).copy(device_role = deviceRole)
+        val resolvedPosture = SourceRuntimePosture.fromValue(payload.source_runtime_posture)
+        val executionRole = if (SourceRuntimePosture.isJoinRuntime(resolvedPosture))
+            "co_executor" else "sole_executor"
+        Log.i(
+            TAG,
+            "goal_execution executing locally; task_id=${payload.task_id} " +
+                "posture=$resolvedPosture role=$executionRole"
+        )
+        return goalExecutor.executeGoal(payload).copy(
+            device_role = deviceRole,
+            source_runtime_posture = resolvedPosture
+        )
     }
 
     /**
      * Handles a [parallel_subtask] message.
      *
-     * Two gates are evaluated in order:
+     * Three gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [parallel_subtask] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
      * 2. **Feature gate**: returns [STATUS_DISABLED] when [AppSettings.parallelExecutionEnabled]
      *    is `false`.
+     * 3. **Posture log**: the `source_runtime_posture` from [payload] is resolved and logged
+     *    before execution.  The resolved posture is echoed in the result so the gateway can
+     *    apply correct result-merge attribution: [SourceRuntimePosture.CONTROL_ONLY] indicates
+     *    Android is the sole executor for its subtask share; [SourceRuntimePosture.JOIN_RUNTIME]
+     *    indicates Android is co-executing alongside the source device.
      *
      * When both gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
-     * and enriches the result with [device_role].
+     * and enriches the result with [device_role] and the resolved posture.
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -108,8 +130,19 @@ class AutonomousExecutionPipeline(
             Log.i(TAG, "parallel_subtask disabled by settings; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "parallel_execution_enabled is false")
         }
-        Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
-        return collaborationAgent.handleParallelSubtask(payload).copy(device_role = deviceRole)
+        val resolvedPosture = SourceRuntimePosture.fromValue(payload.source_runtime_posture)
+        val executionRole = if (SourceRuntimePosture.isJoinRuntime(resolvedPosture))
+            "co_executor" else "sole_executor"
+        Log.i(
+            TAG,
+            "parallel_subtask executing locally; task_id=${payload.task_id} " +
+                "group_id=${payload.group_id} subtask_index=${payload.subtask_index} " +
+                "posture=$resolvedPosture role=$executionRole"
+        )
+        return collaborationAgent.handleParallelSubtask(payload).copy(
+            device_role = deviceRole,
+            source_runtime_posture = resolvedPosture
+        )
     }
 
     private fun buildDisabledResult(
@@ -124,6 +157,7 @@ class AutonomousExecutionPipeline(
         subtask_index = payload.subtask_index,
         latency_ms = 0L,
         device_id = deviceId,
-        device_role = deviceRole
+        device_role = deviceRole,
+        source_runtime_posture = SourceRuntimePosture.fromValue(payload.source_runtime_posture)
     )
 }

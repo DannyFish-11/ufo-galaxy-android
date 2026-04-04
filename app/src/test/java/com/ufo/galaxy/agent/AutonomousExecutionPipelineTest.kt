@@ -81,10 +81,12 @@ class AutonomousExecutionPipelineTest {
     private fun buildPipeline(
         goalExecutionEnabled: Boolean = true,
         parallelExecutionEnabled: Boolean = true,
+        crossDeviceEnabled: Boolean = true,
         deviceId: String = "test-device",
         deviceRole: String = "phone"
     ): AutonomousExecutionPipeline {
         val settings = InMemoryAppSettings(
+            crossDeviceEnabled = crossDeviceEnabled,
             goalExecutionEnabled = goalExecutionEnabled,
             parallelExecutionEnabled = parallelExecutionEnabled,
             deviceRole = deviceRole
@@ -105,13 +107,15 @@ class AutonomousExecutionPipelineTest {
         taskId: String = "t-001",
         goal: String = "open WeChat",
         groupId: String? = null,
-        subtaskIndex: Int? = null
+        subtaskIndex: Int? = null,
+        sourceRuntimePosture: String? = null
     ) = GoalExecutionPayload(
         task_id = taskId,
         goal = goal,
         group_id = groupId,
         subtask_index = subtaskIndex,
-        max_steps = 5
+        max_steps = 5,
+        source_runtime_posture = sourceRuntimePosture
     )
 
     // ── goal_execution disabled ───────────────────────────────────────────────
@@ -319,4 +323,164 @@ class AutonomousExecutionPipelineTest {
         assertEquals("agg-device", result.device_id)
         assertEquals("tablet", result.device_role)
     }
+
+    // ── Posture-aware execution (PR-2A) ───────────────────────────────────────
+
+    @Test
+    fun `goal_execution with control_only posture echoes posture in result`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = true)
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY)
+        )
+        assertEquals(
+            "Result must echo control_only posture from inbound payload",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `goal_execution with join_runtime posture echoes posture in result`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = true)
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME)
+        )
+        assertEquals(
+            "Result must echo join_runtime posture from inbound payload",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `goal_execution control_only and join_runtime both succeed — posture does not block gateway tasks`() {
+        // Android (as TARGET of a gateway task) must execute regardless of source posture.
+        // The distinction is expressed in the echoed posture, not in whether execution proceeds.
+        val pipeline = buildPipeline(goalExecutionEnabled = true)
+
+        val controlOnlyResult = pipeline.handleGoalExecution(
+            buildGoalPayload(taskId = "co-001",
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY)
+        )
+        val joinRuntimeResult = pipeline.handleGoalExecution(
+            buildGoalPayload(taskId = "jr-001",
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME)
+        )
+
+        assertEquals(
+            "control_only gateway task must succeed (Android is sole executor)",
+            EdgeExecutor.STATUS_SUCCESS,
+            controlOnlyResult.status
+        )
+        assertEquals(
+            "join_runtime gateway task must succeed (Android is co-executor)",
+            EdgeExecutor.STATUS_SUCCESS,
+            joinRuntimeResult.status
+        )
+    }
+
+    @Test
+    fun `goal_execution with unknown posture normalises to control_only in result`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = true)
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(sourceRuntimePosture = "future_unknown_value")
+        )
+        assertEquals(
+            "Unknown posture must be normalised to control_only in result",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `goal_execution with null posture normalises to control_only in result`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = true)
+        val result = pipeline.handleGoalExecution(buildGoalPayload(sourceRuntimePosture = null))
+        assertEquals(
+            "Null posture must be normalised to control_only in result",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `disabled result echoes control_only posture`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = false)
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY
+            )
+        )
+        assertEquals(
+            "Disabled result must echo posture for gateway result attribution",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `disabled result echoes join_runtime posture`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = false)
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME
+            )
+        )
+        assertEquals(
+            "Disabled result must echo join_runtime posture for gateway result attribution",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `parallel_subtask with control_only posture echoes posture in result`() {
+        val pipeline = buildPipeline(parallelExecutionEnabled = true)
+        val result = pipeline.handleParallelSubtask(
+            buildGoalPayload(
+                groupId = "grp-co",
+                subtaskIndex = 0,
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY
+            )
+        )
+        assertEquals(
+            "Parallel subtask result must echo control_only posture",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.CONTROL_ONLY,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `parallel_subtask with join_runtime posture echoes posture in result`() {
+        val pipeline = buildPipeline(parallelExecutionEnabled = true)
+        val result = pipeline.handleParallelSubtask(
+            buildGoalPayload(
+                groupId = "grp-jr",
+                subtaskIndex = 1,
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME
+            )
+        )
+        assertEquals(
+            "Parallel subtask result must echo join_runtime posture",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME,
+            result.source_runtime_posture
+        )
+    }
+
+    @Test
+    fun `parallel_subtask disabled result echoes posture`() {
+        val pipeline = buildPipeline(parallelExecutionEnabled = false)
+        val result = pipeline.handleParallelSubtask(
+            buildGoalPayload(
+                sourceRuntimePosture = com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME
+            )
+        )
+        assertEquals(AutonomousExecutionPipeline.STATUS_DISABLED, result.status)
+        assertEquals(
+            "Disabled parallel subtask result must echo join_runtime posture",
+            com.ufo.galaxy.runtime.SourceRuntimePosture.JOIN_RUNTIME,
+            result.source_runtime_posture
+        )
+    }
 }
+

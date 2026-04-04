@@ -76,7 +76,8 @@ class LocalGoalExecutor(
                 group_id = payload.group_id,
                 subtask_index = payload.subtask_index,
                 latency_ms = latencyMs,
-                device_id = deviceId
+                device_id = deviceId,
+                source_runtime_posture = payload.source_runtime_posture
             )
         }
 
@@ -98,7 +99,8 @@ class LocalGoalExecutor(
             latency_ms = latencyMs,
             device_id = deviceId,
             steps = taskResult.steps,
-            error = taskResult.error
+            error = taskResult.error,
+            source_runtime_posture = payload.source_runtime_posture
         )
     }
 }

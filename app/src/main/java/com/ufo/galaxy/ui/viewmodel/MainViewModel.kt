@@ -16,6 +16,7 @@ import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -394,7 +395,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * [LocalLoopExecutor.execute] internally and delivers the result via [onLocalResult].
      */
     private suspend fun executeLocally(goal: String) {
-        val result = UFOGalaxyApplication.localLoopExecutor.execute(LocalLoopOptions(instruction = goal))
+        val result = UFOGalaxyApplication.localLoopExecutor.execute(
+            LocalLoopOptions(
+                instruction = goal,
+                sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME
+            )
+        )
 
         // Record the outcome for the diagnostics panel.
         pushTaskId(result.sessionId, result.status)
