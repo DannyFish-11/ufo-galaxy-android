@@ -4,6 +4,7 @@ import android.util.Log
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
  * Autonomous execution pipeline that gates [goal_execution] and [parallel_subtask]
@@ -58,19 +59,34 @@ class AutonomousExecutionPipeline(
          * Mirrors [EdgeExecutor.STATUS_TIMEOUT] for consistent server-side handling.
          */
         const val STATUS_TIMEOUT = EdgeExecutor.STATUS_TIMEOUT
+
+        /**
+         * Error reason used when [handleGoalExecution] or [handleParallelSubtask] is
+         * blocked by a [SourceRuntimePosture.CONTROL_ONLY] posture on the inbound payload.
+         *
+         * A `control_only` source declares that the originating device is acting purely
+         * as a controller/initiator; Android must not treat itself as a runtime executor
+         * for this task. The canonical contract (main-repo PR #533) requires this gate so
+         * that Android execution is reserved for `join_runtime`-eligible tasks.
+         */
+        const val REASON_POSTURE_CONTROL_ONLY = "posture_control_only"
     }
 
     /**
      * Handles a [goal_execution] message.
      *
-     * Two gates are evaluated in order:
+     * Three gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [goal_execution] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
      * 2. **Feature gate**: returns [STATUS_DISABLED] when [AppSettings.goalExecutionEnabled]
      *    is `false`.
+     * 3. **Posture gate**: returns [STATUS_DISABLED] when [GoalExecutionPayload.source_runtime_posture]
+     *    is [SourceRuntimePosture.CONTROL_ONLY].  A `control_only` source has declared that it
+     *    is not joining local runtime execution; Android must honour this contract and refuse
+     *    to act as an executor for the task.
      *
-     * When both gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
+     * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
      * the result with [device_role].
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
@@ -82,6 +98,13 @@ class AutonomousExecutionPipeline(
             Log.i(TAG, "goal_execution disabled by settings; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "goal_execution_enabled is false")
         }
+        if (SourceRuntimePosture.isControlOnly(payload.source_runtime_posture)) {
+            Log.i(
+                TAG,
+                "goal_execution blocked: source_runtime_posture=control_only; task_id=${payload.task_id}"
+            )
+            return buildDisabledResult(payload, REASON_POSTURE_CONTROL_ONLY)
+        }
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
         return goalExecutor.executeGoal(payload).copy(device_role = deviceRole)
     }
@@ -89,14 +112,18 @@ class AutonomousExecutionPipeline(
     /**
      * Handles a [parallel_subtask] message.
      *
-     * Two gates are evaluated in order:
+     * Three gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [parallel_subtask] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
      * 2. **Feature gate**: returns [STATUS_DISABLED] when [AppSettings.parallelExecutionEnabled]
      *    is `false`.
+     * 3. **Posture gate**: returns [STATUS_DISABLED] when [GoalExecutionPayload.source_runtime_posture]
+     *    is [SourceRuntimePosture.CONTROL_ONLY].  Parallel subtasks are only valid for
+     *    `join_runtime` participants; a `control_only` source must not contribute subtask
+     *    results to the runtime execution pool.
      *
-     * When both gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
+     * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
      * and enriches the result with [device_role].
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
@@ -107,6 +134,13 @@ class AutonomousExecutionPipeline(
         if (!settings.parallelExecutionEnabled) {
             Log.i(TAG, "parallel_subtask disabled by settings; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "parallel_execution_enabled is false")
+        }
+        if (SourceRuntimePosture.isControlOnly(payload.source_runtime_posture)) {
+            Log.i(
+                TAG,
+                "parallel_subtask blocked: source_runtime_posture=control_only; task_id=${payload.task_id}"
+            )
+            return buildDisabledResult(payload, REASON_POSTURE_CONTROL_ONLY)
         }
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
         return collaborationAgent.handleParallelSubtask(payload).copy(device_role = deviceRole)

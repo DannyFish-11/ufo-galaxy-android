@@ -76,7 +76,12 @@ class LocalLoopScenarioRunner(private val modelsDir: File) {
         )
 
         return runBlocking {
-            executor.execute(LocalLoopOptions(instruction = scenario.instruction))
+            executor.execute(
+                LocalLoopOptions(
+                    instruction = scenario.instruction,
+                    sourceRuntimePosture = scenario.sourceRuntimePosture
+                )
+            )
         }
     }
 }
