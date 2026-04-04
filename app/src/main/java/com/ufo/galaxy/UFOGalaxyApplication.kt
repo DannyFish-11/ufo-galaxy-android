@@ -37,6 +37,7 @@ import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
+import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.service.AccessibilityActionExecutor
 import com.ufo.galaxy.service.AccessibilityScreenshotProvider
 import com.ufo.galaxy.service.AndroidBitmapScaler
@@ -162,6 +163,19 @@ class UFOGalaxyApplication : Application() {
         lateinit var agentRuntimeBridge: AgentRuntimeBridge
             private set
 
+        /**
+         * Canonical runtime-host descriptor for this Android instance (PR-5).
+         *
+         * Populated in [initRuntimeHostDescriptor] after [initWebSocketClient] so the
+         * descriptor is available before the first WebSocket connection is established.
+         * `null` only during the brief window between application start and
+         * [initRuntimeHostDescriptor] completing; always non-null by the time any
+         * cross-device message is processed.
+         */
+        @Volatile
+        var runtimeHostDescriptor: RuntimeHostDescriptor? = null
+            private set
+
         // 全局配置
         lateinit var appConfig: AppConfig
             private set
@@ -226,6 +240,11 @@ class UFOGalaxyApplication : Application() {
         
         // 初始化 WebSocket 客户端
         initWebSocketClient()
+
+        // Initialise RuntimeHostDescriptor — Android as first-class runtime host (PR-5).
+        // Must be called after initWebSocketClient() so setRuntimeHostDescriptor() can
+        // register the descriptor on the client before the first WS connection.
+        initRuntimeHostDescriptor()
 
         // Initialise RuntimeController (requires webSocketClient, appSettings, loopController).
         initRuntimeController()
@@ -546,6 +565,37 @@ class UFOGalaxyApplication : Application() {
             loopController = loopController
         )
         Log.d(TAG, "RuntimeController 已初始化")
+    }
+
+    /**
+     * Initialises the [RuntimeHostDescriptor] singleton and registers it with the
+     * [GalaxyWebSocketClient] (PR-5 — Android as first-class runtime host).
+     *
+     * The descriptor is constructed using the stable device identity from
+     * [android.os.Build] and the logical device role from [appSettings].  It is
+     * initialised in the [RuntimeHostDescriptor.HostParticipationState.INACTIVE] state;
+     * transitions to [RuntimeHostDescriptor.HostParticipationState.ACTIVE] will be driven
+     * by [RuntimeController] lifecycle events in a future PR.
+     *
+     * Must be called after [initWebSocketClient] so that [webSocketClient] is available for
+     * [GalaxyWebSocketClient.setRuntimeHostDescriptor].
+     */
+    private fun initRuntimeHostDescriptor() {
+        val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        val descriptor = RuntimeHostDescriptor.of(
+            deviceId = deviceId,
+            deviceRole = appSettings.deviceRole,
+            formationRole = RuntimeHostDescriptor.FormationRole.PRIMARY
+        )
+        runtimeHostDescriptor = descriptor
+        webSocketClient.setRuntimeHostDescriptor(descriptor)
+        Log.d(
+            TAG,
+            "RuntimeHostDescriptor 已初始化: host_id=${descriptor.hostId} " +
+                "device_id=${descriptor.deviceId} role=${descriptor.deviceRole} " +
+                "formation_role=${descriptor.formationRole.wireValue} " +
+                "participation_state=${descriptor.participationState.wireValue}"
+        )
     }
 
     /**

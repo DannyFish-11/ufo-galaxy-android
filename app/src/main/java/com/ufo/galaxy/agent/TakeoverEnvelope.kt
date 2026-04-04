@@ -98,6 +98,11 @@ data class TakeoverRequestEnvelope(
  * [TakeoverRequestEnvelope].  Carries Android's decision (accept / reject) and
  * the relevant runtime metadata so the main runtime can update its session truth.
  *
+ * ## PR-5 additions
+ * [runtime_host_id] and [formation_role] are included when [accepted] is `true` so
+ * the main runtime can record the accepting device as a first-class runtime host in
+ * its session truth, rather than as a generic connected endpoint.
+ *
  * ## Field semantics
  * | Field                    | Role                                                                     |
  * |--------------------------|--------------------------------------------------------------------------|
@@ -110,6 +115,10 @@ data class TakeoverRequestEnvelope(
  * | [runtime_session_id]     | Stable per-app-launch session ID of the Android device.                  |
  * | [source_runtime_posture] | Posture echoed from [TakeoverRequestEnvelope]; preserved for correlation. |
  * | [exec_mode]              | Execution mode Android will use if [accepted] is `true`.                 |
+ * | [runtime_host_id]        | (PR-5) Stable host-instance UUID of the accepting device; non-null when  |
+ * |                          | [accepted] is `true` and a [RuntimeHostDescriptor] is available.         |
+ * | [formation_role]         | (PR-5) [FormationRole.wireValue] of the accepting device; non-null when  |
+ * |                          | [accepted] is `true` and a [RuntimeHostDescriptor] is available.         |
  *
  * @param takeover_id            Echoed from [TakeoverRequestEnvelope.takeover_id].
  * @param task_id                Echoed from [TakeoverRequestEnvelope.task_id].
@@ -120,6 +129,8 @@ data class TakeoverRequestEnvelope(
  * @param runtime_session_id     Stable Android session identifier.
  * @param source_runtime_posture Echoed from the request for correlation.
  * @param exec_mode              Execution mode the Android device will use.
+ * @param runtime_host_id        (PR-5) Stable runtime-host UUID; non-null on acceptance.
+ * @param formation_role         (PR-5) Formation role wire value; non-null on acceptance.
  */
 data class TakeoverResponseEnvelope(
     val takeover_id: String,
@@ -130,7 +141,9 @@ data class TakeoverResponseEnvelope(
     val device_id: String? = null,
     val runtime_session_id: String? = null,
     val source_runtime_posture: String? = null,
-    val exec_mode: String = AgentRuntimeBridge.EXEC_MODE_REMOTE
+    val exec_mode: String = AgentRuntimeBridge.EXEC_MODE_REMOTE,
+    val runtime_host_id: String? = null,
+    val formation_role: String? = null
 )
 
 /**
