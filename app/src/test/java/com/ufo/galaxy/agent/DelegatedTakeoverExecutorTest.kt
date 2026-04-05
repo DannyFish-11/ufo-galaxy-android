@@ -11,9 +11,9 @@ import org.junit.Test
 
 /**
  * Unit tests for [DelegatedTakeoverExecutor] — the canonical Android-side
- * delegated receipt-to-local-takeover executor binding (PR-12,
+ * delegated receipt-to-local-takeover executor binding (PR-12 / PR-13,
  * post-#533 dual-repo runtime unification master plan — Canonical Android-Side
- * Delegated Receipt-to-Local-Takeover Executor Binding, Android side).
+ * Delegated Execution Signal Emission Path, Android side).
  *
  * ## Test matrix
  *
@@ -23,6 +23,11 @@ import org.junit.Test
  *  - Exactly one ACK signal is emitted on failure.
  *  - ACK signal carries correct identity fields.
  *
+ * ### PROGRESS signal emission (PR-13)
+ *  - PROGRESS signal is the second signal emitted (index 1).
+ *  - Exactly one PROGRESS signal is emitted on success.
+ *  - Exactly one PROGRESS signal is emitted on failure.
+ *
  * ### Tracker lifecycle on successful execution
  *  - Tracker is created in PENDING from the initial record.
  *  - Final tracker is in COMPLETED after success.
@@ -30,19 +35,19 @@ import org.junit.Test
  *  - executionStartedAtMs is set after execution.
  *
  * ### RESULT signal on success
- *  - RESULT signal is emitted after successful execution.
+ *  - RESULT signal is emitted after successful execution (index 2).
  *  - RESULT signal carries ResultKind.COMPLETED.
  *  - RESULT signal carries correct identity fields matching the unit.
- *  - Exactly two signals (ACK + RESULT) are emitted on success.
+ *  - Exactly three signals (ACK + PROGRESS + RESULT) are emitted on success.
  *
  * ### Tracker lifecycle on failed execution
  *  - Final tracker is in FAILED after exception.
  *  - Tracker stepCount is 0 after failure (no step recorded).
  *
  * ### RESULT signal on failure
- *  - RESULT signal is emitted after pipeline exception.
+ *  - RESULT signal is emitted after pipeline exception (index 2).
  *  - RESULT signal carries ResultKind.FAILED.
- *  - Exactly two signals (ACK + RESULT) are emitted on failure.
+ *  - Exactly three signals (ACK + PROGRESS + RESULT) are emitted on failure.
  *
  * ### ExecutionOutcome types
  *  - Successful execution returns ExecutionOutcome.Completed.
@@ -208,19 +213,29 @@ class DelegatedTakeoverExecutorTest {
     // ── RESULT signal on success ──────────────────────────────────────────────
 
     @Test
-    fun `exactly two signals emitted on success (ACK + RESULT)`() {
+    fun `exactly three signals emitted on success (ACK + PROGRESS + RESULT)`() {
         val (captured, sink) = captureSignals()
         buildExecutor(sink = sink).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
-        assertEquals("Expected ACK + RESULT = 2 signals", 2, captured.size)
+        assertEquals("Expected ACK + PROGRESS + RESULT = 3 signals", 3, captured.size)
     }
 
     @Test
-    fun `second signal on success is RESULT`() {
+    fun `second signal on success is PROGRESS`() {
         val (captured, sink) = captureSignals()
         buildExecutor(sink = sink).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
         assertTrue(
-            "Second signal must be RESULT, got ${captured[1].kind}",
-            captured[1].isResult
+            "Second signal must be PROGRESS, got ${captured[1].kind}",
+            captured[1].isProgress
+        )
+    }
+
+    @Test
+    fun `third signal on success is RESULT`() {
+        val (captured, sink) = captureSignals()
+        buildExecutor(sink = sink).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertTrue(
+            "Third signal must be RESULT, got ${captured[2].kind}",
+            captured[2].isResult
         )
     }
 
@@ -228,7 +243,7 @@ class DelegatedTakeoverExecutorTest {
     fun `RESULT signal on success carries ResultKind COMPLETED`() {
         val (captured, sink) = captureSignals()
         buildExecutor(sink = sink).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
-        val resultSignal = captured[1]
+        val resultSignal = captured[2]
         assertEquals(DelegatedExecutionSignal.ResultKind.COMPLETED, resultSignal.resultKind)
     }
 
@@ -237,7 +252,7 @@ class DelegatedTakeoverExecutorTest {
         val (captured, sink) = captureSignals()
         val unit = makeUnit(unitId = "u-res", taskId = "t-res", traceId = "tr-res", sessionId = "sess-res")
         buildExecutor(sink = sink).execute(unit, pendingRecord(unit), nowMs = 1_000L)
-        val resultSignal = captured[1]
+        val resultSignal = captured[2]
         assertEquals("u-res", resultSignal.unitId)
         assertEquals("t-res", resultSignal.taskId)
         assertEquals("tr-res", resultSignal.traceId)
@@ -248,7 +263,7 @@ class DelegatedTakeoverExecutorTest {
     fun `RESULT signal on success stepCount is 1`() {
         val (captured, sink) = captureSignals()
         buildExecutor(sink = sink).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
-        assertEquals(1, captured[1].stepCount)
+        assertEquals(1, captured[2].stepCount)
     }
 
     // ── Tracker lifecycle on failure ──────────────────────────────────────────
@@ -284,21 +299,21 @@ class DelegatedTakeoverExecutorTest {
     // ── RESULT signal on failure ──────────────────────────────────────────────
 
     @Test
-    fun `exactly two signals emitted on failure (ACK + RESULT)`() {
+    fun `exactly three signals emitted on failure (ACK + PROGRESS + RESULT)`() {
         val (captured, sink) = captureSignals()
         buildExecutor(pipeline = failingPipeline(), sink = sink)
             .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
-        assertEquals("Expected ACK + RESULT = 2 signals on failure", 2, captured.size)
+        assertEquals("Expected ACK + PROGRESS + RESULT = 3 signals on failure", 3, captured.size)
     }
 
     @Test
-    fun `second signal on failure is RESULT`() {
+    fun `third signal on failure is RESULT`() {
         val (captured, sink) = captureSignals()
         buildExecutor(pipeline = failingPipeline(), sink = sink)
             .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
         assertTrue(
-            "Second signal on failure must be RESULT, got ${captured[1].kind}",
-            captured[1].isResult
+            "Third signal on failure must be RESULT, got ${captured[2].kind}",
+            captured[2].isResult
         )
     }
 
@@ -307,7 +322,7 @@ class DelegatedTakeoverExecutorTest {
         val (captured, sink) = captureSignals()
         buildExecutor(pipeline = failingPipeline(), sink = sink)
             .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
-        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, captured[1].resultKind)
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, captured[2].resultKind)
     }
 
     @Test
@@ -316,7 +331,7 @@ class DelegatedTakeoverExecutorTest {
         val unit = makeUnit(unitId = "u-fail", taskId = "t-fail", traceId = "tr-fail", sessionId = "sess-fail")
         buildExecutor(pipeline = failingPipeline(), sink = sink)
             .execute(unit, pendingRecord(unit), nowMs = 1_000L)
-        val resultSignal = captured[1]
+        val resultSignal = captured[2]
         assertEquals("u-fail", resultSignal.unitId)
         assertEquals("t-fail", resultSignal.taskId)
         assertEquals("tr-fail", resultSignal.traceId)
@@ -497,7 +512,7 @@ class DelegatedTakeoverExecutorTest {
         buildExecutor(pipeline = failingPipeline(), sink = sink)
             .execute(unit, pendingRecord(unit), nowMs = 1_000L)
 
-        assertEquals(2, captured.size)
+        assertEquals(3, captured.size)
         captured.forEach { signal ->
             assertEquals("fail-unit", signal.unitId)
             assertEquals("fail-task", signal.taskId)

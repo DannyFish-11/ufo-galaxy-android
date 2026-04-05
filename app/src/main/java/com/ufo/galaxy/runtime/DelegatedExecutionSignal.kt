@@ -1,9 +1,9 @@
 package com.ufo.galaxy.runtime
 
 /**
- * **Canonical Android-side delegated-runtime acknowledgment/progress/result signal** (PR-10,
- * post-#533 dual-repo runtime unification master plan — Android-Side Delegated-Runtime
- * Execution-Tracking and Acknowledgment Basis, Android side).
+ * **Canonical Android-side delegated-runtime acknowledgment/progress/result signal** (PR-10
+ * / PR-13, post-#533 dual-repo runtime unification master plan — Android-Side
+ * Delegated-Runtime Execution-Tracking and Signal Emission Path, Android side).
  *
  * [DelegatedExecutionSignal] is the authoritative Android-side typed representation of
  * a signal emitted by the local execution pipeline toward the main-repo host during and
@@ -12,13 +12,15 @@ package com.ufo.galaxy.runtime
  *  - [Kind.ACK]      — emitted once after [DelegatedRuntimeReceiver] accepts the inbound
  *                      envelope, before execution begins.  Informs the host that Android
  *                      has received and is preparing to run the delegated unit.
- *  - [Kind.PROGRESS] — emitted periodically during execution (after each step or at
- *                      significant execution milestones) to inform the host that work is
- *                      progressing.  Carries the current [stepCount].
+ *  - [Kind.PROGRESS] — emitted when execution reaches the ACTIVE state (at least once
+ *                      per execution lifecycle) to inform the host that work is actively
+ *                      running.  Carries the current [stepCount].
  *  - [Kind.RESULT]   — emitted exactly once when execution reaches a terminal state
- *                      (completed, failed, or rejected).  Carries a [ResultKind]
- *                      discriminator so the host can update its session-truth state without
- *                      inspecting raw status strings.
+ *                      (completed, failed, timed out, cancelled, or rejected).  Carries a
+ *                      [ResultKind] discriminator so the host can update its session-truth
+ *                      state without inspecting raw status strings.  See [ResultKind] for
+ *                      the full set of terminal outcomes including [ResultKind.TIMEOUT] and
+ *                      [ResultKind.CANCELLED] added in PR-13.
  *
  * ## Design intent
  *
@@ -153,6 +155,27 @@ data class DelegatedExecutionSignal(
          * Corresponds to [DelegatedActivationRecord.ActivationStatus.FAILED].
          */
         FAILED("failed"),
+
+        /**
+         * The delegated unit's execution timed out before reaching a terminal state.
+         *
+         * Emitted when the execution pipeline or the surrounding coroutine scope signals
+         * a timeout condition (e.g. a [kotlinx.coroutines.TimeoutCancellationException]).
+         * The activation record is advanced to [DelegatedActivationRecord.ActivationStatus.FAILED]
+         * before this signal is produced.
+         */
+        TIMEOUT("timeout"),
+
+        /**
+         * The delegated unit was cancelled by the runtime or an external actor before
+         * reaching a terminal state.
+         *
+         * Emitted when the execution is interrupted by a [kotlinx.coroutines.CancellationException]
+         * that is not a timeout (e.g. explicit task cancellation via [TaskCancelRegistry]).
+         * The activation record is advanced to [DelegatedActivationRecord.ActivationStatus.FAILED]
+         * before this signal is produced.
+         */
+        CANCELLED("cancelled"),
 
         /**
          * The delegated unit was rejected before execution began (session absent or terminating).
@@ -325,7 +348,7 @@ data class DelegatedExecutionSignal(
          *
          * @param tracker    The current [DelegatedExecutionTracker] (should be terminal).
          * @param resultKind The terminal outcome: [ResultKind.COMPLETED], [ResultKind.FAILED],
-         *                   or [ResultKind.REJECTED].
+         *                   [ResultKind.TIMEOUT], [ResultKind.CANCELLED], or [ResultKind.REJECTED].
          * @param timestampMs Epoch-ms timestamp; defaults to the current time.
          * @return A [Kind.RESULT] signal anchored to the tracker's identity.
          */
@@ -345,5 +368,39 @@ data class DelegatedExecutionSignal(
             resultKind = resultKind,
             timestampMs = timestampMs
         )
+
+        /**
+         * Produces a [Kind.RESULT] signal with [ResultKind.TIMEOUT] from [tracker].
+         *
+         * Convenience factory; equivalent to `result(tracker, ResultKind.TIMEOUT, timestampMs)`.
+         *
+         * Emit when the execution pipeline or surrounding coroutine scope signals a timeout
+         * (e.g. [kotlinx.coroutines.TimeoutCancellationException]).
+         *
+         * @param tracker     The current [DelegatedExecutionTracker] (should be in FAILED state).
+         * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @return A [Kind.RESULT] / [ResultKind.TIMEOUT] signal anchored to the tracker's identity.
+         */
+        fun timeout(
+            tracker: DelegatedExecutionTracker,
+            timestampMs: Long = System.currentTimeMillis()
+        ): DelegatedExecutionSignal = result(tracker, ResultKind.TIMEOUT, timestampMs)
+
+        /**
+         * Produces a [Kind.RESULT] signal with [ResultKind.CANCELLED] from [tracker].
+         *
+         * Convenience factory; equivalent to `result(tracker, ResultKind.CANCELLED, timestampMs)`.
+         *
+         * Emit when execution is interrupted by an external cancellation request
+         * (e.g. [kotlinx.coroutines.CancellationException] that is not a timeout).
+         *
+         * @param tracker     The current [DelegatedExecutionTracker] (should be in FAILED state).
+         * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @return A [Kind.RESULT] / [ResultKind.CANCELLED] signal anchored to the tracker's identity.
+         */
+        fun cancelled(
+            tracker: DelegatedExecutionTracker,
+            timestampMs: Long = System.currentTimeMillis()
+        ): DelegatedExecutionSignal = result(tracker, ResultKind.CANCELLED, timestampMs)
     }
 }
