@@ -39,6 +39,7 @@ import org.junit.Test
  *  - result_kind echoes ResultKind.wireValue for RESULT/COMPLETED signals.
  *  - result_kind is "timeout" for TIMEOUT signals.
  *  - result_kind is "cancelled" for CANCELLED signals.
+ *  - result_kind is "rejected" for REJECTED signals.
  *
  * ### Outbound AipMessage envelope
  *  - Gson-serialised JSON contains "type" = "delegated_execution_signal".
@@ -256,6 +257,15 @@ class DelegatedExecutionSignalOutboundTransportTest {
         val signal = DelegatedExecutionSignal.cancelled(freshTracker(), timestampMs = 4_000L)
         val payload = signal.toOutboundPayload(deviceId = "device-x")
         assertEquals("cancelled", payload.result_kind)
+    }
+
+    @Test
+    fun `RESULT REJECTED toOutboundPayload result_kind is rejected`() {
+        val signal = DelegatedExecutionSignal.result(
+            freshTracker(), DelegatedExecutionSignal.ResultKind.REJECTED, timestampMs = 4_000L
+        )
+        val payload = signal.toOutboundPayload(deviceId = "device-x")
+        assertEquals("rejected", payload.result_kind)
     }
 
     @Test
