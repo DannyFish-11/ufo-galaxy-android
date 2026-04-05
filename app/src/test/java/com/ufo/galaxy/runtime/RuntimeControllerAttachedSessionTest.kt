@@ -317,4 +317,19 @@ class RuntimeControllerAttachedSessionTest {
             controller.attachedSession.value
         )
     }
+
+    // ── recordDelegatedExecutionAccepted() (PR-14) ────────────────────────────
+
+    @Test
+    fun `recordDelegatedExecutionAccepted is a no-op when no session exists`() {
+        val (controller, _) = buildController()
+        // Precondition: no session.
+        assertNull(controller.attachedSession.value)
+        // Must not throw and session must remain null.
+        controller.recordDelegatedExecutionAccepted()
+        assertNull(
+            "recordDelegatedExecutionAccepted must be a no-op when no session exists",
+            controller.attachedSession.value
+        )
+    }
 }
