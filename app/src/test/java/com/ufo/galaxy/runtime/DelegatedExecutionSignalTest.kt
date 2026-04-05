@@ -7,9 +7,9 @@ import org.junit.Test
 
 /**
  * Unit tests for [DelegatedExecutionSignal] — the canonical Android-side
- * delegated-runtime acknowledgment/progress/result signal (PR-10, post-#533
- * dual-repo runtime unification master plan — Android-Side Delegated-Runtime
- * Execution-Tracking and Acknowledgment Basis, Android side).
+ * delegated-runtime acknowledgment/progress/result signal (PR-10 / PR-13, post-#533
+ * dual-repo runtime unification master plan — Canonical Android-Side Delegated
+ * Execution Signal Emission Path, Android side).
  *
  * ## Test matrix
  *
@@ -20,8 +20,8 @@ import org.junit.Test
  *  - DEFAULT is ACK.
  *
  * ### [DelegatedExecutionSignal.ResultKind] enum
- *  - All three result kinds have distinct, stable wire values.
- *  - fromValue maps known strings to the correct ResultKind.
+ *  - All five result kinds have distinct, stable wire values.
+ *  - fromValue maps known strings (completed / failed / timeout / cancelled / rejected) to the correct ResultKind.
  *  - fromValue with unknown / null input returns null.
  *
  * ### [DelegatedExecutionSignal.ack] factory
@@ -40,6 +40,18 @@ import org.junit.Test
  *  - kind is RESULT.
  *  - resultKind matches the supplied ResultKind.
  *  - stepCount matches tracker.
+ *
+ * ### [DelegatedExecutionSignal.timeout] factory (PR-13)
+ *  - kind is RESULT.
+ *  - resultKind is TIMEOUT.
+ *  - Identity fields echo tracker.
+ *  - toMetadataMap KEY_RESULT_KIND is "timeout".
+ *
+ * ### [DelegatedExecutionSignal.cancelled] factory (PR-13)
+ *  - kind is RESULT.
+ *  - resultKind is CANCELLED.
+ *  - Identity fields echo tracker.
+ *  - toMetadataMap KEY_RESULT_KIND is "cancelled".
  *
  * ### Derived helpers
  *  - isAck / isProgress / isResult return correct values.
@@ -133,6 +145,16 @@ class DelegatedExecutionSignalTest {
     @Test
     fun `ResultKind fromValue maps rejected`() {
         assertEquals(DelegatedExecutionSignal.ResultKind.REJECTED, DelegatedExecutionSignal.ResultKind.fromValue("rejected"))
+    }
+
+    @Test
+    fun `ResultKind fromValue maps timeout`() {
+        assertEquals(DelegatedExecutionSignal.ResultKind.TIMEOUT, DelegatedExecutionSignal.ResultKind.fromValue("timeout"))
+    }
+
+    @Test
+    fun `ResultKind fromValue maps cancelled`() {
+        assertEquals(DelegatedExecutionSignal.ResultKind.CANCELLED, DelegatedExecutionSignal.ResultKind.fromValue("cancelled"))
     }
 
     @Test
@@ -471,5 +493,97 @@ class DelegatedExecutionSignalTest {
     @Test
     fun `KEY_RESULT_KIND is exec_signal_result_kind`() {
         assertEquals("exec_signal_result_kind", DelegatedExecutionSignal.KEY_RESULT_KIND)
+    }
+
+    // ── ResultKind TIMEOUT wire value ─────────────────────────────────────────
+
+    @Test
+    fun `ResultKind TIMEOUT wire value is timeout`() {
+        assertEquals("timeout", DelegatedExecutionSignal.ResultKind.TIMEOUT.wireValue)
+    }
+
+    @Test
+    fun `ResultKind CANCELLED wire value is cancelled`() {
+        assertEquals("cancelled", DelegatedExecutionSignal.ResultKind.CANCELLED.wireValue)
+    }
+
+    // ── timeout() factory ─────────────────────────────────────────────────────
+
+    @Test
+    fun `timeout factory sets kind to RESULT`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        assertEquals(DelegatedExecutionSignal.Kind.RESULT, DelegatedExecutionSignal.timeout(tracker, 1_000L).kind)
+    }
+
+    @Test
+    fun `timeout factory sets resultKind to TIMEOUT`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        assertEquals(DelegatedExecutionSignal.ResultKind.TIMEOUT, DelegatedExecutionSignal.timeout(tracker, 1_000L).resultKind)
+    }
+
+    @Test
+    fun `timeout factory echoes identity fields from tracker`() {
+        val unit = makeUnit(unitId = "u-to", taskId = "t-to", traceId = "tr-to", sessionId = "s-to")
+        val tracker = DelegatedExecutionTracker.create(
+            DelegatedActivationRecord.create(unit = unit, activatedAtMs = 1_000L)
+        ).advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        val signal = DelegatedExecutionSignal.timeout(tracker, 5_000L)
+        assertEquals("u-to", signal.unitId)
+        assertEquals("t-to", signal.taskId)
+        assertEquals("tr-to", signal.traceId)
+        assertEquals("s-to", signal.attachedSessionId)
+    }
+
+    @Test
+    fun `timeout factory preserves timestampMs`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        assertEquals(77_000L, DelegatedExecutionSignal.timeout(tracker, 77_000L).timestampMs)
+    }
+
+    @Test
+    fun `timeout factory toMetadataMap KEY_RESULT_KIND is timeout`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        val map = DelegatedExecutionSignal.timeout(tracker, 1_000L).toMetadataMap()
+        assertEquals("timeout", map[DelegatedExecutionSignal.KEY_RESULT_KIND])
+    }
+
+    // ── cancelled() factory ───────────────────────────────────────────────────
+
+    @Test
+    fun `cancelled factory sets kind to RESULT`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        assertEquals(DelegatedExecutionSignal.Kind.RESULT, DelegatedExecutionSignal.cancelled(tracker, 1_000L).kind)
+    }
+
+    @Test
+    fun `cancelled factory sets resultKind to CANCELLED`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        assertEquals(DelegatedExecutionSignal.ResultKind.CANCELLED, DelegatedExecutionSignal.cancelled(tracker, 1_000L).resultKind)
+    }
+
+    @Test
+    fun `cancelled factory echoes identity fields from tracker`() {
+        val unit = makeUnit(unitId = "u-ca", taskId = "t-ca", traceId = "tr-ca", sessionId = "s-ca")
+        val tracker = DelegatedExecutionTracker.create(
+            DelegatedActivationRecord.create(unit = unit, activatedAtMs = 1_000L)
+        ).advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        val signal = DelegatedExecutionSignal.cancelled(tracker, 6_000L)
+        assertEquals("u-ca", signal.unitId)
+        assertEquals("t-ca", signal.taskId)
+        assertEquals("tr-ca", signal.traceId)
+        assertEquals("s-ca", signal.attachedSessionId)
+    }
+
+    @Test
+    fun `cancelled factory preserves timestampMs`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        assertEquals(88_000L, DelegatedExecutionSignal.cancelled(tracker, 88_000L).timestampMs)
+    }
+
+    @Test
+    fun `cancelled factory toMetadataMap KEY_RESULT_KIND is cancelled`() {
+        val tracker = freshTracker().advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+        val map = DelegatedExecutionSignal.cancelled(tracker, 1_000L).toMetadataMap()
+        assertEquals("cancelled", map[DelegatedExecutionSignal.KEY_RESULT_KIND])
     }
 }

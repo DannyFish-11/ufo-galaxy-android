@@ -1193,10 +1193,12 @@ class GalaxyConnectionService : Service() {
                 )
             )
 
-            // PR-12: Dispatch through the canonical delegated takeover executor.
+            // PR-12/PR-13: Dispatch through the canonical delegated takeover executor.
             // DelegatedTakeoverExecutor manages the full lifecycle: creates the
-            // DelegatedExecutionTracker, emits ACK/RESULT signals, advances tracker through
-            // PENDING → ACTIVATING → ACTIVE → COMPLETED/FAILED, and returns a typed outcome.
+            // DelegatedExecutionTracker, emits ACK/PROGRESS/RESULT signals, advances tracker
+            // through PENDING → ACTIVATING → ACTIVE → COMPLETED/FAILED, and returns a typed
+            // outcome.  PR-13 adds PROGRESS signal emission at ACTIVE and distinguishes
+            // TIMEOUT/CANCELLED outcomes from generic FAILED.
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
             serviceScope.launch {
                 try {
@@ -1209,7 +1211,7 @@ class GalaxyConnectionService : Service() {
                             sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
                             Log.i(
                                 TAG,
-                                "[PR12:TAKEOVER] goal_result sent takeover_id=${envelope.takeover_id} " +
+                                "[PR13:TAKEOVER] goal_result sent takeover_id=${envelope.takeover_id} " +
                                     "task_id=${envelope.task_id} status=${enriched.status} " +
                                     "trace_id=${envelope.trace_id} " +
                                     "attached_session_id=${delegatedUnit.attachedSessionId} " +
@@ -1219,7 +1221,7 @@ class GalaxyConnectionService : Service() {
                         is DelegatedTakeoverExecutor.ExecutionOutcome.Failed -> {
                             Log.w(
                                 TAG,
-                                "[PR12:TAKEOVER] delegated execution failed takeover_id=${envelope.takeover_id} " +
+                                "[PR13:TAKEOVER] delegated execution failed takeover_id=${envelope.takeover_id} " +
                                     "task_id=${envelope.task_id} error=${outcome.error}"
                             )
                             sendGoalError(

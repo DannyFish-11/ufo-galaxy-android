@@ -7,11 +7,13 @@ import com.ufo.galaxy.runtime.DelegatedActivationRecord
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionTracker
 import com.ufo.galaxy.runtime.SourceRuntimePosture
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 
 /**
- * **Canonical Android-side delegated receipt-to-local-takeover executor binding** (PR-12,
- * post-#533 dual-repo runtime unification master plan — Canonical Android-Side
- * Delegated Receipt-to-Local-Takeover Executor Binding, Android side).
+ * **Canonical Android-side delegated receipt-to-local-takeover executor binding** (PR-12
+ * / PR-13, post-#533 dual-repo runtime unification master plan — Canonical Android-Side
+ * Delegated Execution Signal Emission Path, Android side).
  *
  * [DelegatedTakeoverExecutor] is the single authoritative component that bridges an
  * accepted delegated receipt — a [DelegatedRuntimeUnit] and its initial
@@ -38,12 +40,20 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  *     from "Android is executing" and "Android has a final result".
  *  3. Advancing the tracker through the full canonical lifecycle:
  *     ```
- *     PENDING → (ack emitted) → ACTIVATING → ACTIVE → COMPLETED / FAILED
+ *     PENDING → (ack emitted) → ACTIVATING → ACTIVE → (progress emitted) → COMPLETED / FAILED
  *     ```
- *  4. Emitting a [DelegatedExecutionSignal.Kind.RESULT] signal at the terminal step, with
- *     the correct [DelegatedExecutionSignal.ResultKind] ([COMPLETED][DelegatedExecutionSignal.ResultKind.COMPLETED]
- *     on success or [FAILED][DelegatedExecutionSignal.ResultKind.FAILED] on exception).
- *  5. Preserving identity continuity — `unitId`, `taskId`, `traceId`,
+ *  4. Emitting a [DelegatedExecutionSignal.Kind.PROGRESS] signal when execution enters the
+ *     ACTIVE state (before the pipeline is called).  This gives the main-repo host at least
+ *     one mid-execution update confirming that Android is actively running the delegated unit.
+ *  5. Emitting a [DelegatedExecutionSignal.Kind.RESULT] signal at the terminal step, with
+ *     the correct [DelegatedExecutionSignal.ResultKind]:
+ *     - [DelegatedExecutionSignal.ResultKind.COMPLETED] on success.
+ *     - [DelegatedExecutionSignal.ResultKind.TIMEOUT] when a
+ *       [kotlinx.coroutines.TimeoutCancellationException] is thrown by the pipeline.
+ *     - [DelegatedExecutionSignal.ResultKind.CANCELLED] when a
+ *       [kotlinx.coroutines.CancellationException] (non-timeout) is thrown by the pipeline.
+ *     - [DelegatedExecutionSignal.ResultKind.FAILED] for all other exceptions.
+ *  6. Preserving identity continuity — `unitId`, `taskId`, `traceId`,
  *     `attachedSessionId`, and `handoffContractVersion` — on every emitted signal so
  *     the main-repo tracker can correlate signals across the entire lifecycle.
  *  6. Returning a typed [ExecutionOutcome] so callers no longer need inline try/catch
@@ -141,12 +151,19 @@ class DelegatedTakeoverExecutor(
      * 4. Builds [GoalExecutionPayload] from [unit], using
      *    [SourceRuntimePosture.JOIN_RUNTIME] (delegated work is always executed as a
      *    joined runtime participant on Android).
-     * 5. Advances tracker to ACTIVE — the pipeline is about to be entered.
+     * 5. Advances tracker to ACTIVE — emits [DelegatedExecutionSignal.Kind.PROGRESS] to
+     *    inform the host that the pipeline is about to be entered.
      * 6. Calls [GoalExecutionPipeline.executeGoal].
      *    - **On success**: records a step, advances to COMPLETED, emits RESULT signal
      *      with [DelegatedExecutionSignal.ResultKind.COMPLETED], returns
      *      [ExecutionOutcome.Completed].
-     *    - **On exception**: advances to FAILED, emits RESULT signal with
+     *    - **On [TimeoutCancellationException]**: advances to FAILED, emits RESULT signal
+     *      with [DelegatedExecutionSignal.ResultKind.TIMEOUT], returns
+     *      [ExecutionOutcome.Failed].
+     *    - **On [CancellationException]**: advances to FAILED, emits RESULT signal
+     *      with [DelegatedExecutionSignal.ResultKind.CANCELLED], returns
+     *      [ExecutionOutcome.Failed].
+     *    - **On other [Exception]**: advances to FAILED, emits RESULT signal with
      *      [DelegatedExecutionSignal.ResultKind.FAILED], returns [ExecutionOutcome.Failed].
      *
      * ## Identity continuity
@@ -183,7 +200,7 @@ class DelegatedTakeoverExecutor(
 
         Log.d(
             TAG,
-            "[PR12:TAKEOVER] ACK emitted unit_id=${unit.unitId} task_id=${unit.taskId} " +
+            "[PR13:TAKEOVER] ACK emitted unit_id=${unit.unitId} task_id=${unit.taskId} " +
                 "trace_id=${unit.traceId} session_id=${unit.attachedSessionId}"
         )
 
@@ -206,6 +223,19 @@ class DelegatedTakeoverExecutor(
         // ── 5. Advance to ACTIVE — pipeline is about to begin ─────────────────
         tracker = tracker.advance(DelegatedActivationRecord.ActivationStatus.ACTIVE)
 
+        // ── 5b. Emit PROGRESS signal — host can record that execution is ACTIVE ─
+        // This gives the main-repo host at least one mid-execution update confirming
+        // that Android is actively running steps.  Additional PROGRESS signals may
+        // be emitted per step in future pipeline integrations; this canonical emission
+        // at ACTIVE is guaranteed by the executor regardless of pipeline implementation.
+        signalSink.onSignal(DelegatedExecutionSignal.progress(tracker, nowMs))
+
+        Log.d(
+            TAG,
+            "[PR13:TAKEOVER] PROGRESS emitted unit_id=${unit.unitId} task_id=${unit.taskId} " +
+                "trace_id=${unit.traceId} steps=${tracker.stepCount} status=active"
+        )
+
         // ── 6. Run the pipeline and emit the terminal RESULT signal ───────────
         return try {
             val result = pipeline.executeGoal(goalPayload)
@@ -224,11 +254,43 @@ class DelegatedTakeoverExecutor(
 
             Log.d(
                 TAG,
-                "[PR12:TAKEOVER] RESULT(completed) emitted unit_id=${unit.unitId} " +
+                "[PR13:TAKEOVER] RESULT(completed) emitted unit_id=${unit.unitId} " +
                     "task_id=${unit.taskId} steps=${tracker.stepCount} status=${result.status}"
             )
 
             ExecutionOutcome.Completed(tracker = tracker, goalResult = result)
+
+        } catch (e: TimeoutCancellationException) {
+            // Execution timed out — emit RESULT(TIMEOUT) so the host knows this was a
+            // wall-clock timeout and not a generic failure.
+            tracker = tracker.advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+
+            signalSink.onSignal(DelegatedExecutionSignal.timeout(tracker = tracker))
+
+            val errorMessage = e.message ?: "execution_timeout"
+            Log.w(
+                TAG,
+                "[PR13:TAKEOVER] RESULT(timeout) emitted unit_id=${unit.unitId} " +
+                    "task_id=${unit.taskId} error=$errorMessage"
+            )
+
+            ExecutionOutcome.Failed(tracker = tracker, error = errorMessage)
+
+        } catch (e: CancellationException) {
+            // Execution was cancelled (non-timeout) — emit RESULT(CANCELLED) so the host
+            // can distinguish deliberate cancellation from a general failure.
+            tracker = tracker.advance(DelegatedActivationRecord.ActivationStatus.FAILED)
+
+            signalSink.onSignal(DelegatedExecutionSignal.cancelled(tracker = tracker))
+
+            val errorMessage = e.message ?: "execution_cancelled"
+            Log.w(
+                TAG,
+                "[PR13:TAKEOVER] RESULT(cancelled) emitted unit_id=${unit.unitId} " +
+                    "task_id=${unit.taskId} error=$errorMessage"
+            )
+
+            ExecutionOutcome.Failed(tracker = tracker, error = errorMessage)
 
         } catch (e: Exception) {
             tracker = tracker.advance(DelegatedActivationRecord.ActivationStatus.FAILED)
@@ -243,7 +305,7 @@ class DelegatedTakeoverExecutor(
             val errorMessage = e.message ?: "execution_error"
             Log.w(
                 TAG,
-                "[PR12:TAKEOVER] RESULT(failed) emitted unit_id=${unit.unitId} " +
+                "[PR13:TAKEOVER] RESULT(failed) emitted unit_id=${unit.unitId} " +
                     "task_id=${unit.taskId} error=$errorMessage"
             )
 
