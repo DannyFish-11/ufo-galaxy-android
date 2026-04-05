@@ -13,11 +13,13 @@ import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.agent.AgentRuntimeBridge
+import com.ufo.galaxy.agent.DelegatedRuntimeReceiver
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
+import com.ufo.galaxy.runtime.DelegatedActivationRecord
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
@@ -141,6 +143,15 @@ class GalaxyConnectionService : Service() {
     private val takeoverEligibilityAssessor: TakeoverEligibilityAssessor by lazy {
         TakeoverEligibilityAssessor(UFOGalaxyApplication.appSettings)
     }
+
+    /**
+     * Canonical gate for delegated runtime receipt under an attached session (PR-8).
+     *
+     * Called inside [handleTakeoverRequest] after [TakeoverEligibilityAssessor] confirms
+     * device readiness, to enforce that delegated work is accepted only when an explicit
+     * [com.ufo.galaxy.runtime.AttachedRuntimeSession] is active.
+     */
+    private val delegatedRuntimeReceiver = DelegatedRuntimeReceiver()
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
@@ -1059,6 +1070,64 @@ class GalaxyConnectionService : Service() {
                 )
             }
 
+            // PR-8: Gate delegated receipt on an active AttachedRuntimeSession.
+            // Device readiness (eligibility) is necessary but not sufficient: the session
+            // must also be explicitly attached before Android accepts delegated work.
+            val currentSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+            val receiptResult = delegatedRuntimeReceiver.receive(envelope, currentSession)
+            if (receiptResult is DelegatedRuntimeReceiver.ReceiptResult.Rejected) {
+                Log.w(
+                    TAG,
+                    "[PR8:DELEGATE] Delegated receipt rejected — no active attached session: " +
+                        "takeover_id=${envelope.takeover_id} reason=${receiptResult.reason}"
+                )
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "delegated_receipt_rejected",
+                        "takeover_id" to envelope.takeover_id,
+                        "task_id" to envelope.task_id,
+                        "trace_id" to envelope.trace_id,
+                        "rejection_outcome" to receiptResult.outcome.reason,
+                        "reason" to receiptResult.reason
+                    )
+                )
+                sendTakeoverResponse(
+                    TakeoverResponseEnvelope(
+                        takeover_id = envelope.takeover_id,
+                        task_id = envelope.task_id,
+                        trace_id = envelope.trace_id,
+                        accepted = false,
+                        rejection_reason = receiptResult.reason,
+                        device_id = localDeviceId,
+                        runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                        source_runtime_posture = envelope.source_runtime_posture,
+                        exec_mode = envelope.exec_mode
+                    )
+                )
+                return TakeoverHandlingResult(
+                    takeoverId = envelope.takeover_id,
+                    taskId = envelope.task_id,
+                    traceId = envelope.trace_id,
+                    accepted = false,
+                    reason = receiptResult.reason
+                )
+            }
+            // Session gate passed — extract the delegated unit and activation record.
+            val delegatedUnit = (receiptResult as DelegatedRuntimeReceiver.ReceiptResult.Accepted).unit
+            var activationRecord = receiptResult.record
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "delegated_receipt_accepted",
+                    "takeover_id" to envelope.takeover_id,
+                    "task_id" to envelope.task_id,
+                    "trace_id" to envelope.trace_id,
+                    "attached_session_id" to delegatedUnit.attachedSessionId,
+                    "resolved_posture" to delegatedUnit.resolvedPosture,
+                    "activation_status" to activationRecord.activationStatus.wireValue
+                )
+            )
+            activationRecord = activationRecord.transition(DelegatedActivationRecord.ActivationStatus.ACTIVATING)
+
             // PR-5: Device is eligible — accept the takeover as a first-class runtime host.
             // Include runtime_host_id and formation_role in the acceptance response so the
             // main runtime can record this Android instance as a formal execution surface.
@@ -1085,7 +1154,9 @@ class GalaxyConnectionService : Service() {
                     "task_id" to envelope.task_id,
                     "trace_id" to envelope.trace_id,
                     "runtime_host_id" to (hostDescriptor?.hostId ?: ""),
-                    "formation_role" to (hostDescriptor?.formationRole?.wireValue ?: "")
+                    "formation_role" to (hostDescriptor?.formationRole?.wireValue ?: ""),
+                    "attached_session_id" to delegatedUnit.attachedSessionId,
+                    "activation_status" to activationRecord.activationStatus.wireValue
                 )
             )
 
@@ -1101,6 +1172,11 @@ class GalaxyConnectionService : Service() {
                 source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
             )
 
+            // PR-8: Advance activation record to ACTIVE as the pipeline begins.
+            // The transition is tracked locally here as the foundation for future
+            // persistence/observability hooks once the full activation pipeline is built.
+            activationRecord = activationRecord.transition(DelegatedActivationRecord.ActivationStatus.ACTIVE)
+
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
             serviceScope.launch {
                 try {
@@ -1112,13 +1188,14 @@ class GalaxyConnectionService : Service() {
                     sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
                     Log.i(
                         TAG,
-                        "[PR5:TAKEOVER] goal_result 已回传 takeover_id=${envelope.takeover_id} " +
-                            "task_id=${envelope.task_id} status=${enriched.status} trace_id=${envelope.trace_id}"
+                        "[PR8:DELEGATE] goal_result 已回传 takeover_id=${envelope.takeover_id} " +
+                            "task_id=${envelope.task_id} status=${enriched.status} trace_id=${envelope.trace_id} " +
+                            "attached_session_id=${delegatedUnit.attachedSessionId}"
                     )
                 } catch (e: TimeoutCancellationException) {
                     Log.w(
                         TAG,
-                        "[PR5:TAKEOVER] takeover goal timed out takeover_id=${envelope.takeover_id} " +
+                        "[PR8:DELEGATE] takeover goal timed out takeover_id=${envelope.takeover_id} " +
                             "task_id=${envelope.task_id}"
                     )
                     sendGoalError(
@@ -1128,7 +1205,7 @@ class GalaxyConnectionService : Service() {
                 } catch (e: Exception) {
                     Log.e(
                         TAG,
-                        "[PR5:TAKEOVER] takeover execution error task_id=${envelope.task_id}: ${e.message}",
+                        "[PR8:DELEGATE] takeover execution error task_id=${envelope.task_id}: ${e.message}",
                         e
                     )
                     sendGoalError(
