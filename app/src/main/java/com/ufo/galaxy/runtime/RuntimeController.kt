@@ -46,6 +46,20 @@ import kotlin.coroutines.resume
  *    [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
  *    can show a dialog/alert — **never** silently log-only.
  *
+ * Attached-runtime session (PR-7):
+ *  - [attachedSession] exposes the current [AttachedRuntimeSession] as a [StateFlow].
+ *  - A session is created when the runtime transitions to [RuntimeState.Active] (i.e.
+ *    WS connected with cross-device enabled).  It represents stable, persistent Android
+ *    runtime participation — not just WS connectivity.
+ *  - The session is detached when [stop] is called ([AttachedRuntimeSession.DetachCause.DISABLE]),
+ *    when the WS connection is lost ([AttachedRuntimeSession.DetachCause.DISCONNECT]),
+ *    when a registration failure occurs ([AttachedRuntimeSession.DetachCause.DISCONNECT]), or
+ *    when [invalidateSession] is called ([AttachedRuntimeSession.DetachCause.INVALIDATION]).
+ *  - When a [hostDescriptor] is provided, its [RuntimeHostDescriptor.HostParticipationState]
+ *    is kept in sync: [RuntimeHostDescriptor.HostParticipationState.ACTIVE] while the session
+ *    is [AttachedRuntimeSession.State.ATTACHED], [RuntimeHostDescriptor.HostParticipationState.INACTIVE]
+ *    after it is detached.
+ *
  * Remote task handoff (AIP v3 compliance):
  *  - [onRemoteTaskStarted]: called when a `task_assign` or `goal_execution` arrives from
  *    the Gateway; cancels any running local [LoopController] session and sets
@@ -63,12 +77,20 @@ import kotlin.coroutines.resume
  *                               updated on success and on fallback to local.
  * @param loopController         Local closed-loop controller; paused on remote task arrival.
  * @param registrationTimeoutMs  Max time in ms to wait for a WS connection (default 15 s).
+ * @param hostDescriptor         Optional [RuntimeHostDescriptor] for this Android host.
+ *                               When supplied, the descriptor's participation state is kept
+ *                               in sync with the [attachedSession] lifecycle, and the updated
+ *                               descriptor is propagated to [webSocketClient] via
+ *                               [GalaxyWebSocketClient.setRuntimeHostDescriptor].
+ *                               May be `null` when no descriptor has been initialised yet
+ *                               (e.g. in unit tests or early startup).
  */
 class RuntimeController(
     private val webSocketClient: GalaxyWebSocketClient,
     private val settings: AppSettings,
     private val loopController: LoopController,
-    private val registrationTimeoutMs: Long = DEFAULT_REGISTRATION_TIMEOUT_MS
+    private val registrationTimeoutMs: Long = DEFAULT_REGISTRATION_TIMEOUT_MS,
+    private var hostDescriptor: RuntimeHostDescriptor? = null
 ) {
 
     // ── Runtime state ─────────────────────────────────────────────────────────
@@ -108,6 +130,25 @@ class RuntimeController(
      */
     private val _registrationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val registrationError: SharedFlow<String> = _registrationError.asSharedFlow()
+
+    /**
+     * Current attached-runtime session, or `null` when no session is active.
+     *
+     * A non-null value in [AttachedRuntimeSession.State.ATTACHED] indicates that this
+     * Android device is actively participating as a persistent runtime surface — distinct
+     * from mere WS connectivity.  Observe from any component that needs to distinguish
+     * ordinary connection/presence from explicit cross-device attached runtime participation.
+     *
+     * Lifecycle:
+     *  - Set to a new [AttachedRuntimeSession] in [AttachedRuntimeSession.State.ATTACHED]
+     *    when the runtime transitions to [RuntimeState.Active].
+     *  - Transitioned to [AttachedRuntimeSession.State.DETACHED] (and then cleared to `null`
+     *    after a brief period) on [stop], WS disconnect, registration failure, or [invalidateSession].
+     *
+     * (PR-7 — Android Attached-Runtime Session Semantics)
+     */
+    private val _attachedSession = MutableStateFlow<AttachedRuntimeSession?>(null)
+    val attachedSession: StateFlow<AttachedRuntimeSession?> = _attachedSession.asStateFlow()
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -184,6 +225,7 @@ class RuntimeController(
 
         return if (connected) {
             _state.value = RuntimeState.Active
+            openAttachedSession()
             Log.i(TAG, "[RUNTIME] Runtime is now Active")
             true
         } else {
@@ -260,6 +302,7 @@ class RuntimeController(
                     webSocketClient.removeListener(this)
                     if (_state.value == RuntimeState.Starting) {
                         _state.value = RuntimeState.Active
+                        openAttachedSession()
                     }
                 }
 
@@ -267,6 +310,7 @@ class RuntimeController(
                     webSocketClient.removeListener(this)
                     if (_state.value == RuntimeState.Starting) {
                         // Transient failure — fall back to LocalOnly; WS reconnect will retry.
+                        closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
                         _state.value = RuntimeState.LocalOnly
                     }
                 }
@@ -274,6 +318,7 @@ class RuntimeController(
                 override fun onError(error: String) {
                     webSocketClient.removeListener(this)
                     if (_state.value == RuntimeState.Starting) {
+                        closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
                         _state.value = RuntimeState.LocalOnly
                     }
                 }
@@ -289,7 +334,8 @@ class RuntimeController(
      * Stops the cross-device runtime cleanly:
      * 1. Disconnects the WebSocket.
      * 2. Disables cross-device in [settings] and the WS client.
-     * 3. Transitions to [RuntimeState.LocalOnly].
+     * 3. Closes the [attachedSession] with [AttachedRuntimeSession.DetachCause.DISABLE].
+     * 4. Transitions to [RuntimeState.LocalOnly].
      */
     fun stop() {
         Log.i(TAG, "[RUNTIME] Stopping cross-device runtime")
@@ -299,6 +345,7 @@ class RuntimeController(
         if (webSocketClient.isConnected()) {
             webSocketClient.disconnect()
         }
+        closeAttachedSession(AttachedRuntimeSession.DetachCause.DISABLE)
         _state.value = RuntimeState.LocalOnly
     }
 
@@ -336,13 +383,15 @@ class RuntimeController(
 
     /**
      * Handles a registration failure: emits [registrationError], updates [state] to
-     * [RuntimeState.Failed], then falls back to local-only by disabling cross-device
-     * in both [settings] and the [webSocketClient].
+     * [RuntimeState.Failed], closes any [attachedSession] with
+     * [AttachedRuntimeSession.DetachCause.DISCONNECT], then falls back to local-only by
+     * disabling cross-device in both [settings] and the [webSocketClient].
      */
     private suspend fun handleFailure(reason: String) {
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_failed", "reason" to reason))
         _state.value = RuntimeState.Failed(reason)
         _registrationError.emit(reason)
+        closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
         // Fall back to local mode.
         settings.crossDeviceEnabled = false
         webSocketClient.setCrossDeviceEnabled(false)
@@ -355,6 +404,88 @@ class RuntimeController(
 
     fun cancel() {
         controllerScope.cancel()
+    }
+
+    // ── Attached-runtime session management (PR-7) ────────────────────────────
+
+    /**
+     * Explicitly invalidates the current [attachedSession] with
+     * [AttachedRuntimeSession.DetachCause.INVALIDATION].
+     *
+     * Call this when a state inconsistency (host identity change, auth expiry, protocol
+     * mismatch) makes the current session no longer trustworthy.  The runtime state is
+     * **not** changed; only the session is closed.  A new session will be opened if the
+     * runtime reconnects with cross-device still enabled.
+     */
+    fun invalidateSession() {
+        Log.i(TAG, "[RUNTIME] Invalidating attached runtime session")
+        GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_invalidated"))
+        closeAttachedSession(AttachedRuntimeSession.DetachCause.INVALIDATION)
+    }
+
+    /**
+     * Opens a new [AttachedRuntimeSession] and publishes it on [_attachedSession].
+     *
+     * If [hostDescriptor] is available, its participation state is updated to
+     * [RuntimeHostDescriptor.HostParticipationState.ACTIVE] and the updated descriptor
+     * is propagated to [webSocketClient] via [GalaxyWebSocketClient.setRuntimeHostDescriptor].
+     *
+     * No-op if a session is already in [AttachedRuntimeSession.State.ATTACHED] to prevent
+     * duplicate session creation on redundant connection events.
+     */
+    private fun openAttachedSession() {
+        if (_attachedSession.value?.isAttached == true) {
+            Log.d(TAG, "[RUNTIME] openAttachedSession: session already attached — no-op")
+            return
+        }
+        val descriptor = hostDescriptor
+        val session = AttachedRuntimeSession.create(
+            hostId = descriptor?.hostId ?: "",
+            deviceId = descriptor?.deviceId ?: settings.deviceId
+        )
+        _attachedSession.value = session
+        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId}")
+        GalaxyLogger.log(TAG, mapOf(
+            "event" to "runtime_session_attached",
+            "session_id" to session.sessionId,
+            "host_id" to session.hostId
+        ))
+        // Sync host descriptor participation state to ACTIVE.
+        if (descriptor != null) {
+            val updated = descriptor.withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
+            hostDescriptor = updated
+            webSocketClient.setRuntimeHostDescriptor(updated)
+        }
+    }
+
+    /**
+     * Closes the current [AttachedRuntimeSession] with the given [cause] and publishes
+     * the detached session on [_attachedSession].
+     *
+     * If [hostDescriptor] is available, its participation state is updated to
+     * [RuntimeHostDescriptor.HostParticipationState.INACTIVE] and the updated descriptor
+     * is propagated to [webSocketClient].
+     *
+     * No-op if no session is currently attached.
+     */
+    private fun closeAttachedSession(cause: AttachedRuntimeSession.DetachCause) {
+        val current = _attachedSession.value ?: return
+        if (current.isDetached) return
+        val detached = current.detachedWith(cause)
+        _attachedSession.value = detached
+        Log.i(TAG, "[RUNTIME] Attached runtime session closed: session_id=${detached.sessionId} cause=${cause.wireValue}")
+        GalaxyLogger.log(TAG, mapOf(
+            "event" to "runtime_session_detached",
+            "session_id" to detached.sessionId,
+            "cause" to cause.wireValue
+        ))
+        // Sync host descriptor participation state to INACTIVE.
+        val descriptor = hostDescriptor
+        if (descriptor != null) {
+            val updated = descriptor.withState(RuntimeHostDescriptor.HostParticipationState.INACTIVE)
+            hostDescriptor = updated
+            webSocketClient.setRuntimeHostDescriptor(updated)
+        }
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
