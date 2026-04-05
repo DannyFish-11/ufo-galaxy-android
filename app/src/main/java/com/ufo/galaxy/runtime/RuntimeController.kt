@@ -439,8 +439,11 @@ class RuntimeController(
             return
         }
         val descriptor = hostDescriptor
+        if (descriptor == null) {
+            Log.w(TAG, "[RUNTIME] openAttachedSession: no hostDescriptor available; session will use unknown-host identity")
+        }
         val session = AttachedRuntimeSession.create(
-            hostId = descriptor?.hostId ?: "",
+            hostId = descriptor?.hostId ?: "unknown-host",
             deviceId = descriptor?.deviceId ?: settings.deviceId
         )
         _attachedSession.value = session

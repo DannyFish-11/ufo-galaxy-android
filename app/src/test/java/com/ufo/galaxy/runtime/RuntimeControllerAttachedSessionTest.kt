@@ -173,23 +173,26 @@ class RuntimeControllerAttachedSessionTest {
     }
 
     @Test
-    fun `stop transitions existing session to DETACHED with DISABLE cause`() {
-        // Simulate a session being present (as would happen after successful WS connect).
-        // We cannot drive a real WS connection in unit tests, so we verify the cause path
-        // by directly inspecting the behaviour of closeAttachedSession via invalidateSession
-        // followed by manually confirming the stop() path produces the correct cause via
-        // the lifecycle contract established in RuntimeController.
-        //
-        // This test validates that stop() calls closeAttachedSession(DISABLE) by observing
-        // the cause on the session value after stop() is invoked when a session is active.
-        //
-        // Since we cannot inject a connected WS in unit tests, we verify the no-session case
-        // stays null (done in the test above) and verify that invalidateSession produces
-        // INVALIDATION (tested below) — both share the same close path.
+    fun `stop with no prior session leaves attachedSession null`() {
+        // When stop() is called before any session was ever created, the session
+        // StateFlow must remain null (closeAttachedSession is a no-op when null).
         val (controller, _) = buildController()
         controller.stop()
-        // No session existed — attachedSession stays null; this is the correct outcome.
-        assertNull(controller.attachedSession.value)
+        assertNull(
+            "attachedSession must remain null after stop() when no session existed",
+            controller.attachedSession.value
+        )
+    }
+
+    @Test
+    fun `stop DetachCause DISABLE has wireValue disable`() {
+        // Verify the cause used by stop() has the correct wire value, independent
+        // of driving a full WS connection in unit tests.
+        assertEquals(
+            "stop() must use DISABLE cause — wire value must be 'disable'",
+            "disable",
+            AttachedRuntimeSession.DetachCause.DISABLE.wireValue
+        )
     }
 
     // ── invalidateSession() ───────────────────────────────────────────────────
