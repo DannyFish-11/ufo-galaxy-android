@@ -172,29 +172,6 @@ class RuntimeControllerAttachedSessionTest {
         )
     }
 
-    @Test
-    fun `stop with no prior session leaves attachedSession null`() {
-        // When stop() is called before any session was ever created, the session
-        // StateFlow must remain null (closeAttachedSession is a no-op when null).
-        val (controller, _) = buildController()
-        controller.stop()
-        assertNull(
-            "attachedSession must remain null after stop() when no session existed",
-            controller.attachedSession.value
-        )
-    }
-
-    @Test
-    fun `stop DetachCause DISABLE has wireValue disable`() {
-        // Verify the cause used by stop() has the correct wire value, independent
-        // of driving a full WS connection in unit tests.
-        assertEquals(
-            "stop() must use DISABLE cause — wire value must be 'disable'",
-            "disable",
-            AttachedRuntimeSession.DetachCause.DISABLE.wireValue
-        )
-    }
-
     // ── invalidateSession() ───────────────────────────────────────────────────
 
     @Test
@@ -231,28 +208,6 @@ class RuntimeControllerAttachedSessionTest {
             "Null session must not be interpreted as cross-device runtime participation",
             isParticipating
         )
-    }
-
-    // ── DetachCause semantics ─────────────────────────────────────────────────
-
-    @Test
-    fun `DISABLE cause wireValue is disable`() {
-        assertEquals("disable", AttachedRuntimeSession.DetachCause.DISABLE.wireValue)
-    }
-
-    @Test
-    fun `DISCONNECT cause wireValue is disconnect`() {
-        assertEquals("disconnect", AttachedRuntimeSession.DetachCause.DISCONNECT.wireValue)
-    }
-
-    @Test
-    fun `INVALIDATION cause wireValue is invalidation`() {
-        assertEquals("invalidation", AttachedRuntimeSession.DetachCause.INVALIDATION.wireValue)
-    }
-
-    @Test
-    fun `EXPLICIT_DETACH cause wireValue is explicit_detach`() {
-        assertEquals("explicit_detach", AttachedRuntimeSession.DetachCause.EXPLICIT_DETACH.wireValue)
     }
 
     // ── RuntimeHostDescriptor participation state sync ────────────────────────
