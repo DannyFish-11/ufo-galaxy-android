@@ -48,7 +48,7 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * All fields except [takeover_id], [task_id], [trace_id], and [goal] are optional
  * so that the envelope can accept messages from main-runtime versions that pre-date
  * this contract.  [source_runtime_posture] defaults to `null`; consumers must use
- * [SourceRuntimePosture.fromValue] to resolve it to a safe default.  All PR-9 fields
+ * [SourceRuntimePosture.fromValue] to resolve it to a safe default. All PR-9 fields
  * default to `null` / empty so that pre-PR-9 senders remain compatible.
  *
  * @param takeover_id                  Unique identifier for this takeover request.
