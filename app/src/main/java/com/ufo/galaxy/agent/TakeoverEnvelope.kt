@@ -32,26 +32,48 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * | [context]                | Arbitrary key-value context forwarded from the originating device.       |
  * | [constraints]            | Natural-language constraint strings from the original task_assign.       |
  * | [checkpoint]             | Optional progress checkpoint; describes how far the task has progressed. |
+ * | [handoff_reason]         | (PR-9) Why the main-repo is delegating — wire value of                    |
+ * |                          | [DelegatedHandoffContract.HandoffReason]; null for legacy senders.       |
+ * | [originating_host_id]    | (PR-9) [com.ufo.galaxy.runtime.RuntimeHostDescriptor.hostId] of the     |
+ * |                          | dispatching device; null for legacy senders.                             |
+ * | [originating_formation_role] | (PR-9) [com.ufo.galaxy.runtime.RuntimeHostDescriptor.FormationRole]  |
+ * |                          | wire value of the originating device; null for legacy senders.           |
+ * | [required_capability_dimensions] | (PR-9) Comma-separated or list of               |
+ * |                          | [com.ufo.galaxy.capability.AndroidCapabilityVector.ExecutionDimension]  |
+ * |                          | wire values the delegated task requires the receiver to have.            |
+ * | [continuation_token]     | (PR-9) Opaque, stable machine-readable continuation state token           |
+ * |                          | produced by the originating executor; more structured than [checkpoint]. |
  *
  * ## Backward compatibility
  * All fields except [takeover_id], [task_id], [trace_id], and [goal] are optional
  * so that the envelope can accept messages from main-runtime versions that pre-date
  * this contract.  [source_runtime_posture] defaults to `null`; consumers must use
- * [SourceRuntimePosture.fromValue] to resolve it to a safe default.
+ * [SourceRuntimePosture.fromValue] to resolve it to a safe default. All PR-9 fields
+ * default to `null` / empty so that pre-PR-9 senders remain compatible.
  *
- * @param takeover_id            Unique identifier for this takeover request.
- * @param task_id                Task identifier being handed over.
- * @param trace_id               End-to-end trace identifier propagated from the origin.
- * @param goal                   Natural-language objective for the Android executor.
- * @param source_device_id       Identifier of the originating device.
- * @param source_runtime_posture Canonical source-device participation posture.
- * @param exec_mode              Execution mode constant.
- * @param route_mode             Routing path constant; `"cross_device"` for takeovers.
- * @param session_id             Session-level identifier.
- * @param runtime_session_id     Stable per-app-launch session identifier.
- * @param context                Arbitrary key-value context from the originating device.
- * @param constraints            Constraint strings from the original task_assign.
- * @param checkpoint             Optional progress description from the originating executor.
+ * @param takeover_id                  Unique identifier for this takeover request.
+ * @param task_id                      Task identifier being handed over.
+ * @param trace_id                     End-to-end trace identifier propagated from the origin.
+ * @param goal                         Natural-language objective for the Android executor.
+ * @param source_device_id             Identifier of the originating device.
+ * @param source_runtime_posture       Canonical source-device participation posture.
+ * @param exec_mode                    Execution mode constant.
+ * @param route_mode                   Routing path constant; `"cross_device"` for takeovers.
+ * @param session_id                   Session-level identifier.
+ * @param runtime_session_id           Stable per-app-launch session identifier.
+ * @param context                      Arbitrary key-value context from the originating device.
+ * @param constraints                  Constraint strings from the original task_assign.
+ * @param checkpoint                   Optional progress description from the originating executor.
+ * @param handoff_reason               (PR-9) Wire value of [DelegatedHandoffContract.HandoffReason];
+ *                                     null from legacy senders.
+ * @param originating_host_id          (PR-9) RuntimeHostDescriptor.hostId of the dispatching
+ *                                     device; null from legacy senders.
+ * @param originating_formation_role   (PR-9) FormationRole wire value of the originating
+ *                                     device; null from legacy senders.
+ * @param required_capability_dimensions (PR-9) ExecutionDimension wire values the delegated
+ *                                     task requires; empty from legacy senders.
+ * @param continuation_token           (PR-9) Opaque machine-readable continuation state token;
+ *                                     null when not provided by the originating executor.
  */
 data class TakeoverRequestEnvelope(
     val takeover_id: String,
@@ -66,7 +88,13 @@ data class TakeoverRequestEnvelope(
     val runtime_session_id: String? = null,
     val context: Map<String, String> = emptyMap(),
     val constraints: List<String> = emptyList(),
-    val checkpoint: String? = null
+    val checkpoint: String? = null,
+    // ── PR-9: Handoff contract fields ─────────────────────────────────────────
+    val handoff_reason: String? = null,
+    val originating_host_id: String? = null,
+    val originating_formation_role: String? = null,
+    val required_capability_dimensions: List<String> = emptyList(),
+    val continuation_token: String? = null
 ) {
     /**
      * Returns the resolved [source_runtime_posture] using [SourceRuntimePosture.fromValue].
