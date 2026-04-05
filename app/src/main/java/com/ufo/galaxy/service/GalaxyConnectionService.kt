@@ -14,12 +14,14 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.agent.AgentRuntimeBridge
 import com.ufo.galaxy.agent.DelegatedRuntimeReceiver
+import com.ufo.galaxy.agent.DelegatedTakeoverExecutor
+import com.ufo.galaxy.agent.GoalExecutionPipeline
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
-import com.ufo.galaxy.runtime.DelegatedActivationRecord
+import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
@@ -152,6 +154,36 @@ class GalaxyConnectionService : Service() {
      * [com.ufo.galaxy.runtime.AttachedRuntimeSession] is active.
      */
     private val delegatedRuntimeReceiver = DelegatedRuntimeReceiver()
+
+    /**
+     * Signal sink for delegated-execution lifecycle events (PR-12).
+     *
+     * Receives [com.ufo.galaxy.runtime.DelegatedExecutionSignal] events (ACK / RESULT)
+     * emitted by [delegatedTakeoverExecutor] and writes them to structured telemetry.
+     * Future iterations can extend this to transmit signals outbound to the main runtime
+     * via the WebSocket channel without changing [DelegatedTakeoverExecutor].
+     */
+    private val delegatedSignalSink = DelegatedExecutionSignalSink { signal ->
+        GalaxyLogger.log(TAG, signal.toMetadataMap())
+    }
+
+    /**
+     * Canonical binding from accepted delegated receipt into local takeover execution (PR-12).
+     *
+     * [DelegatedTakeoverExecutor] manages the full lifecycle of an accepted
+     * [com.ufo.galaxy.agent.DelegatedRuntimeUnit]: creates the
+     * [com.ufo.galaxy.runtime.DelegatedExecutionTracker], emits ACK and RESULT signals via
+     * [delegatedSignalSink], and returns a typed [DelegatedTakeoverExecutor.ExecutionOutcome]
+     * so [handleTakeoverRequest] no longer needs inline try/catch logic.
+     */
+    private val delegatedTakeoverExecutor: DelegatedTakeoverExecutor by lazy {
+        DelegatedTakeoverExecutor(
+            pipeline = GoalExecutionPipeline { payload ->
+                UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
+            },
+            signalSink = delegatedSignalSink
+        )
+    }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
@@ -1114,7 +1146,7 @@ class GalaxyConnectionService : Service() {
             }
             // Session gate passed — extract the delegated unit and activation record.
             val delegatedUnit = (receiptResult as DelegatedRuntimeReceiver.ReceiptResult.Accepted).unit
-            var activationRecord = receiptResult.record
+            val activationRecord = receiptResult.record
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "delegated_receipt_accepted",
@@ -1126,7 +1158,8 @@ class GalaxyConnectionService : Service() {
                     "activation_status" to activationRecord.activationStatus.wireValue
                 )
             )
-            activationRecord = activationRecord.transition(DelegatedActivationRecord.ActivationStatus.ACTIVATING)
+            // PR-12: The executor owns all lifecycle transitions (PENDING → ACTIVATING →
+            // ACTIVE → COMPLETED/FAILED); do not pre-advance the record here.
 
             // PR-5: Device is eligible — accept the takeover as a first-class runtime host.
             // Include runtime_host_id and formation_role in the acceptance response so the
@@ -1160,58 +1193,42 @@ class GalaxyConnectionService : Service() {
                 )
             )
 
-            // Dispatch the takeover goal through the canonical execution pipeline.
-            // Build a GoalExecutionPayload from the TakeoverRequestEnvelope so the same
-            // posture-aware execution path applies without duplicating gate logic.
-            // Takeover goals always use JOIN_RUNTIME posture since they are explicitly
-            // directed at this device as an active runtime host.
-            val goalPayload = GoalExecutionPayload(
-                task_id = envelope.task_id,
-                goal = envelope.goal,
-                constraints = envelope.constraints,
-                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
-            )
-
-            // PR-8: Advance activation record to ACTIVE as the pipeline begins.
-            // The transition is tracked locally here as the foundation for future
-            // persistence/observability hooks once the full activation pipeline is built.
-            activationRecord = activationRecord.transition(DelegatedActivationRecord.ActivationStatus.ACTIVE)
-
+            // PR-12: Dispatch through the canonical delegated takeover executor.
+            // DelegatedTakeoverExecutor manages the full lifecycle: creates the
+            // DelegatedExecutionTracker, emits ACK/RESULT signals, advances tracker through
+            // PENDING → ACTIVATING → ACTIVE → COMPLETED/FAILED, and returns a typed outcome.
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
             serviceScope.launch {
                 try {
-                    val timeoutMs = goalPayload.effectiveTimeoutMs
-                    val result = withTimeout(timeoutMs) {
-                        UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(goalPayload)
+                    val outcome = delegatedTakeoverExecutor.execute(delegatedUnit, activationRecord)
+                    when (outcome) {
+                        is DelegatedTakeoverExecutor.ExecutionOutcome.Completed -> {
+                            val enriched = outcome.goalResult.copy(
+                                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
+                            )
+                            sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
+                            Log.i(
+                                TAG,
+                                "[PR12:TAKEOVER] goal_result sent takeover_id=${envelope.takeover_id} " +
+                                    "task_id=${envelope.task_id} status=${enriched.status} " +
+                                    "trace_id=${envelope.trace_id} " +
+                                    "attached_session_id=${delegatedUnit.attachedSessionId} " +
+                                    "steps=${outcome.tracker.stepCount}"
+                            )
+                        }
+                        is DelegatedTakeoverExecutor.ExecutionOutcome.Failed -> {
+                            Log.w(
+                                TAG,
+                                "[PR12:TAKEOVER] delegated execution failed takeover_id=${envelope.takeover_id} " +
+                                    "task_id=${envelope.task_id} error=${outcome.error}"
+                            )
+                            sendGoalError(
+                                envelope.task_id, null, null,
+                                "takeover_error: ${outcome.error}", envelope.trace_id,
+                                ROUTE_MODE_CROSS_DEVICE
+                            )
+                        }
                     }
-                    val enriched = result.copy(source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME)
-                    sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
-                    Log.i(
-                        TAG,
-                        "[PR8:DELEGATE] goal_result 已回传 takeover_id=${envelope.takeover_id} " +
-                            "task_id=${envelope.task_id} status=${enriched.status} trace_id=${envelope.trace_id} " +
-                            "attached_session_id=${delegatedUnit.attachedSessionId}"
-                    )
-                } catch (e: TimeoutCancellationException) {
-                    Log.w(
-                        TAG,
-                        "[PR8:DELEGATE] takeover goal timed out takeover_id=${envelope.takeover_id} " +
-                            "task_id=${envelope.task_id}"
-                    )
-                    sendGoalError(
-                        envelope.task_id, null, null,
-                        "takeover_timeout", envelope.trace_id, ROUTE_MODE_CROSS_DEVICE
-                    )
-                } catch (e: Exception) {
-                    Log.e(
-                        TAG,
-                        "[PR8:DELEGATE] takeover execution error task_id=${envelope.task_id}: ${e.message}",
-                        e
-                    )
-                    sendGoalError(
-                        envelope.task_id, null, null,
-                        "takeover_error: ${e.message}", envelope.trace_id, ROUTE_MODE_CROSS_DEVICE
-                    )
                 } finally {
                     UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
                 }
