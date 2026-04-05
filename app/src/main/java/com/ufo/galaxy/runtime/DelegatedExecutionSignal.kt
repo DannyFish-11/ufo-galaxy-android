@@ -504,3 +504,38 @@ data class DelegatedExecutionSignal(
         ): DelegatedExecutionSignal = result(tracker, ResultKind.CANCELLED, timestampMs, signalId)
     }
 }
+
+// ── PR-16: Outbound payload mapping ───────────────────────────────────────────────────────
+
+/**
+ * Maps this [DelegatedExecutionSignal] to a [com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload]
+ * suitable for transmission as a [com.ufo.galaxy.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL]
+ * AIP v3 message.
+ *
+ * All required identity fields ([signalId], [emissionSeq], [taskId], [traceId],
+ * [attachedSessionId], [handoffContractVersion]) are echoed verbatim so the main-repo
+ * tracker can correlate this signal with its own dispatch record.  [resultKind] is
+ * mapped to its wire value for RESULT signals and left `null` otherwise.
+ *
+ * @param deviceId Stable Android device identifier to embed in the payload.
+ * @return A [com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload] ready for
+ *         JSON serialisation and uplink via [com.ufo.galaxy.network.GalaxyWebSocketClient.sendJson].
+ */
+fun DelegatedExecutionSignal.toOutboundPayload(
+    deviceId: String
+): com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload =
+    com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload(
+        signal_id              = signalId,
+        emission_seq           = emissionSeq,
+        task_id                = taskId,
+        trace_id               = traceId,
+        attached_session_id    = attachedSessionId,
+        device_id              = deviceId,
+        handoff_contract_version = handoffContractVersion,
+        signal_kind            = kind.wireValue,
+        unit_id                = unitId,
+        step_count             = stepCount,
+        activation_status_hint = activationStatusHint,
+        timestamp_ms           = timestampMs,
+        result_kind            = resultKind?.wireValue
+    )
