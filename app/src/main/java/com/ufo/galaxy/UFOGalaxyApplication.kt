@@ -562,7 +562,8 @@ class UFOGalaxyApplication : Application() {
         runtimeController = RuntimeController(
             webSocketClient = webSocketClient,
             settings = appSettings,
-            loopController = loopController
+            loopController = loopController,
+            hostDescriptor = runtimeHostDescriptor
         )
         Log.d(TAG, "RuntimeController 已初始化")
     }
@@ -574,8 +575,9 @@ class UFOGalaxyApplication : Application() {
      * The descriptor is constructed using the stable device identity from
      * [android.os.Build] and the logical device role from [appSettings].  It is
      * initialised in the [RuntimeHostDescriptor.HostParticipationState.INACTIVE] state;
-     * transitions to [RuntimeHostDescriptor.HostParticipationState.ACTIVE] will be driven
-     * by [RuntimeController] lifecycle events in a future PR.
+     * [RuntimeController] transitions it to [RuntimeHostDescriptor.HostParticipationState.ACTIVE]
+     * when an [com.ufo.galaxy.runtime.AttachedRuntimeSession] is opened (PR-7), and back to
+     * [RuntimeHostDescriptor.HostParticipationState.INACTIVE] when the session is detached.
      *
      * Must be called after [initWebSocketClient] so that [webSocketClient] is available for
      * [GalaxyWebSocketClient.setRuntimeHostDescriptor].
