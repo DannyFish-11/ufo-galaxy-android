@@ -26,6 +26,19 @@ import java.util.UUID
  * [RuntimeController.attachedSession] as a [kotlinx.coroutines.flow.StateFlow] to
  * react to session lifecycle transitions.
  *
+ * ## Session reuse across multiple delegated tasks (PR-14)
+ *
+ * A single [AttachedRuntimeSession] is designed to serve **multiple successive delegated
+ * task executions** without being re-created between tasks.  Each accepted delegated unit
+ * increments [delegatedExecutionCount] (via [withExecutionAccepted]) so both the local
+ * Android side and the host can observe how many tasks have flowed through this session.
+ *
+ * The host must **not** assume that one task = one session.  Reuse is valid as long as
+ * [isReuseValid] returns `true` (i.e. [state] == [State.ATTACHED]).  Once any of the
+ * four termination causes fires — [DetachCause.EXPLICIT_DETACH], [DetachCause.DISCONNECT],
+ * [DetachCause.DISABLE], or [DetachCause.INVALIDATION] — [isReuseValid] becomes `false`
+ * and no further delegated units should be directed at this session.
+ *
  * ## Lifecycle
  *
  * ```
@@ -58,17 +71,21 @@ import java.util.UUID
  * )
  * ```
  *
- * @property sessionId      Stable UUID identifying this specific attachment session.
- *                          A new [sessionId] is generated for each new attach event;
- *                          it remains fixed across any state transitions of this session.
- * @property hostId         Stable runtime-host identifier from [RuntimeHostDescriptor.hostId].
- * @property deviceId       Hardware device identifier (e.g. `Build.MANUFACTURER + "_" + Build.MODEL`).
- * @property attachedAtMs   Epoch-millisecond timestamp when this session was created.
- * @property state          Current lifecycle state of this session.
- * @property detachCause    Cause of detachment; `null` while [state] is [State.ATTACHED]
- *                          or [State.DETACHING] (before [detachedWith] is called).
- * @property detachedAtMs   Epoch-millisecond timestamp of full detachment;
- *                          `null` while [state] is [State.ATTACHED] or [State.DETACHING].
+ * @property sessionId               Stable UUID identifying this specific attachment session.
+ *                                   A new [sessionId] is generated for each new attach event;
+ *                                   it remains fixed across any state transitions of this session.
+ * @property hostId                  Stable runtime-host identifier from [RuntimeHostDescriptor.hostId].
+ * @property deviceId                Hardware device identifier (e.g. `Build.MANUFACTURER + "_" + Build.MODEL`).
+ * @property attachedAtMs            Epoch-millisecond timestamp when this session was created.
+ * @property state                   Current lifecycle state of this session.
+ * @property delegatedExecutionCount Running count of delegated tasks accepted under this session.
+ *                                   Incremented via [withExecutionAccepted] each time an inbound
+ *                                   [com.ufo.galaxy.agent.DelegatedRuntimeUnit] is accepted.
+ *                                   Starts at `0` for a freshly created session.
+ * @property detachCause             Cause of detachment; `null` while [state] is [State.ATTACHED]
+ *                                   or [State.DETACHING] (before [detachedWith] is called).
+ * @property detachedAtMs            Epoch-millisecond timestamp of full detachment;
+ *                                   `null` while [state] is [State.ATTACHED] or [State.DETACHING].
  */
 data class AttachedRuntimeSession(
     val sessionId: String,
@@ -76,6 +93,7 @@ data class AttachedRuntimeSession(
     val deviceId: String,
     val attachedAtMs: Long = System.currentTimeMillis(),
     val state: State = State.ATTACHED,
+    val delegatedExecutionCount: Int = 0,
     val detachCause: DetachCause? = null,
     val detachedAtMs: Long? = null
 ) {
@@ -188,6 +206,21 @@ data class AttachedRuntimeSession(
         get() = state == State.ATTACHED
 
     /**
+     * `true` when the host may safely direct additional delegated tasks to this session.
+     *
+     * Reuse is valid for as long as [state] remains [State.ATTACHED].  Once any
+     * termination cause fires (detach / disconnect / disable / invalidation) this
+     * returns `false` and no further delegated units should be accepted under this
+     * session — a new [AttachedRuntimeSession] must be created if the host reconnects.
+     *
+     * Semantically equivalent to [isAttached]; exposed under a distinct name so
+     * call-sites that are reasoning about multi-task reuse communicate their intent
+     * clearly rather than conflating liveness with reuse eligibility.
+     */
+    val isReuseValid: Boolean
+        get() = isAttached
+
+    /**
      * `true` when this session has fully terminated ([State.DETACHED]).
      */
     val isDetached: Boolean
@@ -202,6 +235,26 @@ data class AttachedRuntimeSession(
      */
     val durationMs: Long
         get() = (detachedAtMs ?: System.currentTimeMillis()) - attachedAtMs
+
+    /**
+     * Produces a copy of this session with [delegatedExecutionCount] incremented by one.
+     *
+     * Call this each time the session accepts an inbound delegated task (i.e. a
+     * [com.ufo.galaxy.agent.DelegatedRuntimeUnit] is accepted by
+     * [com.ufo.galaxy.agent.DelegatedRuntimeReceiver]).  The increment happens on the
+     * Android side so both local telemetry and the host's reconciliation logic can
+     * observe how many tasks have been dispatched through this session lifetime.
+     *
+     * This method is a no-op guard: if [state] is not [State.ATTACHED] the increment is
+     * still applied to the copy (so callers need not gate on state themselves), but
+     * [isReuseValid] will remain `false` and the caller should not be routing new tasks
+     * through a non-ATTACHED session in the first place.
+     *
+     * @return A new [AttachedRuntimeSession] with [delegatedExecutionCount] == old + 1;
+     *         all other fields are unchanged.
+     */
+    fun withExecutionAccepted(): AttachedRuntimeSession =
+        copy(delegatedExecutionCount = delegatedExecutionCount + 1)
 
     /**
      * Produces a copy of this session with [state] set to [State.DETACHING] and
@@ -241,11 +294,12 @@ data class AttachedRuntimeSession(
      * Builds the canonical metadata map for wire transmission or diagnostic logging.
      *
      * Keys present:
-     *  - [KEY_SESSION_ID]     — stable session identifier.
-     *  - [KEY_HOST_ID]        — runtime host identifier.
-     *  - [KEY_STATE]          — [State.wireValue] of the current state.
-     *  - [KEY_ATTACHED_AT_MS] — epoch-ms attach timestamp.
-     *  - [KEY_DETACH_CAUSE]   — [DetachCause.wireValue]; **absent** when [detachCause] is null.
+     *  - [KEY_SESSION_ID]                  — stable session identifier.
+     *  - [KEY_HOST_ID]                     — runtime host identifier.
+     *  - [KEY_STATE]                       — [State.wireValue] of the current state.
+     *  - [KEY_ATTACHED_AT_MS]              — epoch-ms attach timestamp.
+     *  - [KEY_DELEGATED_EXECUTION_COUNT]   — number of delegated tasks accepted so far.
+     *  - [KEY_DETACH_CAUSE]                — [DetachCause.wireValue]; **absent** when [detachCause] is null.
      *
      * @return An immutable [Map] suitable for merging into AIP v3 metadata payloads.
      */
@@ -254,6 +308,7 @@ data class AttachedRuntimeSession(
         put(KEY_HOST_ID, hostId)
         put(KEY_STATE, state.wireValue)
         put(KEY_ATTACHED_AT_MS, attachedAtMs)
+        put(KEY_DELEGATED_EXECUTION_COUNT, delegatedExecutionCount)
         detachCause?.let { put(KEY_DETACH_CAUSE, it.wireValue) }
     }
 
@@ -274,6 +329,9 @@ data class AttachedRuntimeSession(
 
         /** Metadata key for the epoch-ms attach timestamp. */
         const val KEY_ATTACHED_AT_MS = "attached_session_attached_at_ms"
+
+        /** Metadata key for the [delegatedExecutionCount] integer. */
+        const val KEY_DELEGATED_EXECUTION_COUNT = "attached_session_delegated_execution_count"
 
         /**
          * Metadata key for the [DetachCause.wireValue] string.

@@ -46,11 +46,15 @@ import kotlin.coroutines.resume
  *    [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
  *    can show a dialog/alert — **never** silently log-only.
  *
- * Attached-runtime session (PR-7):
+ * Attached-runtime session (PR-7 / PR-14):
  *  - [attachedSession] exposes the current [AttachedRuntimeSession] as a [StateFlow].
  *  - A session is created when the runtime transitions to [RuntimeState.Active] (i.e.
  *    WS connected with cross-device enabled).  It represents stable, persistent Android
  *    runtime participation — not just WS connectivity.
+ *  - A single session spans **multiple** successive delegated task executions; it is
+ *    **not** re-created between tasks.  [recordDelegatedExecutionAccepted] increments the
+ *    session's [AttachedRuntimeSession.delegatedExecutionCount] each time a delegated unit
+ *    is accepted, without touching the session identity or state (PR-14).
  *  - The session is detached when [stop] is called ([AttachedRuntimeSession.DetachCause.DISABLE]),
  *    when the WS connection is lost ([AttachedRuntimeSession.DetachCause.DISCONNECT]),
  *    when a registration failure occurs ([AttachedRuntimeSession.DetachCause.DISCONNECT]), or
@@ -421,6 +425,46 @@ class RuntimeController(
         Log.i(TAG, "[RUNTIME] Invalidating attached runtime session")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_invalidated"))
         closeAttachedSession(AttachedRuntimeSession.DetachCause.INVALIDATION)
+    }
+
+    /**
+     * Records that a delegated execution has been accepted under the current
+     * [AttachedRuntimeSession], incrementing
+     * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
+     *
+     * This is the sole mechanism by which the session's execution counter is advanced.
+     * It must be called **after** [com.ufo.galaxy.agent.DelegatedRuntimeReceiver.receive]
+     * returns [com.ufo.galaxy.agent.DelegatedRuntimeReceiver.ReceiptResult.Accepted] and
+     * **before** the task is handed off to
+     * [com.ufo.galaxy.agent.DelegatedTakeoverExecutor.execute], so that the counter
+     * reflects the number of tasks that have been dispatched — not just completed.
+     *
+     * ## No per-task session re-creation
+     *
+     * This method updates the in-place session value without creating a new
+     * [AttachedRuntimeSession] or modifying [AttachedRuntimeSession.sessionId].
+     * The session identity (sessionId, hostId, deviceId, attachedAtMs, state) is
+     * preserved exactly; only [AttachedRuntimeSession.delegatedExecutionCount] changes.
+     * This guarantees that multiple delegated tasks can flow through the same attached
+     * session without any re-init overhead.
+     *
+     * ## No-op conditions
+     *
+     *  - If no session is currently active ([attachedSession] is `null`), this is a no-op.
+     *  - If the current session is not in [AttachedRuntimeSession.State.ATTACHED] (i.e. it
+     *    is [AttachedRuntimeSession.State.DETACHING] or [AttachedRuntimeSession.State.DETACHED]),
+     *    this is a no-op: the caller must not be accepting new tasks through a non-reusable
+     *    session, so incrementing would be misleading.
+     */
+    fun recordDelegatedExecutionAccepted() {
+        val current = _attachedSession.value ?: return
+        if (!current.isAttached) return
+        _attachedSession.value = current.withExecutionAccepted()
+        Log.d(
+            TAG,
+            "[RUNTIME] Delegated execution accepted: session_id=${current.sessionId} " +
+                "execution_count=${current.delegatedExecutionCount + 1}"
+        )
     }
 
     /**

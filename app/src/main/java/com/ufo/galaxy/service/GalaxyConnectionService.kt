@@ -1158,6 +1158,12 @@ class GalaxyConnectionService : Service() {
                     "activation_status" to activationRecord.activationStatus.wireValue
                 )
             )
+            // PR-14: Record that a delegated execution has been accepted under the current
+            // attached session.  This increments the session's delegatedExecutionCount without
+            // re-creating the session or changing its identity — multiple tasks can flow
+            // through the same session without any per-task session re-init.
+            UFOGalaxyApplication.runtimeController.recordDelegatedExecutionAccepted()
+
             // PR-12: The executor owns all lifecycle transitions (PENDING → ACTIVATING →
             // ACTIVE → COMPLETED/FAILED); do not pre-advance the record here.
 
