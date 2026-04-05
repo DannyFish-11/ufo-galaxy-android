@@ -2,7 +2,7 @@ package com.ufo.galaxy.runtime
 
 /**
  * **Canonical Android-side delegated-runtime acknowledgment/progress/result signal** (PR-10
- * / PR-13, post-#533 dual-repo runtime unification master plan — Android-Side
+ * / PR-13 / PR-15, post-#533 dual-repo runtime unification master plan — Android-Side
  * Delegated-Runtime Execution-Tracking and Signal Emission Path, Android side).
  *
  * [DelegatedExecutionSignal] is the authoritative Android-side typed representation of
@@ -37,6 +37,29 @@ package com.ufo.galaxy.runtime
  *     so the host can correlate signals across the lifecycle without inspecting raw payloads.
  *  3. **Produces** a canonical [toMetadataMap] output suitable for merging into AIP v3
  *     payloads or structured telemetry.
+ *
+ * ## Recovery-readiness / idempotency metadata (PR-15)
+ *
+ * Intermittent network conditions can cause signals to be delivered more than once or
+ * arrive out of order.  To allow the host to detect duplicates and reconcile out-of-order
+ * delivery safely, PR-15 adds two lightweight, additive fields:
+ *
+ *  - [signalId]     — a UUID that uniquely identifies this specific signal emission.
+ *                     The host can use it as an idempotency key: two signals with the same
+ *                     [signalId] represent the same logical event and the second can be
+ *                     discarded without side-effects.  Callers may supply an explicit value
+ *                     (e.g. when replaying a persisted signal); otherwise a fresh UUID is
+ *                     generated automatically.
+ *
+ *  - [emissionSeq]  — a monotonically increasing integer that reflects the signal's
+ *                     canonical position in the per-execution emission sequence:
+ *                     ACK = [EMISSION_SEQ_ACK] (1), PROGRESS = [EMISSION_SEQ_PROGRESS] (2),
+ *                     RESULT = [EMISSION_SEQ_RESULT] (3).  The host can use this field to
+ *                     detect out-of-order delivery and to reject late duplicates whose
+ *                     [emissionSeq] is lower than the highest sequence already processed.
+ *
+ * Both fields are always present in [toMetadataMap] and are additive — existing consumers
+ * that do not inspect them are unaffected.
  *
  * ## Relationship to [DelegatedExecutionTracker]
  *
@@ -74,6 +97,16 @@ package com.ufo.galaxy.runtime
  * @property resultKind           For [Kind.RESULT] signals: the terminal outcome discriminator.
  *                                `null` for [Kind.ACK] and [Kind.PROGRESS] signals.
  * @property timestampMs          Epoch-ms timestamp when this signal was produced.
+ * @property signalId             Stable UUID identifying this specific emission.  Serves as
+ *                                an idempotency key so the host can discard duplicate
+ *                                deliveries of the same logical event.  Generated
+ *                                automatically via [java.util.UUID.randomUUID] if not
+ *                                supplied explicitly to the factory methods.
+ * @property emissionSeq          Monotonically increasing position in the canonical
+ *                                per-execution emission sequence:
+ *                                [EMISSION_SEQ_ACK] (1) → [EMISSION_SEQ_PROGRESS] (2) →
+ *                                [EMISSION_SEQ_RESULT] (3).  Allows the host to detect
+ *                                out-of-order delivery and reject stale duplicates.
  */
 data class DelegatedExecutionSignal(
     val kind: Kind,
@@ -85,7 +118,9 @@ data class DelegatedExecutionSignal(
     val stepCount: Int,
     val activationStatusHint: String,
     val resultKind: ResultKind?,
-    val timestampMs: Long
+    val timestampMs: Long,
+    val signalId: String,
+    val emissionSeq: Int
 ) {
 
     // ── Enums ─────────────────────────────────────────────────────────────────
@@ -226,6 +261,8 @@ data class DelegatedExecutionSignal(
      *  - [KEY_STEP_COUNT]               — number of steps recorded at signal time.
      *  - [KEY_ACTIVATION_STATUS_HINT]   — current activation status wire value.
      *  - [KEY_TIMESTAMP_MS]             — epoch-ms signal production timestamp.
+     *  - [KEY_SIGNAL_ID]                — stable UUID idempotency key for this emission.
+     *  - [KEY_EMISSION_SEQ]             — monotonic position in the canonical emission sequence.
      *
      * Keys present when non-null:
      *  - [KEY_RESULT_KIND]              — [ResultKind.wireValue]; present for [Kind.RESULT] only.
@@ -242,6 +279,8 @@ data class DelegatedExecutionSignal(
         put(KEY_STEP_COUNT, stepCount)
         put(KEY_ACTIVATION_STATUS_HINT, activationStatusHint)
         put(KEY_TIMESTAMP_MS, timestampMs)
+        put(KEY_SIGNAL_ID, signalId)
+        put(KEY_EMISSION_SEQ, emissionSeq)
         resultKind?.let { put(KEY_RESULT_KIND, it.wireValue) }
     }
 
@@ -283,6 +322,45 @@ data class DelegatedExecutionSignal(
          */
         const val KEY_RESULT_KIND = "exec_signal_result_kind"
 
+        /**
+         * Metadata key for the [signalId] UUID idempotency key.
+         *
+         * Always present in [toMetadataMap].  The host uses this value to deduplicate
+         * re-deliveries of the same logical signal emission (PR-15).
+         */
+        const val KEY_SIGNAL_ID = "exec_signal_id"
+
+        /**
+         * Metadata key for the [emissionSeq] monotonic sequence number.
+         *
+         * Always present in [toMetadataMap].  The host uses this value to detect
+         * out-of-order delivery: [EMISSION_SEQ_ACK] (1) → [EMISSION_SEQ_PROGRESS] (2) →
+         * [EMISSION_SEQ_RESULT] (3) (PR-15).
+         */
+        const val KEY_EMISSION_SEQ = "exec_signal_emission_seq"
+
+        /**
+         * Canonical emission-sequence position for [Kind.ACK] signals.
+         *
+         * The ACK signal is always the first emitted in a delegated execution lifecycle.
+         */
+        const val EMISSION_SEQ_ACK = 1
+
+        /**
+         * Canonical emission-sequence position for [Kind.PROGRESS] signals.
+         *
+         * The PROGRESS signal is emitted second, once the execution pipeline enters the
+         * ACTIVE state.
+         */
+        const val EMISSION_SEQ_PROGRESS = 2
+
+        /**
+         * Canonical emission-sequence position for [Kind.RESULT] signals.
+         *
+         * The RESULT signal is always the last emitted, carrying the terminal outcome.
+         */
+        const val EMISSION_SEQ_RESULT = 3
+
         // ── Factory methods ───────────────────────────────────────────────────
 
         /**
@@ -292,13 +370,17 @@ data class DelegatedExecutionSignal(
          * unit and the initial tracker has been created (i.e. record is
          * [DelegatedActivationRecord.ActivationStatus.PENDING]).
          *
-         * @param tracker   The current [DelegatedExecutionTracker].
+         * @param tracker     The current [DelegatedExecutionTracker].
          * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @param signalId    Stable UUID idempotency key for this emission; defaults to a
+         *                    freshly generated [java.util.UUID.randomUUID].  Supply an
+         *                    explicit value when replaying a previously generated signal.
          * @return A [Kind.ACK] signal anchored to the tracker's identity.
          */
         fun ack(
             tracker: DelegatedExecutionTracker,
-            timestampMs: Long = System.currentTimeMillis()
+            timestampMs: Long = System.currentTimeMillis(),
+            signalId: String = java.util.UUID.randomUUID().toString()
         ): DelegatedExecutionSignal = DelegatedExecutionSignal(
             kind = Kind.ACK,
             unitId = tracker.unitId,
@@ -309,7 +391,9 @@ data class DelegatedExecutionSignal(
             stepCount = tracker.stepCount,
             activationStatusHint = tracker.record.activationStatus.wireValue,
             resultKind = null,
-            timestampMs = timestampMs
+            timestampMs = timestampMs,
+            signalId = signalId,
+            emissionSeq = EMISSION_SEQ_ACK
         )
 
         /**
@@ -319,13 +403,17 @@ data class DelegatedExecutionSignal(
          * during active execution.  The signal carries the current [DelegatedExecutionTracker.stepCount]
          * so the host can detect forward progress.
          *
-         * @param tracker   The current [DelegatedExecutionTracker].
+         * @param tracker     The current [DelegatedExecutionTracker].
          * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @param signalId    Stable UUID idempotency key for this emission; defaults to a
+         *                    freshly generated [java.util.UUID.randomUUID].  Supply an
+         *                    explicit value when replaying a previously generated signal.
          * @return A [Kind.PROGRESS] signal anchored to the tracker's identity.
          */
         fun progress(
             tracker: DelegatedExecutionTracker,
-            timestampMs: Long = System.currentTimeMillis()
+            timestampMs: Long = System.currentTimeMillis(),
+            signalId: String = java.util.UUID.randomUUID().toString()
         ): DelegatedExecutionSignal = DelegatedExecutionSignal(
             kind = Kind.PROGRESS,
             unitId = tracker.unitId,
@@ -336,7 +424,9 @@ data class DelegatedExecutionSignal(
             stepCount = tracker.stepCount,
             activationStatusHint = tracker.record.activationStatus.wireValue,
             resultKind = null,
-            timestampMs = timestampMs
+            timestampMs = timestampMs,
+            signalId = signalId,
+            emissionSeq = EMISSION_SEQ_PROGRESS
         )
 
         /**
@@ -346,16 +436,20 @@ data class DelegatedExecutionSignal(
          * [resultKind] discriminator carries the outcome so the host can update its
          * session truth without inspecting raw status strings.
          *
-         * @param tracker    The current [DelegatedExecutionTracker] (should be terminal).
-         * @param resultKind The terminal outcome: [ResultKind.COMPLETED], [ResultKind.FAILED],
-         *                   [ResultKind.TIMEOUT], [ResultKind.CANCELLED], or [ResultKind.REJECTED].
+         * @param tracker     The current [DelegatedExecutionTracker] (should be terminal).
+         * @param resultKind  The terminal outcome: [ResultKind.COMPLETED], [ResultKind.FAILED],
+         *                    [ResultKind.TIMEOUT], [ResultKind.CANCELLED], or [ResultKind.REJECTED].
          * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @param signalId    Stable UUID idempotency key for this emission; defaults to a
+         *                    freshly generated [java.util.UUID.randomUUID].  Supply an
+         *                    explicit value when replaying a previously generated signal.
          * @return A [Kind.RESULT] signal anchored to the tracker's identity.
          */
         fun result(
             tracker: DelegatedExecutionTracker,
             resultKind: ResultKind,
-            timestampMs: Long = System.currentTimeMillis()
+            timestampMs: Long = System.currentTimeMillis(),
+            signalId: String = java.util.UUID.randomUUID().toString()
         ): DelegatedExecutionSignal = DelegatedExecutionSignal(
             kind = Kind.RESULT,
             unitId = tracker.unitId,
@@ -366,41 +460,47 @@ data class DelegatedExecutionSignal(
             stepCount = tracker.stepCount,
             activationStatusHint = tracker.record.activationStatus.wireValue,
             resultKind = resultKind,
-            timestampMs = timestampMs
+            timestampMs = timestampMs,
+            signalId = signalId,
+            emissionSeq = EMISSION_SEQ_RESULT
         )
 
         /**
          * Produces a [Kind.RESULT] signal with [ResultKind.TIMEOUT] from [tracker].
          *
-         * Convenience factory; equivalent to `result(tracker, ResultKind.TIMEOUT, timestampMs)`.
+         * Convenience factory; equivalent to `result(tracker, ResultKind.TIMEOUT, timestampMs, signalId)`.
          *
          * Emit when the execution pipeline or surrounding coroutine scope signals a timeout
          * (e.g. [kotlinx.coroutines.TimeoutCancellationException]).
          *
          * @param tracker     The current [DelegatedExecutionTracker] (should be in FAILED state).
          * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @param signalId    Stable UUID idempotency key; defaults to a fresh UUID.
          * @return A [Kind.RESULT] / [ResultKind.TIMEOUT] signal anchored to the tracker's identity.
          */
         fun timeout(
             tracker: DelegatedExecutionTracker,
-            timestampMs: Long = System.currentTimeMillis()
-        ): DelegatedExecutionSignal = result(tracker, ResultKind.TIMEOUT, timestampMs)
+            timestampMs: Long = System.currentTimeMillis(),
+            signalId: String = java.util.UUID.randomUUID().toString()
+        ): DelegatedExecutionSignal = result(tracker, ResultKind.TIMEOUT, timestampMs, signalId)
 
         /**
          * Produces a [Kind.RESULT] signal with [ResultKind.CANCELLED] from [tracker].
          *
-         * Convenience factory; equivalent to `result(tracker, ResultKind.CANCELLED, timestampMs)`.
+         * Convenience factory; equivalent to `result(tracker, ResultKind.CANCELLED, timestampMs, signalId)`.
          *
          * Emit when execution is interrupted by an external cancellation request
          * (e.g. [kotlinx.coroutines.CancellationException] that is not a timeout).
          *
          * @param tracker     The current [DelegatedExecutionTracker] (should be in FAILED state).
          * @param timestampMs Epoch-ms timestamp; defaults to the current time.
+         * @param signalId    Stable UUID idempotency key; defaults to a fresh UUID.
          * @return A [Kind.RESULT] / [ResultKind.CANCELLED] signal anchored to the tracker's identity.
          */
         fun cancelled(
             tracker: DelegatedExecutionTracker,
-            timestampMs: Long = System.currentTimeMillis()
-        ): DelegatedExecutionSignal = result(tracker, ResultKind.CANCELLED, timestampMs)
+            timestampMs: Long = System.currentTimeMillis(),
+            signalId: String = java.util.UUID.randomUUID().toString()
+        ): DelegatedExecutionSignal = result(tracker, ResultKind.CANCELLED, timestampMs, signalId)
     }
 }
