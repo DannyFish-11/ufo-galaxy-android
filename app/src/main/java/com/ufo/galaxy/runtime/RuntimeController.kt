@@ -428,6 +428,28 @@ class RuntimeController(
     }
 
     /**
+     * Returns an authoritative **host-facing snapshot** of the current attached session's
+     * reuse state as a [Map], or `null` when no session is active (PR-17).
+     *
+     * The returned map is identical to [AttachedRuntimeSession.toMetadataMap] and always
+     * contains at minimum:
+     *  - [AttachedRuntimeSession.KEY_SESSION_ID]
+     *  - [AttachedRuntimeSession.KEY_DEVICE_ID]
+     *  - [AttachedRuntimeSession.KEY_STATE]
+     *  - [AttachedRuntimeSession.KEY_DELEGATED_EXECUTION_COUNT]
+     *  - [AttachedRuntimeSession.KEY_IS_REUSE_VALID]
+     *  - [AttachedRuntimeSession.KEY_DETACH_CAUSE] (when applicable)
+     *
+     * Use this as the canonical input for host-side reuse binding decisions.  The snapshot
+     * is a point-in-time copy; observe [attachedSession] as a [kotlinx.coroutines.flow.StateFlow]
+     * for continuous updates.
+     *
+     * @return An immutable [Map] with all host-facing session fields; `null` if no session exists.
+     */
+    fun currentSessionSnapshot(): Map<String, Any>? =
+        _attachedSession.value?.toMetadataMap()
+
+    /**
      * Records that a delegated execution has been accepted under the current
      * [AttachedRuntimeSession], incrementing
      * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
@@ -492,11 +514,7 @@ class RuntimeController(
         )
         _attachedSession.value = session
         Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId}")
-        GalaxyLogger.log(TAG, mapOf(
-            "event" to "runtime_session_attached",
-            "session_id" to session.sessionId,
-            "host_id" to session.hostId
-        ))
+        GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_attached") + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
         if (descriptor != null) {
             val updated = descriptor.withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
@@ -521,11 +539,7 @@ class RuntimeController(
         val detached = current.detachedWith(cause)
         _attachedSession.value = detached
         Log.i(TAG, "[RUNTIME] Attached runtime session closed: session_id=${detached.sessionId} cause=${cause.wireValue}")
-        GalaxyLogger.log(TAG, mapOf(
-            "event" to "runtime_session_detached",
-            "session_id" to detached.sessionId,
-            "cause" to cause.wireValue
-        ))
+        GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_detached") + detached.toMetadataMap())
         // Sync host descriptor participation state to INACTIVE.
         val descriptor = hostDescriptor
         if (descriptor != null) {
