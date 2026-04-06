@@ -121,7 +121,18 @@ enum class MsgType(val value: String) {
     /** Uplink: Android responds to a [TAKEOVER_REQUEST] with acceptance or rejection.
      *  Payload model: [com.ufo.galaxy.agent.TakeoverResponseEnvelope].
      *  @status pr3 — model available; send path present via GalaxyConnectionService. */
-    TAKEOVER_RESPONSE("takeover_response");
+    TAKEOVER_RESPONSE("takeover_response"),
+
+    // ── PR-16: Delegated execution signal outbound transport ──────────────────────────────
+    // Uplink signal emitted by Android during and after delegated task execution.
+    // Carries ACK / PROGRESS / RESULT / TIMEOUT / CANCELLED lifecycle events with full
+    // identity continuity so the main-repo tracker can reconcile state without ambiguity.
+
+    /** Uplink: Android emits a delegated-execution lifecycle signal to the main runtime.
+     *  Carries ACK / PROGRESS / RESULT (COMPLETED / FAILED / TIMEOUT / CANCELLED) events.
+     *  Payload model: [DelegatedExecutionSignalPayload].
+     *  @status pr16 — payload defined; send path present via GalaxyConnectionService. */
+    DELEGATED_EXECUTION_SIGNAL("delegated_execution_signal");
 
     companion object {
         /**
@@ -721,4 +732,53 @@ data class HybridDegradePayload(
     val reason: String,
     val fallback_mode: String = "local_only",
     val device_id: String = ""
+)
+
+// ── PR-16: Delegated execution signal outbound payload ────────────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.DELEGATED_EXECUTION_SIGNAL].
+ *
+ * Carries a delegated-execution lifecycle signal (ACK / PROGRESS / RESULT) from the
+ * Android runtime to the main-repo host so the host's tracker can reconcile state.
+ * All identity fields are echoed on every signal to allow the host to correlate signals
+ * with its own dispatch record without maintaining session state on the wire.
+ *
+ * ### Required fields (always present)
+ * @param signal_id              Stable UUID idempotency key for this emission.  The host
+ *                               can discard duplicate deliveries with the same [signal_id].
+ * @param emission_seq           Monotonic position in the per-execution signal sequence:
+ *                               ACK=1, PROGRESS=2, RESULT=3.  Allows the host to detect
+ *                               out-of-order delivery.
+ * @param task_id                Task identifier echoed from the originating takeover request.
+ * @param trace_id               End-to-end trace identifier for distributed tracing.
+ * @param attached_session_id    Attached runtime session identifier this signal is scoped to.
+ * @param device_id              Stable identifier of the Android device emitting the signal.
+ * @param handoff_contract_version Handoff contract schema version from the originating unit.
+ * @param signal_kind            Discriminator wire value: `"ack"`, `"progress"`, or `"result"`.
+ * @param unit_id                Delegated-unit identifier from the originating takeover request.
+ * @param step_count             Number of execution steps completed at signal emission time.
+ * @param activation_status_hint Wire value of the current activation status at emission time.
+ * @param timestamp_ms           Epoch-ms timestamp when this signal was produced on-device.
+ *
+ * ### Conditional fields
+ * @param result_kind            Terminal outcome discriminator; present only for
+ *                               [signal_kind] = `"result"` signals.  Wire values:
+ *                               `"completed"`, `"failed"`, `"timeout"`, `"cancelled"`,
+ *                               `"rejected"`.  `null` for ACK and PROGRESS signals.
+ */
+data class DelegatedExecutionSignalPayload(
+    val signal_id: String,
+    val emission_seq: Int,
+    val task_id: String,
+    val trace_id: String,
+    val attached_session_id: String,
+    val device_id: String,
+    val handoff_contract_version: Int,
+    val signal_kind: String,
+    val unit_id: String,
+    val step_count: Int,
+    val activation_status_hint: String,
+    val timestamp_ms: Long,
+    val result_kind: String? = null
 )

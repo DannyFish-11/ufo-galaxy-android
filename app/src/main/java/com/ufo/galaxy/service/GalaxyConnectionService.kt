@@ -21,7 +21,9 @@ import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
+import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
+import com.ufo.galaxy.runtime.toOutboundPayload
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
@@ -156,15 +158,20 @@ class GalaxyConnectionService : Service() {
     private val delegatedRuntimeReceiver = DelegatedRuntimeReceiver()
 
     /**
-     * Signal sink for delegated-execution lifecycle events (PR-12).
+     * Signal sink for delegated-execution lifecycle events (PR-12 / PR-16).
      *
-     * Receives [com.ufo.galaxy.runtime.DelegatedExecutionSignal] events (ACK / RESULT)
-     * emitted by [delegatedTakeoverExecutor] and writes them to structured telemetry.
-     * Future iterations can extend this to transmit signals outbound to the main runtime
-     * via the WebSocket channel without changing [DelegatedTakeoverExecutor].
+     * Receives [com.ufo.galaxy.runtime.DelegatedExecutionSignal] events (ACK / PROGRESS /
+     * RESULT / TIMEOUT / CANCELLED) emitted by [delegatedTakeoverExecutor] and:
+     *  1. Writes them to structured telemetry via [GalaxyLogger] (observability).
+     *  2. Transmits each signal as a [com.ufo.galaxy.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL]
+     *     AIP v3 message uplink via [webSocketClient] (PR-16 transport closure).
+     *
+     * Signal send failure never interrupts the delegated execution lifecycle — any error
+     * is caught internally and logged for diagnostics observability.
      */
     private val delegatedSignalSink = DelegatedExecutionSignalSink { signal ->
         GalaxyLogger.log(TAG, signal.toMetadataMap())
+        sendDelegatedExecutionSignal(signal)
     }
 
     /**
@@ -928,6 +935,64 @@ class GalaxyConnectionService : Service() {
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         Log.d(TAG, "[ADVANCED:ACK] type_acked=${type.value} message_id=${ackPayload.message_id} sent=$sent")
+    }
+
+    /**
+     * Transmits a [DelegatedExecutionSignal] as a [MsgType.DELEGATED_EXECUTION_SIGNAL]
+     * AIP v3 message uplink (PR-16).
+     *
+     * Called by [delegatedSignalSink] after structured logging so that every ACK /
+     * PROGRESS / RESULT / TIMEOUT / CANCELLED lifecycle event is delivered to the
+     * main-repo host as a stable, parseable outbound message.
+     *
+     * Send failure **never throws** — any error is caught and logged for diagnostics
+     * observability so the executor's lifecycle progression is not interrupted.
+     *
+     * @param signal The [DelegatedExecutionSignal] emitted by [delegatedTakeoverExecutor].
+     */
+    private fun sendDelegatedExecutionSignal(signal: DelegatedExecutionSignal) {
+        try {
+            val payload = signal.toOutboundPayload(deviceId = localDeviceId)
+            val envelope = AipMessage(
+                type = MsgType.DELEGATED_EXECUTION_SIGNAL,
+                payload = payload,
+                device_id = localDeviceId,
+                trace_id = signal.traceId,
+                correlation_id = signal.taskId,
+                idempotency_key = signal.signalId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId
+            )
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            if (sent) {
+                Log.d(TAG, "[DELEGATED_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
+            } else {
+                Log.w(
+                    TAG,
+                    "[DELEGATED_SIGNAL] send failed signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                )
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "delegated_signal_send_failed",
+                        "signal_id" to signal.signalId,
+                        "signal_kind" to signal.kind.wireValue,
+                        "task_id" to signal.taskId,
+                        "trace_id" to signal.traceId,
+                        "emission_seq" to signal.emissionSeq
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "[DELEGATED_SIGNAL] unexpected error sending signal signal_id=${signal.signalId}: ${e.message}", e)
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "delegated_signal_send_error",
+                    "signal_id" to signal.signalId,
+                    "signal_kind" to signal.kind.wireValue,
+                    "task_id" to signal.taskId,
+                    "error" to (e.message ?: "unknown")
+                )
+            )
+        }
     }
 
     /**

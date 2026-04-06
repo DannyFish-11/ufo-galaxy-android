@@ -13,12 +13,14 @@ package com.ufo.galaxy.runtime
  *
  * ## Production wiring
  *
- * In [com.ufo.galaxy.service.GalaxyConnectionService] the sink is wired as a lambda that
- * logs the signal via [com.ufo.galaxy.observability.GalaxyLogger]:
+ * In [com.ufo.galaxy.service.GalaxyConnectionService] the sink logs the signal and also
+ * transmits it as a [com.ufo.galaxy.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL] AIP v3
+ * uplink message via [com.ufo.galaxy.network.GalaxyWebSocketClient.sendJson] (PR-16):
  *
  * ```kotlin
  * private val delegatedSignalSink = DelegatedExecutionSignalSink { signal ->
- *     GalaxyLogger.log(TAG, signal.toMetadataMap().mapValues { it.value.toString() })
+ *     GalaxyLogger.log(TAG, signal.toMetadataMap())
+ *     sendDelegatedExecutionSignal(signal)
  * }
  * ```
  *
