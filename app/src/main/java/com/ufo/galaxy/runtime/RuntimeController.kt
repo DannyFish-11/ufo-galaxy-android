@@ -5,6 +5,7 @@ import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -153,6 +154,22 @@ class RuntimeController(
      */
     private val _attachedSession = MutableStateFlow<AttachedRuntimeSession?>(null)
     val attachedSession: StateFlow<AttachedRuntimeSession?> = _attachedSession.asStateFlow()
+
+    /**
+     * Per-connection UUID generated fresh each time [openAttachedSession] creates a new
+     * [AttachedRuntimeSession] (PR-19).
+     *
+     * Distinct from [AttachedRuntimeSession.sessionId]: while [sessionId] identifies the
+     * application-level attached session, [_currentRuntimeSessionId] tracks the specific
+     * runtime connection instance within that session.  The host registry can use the two
+     * IDs together to distinguish reconnect events from entirely new sessions.
+     *
+     * `null` until the first [openAttachedSession] call; remains set through the session
+     * lifecycle (including after detach) so that [currentHostSessionSnapshot] can project
+     * a complete snapshot for any session state.
+     */
+    @Volatile
+    private var _currentRuntimeSessionId: String? = null
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -450,6 +467,45 @@ class RuntimeController(
         _attachedSession.value?.toMetadataMap()
 
     /**
+     * Returns the canonical **host-session snapshot / projection** for this Android attached
+     * runtime, or `null` when no session has been opened yet (PR-19).
+     *
+     * The returned [AttachedRuntimeHostSessionSnapshot] is the authoritative, field-stable
+     * input source for the main-repository authoritative session registry.  All nine
+     * canonical fields are populated; [AttachedRuntimeHostSessionSnapshot.invalidationReason]
+     * is the only conditional field — non-`null` only when the session was closed via
+     * [AttachedRuntimeSession.DetachCause.INVALIDATION].
+     *
+     * ## Projection semantics across lifecycle events
+     *
+     *  - **attach** — [AttachedRuntimeHostSessionSnapshot.attachmentState]`=attached`,
+     *    [AttachedRuntimeHostSessionSnapshot.isReuseValid]`=true`,
+     *    [AttachedRuntimeHostSessionSnapshot.posture]`=join_runtime`.
+     *  - **detach** — [AttachedRuntimeHostSessionSnapshot.attachmentState]`=detached`,
+     *    [AttachedRuntimeHostSessionSnapshot.isReuseValid]`=false`,
+     *    [AttachedRuntimeHostSessionSnapshot.posture]`=control_only`,
+     *    [AttachedRuntimeHostSessionSnapshot.invalidationReason]`=null`.
+     *  - **reconnect** — new [AttachedRuntimeHostSessionSnapshot.runtimeSessionId],
+     *    [AttachedRuntimeHostSessionSnapshot.attachmentState]`=attached`.
+     *  - **invalidate** — [AttachedRuntimeHostSessionSnapshot.attachmentState]`=detached`,
+     *    [AttachedRuntimeHostSessionSnapshot.invalidationReason]`="invalidation"`.
+     *
+     * @return A fully populated [AttachedRuntimeHostSessionSnapshot]; `null` before the
+     *         first [openAttachedSession] call.
+     */
+    fun currentHostSessionSnapshot(): AttachedRuntimeHostSessionSnapshot? {
+        val session = _attachedSession.value ?: return null
+        val runtimeSessionId = _currentRuntimeSessionId ?: return null
+        val hostRole = hostDescriptor?.formationRole?.wireValue
+            ?: RuntimeHostDescriptor.FormationRole.DEFAULT.wireValue
+        return AttachedRuntimeHostSessionSnapshot.from(
+            session = session,
+            runtimeSessionId = runtimeSessionId,
+            hostRole = hostRole
+        )
+    }
+
+    /**
      * Records that a delegated execution has been accepted under the current
      * [AttachedRuntimeSession], incrementing
      * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
@@ -512,8 +568,10 @@ class RuntimeController(
             hostId = descriptor?.hostId ?: "unknown-host",
             deviceId = descriptor?.deviceId ?: settings.deviceId
         )
+        // Generate a fresh per-connection runtime session ID for the snapshot projection (PR-19).
+        _currentRuntimeSessionId = UUID.randomUUID().toString()
         _attachedSession.value = session
-        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId}")
+        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId} runtime_session_id=${_currentRuntimeSessionId}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_attached") + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
         if (descriptor != null) {
