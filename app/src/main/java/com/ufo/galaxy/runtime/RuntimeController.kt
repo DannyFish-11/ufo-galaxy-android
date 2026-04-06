@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import java.util.UUID
 import kotlin.coroutines.resume
 
 /**
@@ -153,6 +154,19 @@ class RuntimeController(
      */
     private val _attachedSession = MutableStateFlow<AttachedRuntimeSession?>(null)
     val attachedSession: StateFlow<AttachedRuntimeSession?> = _attachedSession.asStateFlow()
+
+    /**
+     * Per-connection-cycle UUID generated each time [openAttachedSession] creates a new
+     * [AttachedRuntimeSession].  Exposed via [currentHostSessionSnapshot] as
+     * [AttachedRuntimeHostSessionSnapshot.runtimeSessionId].
+     *
+     * Distinct from [AttachedRuntimeSession.sessionId]: the session ID is embedded in the
+     * [AttachedRuntimeSession] object itself, while this ID tracks the RuntimeController's
+     * own connection cycle and is used to differentiate successive reconnect cycles in the
+     * host-session projection.
+     */
+    @Volatile
+    private var _currentRuntimeSessionId: String? = null
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -450,6 +464,36 @@ class RuntimeController(
         _attachedSession.value?.toMetadataMap()
 
     /**
+     * Returns the canonical **host-session snapshot / projection** for this Android attached
+     * runtime, or `null` when no session is active (PR-19).
+     *
+     * Unlike [currentSessionSnapshot], which returns the raw [AttachedRuntimeSession.toMetadataMap],
+     * this method returns a fully-typed [AttachedRuntimeHostSessionSnapshot] that:
+     *  - Uses clean, registry-oriented projection keys (e.g. `"session_id"` not
+     *    `"attached_session_id"`).
+     *  - Always includes all nine required fields guaranteed by the canonical snapshot contract.
+     *  - Incorporates [hostDescriptor] metadata ([hostRole]) and derived [posture] so the
+     *    main-repo registry does not need to join these from separate sources.
+     *  - Exposes [AttachedRuntimeHostSessionSnapshot.runtimeSessionId] — a per-connection-cycle
+     *    UUID that changes on every new attach (reconnect) and is distinct from the session ID.
+     *
+     * This snapshot is the stable input source for the main-repo authoritative session registry.
+     * Use [currentSessionSnapshot] only for backward-compatible metadata payloads.
+     *
+     * @return An [AttachedRuntimeHostSessionSnapshot] with all required fields; `null` if no
+     *         session exists or if the runtime session ID has not yet been initialised.
+     */
+    fun currentHostSessionSnapshot(): AttachedRuntimeHostSessionSnapshot? {
+        val session = _attachedSession.value ?: return null
+        val runtimeSessionId = _currentRuntimeSessionId ?: return null
+        return AttachedRuntimeHostSessionSnapshot.from(
+            session = session,
+            runtimeSessionId = runtimeSessionId,
+            hostDescriptor = hostDescriptor
+        )
+    }
+
+    /**
      * Records that a delegated execution has been accepted under the current
      * [AttachedRuntimeSession], incrementing
      * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
@@ -512,8 +556,9 @@ class RuntimeController(
             hostId = descriptor?.hostId ?: "unknown-host",
             deviceId = descriptor?.deviceId ?: settings.deviceId
         )
+        _currentRuntimeSessionId = UUID.randomUUID().toString()
         _attachedSession.value = session
-        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId}")
+        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId} runtime_session_id=${_currentRuntimeSessionId}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_attached") + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
         if (descriptor != null) {
