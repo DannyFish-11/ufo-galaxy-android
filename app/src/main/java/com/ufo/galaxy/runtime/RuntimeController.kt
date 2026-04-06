@@ -154,6 +154,21 @@ class RuntimeController(
     private val _attachedSession = MutableStateFlow<AttachedRuntimeSession?>(null)
     val attachedSession: StateFlow<AttachedRuntimeSession?> = _attachedSession.asStateFlow()
 
+    /**
+     * Per-connection UUID that resets each time a new attached-runtime session is opened.
+     *
+     * Unlike [AttachedRuntimeSession.sessionId], which is the stable session identity,
+     * [_currentRuntimeSessionId] allows the main-repo registry to detect reconnect events:
+     * even if the session identity is regenerated on reconnect, comparing [_currentRuntimeSessionId]
+     * between successive snapshots reveals whether a new connection has been established.
+     *
+     * Set in [openAttachedSession]; cleared in [closeAttachedSession].  `null` when no
+     * session is active.
+     *
+     * (PR-19 — Canonical Attached Runtime Host-Session Snapshot Projection)
+     */
+    private var _currentRuntimeSessionId: String? = null
+
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -450,6 +465,35 @@ class RuntimeController(
         _attachedSession.value?.toMetadataMap()
 
     /**
+     * Returns the **canonical attached-runtime host-session snapshot** for this device, or
+     * `null` when no session is active or when no [_currentRuntimeSessionId] has been
+     * established (PR-19).
+     *
+     * Unlike [currentSessionSnapshot], which returns a raw [Map], this method returns a
+     * fully typed [AttachedRuntimeHostSessionSnapshot] that includes:
+     *  - [AttachedRuntimeHostSessionSnapshot.runtimeSessionId] — per-connection UUID that
+     *    enables the main-repo registry to detect reconnect events.
+     *  - [AttachedRuntimeHostSessionSnapshot.invalidationReason] — non-null only when the
+     *    session was closed due to [AttachedRuntimeSession.DetachCause.INVALIDATION].
+     *  - [AttachedRuntimeHostSessionSnapshot.hostRole] and [AttachedRuntimeHostSessionSnapshot.posture]
+     *    derived inline from the current [hostDescriptor].
+     *
+     * This is the recommended export surface for the main-repo authoritative session registry.
+     *
+     * @return A typed [AttachedRuntimeHostSessionSnapshot], or `null` if no session or no
+     *         runtime-session ID is currently active.
+     */
+    fun currentHostSessionSnapshot(): AttachedRuntimeHostSessionSnapshot? {
+        val session = _attachedSession.value ?: return null
+        val runtimeSessionId = _currentRuntimeSessionId ?: return null
+        return AttachedRuntimeHostSessionSnapshot.from(
+            session = session,
+            runtimeSessionId = runtimeSessionId,
+            hostDescriptor = hostDescriptor
+        )
+    }
+
+    /**
      * Records that a delegated execution has been accepted under the current
      * [AttachedRuntimeSession], incrementing
      * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
@@ -512,8 +556,9 @@ class RuntimeController(
             hostId = descriptor?.hostId ?: "unknown-host",
             deviceId = descriptor?.deviceId ?: settings.deviceId
         )
+        _currentRuntimeSessionId = java.util.UUID.randomUUID().toString()
         _attachedSession.value = session
-        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId}")
+        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId} runtime_session_id=${_currentRuntimeSessionId}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_attached") + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
         if (descriptor != null) {
@@ -537,6 +582,7 @@ class RuntimeController(
         val current = _attachedSession.value ?: return
         if (current.isDetached) return
         val detached = current.detachedWith(cause)
+        _currentRuntimeSessionId = null
         _attachedSession.value = detached
         Log.i(TAG, "[RUNTIME] Attached runtime session closed: session_id=${detached.sessionId} cause=${cause.wireValue}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_detached") + detached.toMetadataMap())
