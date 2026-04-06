@@ -506,6 +506,36 @@ class RuntimeController(
     }
 
     /**
+     * Returns the canonical **host-facing delegated target readiness projection** for this
+     * Android attached runtime, or `null` when no session has been opened yet (PR-20).
+     *
+     * The returned [DelegatedTargetReadinessProjection] is the authoritative, stable input
+     * for the main-repository delegated target selection policy.  It embeds the full
+     * nine-field [AttachedRuntimeHostSessionSnapshot] and adds a pre-computed
+     * [DelegatedTargetReadinessProjection.isSuitableTarget] boolean with an accompanying
+     * [DelegatedTargetReadinessProjection.unsuitabilityReason] for diagnostics and policy
+     * explainability.
+     *
+     * ## Projection semantics across lifecycle events
+     *
+     *  - **attach** — [DelegatedTargetReadinessProjection.isSuitableTarget]`=true`,
+     *    [DelegatedTargetReadinessProjection.unsuitabilityReason]`=null`.
+     *  - **detach** — [DelegatedTargetReadinessProjection.isSuitableTarget]`=false`,
+     *    [DelegatedTargetReadinessProjection.unsuitabilityReason]`="not_attached"`.
+     *  - **reconnect** — new [DelegatedTargetReadinessProjection.runtimeSessionId],
+     *    [DelegatedTargetReadinessProjection.isSuitableTarget]`=true`.
+     *  - **invalidate** — [DelegatedTargetReadinessProjection.isSuitableTarget]`=false`,
+     *    [DelegatedTargetReadinessProjection.unsuitabilityReason]`="invalidated"`.
+     *
+     * @return A fully populated [DelegatedTargetReadinessProjection]; `null` before the
+     *         first [openAttachedSession] call.
+     */
+    fun currentDelegatedTargetReadinessProjection(): DelegatedTargetReadinessProjection? {
+        val snapshot = currentHostSessionSnapshot() ?: return null
+        return DelegatedTargetReadinessProjection.from(snapshot)
+    }
+
+    /**
      * Records that a delegated execution has been accepted under the current
      * [AttachedRuntimeSession], incrementing
      * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
