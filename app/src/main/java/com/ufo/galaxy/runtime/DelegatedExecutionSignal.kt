@@ -246,6 +246,33 @@ data class DelegatedExecutionSignal(
     val isResult: Boolean
         get() = kind == Kind.RESULT
 
+    // ── Replay helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Returns a replay copy of this signal with an updated [timestampMs] but with the
+     * **same [signalId] and [emissionSeq]**.
+     *
+     * Use this method whenever the same logical signal needs to be re-emitted (e.g. after
+     * a send failure, a transport reconnect, or a recovery attempt).  Preserving [signalId]
+     * and [emissionSeq] ensures the host can detect the re-delivery as a duplicate of the
+     * original emission — not as a brand-new signal — and can safely discard it without
+     * side-effects.
+     *
+     * Calling the factory methods ([ack], [progress], [result]) instead would generate a
+     * fresh [signalId], which would cause the host to treat the replay as a new, distinct
+     * emission, breaking idempotency and potentially corrupting host-side ordering state.
+     *
+     * @param replayTimestampMs  Epoch-ms timestamp to stamp on the replay copy; defaults to
+     *                           the current wall clock so the host can distinguish "when was
+     *                           the signal first emitted" ([timestampMs] of the original)
+     *                           from "when was it last re-sent" (this field).
+     * @return A copy of this signal with [timestampMs] replaced by [replayTimestampMs] and
+     *         all other fields — critically [signalId] and [emissionSeq] — preserved verbatim.
+     */
+    fun replayAt(
+        replayTimestampMs: Long = System.currentTimeMillis()
+    ): DelegatedExecutionSignal = copy(timestampMs = replayTimestampMs)
+
     // ── Wire serialisation ────────────────────────────────────────────────────
 
     /**
