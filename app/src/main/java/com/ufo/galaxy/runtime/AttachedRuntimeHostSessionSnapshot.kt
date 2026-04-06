@@ -91,7 +91,7 @@ data class AttachedRuntimeHostSessionSnapshot(
     /**
      * Builds the canonical wire map for this snapshot.
      *
-     * All nine keys are always present in the returned map, with the sole exception that
+     * All eight always-present keys are included in the returned map.
      * [KEY_INVALIDATION_REASON] is included **only** when [invalidationReason] is non-`null`.
      * This keeps the wire format lean for the common non-invalidation case while giving the
      * host a stable, discoverable key for invalidation scenarios.
