@@ -291,24 +291,38 @@ data class AttachedRuntimeSession(
     )
 
     /**
-     * Builds the canonical metadata map for wire transmission or diagnostic logging.
+     * Builds the canonical **host-facing** metadata map for wire transmission or
+     * diagnostic logging.
      *
-     * Keys present:
+     * This map is the authoritative representation of session reuse state that the host
+     * (main orchestrator) can consume to determine whether this Android session is still
+     * a valid target for delegated dispatch.  All fields required for host-side reuse
+     * binding are guaranteed to be present (PR-17).
+     *
+     * Keys always present:
      *  - [KEY_SESSION_ID]                  — stable session identifier.
      *  - [KEY_HOST_ID]                     — runtime host identifier.
+     *  - [KEY_DEVICE_ID]                   — hardware device identifier.
      *  - [KEY_STATE]                       — [State.wireValue] of the current state.
      *  - [KEY_ATTACHED_AT_MS]              — epoch-ms attach timestamp.
      *  - [KEY_DELEGATED_EXECUTION_COUNT]   — number of delegated tasks accepted so far.
-     *  - [KEY_DETACH_CAUSE]                — [DetachCause.wireValue]; **absent** when [detachCause] is null.
+     *  - [KEY_IS_REUSE_VALID]              — `true` iff [isReuseValid]; stable boolean for
+     *                                        host-facing consumption without re-deriving state.
+     *
+     * Keys conditionally present:
+     *  - [KEY_DETACH_CAUSE]                — [DetachCause.wireValue]; **absent** when
+     *                                        [detachCause] is `null` (session is still active).
      *
      * @return An immutable [Map] suitable for merging into AIP v3 metadata payloads.
      */
     fun toMetadataMap(): Map<String, Any> = buildMap {
         put(KEY_SESSION_ID, sessionId)
         put(KEY_HOST_ID, hostId)
+        put(KEY_DEVICE_ID, deviceId)
         put(KEY_STATE, state.wireValue)
         put(KEY_ATTACHED_AT_MS, attachedAtMs)
         put(KEY_DELEGATED_EXECUTION_COUNT, delegatedExecutionCount)
+        put(KEY_IS_REUSE_VALID, isReuseValid)
         detachCause?.let { put(KEY_DETACH_CAUSE, it.wireValue) }
     }
 
@@ -332,6 +346,24 @@ data class AttachedRuntimeSession(
 
         /** Metadata key for the [delegatedExecutionCount] integer. */
         const val KEY_DELEGATED_EXECUTION_COUNT = "attached_session_delegated_execution_count"
+
+        /**
+         * Metadata key for the hardware device identifier ([deviceId]).
+         *
+         * Always present in [toMetadataMap] output so the host can identify which physical
+         * device owns this session without additional look-up (PR-17).
+         */
+        const val KEY_DEVICE_ID = "attached_session_device_id"
+
+        /**
+         * Metadata key for the [isReuseValid] boolean.
+         *
+         * Always present in [toMetadataMap] output.  `true` when the session is in
+         * [State.ATTACHED]; `false` in [State.DETACHING] or [State.DETACHED].
+         * Provided as a pre-computed boolean so the host does not need to re-derive
+         * reuse eligibility from [KEY_STATE] (PR-17).
+         */
+        const val KEY_IS_REUSE_VALID = "attached_session_is_reuse_valid"
 
         /**
          * Metadata key for the [DetachCause.wireValue] string.
