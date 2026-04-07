@@ -23,6 +23,7 @@ import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
+import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.runtime.toOutboundPayload
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
@@ -220,6 +221,22 @@ class GalaxyConnectionService : Service() {
                 // this covers unexpected drops (network outage, server crash) so the loop
                 // is never blocked permanently.
                 UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+                // PR-23: If a takeover was actively in-flight when the WS dropped, emit a
+                // DISCONNECT failure event through RuntimeController so surface layers can
+                // clear any stale "active" or "in-control" state.  The takeover ID is
+                // captured before clearing it so the event carries the correct identity.
+                val activeId = activeTakeoverId
+                if (activeId != null) {
+                    serviceScope.launch {
+                        UFOGalaxyApplication.runtimeController.notifyTakeoverFailed(
+                            takeoverId = activeId,
+                            taskId = "",
+                            traceId = "",
+                            reason = "ws_disconnect_during_takeover",
+                            cause = TakeoverFallbackEvent.Cause.DISCONNECT
+                        )
+                    }
+                }
             }
             
             override fun onMessage(message: String) {
@@ -1299,6 +1316,22 @@ class GalaxyConnectionService : Service() {
                                 envelope.task_id, null, null,
                                 "takeover_error: ${outcome.error}", envelope.trace_id,
                                 ROUTE_MODE_CROSS_DEVICE
+                            )
+                            // PR-23: Notify RuntimeController — the canonical failure path —
+                            // so all surface layers can clear stale "active" or "in-control"
+                            // state.  Derive the cause from the last RESULT signal recorded
+                            // in the emitted-signal ledger.
+                            val failureCause = when (outcome.ledger.lastResult?.resultKind) {
+                                DelegatedExecutionSignal.ResultKind.TIMEOUT -> TakeoverFallbackEvent.Cause.TIMEOUT
+                                DelegatedExecutionSignal.ResultKind.CANCELLED -> TakeoverFallbackEvent.Cause.CANCELLED
+                                else -> TakeoverFallbackEvent.Cause.FAILED
+                            }
+                            UFOGalaxyApplication.runtimeController.notifyTakeoverFailed(
+                                takeoverId = envelope.takeover_id,
+                                taskId = envelope.task_id,
+                                traceId = envelope.trace_id,
+                                reason = outcome.error,
+                                cause = failureCause
                             )
                         }
                     }

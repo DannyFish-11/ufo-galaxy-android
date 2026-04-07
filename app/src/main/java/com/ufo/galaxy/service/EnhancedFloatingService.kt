@@ -34,6 +34,7 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
 import kotlinx.coroutines.CoroutineScope
@@ -196,6 +197,26 @@ class EnhancedFloatingService : Service() {
                     crossDeviceSwitch?.isChecked = false
                 }
                 showRegistrationFailureDialog(reason)
+            }
+        }
+
+        // PR-23: Observe takeover-level failures and clear stale floating-surface state.
+        // Unlike registration failures, individual takeover failures do NOT reset the
+        // cross-device toggle; they only clear the "active" task indicator so the user
+        // sees the current (failed) task outcome rather than a stuck running state.
+        serviceScope.launch {
+            UFOGalaxyApplication.runtimeController.takeoverFailure.collect { event ->
+                Log.w(
+                    TAG,
+                    "[FLOAT] Takeover failure: id=${event.takeoverId} task=${event.taskId} " +
+                        "cause=${event.cause.wireValue} reason=${event.reason}"
+                )
+                // Update task status to ERROR and hide any loading indicator so the
+                // floating overlay does not remain stuck in a "running" visual state.
+                taskStatus = STATUS_ERROR
+                lastTaskId = event.taskId.ifEmpty { event.takeoverId }.take(8)
+                updateStatusLabel()
+                loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
             }
         }
     }

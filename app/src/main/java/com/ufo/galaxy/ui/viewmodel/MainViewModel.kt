@@ -16,6 +16,7 @@ import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
+import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -247,6 +248,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 UFOGalaxyApplication.metricsRecorder.recordRegistrationFailure()
                 pushError(reason)
                 _uiState.update { it.copy(registrationFailure = reason, crossDeviceEnabled = false) }
+            }
+            .launchIn(viewModelScope)
+        // PR-23: Observe takeover-level failures and keep diagnostics state consistent.
+        // These events are individual task failures (FAILED/TIMEOUT/CANCELLED/DISCONNECT)
+        // that do not change the runtime state but do need to be reflected in the UI so
+        // that stale "active" indicators are cleared and recent errors are recorded.
+        UFOGalaxyApplication.runtimeController.takeoverFailure
+            .onEach { event ->
+                Log.w(
+                    TAG,
+                    "Takeover failure: id=${event.takeoverId} task=${event.taskId} " +
+                        "cause=${event.cause.wireValue} reason=${event.reason}"
+                )
+                // Record in the diagnostics recent-error list.
+                pushError(event.reason)
+                // Clear any isLoading flag that might have been set for this task, and
+                // record the failure outcome for the diagnostics recent-task list.
+                pushTaskId(event.taskId.ifEmpty { event.takeoverId }, event.cause.wireValue)
+                _uiState.update { it.copy(isLoading = false) }
             }
             .launchIn(viewModelScope)
     }
