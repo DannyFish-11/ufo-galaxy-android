@@ -46,6 +46,11 @@ import kotlin.coroutines.resume
  *    emits a human-readable reason via [registrationError] so both
  *    [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
  *    can show a dialog/alert — **never** silently log-only.
+ *  - **Takeover failure**: Individual delegated task failures (FAILED / TIMEOUT / CANCELLED
+ *    outcomes from [com.ufo.galaxy.agent.DelegatedTakeoverExecutor.execute], or a WS
+ *    disconnect while a takeover was active) are emitted via [takeoverFailure].  Surface
+ *    layers must observe this flow to clear stale "active" or "in-control" state without
+ *    independently transitioning the runtime (PR-23).
  *
  * Attached-runtime session (PR-7 / PR-14):
  *  - [attachedSession] exposes the current [AttachedRuntimeSession] as a [StateFlow].
@@ -137,6 +142,31 @@ class RuntimeController(
     val registrationError: SharedFlow<String> = _registrationError.asSharedFlow()
 
     /**
+     * One-time delegated-takeover failure events (PR-23 — cross-device failure and
+     * fallback state closure).
+     *
+     * Emits a [TakeoverFallbackEvent] whenever a delegated task execution terminates with
+     * a non-completion outcome:
+     *  - [TakeoverFallbackEvent.Cause.FAILED] — pipeline threw an unclassified exception.
+     *  - [TakeoverFallbackEvent.Cause.TIMEOUT] — execution exceeded its wall-clock budget.
+     *  - [TakeoverFallbackEvent.Cause.CANCELLED] — execution was cooperatively cancelled.
+     *  - [TakeoverFallbackEvent.Cause.DISCONNECT] — WS disconnected while a takeover was
+     *    active; the in-flight execution result is unknown.
+     *
+     * Surface layers ([com.ufo.galaxy.ui.viewmodel.MainViewModel],
+     * [com.ufo.galaxy.service.EnhancedFloatingService]) **must** collect this flow and
+     * clear any stale "active" or "in-control" indicators — **never** silently ignore the
+     * event.  The runtime state and [attachedSession] are intentionally NOT modified by
+     * [notifyTakeoverFailed]; the device stays in cross-device mode and the session remains
+     * valid for the next incoming delegated task.
+     *
+     * Callers that need to record the failure in diagnostics should also call [pushError]
+     * (or equivalent) after receiving the event.
+     */
+    private val _takeoverFailure = MutableSharedFlow<TakeoverFallbackEvent>(extraBufferCapacity = 4)
+    val takeoverFailure: SharedFlow<TakeoverFallbackEvent> = _takeoverFailure.asSharedFlow()
+
+    /**
      * Current attached-runtime session, or `null` when no session is active.
      *
      * A non-null value in [AttachedRuntimeSession.State.ATTACHED] indicates that this
@@ -203,7 +233,54 @@ class RuntimeController(
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    /**
+     * Permanent WS listener installed once at construction time to handle disconnect /
+     * reconnect events while the runtime is in [RuntimeState.Active] (PR-23).
+     *
+     * **Disconnect while Active** — closes the [attachedSession] with
+     * [AttachedRuntimeSession.DetachCause.DISCONNECT] so downstream observers
+     * ([hostSessionSnapshot]) immediately reflect the detached truth.  No state
+     * transition is triggered; the runtime stays [RuntimeState.Active] and the WS
+     * client's built-in reconnect will re-establish the connection.
+     *
+     * **Reconnect while Active** — reopens the [attachedSession] so a fresh session
+     * (with a new [_currentRuntimeSessionId]) is created for the new WS connection.
+     * This prevents state drift where the old (now-stale) ATTACHED session was observed
+     * by host-registry consumers after a transparent reconnect.
+     *
+     * The listener deliberately ignores `onConnected` / `onDisconnected` events while
+     * NOT in [RuntimeState.Active] so it does not interfere with the one-shot listeners
+     * installed by [start] and [connectIfEnabled].
+     */
+    private val permanentWsListener = object : GalaxyWebSocketClient.Listener {
+        override fun onConnected() {
+            // Reopen session on reconnect only when the runtime was already Active
+            // (i.e. this is a transparent reconnect, not the initial connection).
+            if (_state.value == RuntimeState.Active && _attachedSession.value?.isAttached != true) {
+                Log.i(TAG, "[RUNTIME] WS reconnected while Active — reopening attached session")
+                GalaxyLogger.log(TAG, mapOf("event" to "runtime_ws_reconnected"))
+                openAttachedSession()
+            }
+        }
+
+        override fun onDisconnected() {
+            // Close the attached session only when the runtime is Active — transient WS
+            // drops should not leave a stale ATTACHED session visible to host-registry
+            // consumers.  The runtime state stays Active; the WS client will reconnect.
+            if (_state.value == RuntimeState.Active) {
+                Log.w(TAG, "[RUNTIME] WS disconnected while Active — closing attached session")
+                GalaxyLogger.log(TAG, mapOf("event" to "runtime_ws_disconnected_active"))
+                closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
+            }
+        }
+
+        override fun onError(error: String) = Unit
+        override fun onMessage(message: String) = Unit
+    }
+
+    init {
+        webSocketClient.addListener(permanentWsListener)
+    }
 
     /**
      * Starts the cross-device runtime:
@@ -427,6 +504,70 @@ class RuntimeController(
         Log.d(TAG, "[RUNTIME] Remote task finished — local loop unblocked")
         GalaxyLogger.log(TAG, mapOf("event" to "remote_task_finished"))
         loopController.clearRemoteTaskBlock()
+    }
+
+    /**
+     * Notifies all surface layers that a delegated-takeover execution ended with a
+     * non-completion outcome (PR-23 — cross-device failure and fallback state closure).
+     *
+     * This is the **canonical failure signal path** for individual takeover failures.
+     * It emits a [TakeoverFallbackEvent] on [takeoverFailure] so that
+     * [com.ufo.galaxy.ui.viewmodel.MainViewModel] and
+     * [com.ufo.galaxy.service.EnhancedFloatingService] can clear any stale "active"
+     * or "in-control" state they may have set when the takeover started.
+     *
+     * ## What this method does NOT do
+     *
+     * - Does **not** change [state] or close [attachedSession] — takeover-level failures
+     *   do not represent a loss of the cross-device session; the device remains attached
+     *   and ready for the next incoming delegated task.
+     * - Does **not** call [onRemoteTaskFinished] — that must be called by the caller
+     *   (typically in a `finally` block around the entire takeover coroutine) so the loop
+     *   block is cleared regardless of whether this method is called.
+     *
+     * ## Ordering guarantee
+     *
+     * Callers must call [onRemoteTaskFinished] **after** (or in the same `finally` block
+     * as) [notifyTakeoverFailed] so the [LoopController] block is cleared in the correct
+     * order: failure event observed → local execution re-enabled.
+     *
+     * @param takeoverId  Stable takeover identifier from the original request envelope.
+     * @param taskId      Task identifier from the original request envelope.
+     * @param traceId     Trace identifier for cross-layer log correlation.
+     * @param reason      Human-readable failure description for diagnostics.
+     * @param cause       Machine-readable failure classification.
+     */
+    suspend fun notifyTakeoverFailed(
+        takeoverId: String,
+        taskId: String,
+        traceId: String,
+        reason: String,
+        cause: TakeoverFallbackEvent.Cause
+    ) {
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "takeover_failed",
+                "takeover_id" to takeoverId,
+                "task_id" to taskId,
+                "trace_id" to traceId,
+                "reason" to reason,
+                "cause" to cause.wireValue
+            )
+        )
+        Log.w(
+            TAG,
+            "[RUNTIME] Takeover failed: takeover_id=$takeoverId task_id=$taskId " +
+                "trace_id=$traceId reason=$reason cause=${cause.wireValue}"
+        )
+        _takeoverFailure.emit(
+            TakeoverFallbackEvent(
+                takeoverId = takeoverId,
+                taskId = taskId,
+                traceId = traceId,
+                reason = reason,
+                cause = cause
+            )
+        )
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
