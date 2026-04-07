@@ -1,7 +1,7 @@
 package com.ufo.galaxy.runtime
 
 /**
- * **Host-facing delegated target readiness projection** (PR-20, post-#533 dual-repo
+ * **Host-facing delegated target readiness projection** (PR-20 / PR-24, post-#533 dual-repo
  * runtime unification master plan — Host-Facing Delegated Target Readiness Projection,
  * Android side).
  *
@@ -22,10 +22,12 @@ package com.ufo.galaxy.runtime
  *
  * [DelegatedTargetReadinessProjection] resolves this by:
  *  1. Embedding the full nine-field [snapshot] for identity and provenance tracing.
- *  2. Adding a pre-computed [isSuitableTarget] boolean — the authoritative decision.
+ *  2. Adding a pre-computed [isSuitableTarget] boolean — the authoritative suitability decision.
  *  3. Adding an [unsuitabilityReason] for diagnostics and policy explainability.
+ *  4. Adding a [selectionOutcome] — the canonical three-way selection-truth outcome that
+ *     downstream multi-target selection can consume directly without further inference (PR-24).
  *
- * ## Eleven canonical fields
+ * ## Twelve canonical fields
  *
  * | Field                    | Wire key                                   | Always present? |
  * |--------------------------|--------------------------------------------|-----------------|
@@ -39,6 +41,7 @@ package com.ufo.galaxy.runtime
  * | [posture]                | [KEY_POSTURE]                              | yes             |
  * | [isSuitableTarget]       | [KEY_IS_SUITABLE_TARGET]                   | yes             |
  * | [unsuitabilityReason]    | [KEY_UNSUITABILITY_REASON]                 | conditional     |
+ * | [selectionOutcome]       | [KEY_SELECTION_OUTCOME]                    | yes             |
  *
  * ## Suitability semantics
  *
@@ -53,19 +56,31 @@ package com.ufo.galaxy.runtime
  *  - [UNSUITABILITY_INVALIDATED]  — session was closed via INVALIDATION.
  *  - [UNSUITABILITY_NOT_ATTACHED] — session is DETACHING or DETACHED (non-invalidation).
  *
+ * ## Selection outcome semantics (PR-24)
+ *
+ * [selectionOutcome] maps the suitability/readiness truth to a canonical three-way outcome
+ * that downstream multi-target selection can consume without re-inferring from individual
+ * fields.  This eliminates implicit first-active or explicit-target-only assumptions:
+ *  - [SelectionOutcome.SELECTED]  — target is currently suitable; may receive delegated execution.
+ *  - [SelectionOutcome.FALLBACK]  — target is temporarily unavailable (e.g. disconnected) but
+ *    is not permanently excluded; eligible for fallback use if the primary target fails.
+ *  - [SelectionOutcome.REJECTED]  — target session was permanently invalidated; must not be
+ *    selected or used as a fallback.
+ *
  * ## State-transition semantics
  *
- * | Lifecycle event | [isSuitableTarget] | [unsuitabilityReason]          |
- * |-----------------|--------------------|--------------------------------|
- * | attach          | `true`             | `null`                         |
- * | detach          | `false`            | [UNSUITABILITY_NOT_ATTACHED]   |
- * | reconnect       | `true`             | `null`                         |
- * | invalidate      | `false`            | [UNSUITABILITY_INVALIDATED]    |
+ * | Lifecycle event | [isSuitableTarget] | [unsuitabilityReason]          | [selectionOutcome]          |
+ * |-----------------|--------------------|---------------------------------|-----------------------------|
+ * | attach          | `true`             | `null`                         | [SelectionOutcome.SELECTED] |
+ * | detach          | `false`            | [UNSUITABILITY_NOT_ATTACHED]   | [SelectionOutcome.FALLBACK] |
+ * | reconnect       | `true`             | `null`                         | [SelectionOutcome.SELECTED] |
+ * | invalidate      | `false`            | [UNSUITABILITY_INVALIDATED]    | [SelectionOutcome.REJECTED] |
  *
  * ## Obtaining an instance
  *
- * Use [RuntimeController.currentDelegatedTargetReadinessProjection]; do not construct
- * directly.  In tests, use [from] with a manually constructed
+ * Use [RuntimeController.delegatedTargetReadinessProjection] for continuous observable updates,
+ * or [RuntimeController.currentDelegatedTargetReadinessProjection] for a point-in-time query.
+ * Do not construct directly.  In tests, use [from] with a manually constructed
  * [AttachedRuntimeHostSessionSnapshot].
  *
  * @property snapshot                 Full nine-field [AttachedRuntimeHostSessionSnapshot]
@@ -81,6 +96,27 @@ data class DelegatedTargetReadinessProjection(
     val isSuitableTarget: Boolean,
     val unsuitabilityReason: String?
 ) {
+
+    // ── Canonical selection-truth outcome (PR-24) ─────────────────────────────
+
+    /**
+     * Canonical three-way selection-truth outcome derived from [isSuitableTarget] and
+     * [unsuitabilityReason] (PR-24 — stabilize host-facing readiness and target suitability
+     * semantics).
+     *
+     * Downstream multi-target selection consumes this field directly to classify each
+     * candidate target without re-inferring meaning from the underlying boolean and reason
+     * string.  This is the primary mechanism by which multi-target situations are prevented
+     * from collapsing to first-active or explicit-target-only assumptions.
+     *
+     * @see SelectionOutcome
+     */
+    val selectionOutcome: SelectionOutcome
+        get() = when {
+            isSuitableTarget -> SelectionOutcome.SELECTED
+            unsuitabilityReason == UNSUITABILITY_INVALIDATED -> SelectionOutcome.REJECTED
+            else -> SelectionOutcome.FALLBACK
+        }
 
     // ── Convenience accessors (delegate to snapshot) ──────────────────────────
 
@@ -116,6 +152,7 @@ data class DelegatedTargetReadinessProjection(
      * All nine snapshot fields are included, forwarded from
      * [AttachedRuntimeHostSessionSnapshot.toMap].  Additionally:
      *  - [KEY_IS_SUITABLE_TARGET] is always present.
+     *  - [KEY_SELECTION_OUTCOME] is always present (wire value of [selectionOutcome]).
      *  - [KEY_UNSUITABILITY_REASON] is included **only** when [unsuitabilityReason]
      *    is non-`null` (i.e. when [isSuitableTarget] is `false`).
      *
@@ -125,6 +162,7 @@ data class DelegatedTargetReadinessProjection(
     fun toMap(): Map<String, Any> = buildMap {
         putAll(snapshot.toMap())
         put(KEY_IS_SUITABLE_TARGET, isSuitableTarget)
+        put(KEY_SELECTION_OUTCOME, selectionOutcome.wireValue)
         unsuitabilityReason?.let { put(KEY_UNSUITABILITY_REASON, it) }
     }
 
@@ -173,6 +211,12 @@ data class DelegatedTargetReadinessProjection(
          */
         const val KEY_UNSUITABILITY_REASON = "readiness_unsuitability_reason"
 
+        /**
+         * Wire key for [selectionOutcome] ([SelectionOutcome.wireValue]).
+         * Always present in [toMap] output (PR-24).
+         */
+        const val KEY_SELECTION_OUTCOME = "readiness_selection_outcome"
+
         // ── Unsuitability reason constants ────────────────────────────────────
 
         /**
@@ -197,6 +241,7 @@ data class DelegatedTargetReadinessProjection(
         val ALWAYS_PRESENT_KEYS: Set<String> = buildSet {
             addAll(AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS)
             add(KEY_IS_SUITABLE_TARGET)
+            add(KEY_SELECTION_OUTCOME)
         }
 
         // ── Factory ───────────────────────────────────────────────────────────
@@ -215,6 +260,7 @@ data class DelegatedTargetReadinessProjection(
          *  - [unsuitabilityReason] is [UNSUITABILITY_NOT_ATTACHED] when the session is not
          *    attached and not invalidated.
          *  - [unsuitabilityReason] is `null` when [isSuitableTarget] is `true`.
+         *  - [selectionOutcome] is derived from [isSuitableTarget] and [unsuitabilityReason].
          *
          * @param snapshot The [AttachedRuntimeHostSessionSnapshot] to evaluate.
          * @return A fully populated [DelegatedTargetReadinessProjection].
@@ -235,5 +281,37 @@ data class DelegatedTargetReadinessProjection(
                 unsuitabilityReason = unsuitabilityReason
             )
         }
+    }
+
+    // ── SelectionOutcome — canonical three-way selection-truth (PR-24) ────────
+
+    /**
+     * Canonical three-way selection-truth outcome for a delegated target candidate (PR-24).
+     *
+     * Downstream multi-target selection policy consumes [selectionOutcome] to classify each
+     * candidate directly, preventing implicit first-active or explicit-target-only assumptions.
+     *
+     * @property wireValue Stable, machine-readable string emitted in [toMap] under
+     *                     [KEY_SELECTION_OUTCOME].  Never changes between releases.
+     */
+    enum class SelectionOutcome(val wireValue: String) {
+        /**
+         * The target is currently attached, reuse-valid, and postured correctly.
+         * It may receive a new delegated execution immediately.
+         */
+        SELECTED("selected"),
+
+        /**
+         * The target session was permanently invalidated (e.g. identity mismatch, auth
+         * expiry).  It must not be selected and is not eligible for fallback use.
+         */
+        REJECTED("rejected"),
+
+        /**
+         * The target is temporarily not attached (e.g. transient disconnect, session
+         * disabled), but has not been permanently invalidated.  It may be promoted to
+         * [SELECTED] after reconnect, or used as a fallback if the primary target fails.
+         */
+        FALLBACK("fallback")
     }
 }
