@@ -171,6 +171,35 @@ class RuntimeController(
     @Volatile
     private var _currentRuntimeSessionId: String? = null
 
+    /**
+     * The **authoritative observable host-session projection** for this Android attached
+     * runtime (PR-22 — attached-runtime lifecycle projection consolidation).
+     *
+     * This [StateFlow] is the single, canonical observable path through which all
+     * external consumers (host registry, diagnostics, test assertions) should observe
+     * attached-runtime session truth.  It is guaranteed to emit a fresh
+     * [AttachedRuntimeHostSessionSnapshot] on every lifecycle transition:
+     *  - **attach** — non-`null` snapshot with [AttachedRuntimeHostSessionSnapshot.isReuseValid]`=true`.
+     *  - **detach** — snapshot with [AttachedRuntimeHostSessionSnapshot.isReuseValid]`=false`.
+     *  - **invalidate** — snapshot with [AttachedRuntimeHostSessionSnapshot.invalidationReason] set.
+     *  - **reconnect** — snapshot with a new [AttachedRuntimeHostSessionSnapshot.runtimeSessionId].
+     *  - **delegated execution accepted** — snapshot with incremented
+     *    [AttachedRuntimeHostSessionSnapshot.delegatedExecutionCount].
+     *
+     * `null` before the first [openAttachedSession] call.
+     *
+     * This flow is **derived exclusively from [_attachedSession] and [_currentRuntimeSessionId]**
+     * via [updateHostSessionSnapshot]; no other component should update the underlying
+     * [_hostSessionSnapshot] directly.  All attached-runtime mutations must go through
+     * [openAttachedSession], [closeAttachedSession], or [recordDelegatedExecutionAccepted]
+     * on [RuntimeController], which keep this projection in sync automatically.
+     *
+     * For a point-in-time query, use [currentHostSessionSnapshot].
+     */
+    private val _hostSessionSnapshot = MutableStateFlow<AttachedRuntimeHostSessionSnapshot?>(null)
+    val hostSessionSnapshot: StateFlow<AttachedRuntimeHostSessionSnapshot?> =
+        _hostSessionSnapshot.asStateFlow()
+
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -568,6 +597,7 @@ class RuntimeController(
         val current = _attachedSession.value ?: return
         if (!current.isAttached) return
         _attachedSession.value = current.withExecutionAccepted()
+        updateHostSessionSnapshot()
         Log.d(
             TAG,
             "[RUNTIME] Delegated execution accepted: session_id=${current.sessionId} " +
@@ -601,6 +631,7 @@ class RuntimeController(
         // Generate a fresh per-connection runtime session ID for the snapshot projection (PR-19).
         _currentRuntimeSessionId = UUID.randomUUID().toString()
         _attachedSession.value = session
+        updateHostSessionSnapshot()
         Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId} runtime_session_id=${_currentRuntimeSessionId}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_attached") + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
@@ -626,6 +657,7 @@ class RuntimeController(
         if (current.isDetached) return
         val detached = current.detachedWith(cause)
         _attachedSession.value = detached
+        updateHostSessionSnapshot()
         Log.i(TAG, "[RUNTIME] Attached runtime session closed: session_id=${detached.sessionId} cause=${cause.wireValue}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_detached") + detached.toMetadataMap())
         // Sync host descriptor participation state to INACTIVE.
@@ -635,6 +667,20 @@ class RuntimeController(
             hostDescriptor = updated
             webSocketClient.setRuntimeHostDescriptor(updated)
         }
+    }
+
+    // ── Snapshot projection sync ──────────────────────────────────────────────
+
+    /**
+     * Recomputes and publishes the [AttachedRuntimeHostSessionSnapshot] on
+     * [_hostSessionSnapshot].
+     *
+     * Called after every mutation of [_attachedSession] or [_currentRuntimeSessionId]
+     * to keep [hostSessionSnapshot] in sync with the canonical session truth.  This is
+     * the **only** place [_hostSessionSnapshot] is written, ensuring a single update path.
+     */
+    private fun updateHostSessionSnapshot() {
+        _hostSessionSnapshot.value = currentHostSessionSnapshot()
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
