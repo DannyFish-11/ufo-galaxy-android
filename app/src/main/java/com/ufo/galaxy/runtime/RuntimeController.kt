@@ -230,6 +230,44 @@ class RuntimeController(
     val hostSessionSnapshot: StateFlow<AttachedRuntimeHostSessionSnapshot?> =
         _hostSessionSnapshot.asStateFlow()
 
+    /**
+     * The **authoritative observable delegated-target readiness projection** for this
+     * Android attached runtime (PR-24 — stabilize host-facing readiness and target
+     * suitability semantics).
+     *
+     * This [StateFlow] is the stable, canonical observable path through which all
+     * external consumers (host registry, diagnostics, multi-target selection) observe
+     * the combined readiness + suitability + selection-outcome truth.  It is guaranteed
+     * to emit a fresh [DelegatedTargetReadinessProjection] on every lifecycle transition
+     * — mirroring [hostSessionSnapshot] but adding the pre-computed
+     * [DelegatedTargetReadinessProjection.isSuitableTarget],
+     * [DelegatedTargetReadinessProjection.unsuitabilityReason], and
+     * [DelegatedTargetReadinessProjection.selectionOutcome] fields so that downstream
+     * multi-target selection does not have to infer outcomes from scattered fields.
+     *
+     * Emitted value semantics:
+     *  - **attach** — [DelegatedTargetReadinessProjection.selectionOutcome] ==
+     *    [DelegatedTargetReadinessProjection.SelectionOutcome.SELECTED].
+     *  - **detach / disconnect** — [DelegatedTargetReadinessProjection.selectionOutcome] ==
+     *    [DelegatedTargetReadinessProjection.SelectionOutcome.FALLBACK].
+     *  - **invalidate** — [DelegatedTargetReadinessProjection.selectionOutcome] ==
+     *    [DelegatedTargetReadinessProjection.SelectionOutcome.REJECTED].
+     *  - **reconnect** — [DelegatedTargetReadinessProjection.selectionOutcome] ==
+     *    [DelegatedTargetReadinessProjection.SelectionOutcome.SELECTED].
+     *
+     * `null` before the first [openAttachedSession] call.
+     *
+     * This flow is **derived exclusively from [_hostSessionSnapshot]** via
+     * [updateHostSessionSnapshot]; no other component should update the underlying
+     * [_delegatedTargetReadinessProjection] directly.
+     *
+     * For a point-in-time query, use [currentDelegatedTargetReadinessProjection].
+     */
+    private val _delegatedTargetReadinessProjection =
+        MutableStateFlow<DelegatedTargetReadinessProjection?>(null)
+    val delegatedTargetReadinessProjection: StateFlow<DelegatedTargetReadinessProjection?> =
+        _delegatedTargetReadinessProjection.asStateFlow()
+
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -817,11 +855,17 @@ class RuntimeController(
      * [_hostSessionSnapshot].
      *
      * Called after every mutation of [_attachedSession] or [_currentRuntimeSessionId]
-     * to keep [hostSessionSnapshot] in sync with the canonical session truth.  This is
-     * the **only** place [_hostSessionSnapshot] is written, ensuring a single update path.
+     * to keep [hostSessionSnapshot] and [delegatedTargetReadinessProjection] in sync with
+     * the canonical session truth.  This is the **only** place [_hostSessionSnapshot] and
+     * [_delegatedTargetReadinessProjection] are written, ensuring a single update path
+     * with no duplicate or divergent truth surfaces (PR-24).
      */
     private fun updateHostSessionSnapshot() {
-        _hostSessionSnapshot.value = currentHostSessionSnapshot()
+        val snapshot = currentHostSessionSnapshot()
+        _hostSessionSnapshot.value = snapshot
+        _delegatedTargetReadinessProjection.value = snapshot?.let {
+            DelegatedTargetReadinessProjection.from(it)
+        }
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────

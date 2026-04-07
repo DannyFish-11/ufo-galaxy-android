@@ -19,8 +19,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * Unit tests for [DelegatedTargetReadinessProjection] (PR-20, post-#533 dual-repo runtime
- * unification master plan — Host-Facing Delegated Target Readiness Projection, Android side).
+ * Unit tests for [DelegatedTargetReadinessProjection] (PR-20 / PR-24, post-#533 dual-repo
+ * runtime unification master plan — Host-Facing Delegated Target Readiness Projection,
+ * Android side).
  *
  * [DelegatedTargetReadinessProjection] is the authoritative host-facing projection that
  * the main-repository delegated target selection policy consumes to decide whether this
@@ -32,45 +33,64 @@ import org.junit.rules.TemporaryFolder
  *  - KEY_SESSION_ID forwards the snapshot's KEY_SESSION_ID value.
  *  - KEY_IS_SUITABLE_TARGET is "readiness_is_suitable_target".
  *  - KEY_UNSUITABILITY_REASON is "readiness_unsuitability_reason".
+ *  - KEY_SELECTION_OUTCOME is "readiness_selection_outcome".
  *
  * ### Unsuitability reason constants
  *  - UNSUITABILITY_INVALIDATED is "invalidated".
  *  - UNSUITABILITY_NOT_ATTACHED is "not_attached".
  *
+ * ### SelectionOutcome wire values
+ *  - SelectionOutcome.SELECTED wireValue is "selected".
+ *  - SelectionOutcome.REJECTED wireValue is "rejected".
+ *  - SelectionOutcome.FALLBACK wireValue is "fallback".
+ *
  * ### from — attach / suitable projection
  *  - isSuitableTarget is true for an ATTACHED session.
  *  - unsuitabilityReason is null when suitable.
+ *  - selectionOutcome is SELECTED for an ATTACHED session.
  *  - snapshot fields are preserved (sessionId, deviceId, runtimeSessionId).
  *  - posture is join_runtime for ATTACHED session.
  *  - toMap contains KEY_IS_SUITABLE_TARGET = true.
+ *  - toMap contains KEY_SELECTION_OUTCOME = "selected" when ATTACHED.
  *  - toMap does NOT contain KEY_UNSUITABILITY_REASON when suitable.
  *
  * ### from — detach / not-suitable projection
  *  - isSuitableTarget is false after EXPLICIT_DETACH.
  *  - unsuitabilityReason is UNSUITABILITY_NOT_ATTACHED after EXPLICIT_DETACH.
+ *  - selectionOutcome is FALLBACK after EXPLICIT_DETACH.
  *  - isSuitableTarget is false after DISCONNECT.
  *  - unsuitabilityReason is UNSUITABILITY_NOT_ATTACHED after DISCONNECT.
+ *  - selectionOutcome is FALLBACK after DISCONNECT.
  *  - isSuitableTarget is false after DISABLE.
  *  - unsuitabilityReason is UNSUITABILITY_NOT_ATTACHED after DISABLE.
+ *  - selectionOutcome is FALLBACK after DISABLE.
  *  - toMap contains KEY_UNSUITABILITY_REASON when not suitable for non-invalidation reasons.
+ *  - toMap contains KEY_SELECTION_OUTCOME = "fallback" after detach.
  *
  * ### from — invalidate projection
  *  - isSuitableTarget is false after INVALIDATION.
  *  - unsuitabilityReason is UNSUITABILITY_INVALIDATED after INVALIDATION.
+ *  - selectionOutcome is REJECTED after INVALIDATION.
  *  - toMap contains KEY_UNSUITABILITY_REASON = UNSUITABILITY_INVALIDATED.
+ *  - toMap contains KEY_SELECTION_OUTCOME = "rejected" after INVALIDATION.
  *
  * ### from — detaching projection
  *  - isSuitableTarget is false while session is in DETACHING state.
  *  - unsuitabilityReason is UNSUITABILITY_NOT_ATTACHED in DETACHING state.
+ *  - selectionOutcome is FALLBACK in DETACHING state.
  *
  * ### from — delegated execution count
  *  - delegatedExecutionCount reflects updated count after withExecutionAccepted.
  *  - isSuitableTarget remains true after execution count increments on ATTACHED session.
+ *  - selectionOutcome remains SELECTED after execution count increments.
  *
  * ### Readiness transition correctness
  *  - attach → suitable, detach → not suitable.
  *  - attach → suitable, invalidate → not suitable (with UNSUITABILITY_INVALIDATED).
  *  - attach → suitable, reconnect (new runtimeSessionId) → suitable again.
+ *  - attach → SELECTED, detach → FALLBACK, selectionOutcome transitions are stable.
+ *  - attach → SELECTED, invalidate → REJECTED, selectionOutcome transitions are stable.
+ *  - attach → SELECTED, reconnect → SELECTED again, selectionOutcome is stable.
  *
  * ### Host-facing consistency — toMap
  *  - ALWAYS_PRESENT_KEYS all present on ATTACHED projection.
@@ -79,7 +99,8 @@ import org.junit.rules.TemporaryFolder
  *  - toMap includes all nine snapshot fields for DETACHED projection.
  *
  * ### ALWAYS_PRESENT_KEYS constant
- *  - ALWAYS_PRESENT_KEYS contains exactly 9 entries.
+ *  - ALWAYS_PRESENT_KEYS contains exactly 10 entries.
+ *  - KEY_SELECTION_OUTCOME is in ALWAYS_PRESENT_KEYS.
  *  - KEY_UNSUITABILITY_REASON is NOT in ALWAYS_PRESENT_KEYS.
  *  - KEY_INVALIDATION_REASON is NOT in ALWAYS_PRESENT_KEYS.
  *
@@ -142,6 +163,40 @@ class DelegatedTargetReadinessProjectionTest {
         )
     }
 
+    @Test
+    fun `KEY_SELECTION_OUTCOME is readiness_selection_outcome`() {
+        assertEquals(
+            "readiness_selection_outcome",
+            DelegatedTargetReadinessProjection.KEY_SELECTION_OUTCOME
+        )
+    }
+
+    // ── SelectionOutcome wire values ──────────────────────────────────────────
+
+    @Test
+    fun `SelectionOutcome SELECTED wireValue is selected`() {
+        assertEquals(
+            "selected",
+            DelegatedTargetReadinessProjection.SelectionOutcome.SELECTED.wireValue
+        )
+    }
+
+    @Test
+    fun `SelectionOutcome REJECTED wireValue is rejected`() {
+        assertEquals(
+            "rejected",
+            DelegatedTargetReadinessProjection.SelectionOutcome.REJECTED.wireValue
+        )
+    }
+
+    @Test
+    fun `SelectionOutcome FALLBACK wireValue is fallback`() {
+        assertEquals(
+            "fallback",
+            DelegatedTargetReadinessProjection.SelectionOutcome.FALLBACK.wireValue
+        )
+    }
+
     // ── Unsuitability reason constants ────────────────────────────────────────
 
     @Test
@@ -169,6 +224,14 @@ class DelegatedTargetReadinessProjectionTest {
         assertNull(
             "unsuitabilityReason must be null when session is suitable",
             readinessFrom(freshSession()).unsuitabilityReason
+        )
+    }
+
+    @Test
+    fun `from ATTACHED selectionOutcome is SELECTED`() {
+        assertEquals(
+            DelegatedTargetReadinessProjection.SelectionOutcome.SELECTED,
+            readinessFrom(freshSession()).selectionOutcome
         )
     }
 
@@ -202,6 +265,15 @@ class DelegatedTargetReadinessProjectionTest {
     }
 
     @Test
+    fun `toMap contains KEY_SELECTION_OUTCOME selected when ATTACHED`() {
+        val map = readinessFrom(freshSession()).toMap()
+        assertEquals(
+            DelegatedTargetReadinessProjection.SelectionOutcome.SELECTED.wireValue,
+            map[DelegatedTargetReadinessProjection.KEY_SELECTION_OUTCOME]
+        )
+    }
+
+    @Test
     fun `toMap does NOT contain KEY_UNSUITABILITY_REASON when suitable`() {
         val map = readinessFrom(freshSession()).toMap()
         assertFalse(
@@ -228,6 +300,15 @@ class DelegatedTargetReadinessProjectionTest {
     }
 
     @Test
+    fun `from EXPLICIT_DETACH selectionOutcome is FALLBACK`() {
+        val detached = freshSession().detachedWith(AttachedRuntimeSession.DetachCause.EXPLICIT_DETACH)
+        assertEquals(
+            DelegatedTargetReadinessProjection.SelectionOutcome.FALLBACK,
+            readinessFrom(detached).selectionOutcome
+        )
+    }
+
+    @Test
     fun `from DISCONNECT isSuitableTarget is false`() {
         val detached = freshSession().detachedWith(AttachedRuntimeSession.DetachCause.DISCONNECT)
         assertFalse(readinessFrom(detached).isSuitableTarget)
@@ -239,6 +320,15 @@ class DelegatedTargetReadinessProjectionTest {
         assertEquals(
             DelegatedTargetReadinessProjection.UNSUITABILITY_NOT_ATTACHED,
             readinessFrom(detached).unsuitabilityReason
+        )
+    }
+
+    @Test
+    fun `from DISCONNECT selectionOutcome is FALLBACK`() {
+        val detached = freshSession().detachedWith(AttachedRuntimeSession.DetachCause.DISCONNECT)
+        assertEquals(
+            DelegatedTargetReadinessProjection.SelectionOutcome.FALLBACK,
+            readinessFrom(detached).selectionOutcome
         )
     }
 
@@ -258,12 +348,31 @@ class DelegatedTargetReadinessProjectionTest {
     }
 
     @Test
+    fun `from DISABLE selectionOutcome is FALLBACK`() {
+        val detached = freshSession().detachedWith(AttachedRuntimeSession.DetachCause.DISABLE)
+        assertEquals(
+            DelegatedTargetReadinessProjection.SelectionOutcome.FALLBACK,
+            readinessFrom(detached).selectionOutcome
+        )
+    }
+
+    @Test
     fun `toMap contains KEY_UNSUITABILITY_REASON when not suitable for non-invalidation reasons`() {
         val detached = freshSession().detachedWith(AttachedRuntimeSession.DetachCause.DISCONNECT)
         val map = readinessFrom(detached).toMap()
         assertTrue(
             "KEY_UNSUITABILITY_REASON must be present when session is not suitable",
             map.containsKey(DelegatedTargetReadinessProjection.KEY_UNSUITABILITY_REASON)
+        )
+    }
+
+    @Test
+    fun `toMap contains KEY_SELECTION_OUTCOME fallback after detach`() {
+        val detached = freshSession().detachedWith(AttachedRuntimeSession.DetachCause.DISCONNECT)
+        val map = readinessFrom(detached).toMap()
+        assertEquals(
+            DelegatedTargetReadinessProjection.SelectionOutcome.FALLBACK.wireValue,
+            map[DelegatedTargetReadinessProjection.KEY_SELECTION_OUTCOME]
         )
     }
 
@@ -439,8 +548,8 @@ class DelegatedTargetReadinessProjectionTest {
     // ── ALWAYS_PRESENT_KEYS constant ──────────────────────────────────────────
 
     @Test
-    fun `ALWAYS_PRESENT_KEYS contains exactly 9 entries`() {
-        assertEquals(9, DelegatedTargetReadinessProjection.ALWAYS_PRESENT_KEYS.size)
+    fun `ALWAYS_PRESENT_KEYS contains exactly 10 entries`() {
+        assertEquals(10, DelegatedTargetReadinessProjection.ALWAYS_PRESENT_KEYS.size)
     }
 
     @Test
