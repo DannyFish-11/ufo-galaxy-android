@@ -57,9 +57,14 @@ import kotlin.coroutines.resume
  *    session's [AttachedRuntimeSession.delegatedExecutionCount] each time a delegated unit
  *    is accepted, without touching the session identity or state (PR-14).
  *  - The session is detached when [stop] is called ([AttachedRuntimeSession.DetachCause.DISABLE]),
- *    when the WS connection is lost ([AttachedRuntimeSession.DetachCause.DISCONNECT]),
+ *    when the WS connection is lost ([AttachedRuntimeSession.DetachCause.DISCONNECT] — handled
+ *    by the persistent [wsSessionLifecycleListener] installed at construction time, PR-22),
  *    when a registration failure occurs ([AttachedRuntimeSession.DetachCause.DISCONNECT]), or
  *    when [invalidateSession] is called ([AttachedRuntimeSession.DetachCause.INVALIDATION]).
+ *  - After a spontaneous WS drop, the WS client's built-in backoff reconnect logic will
+ *    reconnect automatically; [wsSessionLifecycleListener] detects this reconnect and opens a
+ *    **new** [AttachedRuntimeSession] (new [AttachedRuntimeSession.sessionId]) so the host can
+ *    distinguish the post-reconnect session from the previous one (PR-22 reconnect semantics).
  *  - When a [hostDescriptor] is provided, its [RuntimeHostDescriptor.HostParticipationState]
  *    is kept in sync: [RuntimeHostDescriptor.HostParticipationState.ACTIVE] while the session
  *    is [AttachedRuntimeSession.State.ATTACHED], [RuntimeHostDescriptor.HostParticipationState.INACTIVE]
@@ -147,10 +152,15 @@ class RuntimeController(
      * Lifecycle:
      *  - Set to a new [AttachedRuntimeSession] in [AttachedRuntimeSession.State.ATTACHED]
      *    when the runtime transitions to [RuntimeState.Active].
-     *  - Transitioned to [AttachedRuntimeSession.State.DETACHED] (and then cleared to `null`
-     *    after a brief period) on [stop], WS disconnect, registration failure, or [invalidateSession].
+     *  - Transitioned to [AttachedRuntimeSession.State.DETACHED] on [stop] (cause DISABLE),
+     *    spontaneous WS disconnect handled by [wsSessionLifecycleListener] (cause DISCONNECT,
+     *    PR-22), registration failure (cause DISCONNECT), or [invalidateSession] (cause
+     *    INVALIDATION).
+     *  - After a spontaneous WS disconnect and automatic reconnect, a **new**
+     *    [AttachedRuntimeSession] is opened by [wsSessionLifecycleListener] so the host can
+     *    observe the replacement as a new session with a distinct [AttachedRuntimeSession.sessionId].
      *
-     * (PR-7 — Android Attached-Runtime Session Semantics)
+     * (PR-7 — Android Attached-Runtime Session Semantics; PR-22 — Lifecycle Consolidation)
      */
     private val _attachedSession = MutableStateFlow<AttachedRuntimeSession?>(null)
     val attachedSession: StateFlow<AttachedRuntimeSession?> = _attachedSession.asStateFlow()
@@ -173,6 +183,84 @@ class RuntimeController(
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // ── PR-22: Persistent WS session lifecycle guard ──────────────────────────
+    //
+    // Maintains attached-session consistency across spontaneous WS disconnect /
+    // automatic reconnect events for the lifetime of the controller.
+    //
+    // Invariants enforced:
+    //  - When the WS drops while the runtime is Active and cross-device is still
+    //    enabled (i.e. not a user-initiated stop), the attached session is closed
+    //    with DISCONNECT cause and the runtime transitions to LocalOnly.
+    //  - When the WS client's built-in backoff reconnects after such a drop (state
+    //    is LocalOnly and cross-device is still enabled), a new attached session is
+    //    opened and the runtime returns to Active.
+    //
+    // Guard conditions:
+    //  - The DISCONNECT path acts only when state is Active (never Starting/LocalOnly)
+    //    so it does not interfere with the failure paths inside start() /
+    //    connectIfEnabled().
+    //  - The reconnect path acts only when state is LocalOnly (never Starting/Active)
+    //    so it does not race with the initial-connection logic in start() /
+    //    connectIfEnabled().
+    //  - Both paths check settings.crossDeviceEnabled so that stop() — which sets
+    //    crossDeviceEnabled=false before calling disconnect() — is never mistaken for
+    //    a spontaneous network drop.
+    //
+    // All session mutations here go through openAttachedSession() / closeAttachedSession()
+    // which are the sole session-mutation functions, keeping this controller the single
+    // lifecycle authority (PR-22 constraint).
+    internal val wsSessionLifecycleListener = object : GalaxyWebSocketClient.Listener {
+
+        /**
+         * Handles automatic WS reconnect after a spontaneous disconnect.
+         *
+         * The state fingerprint `LocalOnly + crossDeviceEnabled=true` is left exclusively
+         * by the [onDisconnected] path below, so this guard safely distinguishes a
+         * background reconnect from a user-initiated [start] or [connectIfEnabled] call
+         * (both of which transition through [RuntimeState.Starting], not [RuntimeState.LocalOnly]).
+         */
+        override fun onConnected() {
+            if (_state.value is RuntimeState.LocalOnly && settings.crossDeviceEnabled) {
+                Log.i(TAG, "[RUNTIME] WS auto-reconnected while cross-device enabled → restoring Active")
+                GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_reconnect_restore"))
+                _state.value = RuntimeState.Active
+                openAttachedSession()
+            }
+        }
+
+        /**
+         * Handles spontaneous WS disconnect while the runtime is Active.
+         *
+         * [settings.crossDeviceEnabled] being `true` confirms this is not a
+         * [stop]-triggered disconnect: [stop] always sets `crossDeviceEnabled=false`
+         * before calling [GalaxyWebSocketClient.disconnect], so by the time
+         * [onDisconnected] fires after a [stop], the flag is already `false`.
+         */
+        override fun onDisconnected() {
+            if (_state.value is RuntimeState.Active && settings.crossDeviceEnabled) {
+                Log.i(
+                    TAG,
+                    "[RUNTIME] WS dropped while Active — closing attached session (DISCONNECT)" +
+                        " and transitioning to LocalOnly"
+                )
+                GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_ws_disconnect_guard"))
+                closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
+                _state.value = RuntimeState.LocalOnly
+            }
+        }
+
+        override fun onError(error: String) = Unit
+        override fun onMessage(message: String) = Unit
+    }
+
+    init {
+        // Install the persistent lifecycle guard immediately so it is in place before any
+        // WS connection attempt.  It is never removed because its internal checks
+        // (state + crossDeviceEnabled) prevent spurious action after stop().
+        webSocketClient.addListener(wsSessionLifecycleListener)
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
