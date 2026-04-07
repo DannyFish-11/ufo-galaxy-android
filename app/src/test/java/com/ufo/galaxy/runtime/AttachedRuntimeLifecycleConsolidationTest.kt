@@ -849,18 +849,16 @@ class AttachedRuntimeLifecycleConsolidationTest {
 
         // Simulate spontaneous disconnect.
         controller.wsSessionLifecycleListener.onDisconnected()
-        assertEquals(
+        assertTrue(
             "State must be LocalOnly after disconnect",
-            RuntimeController.RuntimeState.LocalOnly,
-            controller.state.value
+            controller.state.value is RuntimeController.RuntimeState.LocalOnly
         )
 
         // Simulate auto-reconnect.
         controller.wsSessionLifecycleListener.onConnected()
-        assertEquals(
+        assertTrue(
             "State must be Active after reconnect",
-            RuntimeController.RuntimeState.Active,
-            controller.state.value
+            controller.state.value is RuntimeController.RuntimeState.Active
         )
 
         val sessionIdAfter = controller.attachedSession.value!!.sessionId
