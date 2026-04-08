@@ -124,13 +124,17 @@ data class MainUiState(
     // ── PR-29: Execution route tracking ──────────────────────────────────────
     /**
      * The execution route that produced the most recent task result, or `null` if no task
-     * has completed yet in this session.
+     * has completed yet since [MainViewModel] was created.
      *
      * Updated by [MainViewModel] whenever a result arrives via any path:
      *  - [ExecutionRouteTag.LOCAL] — local [com.ufo.galaxy.local.LocalLoopExecutor] result.
      *  - [ExecutionRouteTag.CROSS_DEVICE] — server message via WebSocket.
      *  - [ExecutionRouteTag.FALLBACK] — delegated takeover failure (TakeoverFallbackEvent).
      *  - [ExecutionRouteTag.DELEGATED] — successful delegated takeover completion.
+     *
+     * **Lifecycle**: persists across individual tasks within a session — it always reflects
+     * the last completed task's route and is never reset between tasks.  It starts as `null`
+     * and remains `null` until the first task result of any kind is received.
      *
      * Exposed as a diagnostic field; not shown in user-facing chat text.
      */
