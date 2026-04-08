@@ -176,7 +176,23 @@ data class MainUiState(
      *
      * Exposed for operator-facing diagnostics and regression tests.
      */
-    val rolloutControlSnapshot: com.ufo.galaxy.runtime.RolloutControlSnapshot? = null
+    val rolloutControlSnapshot: com.ufo.galaxy.runtime.RolloutControlSnapshot? = null,
+    // ── PR-33: Reconnect resilience and recovery UX ───────────────────────────
+    /**
+     * PR-33 — Current reconnect recovery state, driven by
+     * [com.ufo.galaxy.runtime.RuntimeController.reconnectRecoveryState].
+     *
+     * Surface layers observe this to show a product-grade "Recovering…" indicator during
+     * short WS disconnects so the user understands the system is self-healing rather than
+     * fully broken.  Transitions:
+     *
+     *  - [com.ufo.galaxy.runtime.ReconnectRecoveryState.IDLE] — connected or stopped; normal UI.
+     *  - [com.ufo.galaxy.runtime.ReconnectRecoveryState.RECOVERING] — show subtle banner.
+     *  - [com.ufo.galaxy.runtime.ReconnectRecoveryState.RECOVERED] — briefly show "Connected".
+     *  - [com.ufo.galaxy.runtime.ReconnectRecoveryState.FAILED] — show "Reconnect" CTA.
+     */
+    val reconnectRecoveryState: com.ufo.galaxy.runtime.ReconnectRecoveryState =
+        com.ufo.galaxy.runtime.ReconnectRecoveryState.IDLE
 )
 
 /**
@@ -400,6 +416,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "crossDevice=${snapshot.crossDeviceAllowed} delegated=${snapshot.delegatedExecutionAllowed} " +
                     "fallback=${snapshot.fallbackToLocalAllowed} goal=${snapshot.goalExecutionAllowed}")
                 _uiState.update { it.copy(rolloutControlSnapshot = snapshot) }
+            }
+            .launchIn(viewModelScope)
+        // PR-33: Observe reconnect recovery state and surface it in UI state so the
+        // user sees a product-grade "Recovering…" indicator during short WS disconnects
+        // rather than just seeing the connected flag toggle off without explanation.
+        UFOGalaxyApplication.runtimeController.reconnectRecoveryState
+            .onEach { recoveryState ->
+                Log.d(TAG, "Reconnect recovery state: ${recoveryState.wireValue}")
+                _uiState.update { it.copy(reconnectRecoveryState = recoveryState) }
             }
             .launchIn(viewModelScope)
     }

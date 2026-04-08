@@ -1179,4 +1179,55 @@ class GalaxyWebSocketClient(
      */
     private fun getDeviceId(): String =
         "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+
+    // ── PR-33 test-support simulation API ────────────────────────────────────
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onConnected] on all registered listeners
+     * without establishing a real WebSocket connection.
+     *
+     * Allows unit tests to drive [com.ufo.galaxy.runtime.RuntimeController]'s
+     * `permanentWsListener` reconnect transition deterministically — specifically the
+     * `RECOVERING → RECOVERED` path — without requiring a live WS server.
+     *
+     * This method also sets [isConnected] to `true` so that subsequent
+     * [sendJson] calls behave as if the socket is live.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateConnected() {
+        isConnected = true
+        listeners.forEach { it.onConnected() }
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onDisconnected] on all registered listeners
+     * without a real WebSocket close event.
+     *
+     * Allows unit tests to drive the `IDLE → RECOVERING` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController.permanentWsListener] without a live server.
+     *
+     * This method also sets [isConnected] to `false`.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateDisconnected() {
+        isConnected = false
+        listeners.forEach { it.onDisconnected() }
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onError] on all registered listeners.
+     *
+     * Allows unit tests to drive the `RECOVERING → FAILED` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController.permanentWsListener] without a live server.
+     *
+     * This method also sets [isConnected] to `false`.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateError(error: String) {
+        isConnected = false
+        listeners.forEach { it.onError(error) }
+    }
 }
