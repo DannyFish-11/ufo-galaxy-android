@@ -138,7 +138,32 @@ data class MainUiState(
      *
      * Exposed as a diagnostic field; not shown in user-facing chat text.
      */
-    val lastExecutionRoute: ExecutionRouteTag? = null
+    val lastExecutionRoute: ExecutionRouteTag? = null,
+    // ── PR-30: Operator-facing observability additions ────────────────────────
+    /**
+     * PR-30 — Per-route execution counts accumulated since [MainViewModel] was created.
+     *
+     * Incremented every time [lastExecutionRoute] is set.  Each entry maps an
+     * [ExecutionRouteTag] to the number of results that arrived via that path during the
+     * current session.  Zero-count entries are omitted (not present in the map).
+     *
+     * Exposed for operator-facing diagnostics (see [MainViewModel.buildDiagnosticsText])
+     * and for regression tests that verify route-count bookkeeping.
+     */
+    val executionRouteCounts: Map<ExecutionRouteTag, Int> = emptyMap(),
+    /**
+     * PR-30 — Category of the **last** observed setup / registration failure, or `null`
+     * when no failure has occurred in the current session.
+     *
+     * Unlike [registrationFailureCategory] — which is cleared together with
+     * [registrationFailure] when the user dismisses the dialog — this field is **never
+     * cleared**.  It provides a persistent operator-visible signal of the most recent
+     * setup failure category, useful for diagnosing rollout issues without relying on
+     * dialog-dismiss timing.
+     *
+     * Set by the [MainViewModel] observer of [RuntimeController.setupError].
+     */
+    val lastSetupFailureCategory: CrossDeviceSetupError.Category? = null
 )
 
 /**
@@ -179,6 +204,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Record the outcome for the diagnostics panel.
                 pushTaskId(result.sessionId, presentation.outcome)
 
+                // PR-30: Structured execution-route log for operator diagnostics.
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_EXEC_ROUTE,
+                    mapOf("route" to ExecutionRouteTag.LOCAL.wireValue, "task_id" to result.sessionId)
+                )
+
                 val assistantMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     role = MessageRole.ASSISTANT,
@@ -190,7 +221,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         messages = state.messages + assistantMessage,
                         isLoading = false,
                         // PR-29: record which execution path produced this result.
-                        lastExecutionRoute = ExecutionRouteTag.LOCAL
+                        lastExecutionRoute = ExecutionRouteTag.LOCAL,
+                        // PR-30: increment per-route counter for operator diagnostics.
+                        executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.LOCAL)
                     )
                 }
             },
@@ -280,6 +313,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // PR-27: Observe typed setup errors and surface the category so the failure dialog
         // can present context-appropriate recovery actions (open settings vs. retry vs.
         // open permissions) rather than a single generic "Retry" button.
+        // PR-30: Also update [MainUiState.lastSetupFailureCategory] — a persistent diagnostic
+        // field that is never cleared, unlike [registrationFailureCategory].
         UFOGalaxyApplication.runtimeController.setupError
             .onEach { err ->
                 Log.w(
@@ -287,7 +322,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "CrossDevice setup error: category=${err.category.wireValue} " +
                         "canRetry=${err.canRetry} reason=${err.reason}"
                 )
-                _uiState.update { it.copy(registrationFailureCategory = err.category) }
+                _uiState.update {
+                    it.copy(
+                        registrationFailureCategory = err.category,
+                        // PR-30: persist last category for operator-facing diagnostics.
+                        lastSetupFailureCategory = err.category
+                    )
+                }
             }
             .launchIn(viewModelScope)
         // PR-23: Observe takeover-level failures and keep diagnostics state consistent.
@@ -296,12 +337,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // (local / cross-device / delegated / fallback) produced the outcome.
         // PR-29: Sets [MainUiState.lastExecutionRoute] to [ExecutionRouteTag.FALLBACK] so the
         // diagnostics panel reflects that the last task ended via a delegated-takeover failure.
+        // PR-30: Emits [GalaxyLogger.TAG_EXEC_ROUTE] (FALLBACK) and increments route counts.
         UFOGalaxyApplication.runtimeController.takeoverFailure
             .onEach { event ->
                 Log.w(
                     TAG,
                     "Takeover failure: id=${event.takeoverId} task=${event.taskId} " +
                         "cause=${event.cause.wireValue} reason=${event.reason}"
+                )
+                // PR-30: Structured execution-route log for operator diagnostics.
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_EXEC_ROUTE,
+                    mapOf(
+                        "route" to ExecutionRouteTag.FALLBACK.wireValue,
+                        "task_id" to event.taskId.ifEmpty { event.takeoverId },
+                        "cause" to event.cause.wireValue
+                    )
                 )
                 val presentation = UnifiedResultPresentation.fromFallbackEvent(event)
                 // Record in the diagnostics recent-error list.
@@ -321,7 +372,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         messages = state.messages + assistantMessage,
                         isLoading = false,
                         // PR-29: record which execution path produced this result.
-                        lastExecutionRoute = ExecutionRouteTag.FALLBACK
+                        lastExecutionRoute = ExecutionRouteTag.FALLBACK,
+                        // PR-30: increment per-route counter for operator diagnostics.
+                        executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.FALLBACK)
                     )
                 }
             }
@@ -390,11 +443,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * delegated results surface through the same presentation path as local results.
      * PR-29: Sets [MainUiState.lastExecutionRoute] to [ExecutionRouteTag.CROSS_DEVICE]
      * so the diagnostics panel reflects that this result arrived via the Gateway WebSocket.
+     * PR-30: Emits [GalaxyLogger.TAG_EXEC_ROUTE] and increments [MainUiState.executionRouteCounts].
      */
     private fun handleServerMessage(message: String) {
         viewModelScope.launch {
             try {
                 val presentation = UnifiedResultPresentation.fromServerMessage(message)
+                // PR-30: Structured execution-route log for operator diagnostics.
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_EXEC_ROUTE,
+                    mapOf("route" to ExecutionRouteTag.CROSS_DEVICE.wireValue)
+                )
                 val assistantMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     role = MessageRole.ASSISTANT,
@@ -407,7 +466,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         messages = state.messages + assistantMessage,
                         isLoading = false,
                         // PR-29: record which execution path produced this result.
-                        lastExecutionRoute = ExecutionRouteTag.CROSS_DEVICE
+                        lastExecutionRoute = ExecutionRouteTag.CROSS_DEVICE,
+                        // PR-30: increment per-route counter for operator diagnostics.
+                        executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.CROSS_DEVICE)
                     )
                 }
             } catch (e: Exception) {
@@ -480,6 +541,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      *
      * PR-26: Uses [UnifiedResultPresentation.fromLocalResult] for consistent formatting.
      * PR-29: Sets [MainUiState.lastExecutionRoute] to [ExecutionRouteTag.LOCAL].
+     * PR-30: Emits [GalaxyLogger.TAG_EXEC_ROUTE] and increments [MainUiState.executionRouteCounts].
      */
     private suspend fun executeLocally(goal: String) {
         val result = UFOGalaxyApplication.localLoopExecutor.execute(LocalLoopOptions(instruction = goal))
@@ -487,6 +549,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Record the outcome for the diagnostics panel.
         pushTaskId(result.sessionId, presentation.outcome)
+
+        // PR-30: Structured execution-route log for operator diagnostics.
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_EXEC_ROUTE,
+            mapOf("route" to ExecutionRouteTag.LOCAL.wireValue, "task_id" to result.sessionId)
+        )
 
         val assistantMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
@@ -499,7 +567,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 messages = state.messages + assistantMessage,
                 isLoading = false,
                 // PR-29: record which execution path produced this result.
-                lastExecutionRoute = ExecutionRouteTag.LOCAL
+                lastExecutionRoute = ExecutionRouteTag.LOCAL,
+                // PR-30: increment per-route counter for operator diagnostics.
+                executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.LOCAL)
             )
         }
     }
@@ -670,6 +740,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CrossDeviceSetupError.Category.CONFIGURATION -> {
                 // Configuration error: opening settings is the only meaningful recovery path.
                 Log.i(TAG, "retryRegistration: configuration error → opening network settings")
+                // PR-30: Log the recovery action for operator diagnostics.
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_SETUP_RECOVERY,
+                    mapOf("category" to category.wireValue, "action" to "open_settings")
+                )
                 _uiState.update { it.copy(showNetworkSettings = true) }
             }
             CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED -> {
@@ -677,12 +752,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // permission/capability would fail immediately.  Direct to settings
                 // so the user can satisfy the capability requirement first.
                 Log.i(TAG, "retryRegistration: capability error → opening network settings for readiness review")
+                // PR-30: Log the recovery action for operator diagnostics.
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_SETUP_RECOVERY,
+                    mapOf("category" to category.wireValue, "action" to "open_permissions")
+                )
                 _uiState.update { it.copy(showNetworkSettings = true) }
             }
             else -> {
                 // Network error (or unknown): attempt re-connection.
                 // crossDeviceEnabled was set to false when the failure occurred; toggling now
                 // will set it to true and attempt a new startWithTimeout().
+                // PR-30: Log the recovery action for operator diagnostics.
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_SETUP_RECOVERY,
+                    mapOf(
+                        "category" to (category?.wireValue ?: "unknown"),
+                        "action" to "retry_connect"
+                    )
+                )
                 toggleCrossDeviceEnabled()
             }
         }
@@ -897,6 +985,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      *
      * The snapshot includes connection state, readiness flags, health-check results,
      * the last 5 errors, and the last 5 task outcomes.
+     *
+     * PR-30: Also includes per-route execution counts and last setup failure category
+     * for operator-facing rollout diagnostics.
      */
     fun buildDiagnosticsText(): String {
         val s = _uiState.value
@@ -927,6 +1018,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("-- Last Execution Route --")
             appendLine("Route: ${s.lastExecutionRoute?.wireValue ?: "none"}")
             appendLine()
+            // PR-30: Per-route execution counts for operator-facing rollout diagnostics.
+            appendLine("-- Execution Routes (this session) --")
+            if (s.executionRouteCounts.isEmpty()) {
+                appendLine("  (no tasks completed)")
+            } else {
+                ExecutionRouteTag.values().forEach { tag ->
+                    val count = s.executionRouteCounts[tag] ?: 0
+                    if (count > 0) appendLine("  ${tag.wireValue}: $count")
+                }
+            }
+            // PR-30: Last setup failure category for operator visibility.
+            if (s.lastSetupFailureCategory != null) {
+                appendLine("Last setup failure: ${s.lastSetupFailureCategory.wireValue}")
+            }
+            appendLine()
             appendLine("-- Recent Errors (last ${s.recentErrors.size}) --")
             if (s.recentErrors.isEmpty()) {
                 appendLine("  (none)")
@@ -949,6 +1055,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun formatDiagTs(ts: Long): String =
         SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(ts))
+
+    /**
+     * PR-30 — Returns a new map with the count for [route] incremented by one.
+     *
+     * Keeps the existing entries unchanged and returns a new [Map] instance (immutable
+     * update semantics, safe for use inside [_uiState].update calls).
+     */
+    private fun incrementRouteCount(
+        counts: Map<ExecutionRouteTag, Int>,
+        route: ExecutionRouteTag
+    ): Map<ExecutionRouteTag, Int> =
+        counts + (route to ((counts[route] ?: 0) + 1))
 
     // ── Local-loop debug panel (PR-G) ─────────────────────────────────────────
 
