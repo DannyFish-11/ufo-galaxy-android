@@ -494,12 +494,12 @@ class Pr31RolloutControlDefaultsTest {
     // ── GalaxyLogger PR-31 tag constants ──────────────────────────────────────
 
     @Test
-    fun `TAG_ROLLOUT_CONTROL value is GALAXY ROLLOUT CONTROL`() {
+    fun `TAG_ROLLOUT_CONTROL value is GALAXY:ROLLOUT:CONTROL`() {
         assertEquals("GALAXY:ROLLOUT:CONTROL", GalaxyLogger.TAG_ROLLOUT_CONTROL)
     }
 
     @Test
-    fun `TAG_KILL_SWITCH value is GALAXY KILL SWITCH`() {
+    fun `TAG_KILL_SWITCH value is GALAXY:KILL:SWITCH`() {
         assertEquals("GALAXY:KILL:SWITCH", GalaxyLogger.TAG_KILL_SWITCH)
     }
 
