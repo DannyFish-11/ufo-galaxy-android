@@ -222,6 +222,30 @@ object GalaxyLogger {
      */
     const val TAG_RECONNECT_RECOVERY = "GALAXY:RECONNECT:RECOVERY"
 
+    // ── PR-34: Runtime and interaction acceptance tag ─────────────────────────
+
+    /**
+     * PR-34 — Fired at key acceptance checkpoints across the runtime and interaction surfaces.
+     *
+     * Emitted when a product-grade acceptance boundary is exercised:
+     *
+     * - `text_input_submitted`    — user text input was accepted and routed.
+     * - `voice_input_submitted`   — voice transcript was accepted and routed.
+     * - `floating_entry_invoked`  — floating secondary entry point was activated.
+     * - `cross_device_toggled`    — cross-device mode was enabled or disabled by the user.
+     * - `delegated_target_evaluated` — delegated target suitability was projected.
+     * - `result_presented`        — unified result was presented to a surface layer.
+     *
+     * Required fields: `event`, `route` (one of `"local"`, `"cross_device"`, `"delegated"`,
+     * `"fallback"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:INTERACTION:ACCEPTANCE","fields":{"event":"text_input_submitted","route":"local"}}
+     * ```
+     */
+    const val TAG_INTERACTION_ACCEPTANCE = "GALAXY:INTERACTION:ACCEPTANCE"
+
     // ── Internal constants ────────────────────────────────────────────────────
 
     private const val ANDROID_TAG     = "GalaxyLogger"
