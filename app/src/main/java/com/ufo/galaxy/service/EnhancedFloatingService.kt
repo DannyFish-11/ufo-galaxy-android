@@ -37,6 +37,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
+import com.ufo.galaxy.ui.viewmodel.UnifiedResultPresentation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -134,12 +135,11 @@ class EnhancedFloatingService : Service() {
             localLoopExecutor = UFOGalaxyApplication.localLoopExecutor,
             coroutineScope = serviceScope,
             onLocalResult = { result ->
+                // PR-26: Use unified presentation so the floating status label uses the
+                // same result vocabulary as the main-UI chat message list.
+                val presentation = UnifiedResultPresentation.fromLocalResult(result)
                 lastTaskId = result.sessionId.take(8)
-                taskStatus = if (result.status == com.ufo.galaxy.local.LocalLoopResult.STATUS_SUCCESS) {
-                    STATUS_SUCCESS
-                } else {
-                    STATUS_ERROR
-                }
+                taskStatus = if (presentation.isSuccess) STATUS_SUCCESS else STATUS_ERROR
                 Log.i(TAG, "[FLOAT] local loop done status=${result.status} steps=${result.stepCount}")
                 updateStatusLabel()
                 loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
@@ -201,9 +201,8 @@ class EnhancedFloatingService : Service() {
         }
 
         // PR-23: Observe takeover-level failures and clear stale floating-surface state.
-        // Unlike registration failures, individual takeover failures do NOT reset the
-        // cross-device toggle; they only clear the "active" task indicator so the user
-        // sees the current (failed) task outcome rather than a stuck running state.
+        // PR-26: Use UnifiedResultPresentation so the floating status label uses the same
+        // outcome vocabulary as the main-UI chat list (no path-specific label leakage).
         serviceScope.launch {
             UFOGalaxyApplication.runtimeController.takeoverFailure.collect { event ->
                 Log.w(
@@ -211,9 +210,10 @@ class EnhancedFloatingService : Service() {
                     "[FLOAT] Takeover failure: id=${event.takeoverId} task=${event.taskId} " +
                         "cause=${event.cause.wireValue} reason=${event.reason}"
                 )
+                val presentation = UnifiedResultPresentation.fromFallbackEvent(event)
                 // Update task status to ERROR and hide any loading indicator so the
                 // floating overlay does not remain stuck in a "running" visual state.
-                taskStatus = STATUS_ERROR
+                taskStatus = if (presentation.isSuccess) STATUS_SUCCESS else STATUS_ERROR
                 lastTaskId = event.taskId.ifEmpty { event.takeoverId }.take(8)
                 updateStatusLabel()
                 loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
