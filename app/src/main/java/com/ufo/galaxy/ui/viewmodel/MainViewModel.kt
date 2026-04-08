@@ -12,7 +12,6 @@ import com.ufo.galaxy.data.MessageRole
 import com.ufo.galaxy.debug.LocalLoopDebugViewModel
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.local.LocalLoopOptions
-import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
@@ -142,22 +141,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             localLoopExecutor = UFOGalaxyApplication.localLoopExecutor,
             coroutineScope = viewModelScope,
             onLocalResult = { result ->
+                val presentation = UnifiedResultPresentation.fromLocalResult(result)
                 // Record the outcome for the diagnostics panel.
-                pushTaskId(result.sessionId, result.status)
-
-                val summary = when (result.status) {
-                    LocalLoopResult.STATUS_SUCCESS ->
-                        "任务完成（${result.stepCount} 步）"
-                    LocalLoopResult.STATUS_CANCELLED ->
-                        "任务取消: ${result.error ?: ""}"
-                    else ->
-                        "任务失败: ${result.error ?: result.stopReason ?: "未知错误"}"
-                }
+                pushTaskId(result.sessionId, presentation.outcome)
 
                 val assistantMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     role = MessageRole.ASSISTANT,
-                    content = summary,
+                    content = presentation.summary,
                     timestamp = System.currentTimeMillis()
                 )
                 _uiState.update { state ->
@@ -251,9 +242,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             .launchIn(viewModelScope)
         // PR-23: Observe takeover-level failures and keep diagnostics state consistent.
-        // These events are individual task failures (FAILED/TIMEOUT/CANCELLED/DISCONNECT)
-        // that do not change the runtime state but do need to be reflected in the UI so
-        // that stale "active" indicators are cleared and recent errors are recorded.
+        // PR-26: Unified result presentation — fallback events now also surface a user-facing
+        // assistant message so the chat experience is consistent regardless of which path
+        // (local / cross-device / delegated / fallback) produced the outcome.
         UFOGalaxyApplication.runtimeController.takeoverFailure
             .onEach { event ->
                 Log.w(
@@ -261,12 +252,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Takeover failure: id=${event.takeoverId} task=${event.taskId} " +
                         "cause=${event.cause.wireValue} reason=${event.reason}"
                 )
+                val presentation = UnifiedResultPresentation.fromFallbackEvent(event)
                 // Record in the diagnostics recent-error list.
                 pushError(event.reason)
-                // Clear any isLoading flag that might have been set for this task, and
-                // record the failure outcome for the diagnostics recent-task list.
-                pushTaskId(event.taskId.ifEmpty { event.takeoverId }, event.cause.wireValue)
-                _uiState.update { it.copy(isLoading = false) }
+                // Record the failure outcome for the diagnostics recent-task list.
+                pushTaskId(event.taskId.ifEmpty { event.takeoverId }, presentation.outcome)
+                // Surface the fallback result as a user-visible assistant message so
+                // the chat experience is identical to local and cross-device paths.
+                val assistantMessage = ChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    role = MessageRole.ASSISTANT,
+                    content = presentation.summary,
+                    timestamp = System.currentTimeMillis()
+                )
+                _uiState.update { state ->
+                    state.copy(
+                        messages = state.messages + assistantMessage,
+                        isLoading = false
+                    )
+                }
             }
             .launchIn(viewModelScope)
     }
@@ -328,14 +332,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     /**
      * 处理服务器消息
+     *
+     * PR-26: Uses [UnifiedResultPresentation.fromServerMessage] so that cross-device /
+     * delegated results surface through the same presentation path as local results.
      */
     private fun handleServerMessage(message: String) {
         viewModelScope.launch {
             try {
+                val presentation = UnifiedResultPresentation.fromServerMessage(message)
                 val assistantMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     role = MessageRole.ASSISTANT,
-                    content = message,
+                    content = presentation.summary,
                     timestamp = System.currentTimeMillis()
                 )
                 
@@ -412,26 +420,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Retained for edge cases where direct local execution is needed outside of
      * [inputRouter]. Normal code paths use [inputRouter.route] which launches
      * [LocalLoopExecutor.execute] internally and delivers the result via [onLocalResult].
+     *
+     * PR-26: Uses [UnifiedResultPresentation.fromLocalResult] for consistent formatting.
      */
     private suspend fun executeLocally(goal: String) {
         val result = UFOGalaxyApplication.localLoopExecutor.execute(LocalLoopOptions(instruction = goal))
+        val presentation = UnifiedResultPresentation.fromLocalResult(result)
 
         // Record the outcome for the diagnostics panel.
-        pushTaskId(result.sessionId, result.status)
-
-        val summary = when (result.status) {
-            LocalLoopResult.STATUS_SUCCESS ->
-                "任务完成（${result.stepCount} 步）"
-            LocalLoopResult.STATUS_CANCELLED ->
-                "任务取消: ${result.error ?: ""}"
-            else ->
-                "任务失败: ${result.error ?: result.stopReason ?: "未知错误"}"
-        }
+        pushTaskId(result.sessionId, presentation.outcome)
 
         val assistantMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
             role = MessageRole.ASSISTANT,
-            content = summary,
+            content = presentation.summary,
             timestamp = System.currentTimeMillis()
         )
         _uiState.update { state ->
