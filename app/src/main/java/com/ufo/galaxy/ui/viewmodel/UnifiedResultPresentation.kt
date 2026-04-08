@@ -48,6 +48,15 @@ data class UnifiedResultPresentation(
                     isSuccess = false,
                     outcome = LocalLoopResult.STATUS_CANCELLED
                 )
+                // PR-29: Explicit handling for the DISABLED outcome so consumers see a clear
+                // "not executed by policy" message rather than the generic failure string.
+                // STATUS_DISABLED is produced when the posture gate or runtime state prevents
+                // execution (distinct from STATUS_FAILED which means the device tried and failed).
+                LocalLoopResult.STATUS_DISABLED -> UnifiedResultPresentation(
+                    summary = "任务未执行（执行路径当前不可用）",
+                    isSuccess = false,
+                    outcome = LocalLoopResult.STATUS_DISABLED
+                )
                 else -> UnifiedResultPresentation(
                     summary = "任务执行失败：${result.error ?: result.stopReason ?: "未知错误"}",
                     isSuccess = false,

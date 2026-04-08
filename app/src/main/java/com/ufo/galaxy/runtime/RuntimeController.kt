@@ -55,7 +55,12 @@ import kotlin.coroutines.resume
  *    outcomes from [com.ufo.galaxy.agent.DelegatedTakeoverExecutor.execute], or a WS
  *    disconnect while a takeover was active) are emitted via [takeoverFailure].  Surface
  *    layers must observe this flow to clear stale "active" or "in-control" state without
- *    independently transitioning the runtime (PR-23).
+ *    independently transitioning the runtime (PR-23).  Duplicate notifications for the
+ *    same `takeoverId` within a single session lifetime are silently suppressed (PR-29).
+ *
+ * Remote execution flight state (PR-29):
+ *  - [isRemoteExecutionActive]: `true` from [onRemoteTaskStarted] until [onRemoteTaskFinished]
+ *    or [stop]; surface layers observe this to avoid maintaining their own redundant flag.
  *
  * Attached-runtime session (PR-7 / PR-14):
  *  - [attachedSession] exposes the current [AttachedRuntimeSession] as a [StateFlow].
@@ -282,6 +287,36 @@ class RuntimeController(
     private val _targetReadinessProjection = MutableStateFlow<DelegatedTargetReadinessProjection?>(null)
     val targetReadinessProjection: StateFlow<DelegatedTargetReadinessProjection?> =
         _targetReadinessProjection.asStateFlow()
+
+    /**
+     * PR-29 — Whether a remote (delegated) execution is currently in flight.
+     *
+     * Set to `true` by [onRemoteTaskStarted] and back to `false` by [onRemoteTaskFinished].
+     * Surface layers ([com.ufo.galaxy.ui.viewmodel.MainViewModel],
+     * [com.ufo.galaxy.service.EnhancedFloatingService]) may observe this flow to
+     * deterministically clear any "loading" or "in-control" UI indicator without tracking
+     * the flag in their own local state.
+     *
+     * The value is authoritative only for **delegated/remote** execution.  Local execution
+     * state is tracked separately by [com.ufo.galaxy.ui.viewmodel.MainViewModel.isLoading]
+     * via the [com.ufo.galaxy.input.InputRouter] callback.
+     */
+    private val _isRemoteExecutionActive = MutableStateFlow(false)
+    val isRemoteExecutionActive: StateFlow<Boolean> = _isRemoteExecutionActive.asStateFlow()
+
+    /**
+     * PR-29 — Deduplication guard for [notifyTakeoverFailed].
+     *
+     * Stores the set of `takeoverId` values for which a [TakeoverFallbackEvent] has already
+     * been emitted during the current [attachedSession] lifetime.  A second call to
+     * [notifyTakeoverFailed] with the same `takeoverId` is silently dropped, preventing
+     * the UI from presenting two error messages for a single logical failure (e.g. when both
+     * the explicit failure outcome and a simultaneous WS disconnect both try to notify).
+     *
+     * Cleared in [closeAttachedSession] so that a session re-open (after reconnect) starts
+     * with a clean deduplication state.
+     */
+    private val _emittedFailureTakeoverIds = mutableSetOf<String>()
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -526,6 +561,9 @@ class RuntimeController(
             webSocketClient.disconnect()
         }
         closeAttachedSession(AttachedRuntimeSession.DetachCause.DISABLE)
+        // PR-29: A runtime stop should also clear any in-flight remote execution state
+        // so that surface layers do not display a stale loading/in-control indicator.
+        _isRemoteExecutionActive.value = false
         _state.value = RuntimeState.LocalOnly
     }
 
@@ -543,6 +581,9 @@ class RuntimeController(
     fun onRemoteTaskStarted() {
         Log.d(TAG, "[RUNTIME] Remote task started — cancelling any local loop")
         GalaxyLogger.log(TAG, mapOf("event" to "remote_task_started"))
+        // PR-29: Signal that a remote execution is now in flight so surface layers can
+        // show a deterministic "loading / in-control" indicator without local state tracking.
+        _isRemoteExecutionActive.value = true
         loopController.cancelForRemoteTask()
     }
 
@@ -556,6 +597,8 @@ class RuntimeController(
     fun onRemoteTaskFinished() {
         Log.d(TAG, "[RUNTIME] Remote task finished — local loop unblocked")
         GalaxyLogger.log(TAG, mapOf("event" to "remote_task_finished"))
+        // PR-29: Clear the in-flight flag so surface layers can dismiss loading indicators.
+        _isRemoteExecutionActive.value = false
         loopController.clearRemoteTaskBlock()
     }
 
@@ -568,6 +611,13 @@ class RuntimeController(
      * [com.ufo.galaxy.ui.viewmodel.MainViewModel] and
      * [com.ufo.galaxy.service.EnhancedFloatingService] can clear any stale "active"
      * or "in-control" state they may have set when the takeover started.
+     *
+     * ## Deduplication (PR-29)
+     *
+     * At most one event is emitted per `takeoverId` within a single [attachedSession]
+     * lifetime.  A second call with the same `takeoverId` is silently dropped to prevent
+     * double-emission when both an explicit failure path and a simultaneous WS disconnect
+     * race to call this method.  The deduplication set is reset in [closeAttachedSession].
      *
      * ## What this method does NOT do
      *
@@ -597,6 +647,18 @@ class RuntimeController(
         reason: String,
         cause: TakeoverFallbackEvent.Cause
     ) {
+        // PR-29: Deduplication guard — drop a second notification for the same takeoverId
+        // within the same session lifetime to prevent double-emission when both an explicit
+        // failure path and a simultaneous WS disconnect both attempt to notify.
+        synchronized(_emittedFailureTakeoverIds) {
+            if (!_emittedFailureTakeoverIds.add(takeoverId)) {
+                Log.d(
+                    TAG,
+                    "[RUNTIME] notifyTakeoverFailed: duplicate suppressed takeover_id=$takeoverId cause=${cause.wireValue}"
+                )
+                return
+            }
+        }
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "takeover_failed",
@@ -894,6 +956,11 @@ class RuntimeController(
         updateHostSessionSnapshot()
         Log.i(TAG, "[RUNTIME] Attached runtime session closed: session_id=${detached.sessionId} cause=${cause.wireValue}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_detached") + detached.toMetadataMap())
+        // PR-29: Clear the takeover deduplication set on session close so that any
+        // subsequent session re-open begins with a clean deduplication state.
+        synchronized(_emittedFailureTakeoverIds) {
+            _emittedFailureTakeoverIds.clear()
+        }
         // Sync host descriptor participation state to INACTIVE.
         val descriptor = hostDescriptor
         if (descriptor != null) {
