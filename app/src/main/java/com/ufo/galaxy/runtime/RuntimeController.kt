@@ -324,6 +324,29 @@ class RuntimeController(
         _rolloutControlSnapshot.asStateFlow()
 
     /**
+     * PR-33 — Observable product-grade reconnect recovery state.
+     *
+     * Tracks the current phase of the WS reconnect lifecycle from the **user's perspective**.
+     * Transitions to [ReconnectRecoveryState.RECOVERING] when the WS drops while the
+     * runtime is [RuntimeState.Active] (transparent auto-reconnect in progress), to
+     * [ReconnectRecoveryState.RECOVERED] when the WS successfully re-establishes, and
+     * to [ReconnectRecoveryState.FAILED] when reconnect attempts are exhausted or the WS
+     * emits a terminal error.  Always reset to [ReconnectRecoveryState.IDLE] by [stop].
+     *
+     * Surface layers ([com.ufo.galaxy.ui.viewmodel.MainViewModel],
+     * [com.ufo.galaxy.service.EnhancedFloatingService]) observe this flow to show a
+     * user-comprehensible "Recovering…" indicator during short disconnects rather than
+     * just toggling `isConnected=false` — making the system appear recoverable to users.
+     *
+     * The [ReconnectRecoveryState] wire values are stable and must not be renamed after
+     * this PR ships without a corresponding V2 contract update.
+     */
+    private val _reconnectRecoveryState =
+        MutableStateFlow(ReconnectRecoveryState.IDLE)
+    val reconnectRecoveryState: StateFlow<ReconnectRecoveryState> =
+        _reconnectRecoveryState.asStateFlow()
+
+    /**
      * PR-29 — Deduplication guard for [notifyTakeoverFailed].
      *
      * Stores the set of `takeoverId` values for which a [TakeoverFallbackEvent] has already
@@ -367,6 +390,19 @@ class RuntimeController(
                 Log.i(TAG, "[RUNTIME] WS reconnected while Active — reopening attached session")
                 GalaxyLogger.log(TAG, mapOf("event" to "runtime_ws_reconnected"))
                 openAttachedSession()
+                // PR-33: Mark recovery as successful if we were in the middle of recovery so
+                // the UI can transition from "Recovering…" to "Connected" / normal state.
+                if (_reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING) {
+                    _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERED
+                    GalaxyLogger.log(
+                        GalaxyLogger.TAG_RECONNECT_RECOVERY,
+                        mapOf(
+                            "transition" to "recovering→recovered",
+                            "trigger" to "ws_reconnected_active"
+                        )
+                    )
+                    Log.i(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → RECOVERED")
+                }
             }
         }
 
@@ -378,10 +414,38 @@ class RuntimeController(
                 Log.w(TAG, "[RUNTIME] WS disconnected while Active — closing attached session")
                 GalaxyLogger.log(TAG, mapOf("event" to "runtime_ws_disconnected_active"))
                 closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
+                // PR-33: Surface the in-progress reconnect as RECOVERING so the UI can show
+                // a "Recovering…" indicator rather than just clearing the connected flag.
+                _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERING
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_RECONNECT_RECOVERY,
+                    mapOf(
+                        "transition" to "idle→recovering",
+                        "trigger" to "ws_disconnect_active"
+                    )
+                )
+                Log.i(TAG, "[RUNTIME] Reconnect recovery: IDLE → RECOVERING")
             }
         }
 
-        override fun onError(error: String) = Unit
+        override fun onError(error: String) {
+            // PR-33: If a WS error occurs while recovery is in progress (e.g. max reconnect
+            // attempts exhausted), mark recovery as failed so the UI can show a "Connection
+            // failed — please reconnect" CTA instead of an indefinite "Recovering…" banner.
+            if (_reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING) {
+                _reconnectRecoveryState.value = ReconnectRecoveryState.FAILED
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_RECONNECT_RECOVERY,
+                    mapOf(
+                        "transition" to "recovering→failed",
+                        "trigger" to "ws_error",
+                        "error" to error
+                    )
+                )
+                Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error)")
+            }
+        }
+
         override fun onMessage(message: String) = Unit
     }
 
@@ -583,6 +647,10 @@ class RuntimeController(
         // PR-29: A runtime stop should also clear any in-flight remote execution state
         // so that surface layers do not display a stale loading/in-control indicator.
         _isRemoteExecutionActive.value = false
+        // PR-33: Reset recovery state to IDLE on explicit stop so the UI returns to a
+        // clean baseline.  Any ongoing "Recovering…" or "Failed" banner should disappear
+        // when the user deliberately turns off cross-device or triggers a full reconnect.
+        _reconnectRecoveryState.value = ReconnectRecoveryState.IDLE
         _state.value = RuntimeState.LocalOnly
         // PR-31: Refresh the rollout snapshot after stopping.
         refreshRolloutControlSnapshot()
@@ -1121,6 +1189,27 @@ class RuntimeController(
         if (url.contains("x.x", ignoreCase = true)) return false
         if (url.matches(Regex(".*://[^/]*x[^/]*/.*", RegexOption.IGNORE_CASE))) return false
         return true
+    }
+
+    // ── PR-33 test-support API ────────────────────────────────────────────────
+
+    /**
+     * PR-33 — For testing only: transitions the runtime directly to [RuntimeState.Active]
+     * and opens an attached session, bypassing the WebSocket connection handshake.
+     *
+     * This allows unit tests to place the runtime into [RuntimeState.Active] state so that
+     * [permanentWsListener] disconnect/reconnect transitions (and their effect on
+     * [reconnectRecoveryState]) can be exercised deterministically without a live WS server.
+     *
+     * After calling this, use [GalaxyWebSocketClient.simulateDisconnected] /
+     * [GalaxyWebSocketClient.simulateConnected] / [GalaxyWebSocketClient.simulateError]
+     * to drive the recovery state machine.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun setActiveForTest() {
+        _state.value = RuntimeState.Active
+        openAttachedSession()
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────

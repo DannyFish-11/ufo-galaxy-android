@@ -49,6 +49,7 @@ import kotlin.concurrent.withLock
  * | `GALAXY:ROLLOUT:CONTROL`  | Rollout-control flag changed at runtime (PR-31)             |
  * | `GALAXY:KILL:SWITCH`      | Kill-switch activated — all remote paths disabled (PR-31)   |
  * | `GALAXY:STAGED:MESH`      | Staged-mesh target execution event (PR-32)                  |
+ * | `GALAXY:RECONNECT:RECOVERY`| Reconnect recovery state transition (PR-33)                |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -197,6 +198,29 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_STAGED_MESH = "GALAXY:STAGED:MESH"
+
+    // ── PR-33: Reconnect resilience and recovery tag ──────────────────────────
+
+    /**
+     * PR-33 — Fired when the reconnect recovery state transitions between phases.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.RuntimeController]'s permanent WS listener
+     * on each [com.ufo.galaxy.runtime.ReconnectRecoveryState] transition:
+     *
+     * - `idle→recovering`        — WS dropped while Active; reconnect started.
+     * - `recovering→recovered`   — WS reconnect succeeded; session resumed.
+     * - `recovering→failed`      — WS error or max attempts exhausted.
+     *
+     * Required fields: `transition` (e.g. `"idle→recovering"`),
+     * `trigger` (e.g. `"ws_disconnect_active"`).
+     * Error transitions additionally include: `error`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RECONNECT:RECOVERY","fields":{"transition":"recovering→recovered","trigger":"ws_reconnected_active"}}
+     * ```
+     */
+    const val TAG_RECONNECT_RECOVERY = "GALAXY:RECONNECT:RECOVERY"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
