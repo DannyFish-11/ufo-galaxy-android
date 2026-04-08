@@ -46,6 +46,8 @@ import kotlin.concurrent.withLock
  * | `GALAXY:SETUP:RECOVERY`   | Recovery attempt after setup/registration failure (PR-30)   |
  * | `GALAXY:RECONNECT:OUTCOME`| Reconnect attempt concluded with success or failure (PR-30) |
  * | `GALAXY:FALLBACK:DECISION`| Fallback path finalised after delegated failure (PR-30)     |
+ * | `GALAXY:ROLLOUT:CONTROL`  | Rollout-control flag changed at runtime (PR-31)             |
+ * | `GALAXY:KILL:SWITCH`      | Kill-switch activated — all remote paths disabled (PR-31)   |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -148,6 +150,32 @@ object GalaxyLogger {
      * [com.ufo.galaxy.runtime.TakeoverFallbackEvent.Cause]), `reason`.
      */
     const val TAG_FALLBACK_DECISION = "GALAXY:FALLBACK:DECISION"
+
+    // ── PR-31: Rollout-control and kill-switch tags ───────────────────────────
+
+    /**
+     * PR-31 — Fired when any rollout-control flag changes at runtime.
+     *
+     * Required fields: `flag` (wire key from [com.ufo.galaxy.runtime.RolloutControlSnapshot]),
+     * `value` (`true` or `false`), `source` (caller that triggered the change, e.g.
+     * `"kill_switch"`, `"settings"`, `"operator"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:ROLLOUT:CONTROL","fields":{"flag":"cross_device_allowed","value":false,"source":"kill_switch"}}
+     * ```
+     */
+    const val TAG_ROLLOUT_CONTROL = "GALAXY:ROLLOUT:CONTROL"
+
+    /**
+     * PR-31 — Fired when the kill-switch is activated via
+     * [com.ufo.galaxy.runtime.RuntimeController.applyKillSwitch].
+     *
+     * Indicates that all remote execution paths (cross-device, delegated, goal execution)
+     * have been atomically disabled.  No required fields beyond the stable tag; optional
+     * field `reason` may be included by the caller for operator traceability.
+     */
+    const val TAG_KILL_SWITCH = "GALAXY:KILL:SWITCH"
 
     // ── Internal constants ────────────────────────────────────────────────────
 

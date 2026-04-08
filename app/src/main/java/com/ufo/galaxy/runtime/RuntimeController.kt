@@ -305,6 +305,25 @@ class RuntimeController(
     val isRemoteExecutionActive: StateFlow<Boolean> = _isRemoteExecutionActive.asStateFlow()
 
     /**
+     * PR-31 — Observable canonical snapshot of all rollout-control flags.
+     *
+     * Emits a fresh [RolloutControlSnapshot] whenever any of the underlying rollout flags
+     * change via [applyKillSwitch] or direct [AppSettings] mutation followed by a call to
+     * [refreshRolloutControlSnapshot].  The snapshot is always consistent with the current
+     * [settings] state at emission time.
+     *
+     * `null` is never emitted; the initial value is derived from [settings] at construction
+     * time so that observers always have a valid baseline.
+     *
+     * External consumers (diagnostics, test assertions) should prefer this flow over
+     * reading individual [AppSettings] flags so they get an atomic, stable view.
+     */
+    private val _rolloutControlSnapshot =
+        MutableStateFlow(RolloutControlSnapshot.from(settings))
+    val rolloutControlSnapshot: StateFlow<RolloutControlSnapshot> =
+        _rolloutControlSnapshot.asStateFlow()
+
+    /**
      * PR-29 — Deduplication guard for [notifyTakeoverFailed].
      *
      * Stores the set of `takeoverId` values for which a [TakeoverFallbackEvent] has already
@@ -565,9 +584,80 @@ class RuntimeController(
         // so that surface layers do not display a stale loading/in-control indicator.
         _isRemoteExecutionActive.value = false
         _state.value = RuntimeState.LocalOnly
+        // PR-31: Refresh the rollout snapshot after stopping.
+        refreshRolloutControlSnapshot()
     }
 
-    // ── Remote/local task handoff ─────────────────────────────────────────────
+    /**
+     * PR-31 — Kill-switch: atomically disables all remote execution paths.
+     *
+     * This is the canonical one-call safe-disable entry point for production rollback
+     * and emergency shutdown scenarios.  It performs an atomic sequence:
+     *  1. Sets [AppSettings.crossDeviceEnabled] = `false` and [AppSettings.goalExecutionEnabled]
+     *     = `false` so that both the WS connection guard and the goal-execution feature flag
+     *     are off — independently ensuring that no new delegated task is accepted.
+     *  2. Calls [stop] to disconnect the WebSocket, detach the [attachedSession], clear any
+     *     in-flight remote execution state, and transition to [RuntimeState.LocalOnly].
+     *  3. Emits a [GalaxyLogger.TAG_KILL_SWITCH] structured log entry for operator audit.
+     *  4. Refreshes [rolloutControlSnapshot] so observers see the new state immediately.
+     *
+     * The [AppSettings.delegatedExecutionAllowed] and [AppSettings.fallbackToLocalAllowed]
+     * flags are deliberately **not** cleared: delegation and fallback are already blocked by
+     * the two primary flags above, and leaving them `true` makes it straightforward to
+     * re-enable the full system by only flipping the primary flags — without having to
+     * remember which of the fine-grained flags were previously active.
+     *
+     * This method is **non-suspending** and safe to call from any thread.
+     *
+     * @param reason Optional human-readable explanation for the kill-switch activation,
+     *               included in the structured log entry for operator traceability.
+     */
+    fun applyKillSwitch(reason: String = "operator kill-switch") {
+        Log.w(TAG, "[RUNTIME] Kill-switch activated: $reason")
+        // Atomically disable the two primary remote-execution gates.
+        settings.crossDeviceEnabled = false
+        settings.goalExecutionEnabled = false
+        // PR-31: Log each flag change individually so operators can filter by flag name.
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_ROLLOUT_CONTROL,
+            mapOf(
+                "flag" to RolloutControlSnapshot.KEY_CROSS_DEVICE_ALLOWED,
+                "value" to false,
+                "source" to "kill_switch"
+            )
+        )
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_ROLLOUT_CONTROL,
+            mapOf(
+                "flag" to RolloutControlSnapshot.KEY_GOAL_EXECUTION_ALLOWED,
+                "value" to false,
+                "source" to "kill_switch"
+            )
+        )
+        // Emit the high-level kill-switch event.
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_KILL_SWITCH,
+            mapOf("reason" to reason)
+        )
+        // Cleanly stop all active cross-device work (also refreshes rollout snapshot).
+        stop()
+    }
+
+    /**
+     * PR-31 — Refreshes [rolloutControlSnapshot] from the current [settings] state.
+     *
+     * Must be called whenever any rollout-control flag in [settings] is mutated outside
+     * of [applyKillSwitch] so that the observable snapshot stays in sync.  [stop] and
+     * [applyKillSwitch] call this automatically; other callers (e.g. after a settings
+     * save) should also call this to keep the snapshot current.
+     *
+     * This method is safe to call from any thread.
+     */
+    fun refreshRolloutControlSnapshot() {
+        _rolloutControlSnapshot.value = RolloutControlSnapshot.from(settings)
+    }
+
+
 
     /**
      * Must be called when the Gateway assigns a remote task (`task_assign` or
