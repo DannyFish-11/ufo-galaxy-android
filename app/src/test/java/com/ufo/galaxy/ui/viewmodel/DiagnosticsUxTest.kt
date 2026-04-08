@@ -1,5 +1,7 @@
 package com.ufo.galaxy.ui.viewmodel
 
+import com.ufo.galaxy.runtime.CrossDeviceSetupError
+import com.ufo.galaxy.runtime.ExecutionRouteTag
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -198,6 +200,9 @@ class DiagnosticsUxTest {
     /**
      * Mirrors the [MainViewModel.buildDiagnosticsText] logic so it can be tested
      * without an Android Application instance.
+     *
+     * Updated for PR-29 (lastExecutionRoute section) and PR-30 (executionRouteCounts
+     * and lastSetupFailureCategory sections).
      */
     private fun buildDiagnosticsTextFromState(s: MainUiState): String {
         return buildString {
@@ -221,6 +226,24 @@ class DiagnosticsUxTest {
             appendLine("Permissions OK: ${s.accessibilityReady && s.overlayReady}")
             appendLine("Battery optimizations disabled: ${s.batteryOptimizationsDisabled}")
             appendLine()
+            // PR-29
+            appendLine("-- Last Execution Route --")
+            appendLine("Route: ${s.lastExecutionRoute?.wireValue ?: "none"}")
+            appendLine()
+            // PR-30
+            appendLine("-- Execution Routes (this session) --")
+            if (s.executionRouteCounts.isEmpty()) {
+                appendLine("  (no tasks completed)")
+            } else {
+                ExecutionRouteTag.values().forEach { tag ->
+                    val count = s.executionRouteCounts[tag] ?: 0
+                    if (count > 0) appendLine("  ${tag.wireValue}: $count")
+                }
+            }
+            if (s.lastSetupFailureCategory != null) {
+                appendLine("Last setup failure: ${s.lastSetupFailureCategory.wireValue}")
+            }
+            appendLine()
             appendLine("-- Recent Errors (last ${s.recentErrors.size}) --")
             if (s.recentErrors.isEmpty()) {
                 appendLine("  (none)")
@@ -235,5 +258,124 @@ class DiagnosticsUxTest {
                 s.recentTaskIds.forEach { t -> appendLine("  [ts] ${t.taskId} → ${t.outcome}") }
             }
         }.trimEnd()
+    }
+
+    // ── PR-29: Last Execution Route in diagnostics text ───────────────────────
+
+    @Test
+    fun `buildDiagnosticsText includes Last Execution Route section`() {
+        val state = MainUiState(lastExecutionRoute = ExecutionRouteTag.LOCAL)
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("-- Last Execution Route --"))
+        assertTrue(text.contains("Route: local"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows none when lastExecutionRoute is null`() {
+        val state = MainUiState(lastExecutionRoute = null)
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("Route: none"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows correct wire value for all route tags`() {
+        ExecutionRouteTag.values().forEach { tag ->
+            val state = MainUiState(lastExecutionRoute = tag)
+            val text = buildDiagnosticsTextFromState(state)
+            assertTrue("Expected route wire value '${tag.wireValue}'", text.contains("Route: ${tag.wireValue}"))
+        }
+    }
+
+    // ── PR-30: Execution route counts in diagnostics text ────────────────────
+
+    @Test
+    fun `buildDiagnosticsText includes Execution Routes section`() {
+        val state = MainUiState()
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("-- Execution Routes (this session) --"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows no tasks when executionRouteCounts is empty`() {
+        val state = MainUiState(executionRouteCounts = emptyMap())
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("(no tasks completed)"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows local route count`() {
+        val state = MainUiState(executionRouteCounts = mapOf(ExecutionRouteTag.LOCAL to 3))
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("local: 3"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows multiple route counts`() {
+        val state = MainUiState(
+            executionRouteCounts = mapOf(
+                ExecutionRouteTag.LOCAL to 2,
+                ExecutionRouteTag.CROSS_DEVICE to 5,
+                ExecutionRouteTag.FALLBACK to 1
+            )
+        )
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("local: 2"))
+        assertTrue(text.contains("cross_device: 5"))
+        assertTrue(text.contains("fallback: 1"))
+        // DELEGATED has 0 count — must not appear
+        assertFalse(text.contains("delegated: 0"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText omits zero-count routes`() {
+        val state = MainUiState(executionRouteCounts = mapOf(ExecutionRouteTag.LOCAL to 1))
+        val text = buildDiagnosticsTextFromState(state)
+        assertFalse(text.contains("cross_device: 0"))
+        assertFalse(text.contains("delegated: 0"))
+        assertFalse(text.contains("fallback: 0"))
+    }
+
+    // ── PR-30: lastSetupFailureCategory in diagnostics text ──────────────────
+
+    @Test
+    fun `buildDiagnosticsText does not show last setup failure when null`() {
+        val state = MainUiState(lastSetupFailureCategory = null)
+        val text = buildDiagnosticsTextFromState(state)
+        assertFalse(text.contains("Last setup failure:"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows last setup failure category when set`() {
+        val state = MainUiState(lastSetupFailureCategory = CrossDeviceSetupError.Category.NETWORK)
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("Last setup failure: network"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows configuration setup failure category`() {
+        val state = MainUiState(lastSetupFailureCategory = CrossDeviceSetupError.Category.CONFIGURATION)
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("Last setup failure: configuration"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText shows capability_not_satisfied setup failure category`() {
+        val state = MainUiState(
+            lastSetupFailureCategory = CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED
+        )
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("Last setup failure: capability_not_satisfied"))
+    }
+
+    // ── PR-30: MainUiState new field defaults ─────────────────────────────────
+
+    @Test
+    fun `MainUiState defaults executionRouteCounts to empty map`() {
+        assertEquals(emptyMap<ExecutionRouteTag, Int>(), MainUiState().executionRouteCounts)
+    }
+
+    @Test
+    fun `MainUiState defaults lastSetupFailureCategory to null`() {
+        assertNull(MainUiState().lastSetupFailureCategory)
     }
 }

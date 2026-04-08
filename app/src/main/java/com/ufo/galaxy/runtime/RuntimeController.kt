@@ -669,6 +669,19 @@ class RuntimeController(
                 "cause" to cause.wireValue
             )
         )
+        // PR-30: Emit a structured fallback-decision signal for operator diagnostics.
+        // This is distinct from the takeover_failed event above — it uses the stable
+        // TAG_FALLBACK_DECISION tag so operators can filter fallback decisions across
+        // all execution-path log entries without parsing the `event` field.
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_FALLBACK_DECISION,
+            mapOf(
+                "takeover_id" to takeoverId,
+                "task_id" to taskId,
+                "cause" to cause.wireValue,
+                "reason" to reason
+            )
+        )
         Log.w(
             TAG,
             "[RUNTIME] Takeover failed: takeover_id=$takeoverId task_id=$taskId " +
@@ -745,7 +758,16 @@ class RuntimeController(
         Log.i(TAG, "[RUNTIME] reconnect: stopping and restarting")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_reconnect"))
         stop()
-        return startWithTimeout()
+        val result = startWithTimeout()
+        // PR-30: Log the reconnect outcome for operator diagnostics.
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_RECONNECT_OUTCOME,
+            mapOf(
+                "outcome" to if (result) "success" else "failure",
+                "state" to _state.value.javaClass.simpleName
+            )
+        )
+        return result
     }
 
     fun cancel() {

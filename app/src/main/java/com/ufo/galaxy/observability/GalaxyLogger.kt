@@ -42,6 +42,10 @@ import kotlin.concurrent.withLock
  * | `GALAXY:LOCAL_LOOP:STEP`  | Single step completed within a local-loop session           |
  * | `GALAXY:LOCAL_LOOP:PLAN`  | Planner produced an initial plan or replan                  |
  * | `GALAXY:LOCAL_LOOP:DONE`  | Local-loop goal session ended (success / failure / cancel)  |
+ * | `GALAXY:EXEC:ROUTE`       | Execution route decision recorded (PR-30)                   |
+ * | `GALAXY:SETUP:RECOVERY`   | Recovery attempt after setup/registration failure (PR-30)   |
+ * | `GALAXY:RECONNECT:OUTCOME`| Reconnect attempt concluded with success or failure (PR-30) |
+ * | `GALAXY:FALLBACK:DECISION`| Fallback path finalised after delegated failure (PR-30)     |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -102,6 +106,48 @@ object GalaxyLogger {
 
     /** Fired when a local-loop goal session ends (success, failure, or cancel). */
     const val TAG_LOCAL_LOOP_DONE = "GALAXY:LOCAL_LOOP:DONE"
+
+    // ── PR-30: Execution-path observability tags ──────────────────────────────
+
+    /**
+     * PR-30 — Fired whenever an execution route decision is recorded.
+     *
+     * Required fields: `route` (wire value from [com.ufo.galaxy.runtime.ExecutionRouteTag]),
+     * `task_id` (or session id when no task id is available).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:EXEC:ROUTE","fields":{"route":"local","task_id":"sess-abc"}}
+     * ```
+     */
+    const val TAG_EXEC_ROUTE = "GALAXY:EXEC:ROUTE"
+
+    /**
+     * PR-30 — Fired when a recovery attempt is initiated after a setup / registration failure.
+     *
+     * Required fields: `category` (wire value from
+     * [com.ufo.galaxy.runtime.CrossDeviceSetupError.Category]), `action`
+     * (one of `"retry_connect"`, `"open_settings"`, `"open_permissions"`).
+     */
+    const val TAG_SETUP_RECOVERY = "GALAXY:SETUP:RECOVERY"
+
+    /**
+     * PR-30 — Fired when a reconnect attempt concludes (success or failure).
+     *
+     * Fields: `outcome` (`"success"` or `"failure"`), `state` (the [RuntimeController.RuntimeState]
+     * simple class name after the attempt).
+     */
+    const val TAG_RECONNECT_OUTCOME = "GALAXY:RECONNECT:OUTCOME"
+
+    /**
+     * PR-30 — Fired when a fallback path decision is finalised after a delegated-takeover
+     * failure.  Provides richer operator context alongside the existing
+     * [GALAXY:TASK:RETURN] / takeover failure events.
+     *
+     * Required fields: `takeover_id`, `task_id`, `cause` (wire value from
+     * [com.ufo.galaxy.runtime.TakeoverFallbackEvent.Cause]), `reason`.
+     */
+    const val TAG_FALLBACK_DECISION = "GALAXY:FALLBACK:DECISION"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
