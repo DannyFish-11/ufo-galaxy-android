@@ -249,6 +249,7 @@ class RuntimeController(
      * Derived exclusively from [_hostSessionSnapshot] via [updateHostSessionSnapshot]; no
      * other component should update the underlying [_targetReadinessProjection] directly.
      */
+    // Invariant: written exclusively inside [updateHostSessionSnapshot]; never mutated directly elsewhere in this class.
     private val _targetReadinessProjection = MutableStateFlow<DelegatedTargetReadinessProjection?>(null)
     val targetReadinessProjection: StateFlow<DelegatedTargetReadinessProjection?> =
         _targetReadinessProjection.asStateFlow()
