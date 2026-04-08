@@ -79,7 +79,7 @@ import org.junit.rules.TemporaryFolder
  *  - toMap includes all nine snapshot fields for DETACHED projection.
  *
  * ### ALWAYS_PRESENT_KEYS constant
- *  - ALWAYS_PRESENT_KEYS contains exactly 9 entries.
+ *  - ALWAYS_PRESENT_KEYS contains exactly 10 entries.
  *  - KEY_UNSUITABILITY_REASON is NOT in ALWAYS_PRESENT_KEYS.
  *  - KEY_INVALIDATION_REASON is NOT in ALWAYS_PRESENT_KEYS.
  *
@@ -439,8 +439,8 @@ class DelegatedTargetReadinessProjectionTest {
     // ── ALWAYS_PRESENT_KEYS constant ──────────────────────────────────────────
 
     @Test
-    fun `ALWAYS_PRESENT_KEYS contains exactly 9 entries`() {
-        assertEquals(9, DelegatedTargetReadinessProjection.ALWAYS_PRESENT_KEYS.size)
+    fun `ALWAYS_PRESENT_KEYS contains exactly 10 entries`() {
+        assertEquals(10, DelegatedTargetReadinessProjection.ALWAYS_PRESENT_KEYS.size)
     }
 
     @Test

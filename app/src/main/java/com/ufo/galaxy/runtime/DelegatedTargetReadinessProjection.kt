@@ -1,7 +1,7 @@
 package com.ufo.galaxy.runtime
 
 /**
- * **Host-facing delegated target readiness projection** (PR-20, post-#533 dual-repo
+ * **Host-facing delegated target readiness projection** (PR-20 / PR-24, post-#533 dual-repo
  * runtime unification master plan — Host-Facing Delegated Target Readiness Projection,
  * Android side).
  *
@@ -24,8 +24,10 @@ package com.ufo.galaxy.runtime
  *  1. Embedding the full nine-field [snapshot] for identity and provenance tracing.
  *  2. Adding a pre-computed [isSuitableTarget] boolean — the authoritative decision.
  *  3. Adding an [unsuitabilityReason] for diagnostics and policy explainability.
+ *  4. (PR-24) Exposing a [selectionOutcome] canonical enum so downstream can act on
+ *     SELECTED / REJECTED / FALLBACK semantics without ad-hoc field inference.
  *
- * ## Eleven canonical fields
+ * ## Thirteen canonical fields
  *
  * | Field                    | Wire key                                   | Always present? |
  * |--------------------------|--------------------------------------------|-----------------|
@@ -39,6 +41,8 @@ package com.ufo.galaxy.runtime
  * | [posture]                | [KEY_POSTURE]                              | yes             |
  * | [isSuitableTarget]       | [KEY_IS_SUITABLE_TARGET]                   | yes             |
  * | [unsuitabilityReason]    | [KEY_UNSUITABILITY_REASON]                 | conditional     |
+ * | [selectionOutcome]       | [KEY_SELECTION_OUTCOME]                    | yes             |
+ * | [selectionOutcomeReason] | [KEY_SELECTION_OUTCOME_REASON]             | conditional     |
  *
  * ## Suitability semantics
  *
@@ -53,20 +57,36 @@ package com.ufo.galaxy.runtime
  *  - [UNSUITABILITY_INVALIDATED]  — session was closed via INVALIDATION.
  *  - [UNSUITABILITY_NOT_ATTACHED] — session is DETACHING or DETACHED (non-invalidation).
  *
+ * ## Selection outcome semantics (PR-24)
+ *
+ * [selectionOutcome] canonicalises the target's role in multi-target selection:
+ *  - [TargetSelectionOutcome.SELECTED]  — suitable, primary-role candidate.
+ *  - [TargetSelectionOutcome.FALLBACK]  — suitable, but non-primary-role (SECONDARY /
+ *    SATELLITE); preferred over REJECTED but secondary to a SELECTED candidate.
+ *  - [TargetSelectionOutcome.REJECTED]  — not suitable; must not receive new tasks.
+ *
+ * [selectionOutcomeReason] is a stable machine-readable string that accompanies non-null
+ * outcomes:
+ *  - `null` for [TargetSelectionOutcome.SELECTED].
+ *  - [FALLBACK_REASON_NON_PRIMARY_ROLE] for [TargetSelectionOutcome.FALLBACK].
+ *  - The [unsuitabilityReason] value for [TargetSelectionOutcome.REJECTED].
+ *
  * ## State-transition semantics
  *
- * | Lifecycle event | [isSuitableTarget] | [unsuitabilityReason]          |
- * |-----------------|--------------------|--------------------------------|
- * | attach          | `true`             | `null`                         |
- * | detach          | `false`            | [UNSUITABILITY_NOT_ATTACHED]   |
- * | reconnect       | `true`             | `null`                         |
- * | invalidate      | `false`            | [UNSUITABILITY_INVALIDATED]    |
+ * | Lifecycle event         | [isSuitableTarget] | [selectionOutcome]             | [selectionOutcomeReason]          |
+ * |-------------------------|--------------------|--------------------------------|-----------------------------------|
+ * | attach (primary role)   | `true`             | [TargetSelectionOutcome.SELECTED]  | `null`                            |
+ * | attach (secondary role) | `true`             | [TargetSelectionOutcome.FALLBACK]  | [FALLBACK_REASON_NON_PRIMARY_ROLE]|
+ * | detach                  | `false`            | [TargetSelectionOutcome.REJECTED]  | [UNSUITABILITY_NOT_ATTACHED]      |
+ * | reconnect               | `true`             | [TargetSelectionOutcome.SELECTED]  | `null`                            |
+ * | invalidate              | `false`            | [TargetSelectionOutcome.REJECTED]  | [UNSUITABILITY_INVALIDATED]       |
  *
  * ## Obtaining an instance
  *
- * Use [RuntimeController.currentDelegatedTargetReadinessProjection]; do not construct
- * directly.  In tests, use [from] with a manually constructed
- * [AttachedRuntimeHostSessionSnapshot].
+ * Use [RuntimeController.currentDelegatedTargetReadinessProjection] for a point-in-time
+ * query, or observe [RuntimeController.targetReadinessProjection] as a [kotlinx.coroutines.flow.StateFlow]
+ * for reactive consumption.  Do not construct directly.  In tests, use [from] with a
+ * manually constructed [AttachedRuntimeHostSessionSnapshot].
  *
  * @property snapshot                 Full nine-field [AttachedRuntimeHostSessionSnapshot]
  *                                    from which this projection is derived.
@@ -108,6 +128,44 @@ data class DelegatedTargetReadinessProjection(
     /** Delegates to [AttachedRuntimeHostSessionSnapshot.posture]. */
     val posture: String get() = snapshot.posture
 
+    // ── Selection outcome (PR-24) ─────────────────────────────────────────────
+
+    /**
+     * Canonical selection classification for this target (PR-24).
+     *
+     * Derived purely from [isSuitableTarget] and [snapshot.hostRole]:
+     *  - [TargetSelectionOutcome.REJECTED] — not suitable; downstream must not assign
+     *    new tasks to this target.
+     *  - [TargetSelectionOutcome.FALLBACK]  — suitable but non-primary (SECONDARY /
+     *    SATELLITE role); preferred over REJECTED, secondary to SELECTED.
+     *  - [TargetSelectionOutcome.SELECTED]  — suitable, primary-role candidate.
+     *
+     * This property is the authoritative, stable surface that lets the main-repository
+     * selection policy make a decision without re-combining scattered fields.
+     */
+    val selectionOutcome: TargetSelectionOutcome get() = when {
+        !isSuitableTarget -> TargetSelectionOutcome.REJECTED
+        snapshot.hostRole == RuntimeHostDescriptor.FormationRole.SECONDARY.wireValue ||
+            snapshot.hostRole == RuntimeHostDescriptor.FormationRole.SATELLITE.wireValue ->
+            TargetSelectionOutcome.FALLBACK
+        else -> TargetSelectionOutcome.SELECTED
+    }
+
+    /**
+     * Stable machine-readable reason string accompanying [selectionOutcome] (PR-24).
+     *
+     *  - `null` when [selectionOutcome] is [TargetSelectionOutcome.SELECTED].
+     *  - [FALLBACK_REASON_NON_PRIMARY_ROLE] when [selectionOutcome] is
+     *    [TargetSelectionOutcome.FALLBACK].
+     *  - The [unsuitabilityReason] value when [selectionOutcome] is
+     *    [TargetSelectionOutcome.REJECTED].
+     */
+    val selectionOutcomeReason: String? get() = when (selectionOutcome) {
+        TargetSelectionOutcome.SELECTED -> null
+        TargetSelectionOutcome.FALLBACK -> FALLBACK_REASON_NON_PRIMARY_ROLE
+        TargetSelectionOutcome.REJECTED -> unsuitabilityReason
+    }
+
     // ── Serialisation ─────────────────────────────────────────────────────────
 
     /**
@@ -118,6 +176,9 @@ data class DelegatedTargetReadinessProjection(
      *  - [KEY_IS_SUITABLE_TARGET] is always present.
      *  - [KEY_UNSUITABILITY_REASON] is included **only** when [unsuitabilityReason]
      *    is non-`null` (i.e. when [isSuitableTarget] is `false`).
+     *  - [KEY_SELECTION_OUTCOME] is always present (PR-24).
+     *  - [KEY_SELECTION_OUTCOME_REASON] is included **only** when [selectionOutcomeReason]
+     *    is non-`null` (i.e. when [selectionOutcome] is not [TargetSelectionOutcome.SELECTED]).
      *
      * @return An immutable [Map] suitable for transmission to the main-repo
      *         delegated target selection policy.
@@ -126,6 +187,8 @@ data class DelegatedTargetReadinessProjection(
         putAll(snapshot.toMap())
         put(KEY_IS_SUITABLE_TARGET, isSuitableTarget)
         unsuitabilityReason?.let { put(KEY_UNSUITABILITY_REASON, it) }
+        put(KEY_SELECTION_OUTCOME, selectionOutcome.wireValue)
+        selectionOutcomeReason?.let { put(KEY_SELECTION_OUTCOME_REASON, it) }
     }
 
     // ── Companion / factory ───────────────────────────────────────────────────
@@ -173,6 +236,20 @@ data class DelegatedTargetReadinessProjection(
          */
         const val KEY_UNSUITABILITY_REASON = "readiness_unsuitability_reason"
 
+        /**
+         * Wire key for [selectionOutcome] (PR-24).
+         * Always present in [toMap] output.
+         */
+        const val KEY_SELECTION_OUTCOME = "readiness_selection_outcome"
+
+        /**
+         * Wire key for [selectionOutcomeReason] (PR-24).
+         * Present in [toMap] output **only** when [selectionOutcomeReason] is non-`null`
+         * (i.e. when [selectionOutcome] is [TargetSelectionOutcome.FALLBACK] or
+         * [TargetSelectionOutcome.REJECTED]).
+         */
+        const val KEY_SELECTION_OUTCOME_REASON = "readiness_selection_outcome_reason"
+
         // ── Unsuitability reason constants ────────────────────────────────────
 
         /**
@@ -187,16 +264,27 @@ data class DelegatedTargetReadinessProjection(
          */
         const val UNSUITABILITY_NOT_ATTACHED = "not_attached"
 
+        // ── Selection outcome reason constants (PR-24) ────────────────────────
+
+        /**
+         * [selectionOutcomeReason] value when [selectionOutcome] is
+         * [TargetSelectionOutcome.FALLBACK] because the host's [snapshot.hostRole] is
+         * [RuntimeHostDescriptor.FormationRole.SECONDARY] or
+         * [RuntimeHostDescriptor.FormationRole.SATELLITE].
+         */
+        const val FALLBACK_REASON_NON_PRIMARY_ROLE = "non_primary_role"
+
         // ── Always-present keys ───────────────────────────────────────────────
 
         /**
          * The keys that are **always** present in [toMap] output, regardless of
-         * session state.  [KEY_INVALIDATION_REASON] and [KEY_UNSUITABILITY_REASON]
-         * are excluded because they are conditional.
+         * session state.  [KEY_INVALIDATION_REASON], [KEY_UNSUITABILITY_REASON], and
+         * [KEY_SELECTION_OUTCOME_REASON] are excluded because they are conditional.
          */
         val ALWAYS_PRESENT_KEYS: Set<String> = buildSet {
             addAll(AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS)
             add(KEY_IS_SUITABLE_TARGET)
+            add(KEY_SELECTION_OUTCOME)
         }
 
         // ── Factory ───────────────────────────────────────────────────────────
@@ -215,6 +303,10 @@ data class DelegatedTargetReadinessProjection(
          *  - [unsuitabilityReason] is [UNSUITABILITY_NOT_ATTACHED] when the session is not
          *    attached and not invalidated.
          *  - [unsuitabilityReason] is `null` when [isSuitableTarget] is `true`.
+         *
+         * **Selection outcome** ([selectionOutcome]) and reason ([selectionOutcomeReason])
+         * are computed properties on the returned instance; they do not require additional
+         * factory parameters (PR-24).
          *
          * @param snapshot The [AttachedRuntimeHostSessionSnapshot] to evaluate.
          * @return A fully populated [DelegatedTargetReadinessProjection].
@@ -236,4 +328,54 @@ data class DelegatedTargetReadinessProjection(
             )
         }
     }
+}
+
+/**
+ * Canonical selection outcome for a delegated target (PR-24 — selection truth consolidation).
+ *
+ * [TargetSelectionOutcome] is exposed as a stable, machine-readable enum on
+ * [DelegatedTargetReadinessProjection.selectionOutcome] so that the main-repository
+ * delegated target selection policy can act on a pre-classified verdict rather than
+ * inferring it from scattered readiness fields.
+ *
+ * | Value      | Wire value   | Meaning                                                  |
+ * |------------|--------------|----------------------------------------------------------|
+ * | [SELECTED] | `"selected"` | Suitable, primary-role target; preferred for assignment. |
+ * | [FALLBACK] | `"fallback"` | Suitable, non-primary-role target; secondary preference. |
+ * | [REJECTED] | `"rejected"` | Not suitable; must not receive new delegated executions. |
+ */
+enum class TargetSelectionOutcome(
+    /** Stable wire value for serialisation; used as the value for
+     *  [DelegatedTargetReadinessProjection.KEY_SELECTION_OUTCOME] in [DelegatedTargetReadinessProjection.toMap]. */
+    val wireValue: String
+) {
+    /**
+     * The target is a suitable, primary-role candidate.
+     *
+     * This outcome is assigned when [DelegatedTargetReadinessProjection.isSuitableTarget]
+     * is `true` and the host's formation role is [RuntimeHostDescriptor.FormationRole.PRIMARY],
+     * [RuntimeHostDescriptor.FormationRole.DEFAULT], or any other role that is not explicitly
+     * secondary/tertiary.
+     */
+    SELECTED("selected"),
+
+    /**
+     * The target is suitable, but carries a lower selection priority than a [SELECTED] target.
+     *
+     * This outcome is assigned when [DelegatedTargetReadinessProjection.isSuitableTarget]
+     * is `true` and the host's formation role is [RuntimeHostDescriptor.FormationRole.SECONDARY]
+     * or [RuntimeHostDescriptor.FormationRole.SATELLITE].  It prevents multi-target selection
+     * from being driven solely by first-active or explicit-target heuristics — secondary
+     * devices are always identifiable as FALLBACK regardless of attachment order.
+     */
+    FALLBACK("fallback"),
+
+    /**
+     * The target is not suitable and must not receive new delegated executions.
+     *
+     * This outcome is assigned when [DelegatedTargetReadinessProjection.isSuitableTarget]
+     * is `false`.  The accompanying [DelegatedTargetReadinessProjection.selectionOutcomeReason]
+     * echoes [DelegatedTargetReadinessProjection.unsuitabilityReason] for diagnostics.
+     */
+    REJECTED("rejected"),
 }
