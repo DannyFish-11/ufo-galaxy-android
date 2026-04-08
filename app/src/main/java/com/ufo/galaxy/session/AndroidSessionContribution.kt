@@ -83,7 +83,19 @@ data class AndroidSessionContribution(
          * blocked execution.  Distinct from [FAILURE] so callers can differentiate
          * "device refused by policy" from "device tried and failed".
          */
-        DISABLED
+        DISABLED,
+
+        /**
+         * Android executed a subtask as a participation target in a V2-led staged-mesh
+         * coordination flow (PR-32).
+         *
+         * Distinct from [FINAL_COMPLETION] so session-truth consumers can distinguish
+         * direct single-device completions from staged-mesh-participant completions
+         * without inspecting raw status strings or route fields.  The [traceId] and
+         * [groupId] fields both carry the [com.ufo.galaxy.runtime.StagedMeshParticipationResult.meshId]
+         * for correlation.
+         */
+        STAGED_MESH_SUBTASK
     }
 
     companion object {
@@ -193,5 +205,24 @@ data class AndroidSessionContribution(
                 deviceRole = ""
             )
         }
+
+        // ── Factory: StagedMeshParticipationResult → AndroidSessionContribution ─
+
+        /**
+         * Creates an [AndroidSessionContribution] from a
+         * [com.ufo.galaxy.runtime.StagedMeshParticipationResult] (PR-32).
+         *
+         * This factory delegates to
+         * [com.ufo.galaxy.runtime.StagedMeshParticipationResult.toSessionContribution]
+         * and is the canonical construction path for staged-mesh contributions so that
+         * callers in [com.ufo.galaxy.session] do not need to import the runtime package.
+         *
+         * @param result     The [com.ufo.galaxy.runtime.StagedMeshParticipationResult] to wrap.
+         * @param deviceRole Logical device role (e.g. `"phone"`, `"tablet"`).
+         */
+        fun fromStagedMeshResult(
+            result: com.ufo.galaxy.runtime.StagedMeshParticipationResult,
+            deviceRole: String = ""
+        ): AndroidSessionContribution = result.toSessionContribution(deviceRole)
     }
 }
