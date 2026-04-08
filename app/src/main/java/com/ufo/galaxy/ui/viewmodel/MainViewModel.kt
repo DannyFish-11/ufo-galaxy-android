@@ -15,6 +15,7 @@ import com.ufo.galaxy.local.LocalLoopOptions
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
+import com.ufo.galaxy.runtime.CrossDeviceEnablementError
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
@@ -90,11 +91,12 @@ data class MainUiState(
     /** True when the OS battery-optimisation exemption has been granted for this app. */
     val batteryOptimizationsDisabled: Boolean = false,
     /**
-     * Non-null when the cross-device runtime failed to register (network error or timeout).
-     * The value is the human-readable failure reason. Set back to null via
-     * [MainViewModel.clearRegistrationFailure] after the user dismisses the dialog.
+     * Non-null when the cross-device runtime failed to register.
+     * PR-27: Carries a typed [CrossDeviceEnablementError] so that the UI dialog can show
+     * category-appropriate recovery actions (retry, go to settings, fix capabilities).
+     * Set back to null via [MainViewModel.clearRegistrationFailure] after the user dismisses.
      */
-    val registrationFailure: String? = null,
+    val registrationFailure: CrossDeviceEnablementError? = null,
     // ── Network settings (网络与诊断增强包) ──────────────────────────────────
     /** True while the network settings screen is shown. */
     val showNetworkSettings: Boolean = false,
@@ -232,13 +234,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         // Observe RuntimeController registration failures and surface them as dialogs.
-        // SharedFlow: each emission is a one-time event (failure reason string).
+        // PR-27: SharedFlow now emits typed CrossDeviceEnablementError for differentiated
+        // recovery UX (CONFIGURATION → settings, NETWORK → retry, CAPABILITY → permissions).
         UFOGalaxyApplication.runtimeController.registrationError
-            .onEach { reason ->
-                Log.w(TAG, "RuntimeController registration failure: $reason")
+            .onEach { error ->
+                Log.w(TAG, "RuntimeController registration failure [${error.category}]: ${error.message}")
                 UFOGalaxyApplication.metricsRecorder.recordRegistrationFailure()
-                pushError(reason)
-                _uiState.update { it.copy(registrationFailure = reason, crossDeviceEnabled = false) }
+                pushError(error.message)
+                _uiState.update { it.copy(registrationFailure = error, crossDeviceEnabled = false) }
             }
             .launchIn(viewModelScope)
         // PR-23: Observe takeover-level failures and keep diagnostics state consistent.

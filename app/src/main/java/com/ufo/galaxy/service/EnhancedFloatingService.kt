@@ -34,6 +34,7 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.runtime.CrossDeviceEnablementError
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
@@ -189,14 +190,15 @@ class EnhancedFloatingService : Service() {
         setupWebSocketListener()
 
         // Observe RuntimeController registration failures and show floating dialog.
+        // PR-27: Error is now typed (CrossDeviceEnablementError) for differentiated recovery UI.
         serviceScope.launch {
-            UFOGalaxyApplication.runtimeController.registrationError.collect { reason ->
-                Log.w(TAG, "[FLOAT] Registration failure: $reason")
+            UFOGalaxyApplication.runtimeController.registrationError.collect { error ->
+                Log.w(TAG, "[FLOAT] Registration failure [${error.category}]: ${error.message}")
                 // Reset switch state on main thread.
                 crossDeviceSwitch?.post {
                     crossDeviceSwitch?.isChecked = false
                 }
-                showRegistrationFailureDialog(reason)
+                showRegistrationFailureDialog(error)
             }
         }
 
@@ -644,19 +646,28 @@ class EnhancedFloatingService : Service() {
     /**
      * Shows a floating overlay dialog when cross-device device registration fails.
      *
+     * PR-27: The dialog now receives a typed [CrossDeviceEnablementError] and shows
+     * category-appropriate recovery actions:
+     *  - [CrossDeviceEnablementError.Category.NETWORK] — shows "重试" (retry) and
+     *    "关闭跨设备" (dismiss); retry re-attempts registration via RuntimeController.
+     *  - [CrossDeviceEnablementError.Category.CONFIGURATION] or
+     *    [CrossDeviceEnablementError.Category.CAPABILITY] — shows "去设置" (open main
+     *    activity settings) and "关闭跨设备" (dismiss); retry is not shown because
+     *    the user must first fix the configuration / permissions.
+     *
      * Because [EnhancedFloatingService] is a [Service] (not an [Activity]), we cannot use
      * the standard [android.app.AlertDialog] API directly. Instead, we create a small
      * overlay view using the [WindowManager] with [TYPE_APPLICATION_OVERLAY] type, which
      * is the same mechanism used for the floating island itself.
      *
-     * The dialog auto-dismisses when the user taps "确定". If the overlay permission has
-     * not been granted yet, the error is logged (overlay cannot be shown without permission).
+     * If the overlay permission has not been granted yet, the error is logged (overlay
+     * cannot be shown without permission).
      */
-    private fun showRegistrationFailureDialog(reason: String) {
+    private fun showRegistrationFailureDialog(error: CrossDeviceEnablementError) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
             !android.provider.Settings.canDrawOverlays(this)
         ) {
-            Log.w(TAG, "[FLOAT] Cannot show registration failure dialog: overlay permission not granted. reason=$reason")
+            Log.w(TAG, "[FLOAT] Cannot show registration failure dialog: overlay permission not granted. error=${error.message}")
             return
         }
 
@@ -668,20 +679,20 @@ class EnhancedFloatingService : Service() {
             setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
 
             addView(android.widget.TextView(context).apply {
-                text = "跨设备注册失败"
+                text = "跨设备开启失败"
                 setTextColor(0xFFFFFFFF.toInt())
                 textSize = 16f
                 setPadding(0, 0, 0, dpToPx(8))
             })
 
             addView(android.widget.TextView(context).apply {
-                text = reason
+                text = error.message
                 setTextColor(0xFFCCCCCC.toInt())
                 textSize = 13f
                 setPadding(0, 0, 0, dpToPx(12))
             })
 
-            // Dismiss button — must be added after we create dialogParams reference.
+            // Dismiss button — must be added before action buttons.
         }
 
         val dialogParams = WindowManager.LayoutParams().apply {
@@ -699,7 +710,7 @@ class EnhancedFloatingService : Service() {
             gravity = android.view.Gravity.CENTER
         }
 
-        // Dismiss button: removes the dialog view from the WindowManager.
+        // Dismiss/close button: always present.
         dialogView.addView(android.widget.Button(context).apply {
             text = "关闭跨设备"
             setTextColor(0xFFFFFFFF.toInt())
@@ -712,34 +723,54 @@ class EnhancedFloatingService : Service() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).also { it.bottomMargin = dpToPx(8) })
 
-        // Retry button: re-attempts cross-device registration.
-        dialogView.addView(android.widget.Button(context).apply {
-            text = "重试"
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF1976D2.toInt())
-            setOnClickListener {
-                try { windowManager.removeView(dialogView) } catch (_: Exception) {}
-                serviceScope.launch {
-                    val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
-                    crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = ok }
-                    if (!ok) {
-                        // Notify the user that the retry also failed.
-                        android.widget.Toast.makeText(
-                            context,
-                            "重试失败，请检查网络或 Gateway 配置后再试。",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
+        // PR-27: Category-appropriate action button.
+        when (error.category) {
+            CrossDeviceEnablementError.Category.NETWORK -> {
+                // Network error → offer "重试" to re-attempt registration immediately.
+                dialogView.addView(android.widget.Button(context).apply {
+                    text = "重试"
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(0xFF1976D2.toInt())
+                    setOnClickListener {
+                        try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+                        serviceScope.launch {
+                            val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                            crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = ok }
+                            if (!ok) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "重试失败，请检查网络或 Gateway 配置后再试。",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                     }
-                }
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
             }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+            CrossDeviceEnablementError.Category.CONFIGURATION,
+            CrossDeviceEnablementError.Category.CAPABILITY -> {
+                // Configuration/capability error → user must fix settings first; open main UI.
+                dialogView.addView(android.widget.Button(context).apply {
+                    text = "去设置"
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(0xFF1976D2.toInt())
+                    setOnClickListener {
+                        try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+                        openMainActivity()
+                    }
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+            }
+        }
 
         try {
             windowManager.addView(dialogView, dialogParams)
-            Log.i(TAG, "[FLOAT] Registration failure dialog shown: $reason")
+            Log.i(TAG, "[FLOAT] Registration failure dialog shown [${error.category}]: ${error.message}")
         } catch (e: Exception) {
             Log.e(TAG, "[FLOAT] Failed to show registration failure dialog", e)
         }

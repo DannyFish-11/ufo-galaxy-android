@@ -38,6 +38,7 @@ import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
 import com.ufo.galaxy.ui.theme.UFOGalaxyTheme
 import com.ufo.galaxy.ui.viewmodel.MainViewModel
+import com.ufo.galaxy.runtime.CrossDeviceEnablementError
 
 /**
  * UFO Galaxy Android - 主 Activity
@@ -321,24 +322,40 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     }
 
     // Show registration failure dialog when cross-device registration fails.
-    uiState.registrationFailure?.let { reason ->
+    // PR-27: Offer category-appropriate recovery actions.
+    uiState.registrationFailure?.let { error ->
         AlertDialog(
             onDismissRequest = { viewModel.clearRegistrationFailure() },
-            title = { Text("跨设备注册失败") },
-            text = { Text(reason) },
+            title = { Text("跨设备开启失败") },
+            text = { Text(error.message) },
             confirmButton = {
-                TextButton(onClick = { viewModel.retryRegistration() }) {
-                    Text("重试")
+                when (error.category) {
+                    CrossDeviceEnablementError.Category.NETWORK -> {
+                        TextButton(onClick = { viewModel.retryRegistration() }) {
+                            Text("重试")
+                        }
+                    }
+                    CrossDeviceEnablementError.Category.CONFIGURATION,
+                    CrossDeviceEnablementError.Category.CAPABILITY -> {
+                        TextButton(onClick = {
+                            viewModel.clearRegistrationFailure()
+                            viewModel.openNetworkSettings()
+                        }) {
+                            Text("去设置")
+                        }
+                    }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    viewModel.clearRegistrationFailure()
-                    viewModel.openNetworkSettings()
-                }) {
-                    Text("查看诊断/设置")
+            dismissButton = if (error.category == CrossDeviceEnablementError.Category.NETWORK) {
+                {
+                    TextButton(onClick = {
+                        viewModel.clearRegistrationFailure()
+                        viewModel.openNetworkSettings()
+                    }) {
+                        Text("查看诊断/设置")
+                    }
                 }
-            }
+            } else null
         )
     }
 

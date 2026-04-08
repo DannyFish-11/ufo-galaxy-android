@@ -233,10 +233,10 @@ Exceptional conditions (any uncaught exception) are mapped to `ERROR` status; `E
 ```
 
 **Key lifecycle contract:**
-- `startWithTimeout()` → `start()`: enables WS, must register within `registrationTimeoutMs`; on failure emits `registrationError` and resets `crossDeviceEnabled = false`.
+- `startWithTimeout()` → `start()`: first runs a pre-flight capability check (accessibility, overlay); on capability failure emits `registrationError` as `CrossDeviceEnablementError.CapabilityError` immediately. If capabilities are satisfied, enables WS and must register within `registrationTimeoutMs`; on network failure emits `CrossDeviceEnablementError.NetworkError` and resets `crossDeviceEnabled = false`.
 - `stop()`: cleanly disconnects WS, sets `crossDeviceEnabled = false`, transitions to `LocalOnly`.
 - `connectIfEnabled()`: called on service restart / resume; syncs WS state without modifying settings or emitting errors on transient failure.
-- Both `MainActivity` and `EnhancedFloatingService` observe `registrationError` via `RegistrationFailureNotifier` to show a dialog — errors are never silently logged only.
+- Both `MainActivity` and `EnhancedFloatingService` observe `registrationError: SharedFlow<CrossDeviceEnablementError>` to show a typed dialog — `CAPABILITY` errors show "去设置", `NETWORK` errors show "重试" + "查看诊断/设置".
 
 ---
 

@@ -89,7 +89,7 @@ class RuntimeControllerTest {
 
     private fun buildController(
         loopController: LoopController = buildLoopController(),
-        settings: InMemoryAppSettings = InMemoryAppSettings(),
+        settings: InMemoryAppSettings = InMemoryAppSettings(accessibilityReady = true, overlayReady = true),
         crossDeviceEnabled: Boolean = false,
         timeoutMs: Long = 100L // very short for tests
     ): Pair<RuntimeController, GalaxyWebSocketClient> {
@@ -161,7 +161,7 @@ class RuntimeControllerTest {
     fun `startWithTimeout emits registrationError on failure`() = runBlocking {
         val (controller, _) = buildController(timeoutMs = 200L)
 
-        var errorReceived: String? = null
+        var errorReceived: CrossDeviceEnablementError? = null
         val job = launch {
             errorReceived = controller.registrationError.first()
         }
@@ -169,10 +169,15 @@ class RuntimeControllerTest {
         controller.startWithTimeout()
         job.join()
 
-        assertNotNull("registrationError should emit a failure reason", errorReceived)
+        assertNotNull("registrationError should emit a typed failure error", errorReceived)
         assertTrue(
-            "Failure reason should be non-empty",
-            errorReceived!!.isNotEmpty()
+            "Failure message should be non-empty",
+            errorReceived!!.message.isNotEmpty()
+        )
+        // PR-27: network timeout → NetworkError category (not Configuration or Capability).
+        assertTrue(
+            "Timeout failure must be categorised as NetworkError",
+            errorReceived is CrossDeviceEnablementError.NetworkError
         )
     }
 
@@ -190,8 +195,8 @@ class RuntimeControllerTest {
     fun `registrationError delivers to multiple consumers (wiring test for both UI surfaces)`() = runBlocking {
         val (controller, _) = buildController(timeoutMs = 200L)
 
-        var errorForMainViewModel: String? = null
-        var errorForFloatingService: String? = null
+        var errorForMainViewModel: CrossDeviceEnablementError? = null
+        var errorForFloatingService: CrossDeviceEnablementError? = null
 
         // Both consumers must be subscribed *before* the emission.
         val job1 = launch { errorForMainViewModel = controller.registrationError.first() }
@@ -211,7 +216,7 @@ class RuntimeControllerTest {
             errorForFloatingService
         )
         assertEquals(
-            "Both consumers should receive the same error message",
+            "Both consumers should receive the same typed error",
             errorForMainViewModel,
             errorForFloatingService
         )

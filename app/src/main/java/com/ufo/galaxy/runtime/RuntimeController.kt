@@ -131,15 +131,21 @@ class RuntimeController(
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
 
     /**
-     * One-time registration failure events.
+     * One-time registration failure events (PR-27 — typed error for setup/recovery UX).
      *
-     * Emits a human-readable failure reason whenever [start] fails (network error,
-     * timeout, or explicit WS error). Both [com.ufo.galaxy.ui.MainActivity] and
-     * [com.ufo.galaxy.service.EnhancedFloatingService] must collect this flow and
-     * show an AlertDialog/overlay dialog — **never** silently swallow the event.
+     * Emits a [CrossDeviceEnablementError] whenever [start] fails. The error carries a
+     * [CrossDeviceEnablementError.Category] so that surface layers can show appropriate
+     * recovery actions:
+     *  - [CrossDeviceEnablementError.Category.CONFIGURATION] → open network settings.
+     *  - [CrossDeviceEnablementError.Category.NETWORK] → retry + view diagnostics.
+     *  - [CrossDeviceEnablementError.Category.CAPABILITY] → go to system settings.
+     *
+     * Both [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
+     * must collect this flow and show an AlertDialog/overlay dialog — **never** silently
+     * swallow the event.
      */
-    private val _registrationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val registrationError: SharedFlow<String> = _registrationError.asSharedFlow()
+    private val _registrationError = MutableSharedFlow<CrossDeviceEnablementError>(extraBufferCapacity = 1)
+    val registrationError: SharedFlow<CrossDeviceEnablementError> = _registrationError.asSharedFlow()
 
     /**
      * One-time delegated-takeover failure events (PR-23 — cross-device failure and
@@ -328,6 +334,27 @@ class RuntimeController(
         Log.i(TAG, "[RUNTIME] Starting cross-device runtime (timeout=${registrationTimeoutMs}ms)")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_start", "timeout_ms" to registrationTimeoutMs))
 
+        // PR-27: Pre-flight capability check — surface a typed CapabilityError immediately
+        // rather than letting the WS connection attempt fail with a misleading network error.
+        if (!settings.accessibilityReady) {
+            Log.w(TAG, "[RUNTIME] Pre-flight failed: accessibility service not enabled")
+            handleFailure(
+                CrossDeviceEnablementError.CapabilityError(
+                    "跨设备模式需要无障碍服务权限。请前往"无障碍"设置，启用 UFO Galaxy 服务后重试。"
+                )
+            )
+            return false
+        }
+        if (!settings.overlayReady) {
+            Log.w(TAG, "[RUNTIME] Pre-flight failed: overlay permission not granted")
+            handleFailure(
+                CrossDeviceEnablementError.CapabilityError(
+                    "跨设备模式需要悬浮窗权限。请前往"显示在其他应用上层"设置，授予 UFO Galaxy 权限后重试。"
+                )
+            )
+            return false
+        }
+
         // Enable WS client for this attempt.
         webSocketClient.setCrossDeviceEnabled(true)
         settings.crossDeviceEnabled = true
@@ -380,8 +407,11 @@ class RuntimeController(
             Log.i(TAG, "[RUNTIME] Runtime is now Active")
             true
         } else {
-            val reason = "跨设备注册失败：无法连接到 Gateway。请检查网络或服务器设置。"
-            handleFailure(reason)
+            handleFailure(
+                CrossDeviceEnablementError.NetworkError(
+                    "跨设备注册失败：无法连接到 Gateway。请检查网络或服务器设置。"
+                )
+            )
             false
         }
     }
@@ -401,9 +431,11 @@ class RuntimeController(
         return try {
             withTimeout(registrationTimeoutMs) { start() }
         } catch (e: TimeoutCancellationException) {
-            val reason = "跨设备注册超时（${registrationTimeoutMs / 1000}秒）。请检查 Gateway 是否在线。"
-            Log.w(TAG, "[RUNTIME] Registration timed out: $reason")
-            handleFailure(reason)
+            val error = CrossDeviceEnablementError.NetworkError(
+                "跨设备注册超时（${registrationTimeoutMs / 1000}秒）。请检查 Gateway 是否在线。"
+            )
+            Log.w(TAG, "[RUNTIME] Registration timed out: ${error.message}")
+            handleFailure(error)
             false
         }
     }
@@ -597,15 +629,25 @@ class RuntimeController(
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /**
-     * Handles a registration failure: emits [registrationError], updates [state] to
-     * [RuntimeState.Failed], closes any [attachedSession] with
-     * [AttachedRuntimeSession.DetachCause.DISCONNECT], then falls back to local-only by
-     * disabling cross-device in both [settings] and the [webSocketClient].
+     * Handles a registration failure: emits [registrationError] with a typed
+     * [CrossDeviceEnablementError], updates [state] to [RuntimeState.Failed], closes any
+     * [attachedSession] with [AttachedRuntimeSession.DetachCause.DISCONNECT], then falls
+     * back to local-only by disabling cross-device in both [settings] and [webSocketClient].
+     *
+     * PR-27: The typed [error] lets surface layers ([com.ufo.galaxy.ui.MainActivity],
+     * [com.ufo.galaxy.service.EnhancedFloatingService]) offer category-appropriate recovery
+     * actions instead of always showing a generic "Retry" button.
      */
-    private suspend fun handleFailure(reason: String) {
-        GalaxyLogger.log(TAG, mapOf("event" to "runtime_failed", "reason" to reason))
-        _state.value = RuntimeState.Failed(reason)
-        _registrationError.emit(reason)
+    private suspend fun handleFailure(error: CrossDeviceEnablementError) {
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "runtime_failed",
+                "error_category" to error.category.name,
+                "reason" to error.message
+            )
+        )
+        _state.value = RuntimeState.Failed(error.message)
+        _registrationError.emit(error)
         closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
         // Fall back to local mode.
         settings.crossDeviceEnabled = false
@@ -614,7 +656,7 @@ class RuntimeController(
             webSocketClient.disconnect()
         }
         _state.value = RuntimeState.LocalOnly
-        Log.w(TAG, "[RUNTIME] Fell back to LocalOnly after failure: $reason")
+        Log.w(TAG, "[RUNTIME] Fell back to LocalOnly after failure (${error.category}): ${error.message}")
     }
 
     fun cancel() {

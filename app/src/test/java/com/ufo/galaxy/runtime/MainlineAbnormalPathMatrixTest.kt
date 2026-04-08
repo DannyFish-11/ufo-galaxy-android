@@ -159,7 +159,7 @@ class MainlineAbnormalPathMatrixTest {
 
     private fun buildController(
         loopController: LoopController = buildLoopController(),
-        settings: InMemoryAppSettings = InMemoryAppSettings(),
+        settings: InMemoryAppSettings = InMemoryAppSettings(accessibilityReady = true, overlayReady = true),
         hostDescriptor: RuntimeHostDescriptor? = buildHostDescriptor(),
         timeoutMs: Long = 100L
     ): Pair<RuntimeController, GalaxyWebSocketClient> {

@@ -146,7 +146,7 @@ class CrossDeviceFallbackClosureTest {
 
     private fun buildController(
         loopController: LoopController = buildLoopController(),
-        settings: InMemoryAppSettings = InMemoryAppSettings(),
+        settings: InMemoryAppSettings = InMemoryAppSettings(accessibilityReady = true, overlayReady = true),
         timeoutMs: Long = 100L
     ): Pair<RuntimeController, GalaxyWebSocketClient> {
         val client = GalaxyWebSocketClient(
