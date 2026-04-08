@@ -53,6 +53,13 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
         BLOCKED_GOAL_EXECUTION_DISABLED("goal_execution_disabled"),
 
         /**
+         * PR-31 — [AppSettings.delegatedExecutionAllowed] is `false`; the rollout-control
+         * flag that governs whether this device accepts inbound delegated tasks is currently
+         * disabled.  Cross-device connectivity (WS session) remains active.
+         */
+        BLOCKED_DELEGATED_EXECUTION_DISABLED("delegated_execution_disabled"),
+
+        /**
          * [AppSettings.accessibilityReady] is `false`; the accessibility service is not
          * running or has not been granted the required permissions.
          */
@@ -110,6 +117,12 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
         }
         if (!settings.goalExecutionEnabled) {
             return blocked(EligibilityOutcome.BLOCKED_GOAL_EXECUTION_DISABLED)
+        }
+        // PR-31: Check the rollout-control delegation flag before capability checks.
+        // This allows operators to disable delegation without affecting cross-device
+        // connectivity or requiring a full reconnect cycle.
+        if (!settings.delegatedExecutionAllowed) {
+            return blocked(EligibilityOutcome.BLOCKED_DELEGATED_EXECUTION_DISABLED)
         }
         if (!settings.accessibilityReady) {
             return blocked(EligibilityOutcome.BLOCKED_ACCESSIBILITY_NOT_READY)

@@ -163,7 +163,20 @@ data class MainUiState(
      *
      * Set by the [MainViewModel] observer of [RuntimeController.setupError].
      */
-    val lastSetupFailureCategory: CrossDeviceSetupError.Category? = null
+    val lastSetupFailureCategory: CrossDeviceSetupError.Category? = null,
+    // ── PR-31: Rollout-control snapshot ──────────────────────────────────────
+    /**
+     * PR-31 — Snapshot of all rollout-control flags as reported by
+     * [RuntimeController.rolloutControlSnapshot].
+     *
+     * Null before the first emission from [RuntimeController] (typically immediately after
+     * the ViewModel observes the flow for the first time).  The snapshot is updated
+     * whenever the underlying flags change (e.g. after [RuntimeController.applyKillSwitch]
+     * or after settings are saved).
+     *
+     * Exposed for operator-facing diagnostics and regression tests.
+     */
+    val rolloutControlSnapshot: com.ufo.galaxy.runtime.RolloutControlSnapshot? = null
 )
 
 /**
@@ -377,6 +390,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.FALLBACK)
                     )
                 }
+            }
+            .launchIn(viewModelScope)
+        // PR-31: Observe rollout-control snapshot changes and surface them in UI state
+        // so the diagnostics panel always shows the current rollout-control posture.
+        UFOGalaxyApplication.runtimeController.rolloutControlSnapshot
+            .onEach { snapshot ->
+                Log.d(TAG, "Rollout control snapshot updated: killSwitch=${snapshot.killSwitchActive} " +
+                    "crossDevice=${snapshot.crossDeviceAllowed} delegated=${snapshot.delegatedExecutionAllowed} " +
+                    "fallback=${snapshot.fallbackToLocalAllowed} goal=${snapshot.goalExecutionAllowed}")
+                _uiState.update { it.copy(rolloutControlSnapshot = snapshot) }
             }
             .launchIn(viewModelScope)
     }
@@ -1031,6 +1054,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // PR-30: Last setup failure category for operator visibility.
             if (s.lastSetupFailureCategory != null) {
                 appendLine("Last setup failure: ${s.lastSetupFailureCategory.wireValue}")
+            }
+            appendLine()
+            // PR-31: Rollout-control snapshot for operator-facing kill-switch diagnostics.
+            appendLine("-- Rollout Control --")
+            val rcs = s.rolloutControlSnapshot
+            if (rcs == null) {
+                appendLine("  (not yet available)")
+            } else {
+                appendLine("  cross_device_allowed: ${rcs.crossDeviceAllowed}")
+                appendLine("  delegated_execution_allowed: ${rcs.delegatedExecutionAllowed}")
+                appendLine("  fallback_to_local_allowed: ${rcs.fallbackToLocalAllowed}")
+                appendLine("  goal_execution_allowed: ${rcs.goalExecutionAllowed}")
+                appendLine("  kill_switch_active: ${rcs.killSwitchActive}")
             }
             appendLine()
             appendLine("-- Recent Errors (last ${s.recentErrors.size}) --")

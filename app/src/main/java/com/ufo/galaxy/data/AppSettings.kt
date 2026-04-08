@@ -45,6 +45,35 @@ interface AppSettings {
     /** Whether autonomous goal execution is advertised in the capability report. */
     var goalExecutionEnabled: Boolean
 
+    /**
+     * PR-31 — Rollout-control flag: whether this device may accept inbound
+     * delegated-takeover tasks from the main runtime.
+     *
+     * When `false`, [com.ufo.galaxy.agent.TakeoverEligibilityAssessor] will reject every
+     * inbound takeover request with
+     * [com.ufo.galaxy.agent.TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_DELEGATED_EXECUTION_DISABLED].
+     * Cross-device connectivity (WS connection, session registration) remains active so
+     * the operator can disable delegation without triggering a full reconnect cycle.
+     *
+     * Default: `true` — preserves backward compatibility; delegation was previously
+     * controlled exclusively through [crossDeviceEnabled] and [goalExecutionEnabled].
+     */
+    var delegatedExecutionAllowed: Boolean
+
+    /**
+     * PR-31 — Rollout-control flag: whether local fallback is permitted when a
+     * delegated-takeover execution fails.
+     *
+     * When `false`, a [com.ufo.galaxy.runtime.TakeoverFallbackEvent] is still emitted
+     * via [com.ufo.galaxy.runtime.RuntimeController.notifyTakeoverFailed] but the
+     * surface layer must not automatically re-execute the task locally.  Use this to
+     * prevent unintended local executions in environments where strict cross-device
+     * execution semantics are required.
+     *
+     * Default: `true` — preserves the prior fallback-always-allowed behaviour.
+     */
+    var fallbackToLocalAllowed: Boolean
+
     /** Whether on-device model inference is available (updated when models load/unload). */
     var localModelEnabled: Boolean
 
@@ -257,6 +286,8 @@ class InMemoryAppSettings(
     override var galaxyGatewayUrl: String = SharedPrefsAppSettings.DEFAULT_GATEWAY_URL,
     override var restBaseUrl: String = SharedPrefsAppSettings.DEFAULT_REST_BASE_URL,
     override var goalExecutionEnabled: Boolean = false,
+    override var delegatedExecutionAllowed: Boolean = true,
+    override var fallbackToLocalAllowed: Boolean = true,
     override var localModelEnabled: Boolean = false,
     override var parallelExecutionEnabled: Boolean = false,
     override var deviceRole: String = SharedPrefsAppSettings.DEFAULT_DEVICE_ROLE,
@@ -352,6 +383,15 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getBoolean(KEY_GOAL_EXECUTION_ENABLED, false)
         set(value) { prefs.edit().putBoolean(KEY_GOAL_EXECUTION_ENABLED, value).apply() }
 
+    // PR-31: Rollout-control flags
+    override var delegatedExecutionAllowed: Boolean
+        get() = prefs.getBoolean(KEY_DELEGATED_EXECUTION_ALLOWED, true)
+        set(value) { prefs.edit().putBoolean(KEY_DELEGATED_EXECUTION_ALLOWED, value).apply() }
+
+    override var fallbackToLocalAllowed: Boolean
+        get() = prefs.getBoolean(KEY_FALLBACK_TO_LOCAL_ALLOWED, true)
+        set(value) { prefs.edit().putBoolean(KEY_FALLBACK_TO_LOCAL_ALLOWED, value).apply() }
+
     override var localModelEnabled: Boolean
         get() = prefs.getBoolean(KEY_LOCAL_MODEL_ENABLED, false)
         set(value) { prefs.edit().putBoolean(KEY_LOCAL_MODEL_ENABLED, value).apply() }
@@ -440,6 +480,9 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_GALAXY_GATEWAY_URL = "galaxy_gateway_url"
         const val KEY_REST_BASE_URL = "rest_base_url"
         const val KEY_GOAL_EXECUTION_ENABLED = "goal_execution_enabled"
+        // PR-31: Rollout-control flag keys
+        const val KEY_DELEGATED_EXECUTION_ALLOWED = "delegated_execution_allowed"
+        const val KEY_FALLBACK_TO_LOCAL_ALLOWED = "fallback_to_local_allowed"
         const val KEY_LOCAL_MODEL_ENABLED = "local_model_enabled"
         const val KEY_PARALLEL_EXECUTION_ENABLED = "parallel_execution_enabled"
         const val KEY_DEVICE_ROLE = "device_role"
