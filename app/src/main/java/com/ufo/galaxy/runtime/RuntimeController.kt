@@ -43,9 +43,14 @@ import kotlin.coroutines.resume
  *    and triggers a best-effort reconnect — without emitting [registrationError] or
  *    modifying settings on transient failure.
  *  - **Failure**: Any registration or network failure inside [start] / [startWithTimeout]
- *    emits a human-readable reason via [registrationError] so both
+ *    emits a human-readable reason via [registrationError] and a typed
+ *    [CrossDeviceSetupError] via [setupError] so both
  *    [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
- *    can show a dialog/alert — **never** silently log-only.
+ *    can show a dialog/alert with context-appropriate recovery actions — **never** silently
+ *    log-only.
+ *  - **Reconnect** ([reconnect]): convenience method that cleanly stops and then
+ *    re-starts the runtime in one atomic step; intended for "save settings and reconnect"
+ *    flows and category-aware retry logic.
  *  - **Takeover failure**: Individual delegated task failures (FAILED / TIMEOUT / CANCELLED
  *    outcomes from [com.ufo.galaxy.agent.DelegatedTakeoverExecutor.execute], or a WS
  *    disconnect while a takeover was active) are emitted via [takeoverFailure].  Surface
@@ -140,6 +145,30 @@ class RuntimeController(
      */
     private val _registrationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val registrationError: SharedFlow<String> = _registrationError.asSharedFlow()
+
+    /**
+     * PR-27 — Typed setup error events for product-grade error differentiation.
+     *
+     * Emits a [CrossDeviceSetupError] alongside every [registrationError] emission so that
+     * surface layers can present **category-appropriate** recovery actions rather than a
+     * single generic "retry" option:
+     *
+     *  - [CrossDeviceSetupError.Category.CONFIGURATION] — gateway not configured; recovery
+     *    action is to open network settings.
+     *  - [CrossDeviceSetupError.Category.NETWORK] — transient network failure; recovery
+     *    action is to retry the connection.
+     *  - [CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED] — permissions or
+     *    capability requirements not met; recovery action is to open system settings.
+     *
+     * The [CrossDeviceSetupError.canRetry] flag indicates whether the retry path is
+     * meaningful for the given category without a settings change.
+     *
+     * Both [registrationError] and [setupError] are emitted atomically in [handleFailure];
+     * consumers should prefer [setupError] for new code but [registrationError] remains
+     * available for backward compatibility.
+     */
+    private val _setupError = MutableSharedFlow<CrossDeviceSetupError>(extraBufferCapacity = 1)
+    val setupError: SharedFlow<CrossDeviceSetupError> = _setupError.asSharedFlow()
 
     /**
      * One-time delegated-takeover failure events (PR-23 — cross-device failure and
@@ -597,15 +626,34 @@ class RuntimeController(
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /**
-     * Handles a registration failure: emits [registrationError], updates [state] to
-     * [RuntimeState.Failed], closes any [attachedSession] with
+     * Handles a registration failure: emits [registrationError] and [setupError], updates
+     * [state] to [RuntimeState.Failed], closes any [attachedSession] with
      * [AttachedRuntimeSession.DetachCause.DISCONNECT], then falls back to local-only by
      * disabling cross-device in both [settings] and the [webSocketClient].
+     *
+     * PR-27: Also classifies the failure into a [CrossDeviceSetupError] and emits it on
+     * [setupError] so that consumers can present category-appropriate recovery actions
+     * without inspecting the raw [reason] string.
      */
     private suspend fun handleFailure(reason: String) {
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_failed", "reason" to reason))
         _state.value = RuntimeState.Failed(reason)
         _registrationError.emit(reason)
+        // PR-27: Classify and emit on the typed setup-error flow.
+        val isGatewayConfigured = settings.gatewayHost.isNotBlank() ||
+            (settings.galaxyGatewayUrl.isNotBlank() &&
+                !settings.galaxyGatewayUrl.contains("x.x") &&
+                !settings.galaxyGatewayUrl.matches(Regex(".*://[^/]*x[^/]*/.*", RegexOption.IGNORE_CASE)))
+        val setupErr = CrossDeviceSetupError.classify(reason, isGatewayConfigured)
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "runtime_setup_error",
+                "category" to setupErr.category.wireValue,
+                "can_retry" to setupErr.canRetry
+            )
+        )
+        _setupError.emit(setupErr)
         closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
         // Fall back to local mode.
         settings.crossDeviceEnabled = false
@@ -614,7 +662,32 @@ class RuntimeController(
             webSocketClient.disconnect()
         }
         _state.value = RuntimeState.LocalOnly
-        Log.w(TAG, "[RUNTIME] Fell back to LocalOnly after failure: $reason")
+        Log.w(TAG, "[RUNTIME] Fell back to LocalOnly after failure: $reason (category=${setupErr.category.wireValue})")
+    }
+
+    /**
+     * Stops the current runtime and immediately starts again with the same settings.
+     *
+     * PR-27 — This is the canonical **reconnect** entry point for:
+     *  - "Save settings and reconnect" flows triggered from the network settings screen.
+     *  - Category-aware retry after a [CrossDeviceSetupError] — callers should prefer
+     *    this over separate [stop] + [startWithTimeout] calls to avoid leaving the
+     *    runtime in an inconsistent state between the two calls.
+     *
+     * The method is equivalent to [stop] followed immediately by [startWithTimeout] but
+     * guarantees atomicity: no external state can be observed between the stop and the
+     * start.
+     *
+     * Must be called from a coroutine context (e.g. `viewModelScope` or `serviceScope`).
+     *
+     * @return `true` if the runtime became [RuntimeState.Active] after the reconnect;
+     *         `false` on any failure (same semantics as [startWithTimeout]).
+     */
+    suspend fun reconnect(): Boolean {
+        Log.i(TAG, "[RUNTIME] reconnect: stopping and restarting")
+        GalaxyLogger.log(TAG, mapOf("event" to "runtime_reconnect"))
+        stop()
+        return startWithTimeout()
     }
 
     fun cancel() {
