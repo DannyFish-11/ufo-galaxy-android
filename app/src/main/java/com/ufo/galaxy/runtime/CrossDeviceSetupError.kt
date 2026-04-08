@@ -61,6 +61,14 @@ data class CrossDeviceSetupError(
 
     companion object {
         /**
+         * Keywords whose presence in a failure reason string indicates a
+         * [Category.CAPABILITY_NOT_SATISFIED] error.  Checked case-insensitively.
+         */
+        private val CAPABILITY_KEYWORDS = listOf(
+            "capability", "permission", "accessibility", "overlay", "model"
+        )
+
+        /**
          * Classifies a raw failure reason string into a [CrossDeviceSetupError].
          *
          * Called by [RuntimeController.handleFailure] after every registration attempt; the
@@ -69,8 +77,7 @@ data class CrossDeviceSetupError(
          *
          * Classification rules (applied in priority order):
          *  1. If [isGatewayConfigured] is `false` → [Category.CONFIGURATION].
-         *  2. If [reason] contains capability-related keywords (permission, accessibility,
-         *     overlay, model) → [Category.CAPABILITY_NOT_SATISFIED].
+         *  2. If [reason] contains any of [CAPABILITY_KEYWORDS] → [Category.CAPABILITY_NOT_SATISFIED].
          *  3. Otherwise → [Category.NETWORK] (connection failure / timeout).
          *
          * @param reason              Human-readable failure reason from [RuntimeController].
@@ -82,11 +89,8 @@ data class CrossDeviceSetupError(
         fun classify(reason: String, isGatewayConfigured: Boolean): CrossDeviceSetupError {
             val category = when {
                 !isGatewayConfigured -> Category.CONFIGURATION
-                reason.contains("capability", ignoreCase = true) ||
-                    reason.contains("permission", ignoreCase = true) ||
-                    reason.contains("accessibility", ignoreCase = true) ||
-                    reason.contains("overlay", ignoreCase = true) ||
-                    reason.contains("model", ignoreCase = true) -> Category.CAPABILITY_NOT_SATISFIED
+                CAPABILITY_KEYWORDS.any { reason.contains(it, ignoreCase = true) } ->
+                    Category.CAPABILITY_NOT_SATISFIED
                 else -> Category.NETWORK
             }
             return CrossDeviceSetupError(

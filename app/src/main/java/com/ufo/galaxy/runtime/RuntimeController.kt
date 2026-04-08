@@ -640,11 +640,7 @@ class RuntimeController(
         _state.value = RuntimeState.Failed(reason)
         _registrationError.emit(reason)
         // PR-27: Classify and emit on the typed setup-error flow.
-        val isGatewayConfigured = settings.gatewayHost.isNotBlank() ||
-            (settings.galaxyGatewayUrl.isNotBlank() &&
-                !settings.galaxyGatewayUrl.contains("x.x") &&
-                !settings.galaxyGatewayUrl.matches(Regex(".*://[^/]*x[^/]*/.*", RegexOption.IGNORE_CASE)))
-        val setupErr = CrossDeviceSetupError.classify(reason, isGatewayConfigured)
+        val setupErr = CrossDeviceSetupError.classify(reason, isGatewayConfigured())
         GalaxyLogger.log(
             TAG,
             mapOf(
@@ -925,6 +921,27 @@ class RuntimeController(
         _targetReadinessProjection.value = snapshot?.let {
             DelegatedTargetReadinessProjection.from(it)
         }
+    }
+
+    // ── Setup error helpers (PR-27) ───────────────────────────────────────────
+
+    /**
+     * Returns `true` when the current [settings] contain a real (non-placeholder) gateway
+     * address — either a non-blank [AppSettings.gatewayHost] override, or a
+     * [AppSettings.galaxyGatewayUrl] that does not match the `100.x.x.x` placeholder
+     * pattern used in the default build configuration.
+     *
+     * Called by [handleFailure] to determine the correct [CrossDeviceSetupError.Category]
+     * for the emitted [setupError] event.
+     */
+    private fun isGatewayConfigured(): Boolean {
+        if (settings.gatewayHost.isNotBlank()) return true
+        val url = settings.galaxyGatewayUrl
+        if (url.isBlank()) return false
+        // Reject the default placeholder pattern (e.g. "ws://100.x.x.x:8765").
+        if (url.contains("x.x", ignoreCase = true)) return false
+        if (url.matches(Regex(".*://[^/]*x[^/]*/.*", RegexOption.IGNORE_CASE))) return false
+        return true
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
