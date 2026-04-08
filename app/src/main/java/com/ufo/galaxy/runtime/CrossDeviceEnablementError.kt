@@ -57,7 +57,7 @@ sealed class CrossDeviceEnablementError {
      * the relevant system settings to grant the required permission before enabling
      * cross-device mode.
      *
-     * Recovery action: open network/permissions settings.
+     * Recovery action: open system permission settings (Accessibility or Overlay).
      */
     data class CapabilityError(override val message: String) : CrossDeviceEnablementError() {
         override val category: Category get() = Category.CAPABILITY
