@@ -16,6 +16,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.runtime.CrossDeviceSetupError
+import com.ufo.galaxy.runtime.ExecutionRouteTag
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
@@ -119,7 +120,25 @@ data class MainUiState(
     val diagnosticsReport: String? = null,
     // ── Local-loop debug panel (PR-G) ─────────────────────────────────────────
     /** True while the local-loop debug panel is visible. Debug-only entry point. */
-    val showLocalLoopDebug: Boolean = false
+    val showLocalLoopDebug: Boolean = false,
+    // ── PR-29: Execution route tracking ──────────────────────────────────────
+    /**
+     * The execution route that produced the most recent task result, or `null` if no task
+     * has completed yet since [MainViewModel] was created.
+     *
+     * Updated by [MainViewModel] whenever a result arrives via any path:
+     *  - [ExecutionRouteTag.LOCAL] — local [com.ufo.galaxy.local.LocalLoopExecutor] result.
+     *  - [ExecutionRouteTag.CROSS_DEVICE] — server message via WebSocket.
+     *  - [ExecutionRouteTag.FALLBACK] — delegated takeover failure (TakeoverFallbackEvent).
+     *  - [ExecutionRouteTag.DELEGATED] — successful delegated takeover completion.
+     *
+     * **Lifecycle**: persists across individual tasks within a session — it always reflects
+     * the last completed task's route and is never reset between tasks.  It starts as `null`
+     * and remains `null` until the first task result of any kind is received.
+     *
+     * Exposed as a diagnostic field; not shown in user-facing chat text.
+     */
+    val lastExecutionRoute: ExecutionRouteTag? = null
 )
 
 /**
@@ -169,7 +188,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + assistantMessage,
-                        isLoading = false
+                        isLoading = false,
+                        // PR-29: record which execution path produced this result.
+                        lastExecutionRoute = ExecutionRouteTag.LOCAL
                     )
                 }
             },
@@ -273,6 +294,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // PR-26: Unified result presentation — fallback events now also surface a user-facing
         // assistant message so the chat experience is consistent regardless of which path
         // (local / cross-device / delegated / fallback) produced the outcome.
+        // PR-29: Sets [MainUiState.lastExecutionRoute] to [ExecutionRouteTag.FALLBACK] so the
+        // diagnostics panel reflects that the last task ended via a delegated-takeover failure.
         UFOGalaxyApplication.runtimeController.takeoverFailure
             .onEach { event ->
                 Log.w(
@@ -296,7 +319,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + assistantMessage,
-                        isLoading = false
+                        isLoading = false,
+                        // PR-29: record which execution path produced this result.
+                        lastExecutionRoute = ExecutionRouteTag.FALLBACK
                     )
                 }
             }
@@ -363,6 +388,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      *
      * PR-26: Uses [UnifiedResultPresentation.fromServerMessage] so that cross-device /
      * delegated results surface through the same presentation path as local results.
+     * PR-29: Sets [MainUiState.lastExecutionRoute] to [ExecutionRouteTag.CROSS_DEVICE]
+     * so the diagnostics panel reflects that this result arrived via the Gateway WebSocket.
      */
     private fun handleServerMessage(message: String) {
         viewModelScope.launch {
@@ -378,7 +405,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + assistantMessage,
-                        isLoading = false
+                        isLoading = false,
+                        // PR-29: record which execution path produced this result.
+                        lastExecutionRoute = ExecutionRouteTag.CROSS_DEVICE
                     )
                 }
             } catch (e: Exception) {
@@ -450,6 +479,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * [LocalLoopExecutor.execute] internally and delivers the result via [onLocalResult].
      *
      * PR-26: Uses [UnifiedResultPresentation.fromLocalResult] for consistent formatting.
+     * PR-29: Sets [MainUiState.lastExecutionRoute] to [ExecutionRouteTag.LOCAL].
      */
     private suspend fun executeLocally(goal: String) {
         val result = UFOGalaxyApplication.localLoopExecutor.execute(LocalLoopOptions(instruction = goal))
@@ -467,7 +497,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { state ->
             state.copy(
                 messages = state.messages + assistantMessage,
-                isLoading = false
+                isLoading = false,
+                // PR-29: record which execution path produced this result.
+                lastExecutionRoute = ExecutionRouteTag.LOCAL
             )
         }
     }
@@ -614,11 +646,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      *  - [CrossDeviceSetupError.Category.CONFIGURATION] → clears the failure dialog and
      *    opens the network settings screen instead of attempting a connection that would
      *    fail again for the same configuration reason.
-     *  - [CrossDeviceSetupError.Category.NETWORK] or
-     *    [CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED] → clears the failure
-     *    dialog and immediately re-attempts connection via [toggleCrossDeviceEnabled],
-     *    which is equivalent to the user manually flipping the toggle back on after it was
+     *  - [CrossDeviceSetupError.Category.NETWORK] → clears the failure dialog and
+     *    immediately re-attempts connection via [toggleCrossDeviceEnabled], which is
+     *    equivalent to the user manually flipping the toggle back on after it was
      *    automatically disabled by [RuntimeController.handleFailure].
+     *
+     * PR-29 — CAPABILITY_NOT_SATISFIED tightening:
+     *  - [CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED] → opens the network
+     *    settings screen (where readiness flags are visible) instead of blindly retrying.
+     *    Retrying without granting the missing permission / readiness would fail immediately
+     *    with the same error, so directing the user to settings is the only meaningful path.
      *
      * When no category is recorded (e.g. the dialog was shown by an older code path without
      * category enrichment), falls back to the direct retry path.
@@ -629,15 +666,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun retryRegistration() {
         val category = _uiState.value.registrationFailureCategory
         _uiState.update { it.copy(registrationFailure = null, registrationFailureCategory = null) }
-        if (category == CrossDeviceSetupError.Category.CONFIGURATION) {
-            // Configuration error: opening settings is the only meaningful recovery path.
-            Log.i(TAG, "retryRegistration: configuration error → opening network settings")
-            _uiState.update { it.copy(showNetworkSettings = true) }
-        } else {
-            // Network or capability error (or unknown): attempt re-connection.
-            // crossDeviceEnabled was set to false when the failure occurred; toggling now
-            // will set it to true and attempt a new startWithTimeout().
-            toggleCrossDeviceEnabled()
+        when (category) {
+            CrossDeviceSetupError.Category.CONFIGURATION -> {
+                // Configuration error: opening settings is the only meaningful recovery path.
+                Log.i(TAG, "retryRegistration: configuration error → opening network settings")
+                _uiState.update { it.copy(showNetworkSettings = true) }
+            }
+            CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED -> {
+                // PR-29: Capability error: retrying without granting the missing
+                // permission/capability would fail immediately.  Direct to settings
+                // so the user can satisfy the capability requirement first.
+                Log.i(TAG, "retryRegistration: capability error → opening network settings for readiness review")
+                _uiState.update { it.copy(showNetworkSettings = true) }
+            }
+            else -> {
+                // Network error (or unknown): attempt re-connection.
+                // crossDeviceEnabled was set to false when the failure occurred; toggling now
+                // will set it to true and attempt a new startWithTimeout().
+                toggleCrossDeviceEnabled()
+            }
         }
     }
 
@@ -874,6 +921,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("Network OK: ${s.networkOk}")
             appendLine("Permissions OK: ${s.accessibilityReady && s.overlayReady}")
             appendLine("Battery optimizations disabled: ${s.batteryOptimizationsDisabled}")
+            appendLine()
+            // PR-29: Include last execution route so post-release diagnostics can identify
+            // which execution path was used for the most recent task.
+            appendLine("-- Last Execution Route --")
+            appendLine("Route: ${s.lastExecutionRoute?.wireValue ?: "none"}")
             appendLine()
             appendLine("-- Recent Errors (last ${s.recentErrors.size}) --")
             if (s.recentErrors.isEmpty()) {
