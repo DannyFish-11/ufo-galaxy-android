@@ -767,7 +767,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 GalaxyLogger.log(
                     GalaxyLogger.TAG_SETUP_RECOVERY,
                     mapOf(
-                        "category" to (category?.wireValue ?: "unknown"),
+                        "category" to (category?.wireValue ?: "category_unknown"),
                         "action" to "retry_connect"
                     )
                 )

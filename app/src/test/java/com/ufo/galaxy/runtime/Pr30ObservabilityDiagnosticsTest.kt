@@ -350,10 +350,13 @@ class Pr30ObservabilityDiagnosticsTest {
     fun `route counts survive copy of other MainUiState fields`() {
         val original = MainUiState(
             executionRouteCounts = mapOf(ExecutionRouteTag.LOCAL to 5),
-            lastExecutionRoute = ExecutionRouteTag.LOCAL
+            lastExecutionRoute = ExecutionRouteTag.LOCAL,
+            lastSetupFailureCategory = CrossDeviceSetupError.Category.NETWORK
         )
         val copied = original.copy(isLoading = true, isConnected = true)
         assertEquals(5, copied.executionRouteCounts[ExecutionRouteTag.LOCAL])
+        // PR-30: lastSetupFailureCategory must also survive copy operations
+        assertEquals(CrossDeviceSetupError.Category.NETWORK, copied.lastSetupFailureCategory)
     }
 
     // ── MainUiState.lastSetupFailureCategory ──────────────────────────────────

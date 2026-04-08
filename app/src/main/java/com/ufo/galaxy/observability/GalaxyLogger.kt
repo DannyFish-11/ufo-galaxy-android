@@ -134,7 +134,8 @@ object GalaxyLogger {
     /**
      * PR-30 — Fired when a reconnect attempt concludes (success or failure).
      *
-     * Required fields: `outcome` (`"success"` or `"failure"`), `reason` (non-null on failure).
+     * Fields: `outcome` (`"success"` or `"failure"`), `state` (the [RuntimeController.RuntimeState]
+     * simple class name after the attempt).
      */
     const val TAG_RECONNECT_OUTCOME = "GALAXY:RECONNECT:OUTCOME"
 
