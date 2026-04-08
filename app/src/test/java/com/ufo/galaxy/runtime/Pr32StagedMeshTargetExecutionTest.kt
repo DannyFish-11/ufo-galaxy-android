@@ -696,7 +696,7 @@ class Pr32StagedMeshTargetExecutionTest {
     @Test
     fun `fromStagedMeshResult delegates to toSessionContribution`() {
         val result = makeSuccessResult(meshId = "mesh-delegate-test", subtaskId = "sub-delegate-test")
-        val directContrib  = result.toSessionContribution("phone")
+        val directContrib = result.toSessionContribution("phone")
         val factoryContrib = AndroidSessionContribution.fromStagedMeshResult(result, "phone")
         assertEquals(directContrib, factoryContrib)
     }

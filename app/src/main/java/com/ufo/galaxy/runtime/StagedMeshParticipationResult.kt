@@ -126,7 +126,7 @@ data class StagedMeshParticipationResult(
             ExecutionStatus.SUCCESS   -> AndroidSessionContribution.Kind.STAGED_MESH_SUBTASK
             ExecutionStatus.CANCELLED -> AndroidSessionContribution.Kind.CANCELLATION
             ExecutionStatus.BLOCKED   -> AndroidSessionContribution.Kind.DISABLED
-            else                      -> AndroidSessionContribution.Kind.FAILURE
+            ExecutionStatus.FAILURE   -> AndroidSessionContribution.Kind.FAILURE
         }
         return AndroidSessionContribution(
             kind                 = kind,
