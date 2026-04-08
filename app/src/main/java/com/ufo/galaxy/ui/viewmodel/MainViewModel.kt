@@ -15,6 +15,7 @@ import com.ufo.galaxy.local.LocalLoopOptions
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
+import com.ufo.galaxy.runtime.CrossDeviceSetupError
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
@@ -95,6 +96,20 @@ data class MainUiState(
      * [MainViewModel.clearRegistrationFailure] after the user dismisses the dialog.
      */
     val registrationFailure: String? = null,
+    /**
+     * PR-27 — Typed category of the most recent registration failure; non-null when
+     * [registrationFailure] is also non-null.
+     *
+     * Consumers use this to present category-appropriate recovery actions in the
+     * registration failure dialog:
+     *  - [CrossDeviceSetupError.Category.CONFIGURATION] → "Open Settings" CTA.
+     *  - [CrossDeviceSetupError.Category.NETWORK] → "Retry" CTA.
+     *  - [CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED] → "Open Permissions" CTA.
+     *
+     * Reset to `null` together with [registrationFailure] by
+     * [MainViewModel.clearRegistrationFailure].
+     */
+    val registrationFailureCategory: CrossDeviceSetupError.Category? = null,
     // ── Network settings (网络与诊断增强包) ──────────────────────────────────
     /** True while the network settings screen is shown. */
     val showNetworkSettings: Boolean = false,
@@ -239,6 +254,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 UFOGalaxyApplication.metricsRecorder.recordRegistrationFailure()
                 pushError(reason)
                 _uiState.update { it.copy(registrationFailure = reason, crossDeviceEnabled = false) }
+            }
+            .launchIn(viewModelScope)
+        // PR-27: Observe typed setup errors and surface the category so the failure dialog
+        // can present context-appropriate recovery actions (open settings vs. retry vs.
+        // open permissions) rather than a single generic "Retry" button.
+        UFOGalaxyApplication.runtimeController.setupError
+            .onEach { err ->
+                Log.w(
+                    TAG,
+                    "CrossDevice setup error: category=${err.category.wireValue} " +
+                        "canRetry=${err.canRetry} reason=${err.reason}"
+                )
+                _uiState.update { it.copy(registrationFailureCategory = err.category) }
             }
             .launchIn(viewModelScope)
         // PR-23: Observe takeover-level failures and keep diagnostics state consistent.
@@ -572,28 +600,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Clears [MainUiState.registrationFailure] after the user has dismissed the dialog.
+     * Clears [MainUiState.registrationFailure] and [MainUiState.registrationFailureCategory]
+     * after the user has dismissed the dialog.
      */
     fun clearRegistrationFailure() {
-        _uiState.update { it.copy(registrationFailure = null) }
+        _uiState.update { it.copy(registrationFailure = null, registrationFailureCategory = null) }
     }
 
     /**
      * Retries cross-device registration after a failure.
      *
-     * Clears the failure dialog and immediately attempts to re-enable cross-device
-     * collaboration by toggling [toggleCrossDeviceEnabled]. This is equivalent to the
-     * user manually flipping the toggle back on after it was automatically disabled by
-     * [RuntimeController.handleFailure].
+     * PR-27 — Category-aware retry logic:
+     *  - [CrossDeviceSetupError.Category.CONFIGURATION] → clears the failure dialog and
+     *    opens the network settings screen instead of attempting a connection that would
+     *    fail again for the same configuration reason.
+     *  - [CrossDeviceSetupError.Category.NETWORK] or
+     *    [CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED] → clears the failure
+     *    dialog and immediately re-attempts connection via [toggleCrossDeviceEnabled],
+     *    which is equivalent to the user manually flipping the toggle back on after it was
+     *    automatically disabled by [RuntimeController.handleFailure].
      *
-     * Called from the "Retry" button in the registration failure dialog displayed in
-     * [com.ufo.galaxy.ui.MainActivity].
+     * When no category is recorded (e.g. the dialog was shown by an older code path without
+     * category enrichment), falls back to the direct retry path.
+     *
+     * Called from the "Retry" / "Open Settings" button in the registration failure dialog
+     * displayed in [com.ufo.galaxy.ui.MainActivity].
      */
     fun retryRegistration() {
-        _uiState.update { it.copy(registrationFailure = null) }
-        // crossDeviceEnabled was set to false when the failure occurred; toggling now
-        // will set it to true and attempt a new startWithTimeout().
-        toggleCrossDeviceEnabled()
+        val category = _uiState.value.registrationFailureCategory
+        _uiState.update { it.copy(registrationFailure = null, registrationFailureCategory = null) }
+        if (category == CrossDeviceSetupError.Category.CONFIGURATION) {
+            // Configuration error: opening settings is the only meaningful recovery path.
+            Log.i(TAG, "retryRegistration: configuration error → opening network settings")
+            _uiState.update { it.copy(showNetworkSettings = true) }
+        } else {
+            // Network or capability error (or unknown): attempt re-connection.
+            // crossDeviceEnabled was set to false when the failure occurred; toggling now
+            // will set it to true and attempt a new startWithTimeout().
+            toggleCrossDeviceEnabled()
+        }
     }
 
     // ── Network settings (网络与诊断增强包) ──────────────────────────────────
@@ -611,7 +656,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Saves network settings to [AppSettings] and optionally triggers a WS reconnect.
      *
-     * @param reconnect When true, stops the current runtime and starts again with the new config.
+     * PR-27 — When [reconnect] is true and cross-device is currently enabled, uses
+     * [RuntimeController.reconnect] (stop + startWithTimeout atomically) so that the
+     * new settings take effect cleanly without leaving the runtime in an inconsistent
+     * intermediate state.
+     *
+     * @param reconnect When true, reconnects the runtime with the new configuration.
      */
     fun saveNetworkSettings(
         gatewayHost: String,
@@ -634,9 +684,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         s.metricsEndpoint = metricsEndpoint.trim()
         Log.i(TAG, "saveNetworkSettings: host=${s.gatewayHost} port=${s.gatewayPort} tls=${s.useTls} reconnect=$reconnect")
         if (reconnect && _uiState.value.crossDeviceEnabled) {
-            UFOGalaxyApplication.runtimeController.stop()
+            // PR-27: Use RuntimeController.reconnect() for atomic stop + startWithTimeout.
             viewModelScope.launch {
-                val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                val ok = UFOGalaxyApplication.runtimeController.reconnect()
                 if (!ok) {
                     _uiState.update { it.copy(crossDeviceEnabled = false) }
                 }
