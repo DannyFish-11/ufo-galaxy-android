@@ -48,6 +48,7 @@ import kotlin.concurrent.withLock
  * | `GALAXY:FALLBACK:DECISION`| Fallback path finalised after delegated failure (PR-30)     |
  * | `GALAXY:ROLLOUT:CONTROL`  | Rollout-control flag changed at runtime (PR-31)             |
  * | `GALAXY:KILL:SWITCH`      | Kill-switch activated — all remote paths disabled (PR-31)   |
+ * | `GALAXY:STAGED:MESH`      | Staged-mesh target execution event (PR-32)                  |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -176,6 +177,26 @@ object GalaxyLogger {
      * field `reason` may be included by the caller for operator traceability.
      */
     const val TAG_KILL_SWITCH = "GALAXY:KILL:SWITCH"
+
+    // ── PR-32: Staged-mesh target execution tag ───────────────────────────────
+
+    /**
+     * PR-32 — Fired for key events in the staged-mesh target execution path.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.StagedMeshExecutionTarget] for:
+     * - `staged_mesh_accept`  — subtask accepted and dispatched to the pipeline.
+     * - `staged_mesh_blocked` — subtask rejected by a rollout-control gate.
+     * - `staged_mesh_result`  — subtask execution completed (success, failure, or cancelled).
+     *
+     * Required fields: `event`, `mesh_id`, `subtask_id`, `task_id`.
+     * Result events additionally include: `status`, `step_count`, `latency_ms`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:STAGED:MESH","fields":{"event":"staged_mesh_result","mesh_id":"sm-1","subtask_id":"sub-0","task_id":"t-abc","status":"success","step_count":3,"latency_ms":1200}}
+     * ```
+     */
+    const val TAG_STAGED_MESH = "GALAXY:STAGED:MESH"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
