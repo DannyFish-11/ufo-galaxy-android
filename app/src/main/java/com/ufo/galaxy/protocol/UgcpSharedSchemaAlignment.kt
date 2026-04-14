@@ -19,12 +19,21 @@ data class UgcpIdentityAlignment(
     val androidCarrier: String
 )
 
+data class UgcpTransferEventAlignment(
+    val androidEvent: String,
+    val canonicalTransferSemantic: String
+)
+
 object UgcpSharedSchemaAlignment {
     const val runtimeWsProfileName: String = "ugcp.runtime_ws_profile.android"
 
     const val runtimeWsProfileTransport: String = "aip_ws"
 
     const val runtimeWsProfileStatus: String = "incremental_alignment"
+
+    const val controlTransferProfileName: String = "ugcp.control_transfer_profile.android"
+
+    const val controlTransferProfileStatus: String = "incremental_alignment"
 
     val identityAlignments: List<UgcpIdentityAlignment> = listOf(
         UgcpIdentityAlignment("TaskId", "task_id"),
@@ -97,6 +106,46 @@ object UgcpSharedSchemaAlignment {
         "takeover_request",
         "takeover_response",
         "delegated_execution_signal"
+    )
+
+    val transferLifecycleTerms: Set<String> = setOf(
+        "transfer_accept",
+        "transfer_reject",
+        "transfer_cancel",
+        "transfer_expire",
+        "transfer_adopt",
+        "transfer_resume"
+    )
+
+    val transferEventAlignments: List<UgcpTransferEventAlignment> = listOf(
+        UgcpTransferEventAlignment(
+            androidEvent = "takeover_response.accepted=true",
+            canonicalTransferSemantic = "transfer_accept"
+        ),
+        UgcpTransferEventAlignment(
+            androidEvent = "takeover_response.accepted=false",
+            canonicalTransferSemantic = "transfer_reject"
+        ),
+        UgcpTransferEventAlignment(
+            androidEvent = "delegated_execution_signal.result_kind=cancelled",
+            canonicalTransferSemantic = "transfer_cancel"
+        ),
+        UgcpTransferEventAlignment(
+            androidEvent = "delegated_execution_signal.result_kind=timeout",
+            canonicalTransferSemantic = "transfer_expire"
+        ),
+        UgcpTransferEventAlignment(
+            androidEvent = "delegated_execution_signal.result_kind=rejected",
+            canonicalTransferSemantic = "transfer_reject"
+        ),
+        UgcpTransferEventAlignment(
+            androidEvent = "delegated_handoff_contract.continuation_token",
+            canonicalTransferSemantic = "transfer_adopt"
+        ),
+        UgcpTransferEventAlignment(
+            androidEvent = "delegated_handoff_contract.handoff_reason=continuation",
+            canonicalTransferSemantic = "transfer_resume"
+        )
     )
 
     val meshTerms: Set<String> = setOf(

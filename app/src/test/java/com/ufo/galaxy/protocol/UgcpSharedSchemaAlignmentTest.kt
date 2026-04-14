@@ -11,6 +11,8 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("ugcp.runtime_ws_profile.android", UgcpSharedSchemaAlignment.runtimeWsProfileName)
         assertEquals("aip_ws", UgcpSharedSchemaAlignment.runtimeWsProfileTransport)
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.runtimeWsProfileStatus)
+        assertEquals("ugcp.control_transfer_profile.android", UgcpSharedSchemaAlignment.controlTransferProfileName)
+        assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.controlTransferProfileStatus)
     }
 
     @Test
@@ -38,9 +40,29 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(UgcpSharedSchemaAlignment.readinessCapabilityTerms.contains("source_runtime_posture"))
         assertTrue(UgcpSharedSchemaAlignment.readinessCapabilityTerms.contains("model_ready"))
         assertTrue(UgcpSharedSchemaAlignment.transferTerms.contains("takeover_response"))
+        assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_accept"))
+        assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_reject"))
+        assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_cancel"))
+        assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_expire"))
+        assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_adopt"))
+        assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_resume"))
         assertTrue(UgcpSharedSchemaAlignment.meshTerms.contains("mesh_join"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("failed"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("partial"))
+    }
+
+    @Test
+    fun `transfer event mapping aligns Android events with canonical control transfer vocabulary`() {
+        val mapping = UgcpSharedSchemaAlignment.transferEventAlignments.associate {
+            it.androidEvent to it.canonicalTransferSemantic
+        }
+        assertEquals("transfer_accept", mapping["takeover_response.accepted=true"])
+        assertEquals("transfer_reject", mapping["takeover_response.accepted=false"])
+        assertEquals("transfer_cancel", mapping["delegated_execution_signal.result_kind=cancelled"])
+        assertEquals("transfer_expire", mapping["delegated_execution_signal.result_kind=timeout"])
+        assertEquals("transfer_reject", mapping["delegated_execution_signal.result_kind=rejected"])
+        assertEquals("transfer_adopt", mapping["delegated_handoff_contract.continuation_token"])
+        assertEquals("transfer_resume", mapping["delegated_handoff_contract.handoff_reason=continuation"])
     }
 
     @Test
