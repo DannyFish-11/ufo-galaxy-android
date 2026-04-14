@@ -290,4 +290,45 @@ class UgcpSharedSchemaAlignmentTest {
             UgcpSharedSchemaAlignment.deprecationExecutionPhases
         )
     }
+
+    @Test
+    fun `migration readiness surfaces make staged tightening boundaries explicit`() {
+        val bySurface = UgcpSharedSchemaAlignment.migrationReadinessSurfaces.associateBy { it.surface }
+        assertEquals(
+            UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            bySurface["runtime_ingress.type_normalization_and_tier_classification"]?.readinessTier
+        )
+        assertEquals(
+            UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            bySurface["transfer.result_kind_lifecycle_status_normalization"]?.readinessTier
+        )
+        assertEquals(
+            UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            bySurface["coordination.mesh_result_status_normalization"]?.readinessTier
+        )
+        assertEquals(
+            UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            bySurface["truth_event_authoritative_vs_observational_boundary_review"]?.readinessTier
+        )
+    }
+
+    @Test
+    fun `retirement sequencing guidance maps message-type handling to phased rollout`() {
+        val canonical = UgcpSharedSchemaAlignment.retirementSequencingForMessageType("takeover_request")
+        assertEquals(UgcpDeprecationStage.ACTIVE_CANONICAL, canonical.deprecationStage)
+        assertEquals("phase_1_warn_and_observe", canonical.sequencingPhase)
+
+        val normalized = UgcpSharedSchemaAlignment.retirementSequencingForMessageType("task_execute")
+        assertEquals(UgcpDeprecationStage.NORMALIZED_LEGACY_ALIAS, normalized.deprecationStage)
+        assertEquals("phase_2_normalize_and_report", normalized.sequencingPhase)
+
+        val transitional = UgcpSharedSchemaAlignment.retirementSequencingForMessageType("relay")
+        assertEquals(UgcpDeprecationStage.TRANSITIONAL_COMPATIBILITY, transitional.deprecationStage)
+        assertEquals("phase_3_migration_gate_candidate", transitional.sequencingPhase)
+
+        val rejectCandidate =
+            UgcpSharedSchemaAlignment.retirementSequencingForMessageType("totally_unknown_type")
+        assertEquals(UgcpDeprecationStage.DEPRECATION_CANDIDATE, rejectCandidate.deprecationStage)
+        assertEquals("phase_4_reject_after_explicit_rollout", rejectCandidate.sequencingPhase)
+    }
 }

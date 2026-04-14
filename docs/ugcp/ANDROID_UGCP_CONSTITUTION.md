@@ -337,3 +337,22 @@ This is intentionally incremental:
 - Android runtime behavior is preserved (no global strict-mode hard break).
 - Non-canonical/legacy/transitional pathways are more explicitly classified and reviewable.
 - Deprecation-ready boundaries are clearer for future controlled tightening.
+
+## 13) PR-11 Android migration-readiness and retirement sequencing groundwork
+
+PR-11 adds bounded migration-readiness and retirement-sequencing surfaces in
+`UgcpSharedSchemaAlignment` to support staged rollout planning without changing runtime behavior:
+
+- `migrationReadinessSurfaces` classifies key Android runtime protocol boundaries as:
+  - `READY_FOR_STAGED_TIGHTENING` (canonical surfaces with explicit review boundaries)
+  - `REQUIRES_PHASED_TOLERANCE` (surfaces that still need compatibility-aware sequencing)
+- `retirementSequencingForMessageType(rawType)` maps current handling classification to
+  phased retirement guidance:
+  `phase_1_warn_and_observe → phase_2_normalize_and_report → phase_3_migration_gate_candidate → phase_4_reject_after_explicit_rollout`.
+
+This remains intentionally incremental:
+
+- Android does not claim immediate strict rollout or abrupt legacy retirement.
+- Lifecycle/transfer/coordination/truth-event-adjacent pathways are more explicitly reviewable
+  for phased tightening.
+- Transitional handling remains operationally tolerated until explicitly sequenced retirement.
