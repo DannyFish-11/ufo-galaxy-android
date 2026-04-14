@@ -1223,8 +1223,16 @@ class GalaxyWebSocketClient(
      * 获取设备唯一标识
      */
     private fun getDeviceId(): String =
-        configuredDeviceId.takeIf { it.isNotBlank() }
-            ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        sanitizeDeviceId(
+            configuredDeviceId.takeIf { it.isNotBlank() }
+                ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        )
+
+    private fun sanitizeDeviceId(rawDeviceId: String): String =
+        rawDeviceId
+            .trim()
+            .replace("\\s+".toRegex(), "_")
+            .replace("[^A-Za-z0-9._-]".toRegex(), "_")
 
     private fun buildIdempotencyKey(taskId: String, type: String): String {
         val session = runtimeSessionId ?: "no_runtime_session"

@@ -399,6 +399,12 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `effectiveGatewayWsUrl sanitizes configured deviceId for URL path`() {
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000", deviceId = "Pixel 8/Pro")
+        assertEquals("ws://10.0.0.1:9000/ws/device/Pixel_8_Pro", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
     fun `applyGatewayConfig supports structured ws_base and ws_paths`() {
         val settings = InMemoryAppSettings(deviceId = "device-777")
         val cfg = org.json.JSONObject(

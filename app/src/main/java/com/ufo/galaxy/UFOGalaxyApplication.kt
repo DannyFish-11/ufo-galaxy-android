@@ -318,8 +318,7 @@ class UFOGalaxyApplication : Application() {
                     }
                     Log.i(
                         TAG,
-                        "Remote gateway config applied (ws_changed=${previousWsUrl != updatedWsUrl}, " +
-                            "token_changed=${previousToken != updatedToken})"
+                        "Remote gateway config applied (connection_changed=$connectionRelevantChanged)"
                     )
                     if (connectionRelevantChanged && ::runtimeController.isInitialized && appSettings.crossDeviceEnabled) {
                         val reconnected = runtimeController.reconnect()

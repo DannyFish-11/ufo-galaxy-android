@@ -265,8 +265,16 @@ interface AppSettings {
     }
 
     fun resolveDeviceIdForPath(): String =
-        deviceId.takeIf { it.isNotBlank() }
-            ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        sanitizeDeviceIdForPath(
+            deviceId.takeIf { it.isNotBlank() }
+                ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        )
+
+    fun sanitizeDeviceIdForPath(rawDeviceId: String): String =
+        rawDeviceId
+            .trim()
+            .replace("\\s+".toRegex(), "_")
+            .replace("[^A-Za-z0-9._-]".toRegex(), "_")
 
     fun joinWsBaseAndPath(base: String, path: String): String {
         val normalisedPath = if (path.startsWith("/")) path else "/$path"
