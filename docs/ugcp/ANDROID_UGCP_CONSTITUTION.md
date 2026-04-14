@@ -167,6 +167,39 @@ Notes:
 - Expiry semantics are currently aligned through delegated `timeout` terminal signaling.
 - Adoption/resume semantics are currently aligned through continuation-token and continuation-reason handoff contract fields.
 
+### 4.8 UGCP Truth/Event Model alignment (Android, incremental)
+
+Android now explicitly declares participation in the **UGCP Truth/Event Model**:
+
+- Model identity: `ugcp.truth_event_model.android`
+- Current status: `incremental_alignment`
+- Behavior stance: preserve existing runtime behavior while making Android truth/event roles explicit and reviewable.
+
+Authoritative state-bearing transitions and reports (Android side):
+
+| Android signal surface | Canonical truth/event semantic | Semantics class |
+|---|---|---|
+| `RuntimeController.state` transition | `runtime_state_truth_updated` | authoritative state transition |
+| `RuntimeController.hostSessionSnapshot` update | `attached_runtime_session_truth_updated` | authoritative state transition |
+| `RuntimeController.targetReadinessProjection` update | `delegated_target_selection_truth_updated` | authoritative state transition |
+| `RuntimeController.reconnectRecoveryState` transition | `runtime_reconnect_recovery_truth_updated` | authoritative state transition |
+| `task_result` / `command_result` / `goal_result` / `goal_execution_result` | `execution_terminal_truth_reported` | authoritative result report |
+| `mesh_result.status in {success,partial,error}` | `coordination_execution_terminal_reported` | authoritative result report |
+
+Observational/notification emissions (not replacement truth surfaces):
+
+| Android signal surface | Canonical truth/event semantic | Semantics class |
+|---|---|---|
+| `RuntimeController.takeoverFailure` | `transfer_fallback_notified` | observational event emission |
+| `delegated_execution_signal.signal_kind in {ack,progress,result}` | `delegated_execution_lifecycle_notified` | observational event emission |
+| `mesh_join` / `mesh_leave` | `coordination_participant_joined` / `coordination_participant_left` | informational participation emission |
+
+Truth/event boundary notes:
+
+- `hostSessionSnapshot` and `targetReadinessProjection` are Android’s canonical host-facing truth projections for attached-session and delegated-selection semantics.
+- `takeoverFailure` and delegated ACK/PROGRESS/RESULT streams are lifecycle notifications for reconciliation and operator visibility; they do not replace authoritative session/readiness projections.
+- Terminal result payloads (`task_result` / `goal_result` families, mesh terminal status) remain the Android-side authoritative execution outcome reports sent to center-side truth surfaces.
+
 ## 5) Android message family → canonical phase graph mapping
 
 Canonical phases used here: **ingress → planning → assignment → execution → transfer → completion → recovery**.
@@ -246,3 +279,14 @@ alignment, not broad behavioral rewrites.
 - Readiness/capability/posture and transfer/mesh semantics are documented as first-class protocol
   roles.
 - Full cross-repo convergence is **not** over-claimed; additive convergence remains follow-up work.
+
+## 10) Replay/recovery/resume and durable-state expectations (Android scope)
+
+Android aligns with shared truth/event expectations in an incremental runtime-profile way:
+
+- **Replay/recovery state signaling:** `ReconnectRecoveryState` (`idle|recovering|recovered|failed`) is a first-class runtime truth surface for reconnect lifecycle continuity.
+- **Session continuity projection:** `AttachedRuntimeHostSessionSnapshot` remains the authoritative Android projection for attached runtime session continuity and invalidation semantics.
+- **Delegated signal replay identity:** delegated ACK/PROGRESS/RESULT supports replay-safe identity (`signal_id`, `emission_seq`) for host-side dedupe/reconciliation without claiming full Android-local durable event-sourcing.
+- **Offline result durability (bounded):** Android buffers selected outbound result payloads for reconnect replay (`OfflineTaskQueue`) as a bounded runtime durability aid, not as a full authoritative center-side persistence layer.
+
+This keeps Android behavior stable while making replay/recovery/resume and truth/event responsibilities explicit for later cross-repo hardening.

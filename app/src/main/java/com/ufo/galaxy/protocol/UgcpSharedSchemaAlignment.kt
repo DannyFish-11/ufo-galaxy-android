@@ -29,6 +29,18 @@ data class UgcpCoordinationEventAlignment(
     val canonicalCoordinationSemantic: String
 )
 
+enum class UgcpTruthEventSemanticClass {
+    AUTHORITATIVE_STATE_TRANSITION,
+    AUTHORITATIVE_RESULT_REPORT,
+    OBSERVATIONAL_EVENT_EMISSION
+}
+
+data class UgcpTruthEventAlignment(
+    val androidSignal: String,
+    val canonicalTruthEventSemantic: String,
+    val semanticClass: UgcpTruthEventSemanticClass
+)
+
 object UgcpSharedSchemaAlignment {
     const val runtimeWsProfileName: String = "ugcp.runtime_ws_profile.android"
 
@@ -43,6 +55,10 @@ object UgcpSharedSchemaAlignment {
     const val coordinationProfileName: String = "ugcp.coordination_profile.android"
 
     const val coordinationProfileStatus: String = "incremental_alignment"
+
+    const val truthEventModelName: String = "ugcp.truth_event_model.android"
+
+    const val truthEventModelStatus: String = "incremental_alignment"
 
     val identityAlignments: List<UgcpIdentityAlignment> = listOf(
         UgcpIdentityAlignment("TaskId", "task_id"),
@@ -216,6 +232,63 @@ object UgcpSharedSchemaAlignment {
 
     val coordinationOutcomeVocabulary: Set<String> = terminalVocabulary.intersect(
         setOf("success", "partial", "error")
+    )
+
+    val authoritativeTruthSurfaces: Set<String> = setOf(
+        "RuntimeController.state",
+        "RuntimeController.hostSessionSnapshot",
+        "RuntimeController.targetReadinessProjection",
+        "RuntimeController.reconnectRecoveryState",
+        "task_result|command_result|goal_result|goal_execution_result terminal status"
+    )
+
+    val observationalNotificationSurfaces: Set<String> = setOf(
+        "RuntimeController.takeoverFailure",
+        "delegated_execution_signal.ack/progress/result",
+        "mesh_join|mesh_leave informational participation emission"
+    )
+
+    val truthEventAlignments: List<UgcpTruthEventAlignment> = listOf(
+        UgcpTruthEventAlignment(
+            androidSignal = "RuntimeController.state transition",
+            canonicalTruthEventSemantic = "runtime_state_truth_updated",
+            semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "RuntimeController.hostSessionSnapshot update",
+            canonicalTruthEventSemantic = "attached_runtime_session_truth_updated",
+            semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "RuntimeController.targetReadinessProjection update",
+            canonicalTruthEventSemantic = "delegated_target_selection_truth_updated",
+            semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "RuntimeController.reconnectRecoveryState transition",
+            canonicalTruthEventSemantic = "runtime_reconnect_recovery_truth_updated",
+            semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "task_result|command_result|goal_result|goal_execution_result",
+            canonicalTruthEventSemantic = "execution_terminal_truth_reported",
+            semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_RESULT_REPORT
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "RuntimeController.takeoverFailure emission",
+            canonicalTruthEventSemantic = "transfer_fallback_notified",
+            semanticClass = UgcpTruthEventSemanticClass.OBSERVATIONAL_EVENT_EMISSION
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "delegated_execution_signal.signal_kind=ack|progress|result",
+            canonicalTruthEventSemantic = "delegated_execution_lifecycle_notified",
+            semanticClass = UgcpTruthEventSemanticClass.OBSERVATIONAL_EVENT_EMISSION
+        ),
+        UgcpTruthEventAlignment(
+            androidSignal = "mesh_result.status in {success,partial,error}",
+            canonicalTruthEventSemantic = "coordination_execution_terminal_reported",
+            semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_RESULT_REPORT
+        )
     )
 
     fun familyFor(type: MsgType): UgcpSchemaFamily? = messageFamilyAlignments[type]
