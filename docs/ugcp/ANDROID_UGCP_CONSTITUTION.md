@@ -11,6 +11,7 @@ It is intentionally grounded in current Android implementation.
 ## 2) Android runtime-profile role in UGCP
 
 Android is a **runtime-profile participant** in the shared control-plane architecture.
+Android AIP/WS is treated as the Android-side realization of the **UGCP Runtime WS Profile**.
 Current responsibilities (implemented in Android):
 
 - Device registration + capability/reporting + heartbeat
@@ -28,6 +29,13 @@ Authoritative Android runtime surfaces:
 - Attached host-session projection: `app/src/main/java/com/ufo/galaxy/runtime/AttachedRuntimeHostSessionSnapshot.kt`
 - Readiness contract: `app/src/main/java/com/ufo/galaxy/service/ReadinessChecker.kt`
 - Takeover/delegated contracts: `app/src/main/java/com/ufo/galaxy/agent/TakeoverEnvelope.kt`, `app/src/main/java/com/ufo/galaxy/runtime/DelegatedExecutionSignal.kt`
+
+### 2.1 Runtime WS Profile declaration (Android side)
+
+- Profile identity: `ugcp.runtime_ws_profile.android`
+- Transport realization: `aip_ws` (AIP over WebSocket)
+- Current status: `incremental_alignment`
+- Stability posture: preserve current runtime behavior; align semantics and vocabulary incrementally.
 
 ## 3) Canonical identity/session vocabulary freeze (Android side)
 
@@ -53,6 +61,9 @@ Android session terms are frozen as:
 - **Attached runtime host session**: `AttachedRuntimeSession.sessionId` + projected `runtimeSessionId` in `AttachedRuntimeHostSessionSnapshot`.
 - **Adopted delegated session context**: `attached_session_id` in `delegated_execution_signal` payload binds delegated execution to the active attached runtime host session.
 - **Mesh session**: `mesh_id`.
+- **Reconnect recovery state**: `idle` / `recovering` / `recovered` / `failed` (`ReconnectRecoveryState`).
+- **Attached session continuity state**: `attached` / `detaching` / `detached` with detach cause
+  `explicit_detach` / `disconnect` / `disable` / `invalidation` (`AttachedRuntimeSession`).
 
 No claim is made that all repos already expose all canonical names as first-class wire keys.
 This document freezes Android-side semantics and aliases for convergence.
@@ -159,3 +170,16 @@ This registry does **not** rewrite wire fields or runtime behavior. It documents
 - terminal/result/failure vocabulary alignment used by Android runtime-facing paths
 
 This provides a stable Android-side bridge for later Runtime WS Profile and Control Transfer Profile convergence without destabilizing existing AIP/runtime implementations.
+
+## 9) Runtime WS Profile foundation outcome (Android PR-4 scope)
+
+Android-side PR-4 work intentionally focuses on explicit protocol-role promotion and bounded model
+alignment, not broad behavioral rewrites.
+
+- AIP/WS is explicitly documented as Android’s UGCP Runtime WS Profile realization.
+- Core runtime message families are mapped to canonical control/runtime/coordination/truth semantics.
+- Session continuity semantics now explicitly include runtime session, attached session, and reconnect
+  recovery taxonomy.
+- Readiness/capability/posture and transfer/mesh semantics are documented as first-class protocol
+  roles.
+- Full cross-repo convergence is **not** over-claimed; additive convergence remains follow-up work.
