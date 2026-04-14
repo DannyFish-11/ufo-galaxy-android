@@ -28,7 +28,7 @@ object UgcpSharedSchemaAlignment {
         UgcpIdentityAlignment("RuntimeSessionId", "runtime_session_id"),
         UgcpIdentityAlignment("MeshSessionId", "mesh_id"),
         UgcpIdentityAlignment("NodeId(source)", "device_id"),
-        UgcpIdentityAlignment("NodeId(target)", "routing context / takeover target"),
+        UgcpIdentityAlignment("NodeId(target)", "target_device_id / target_node"),
         UgcpIdentityAlignment("ExecutionInstanceId", "signal_id or idempotency_key")
     )
 
