@@ -2,7 +2,7 @@
 
 This document describes the canonical architecture of UFO Galaxy Android as of v3.0.0. It is the authoritative reference for component roles, package ownership, and authority boundaries.
 
-For Android-side UGCP constitution and canonical control-plane vocabulary alignment, see
+For Android-side UGCP Runtime WS Profile declaration, constitution, and canonical control-plane vocabulary alignment, see
 [`docs/ugcp/ANDROID_UGCP_CONSTITUTION.md`](ugcp/ANDROID_UGCP_CONSTITUTION.md).
 
 ---

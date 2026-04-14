@@ -7,6 +7,13 @@ import org.junit.Test
 class UgcpSharedSchemaAlignmentTest {
 
     @Test
+    fun `runtime ws profile declaration is explicit and stable`() {
+        assertEquals("ugcp.runtime_ws_profile.android", UgcpSharedSchemaAlignment.runtimeWsProfileName)
+        assertEquals("aip_ws", UgcpSharedSchemaAlignment.runtimeWsProfileTransport)
+        assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.runtimeWsProfileStatus)
+    }
+
+    @Test
     fun `identity alignment includes canonical UGCP lineage`() {
         val identities = UgcpSharedSchemaAlignment.identityAlignments.map { it.canonicalIdentity }.toSet()
         assertTrue(identities.contains("TaskId"))
@@ -28,10 +35,37 @@ class UgcpSharedSchemaAlignmentTest {
 
     @Test
     fun `alignment contains readiness transfer mesh and terminal terms`() {
+        assertTrue(UgcpSharedSchemaAlignment.readinessCapabilityTerms.contains("source_runtime_posture"))
         assertTrue(UgcpSharedSchemaAlignment.readinessCapabilityTerms.contains("model_ready"))
         assertTrue(UgcpSharedSchemaAlignment.transferTerms.contains("takeover_response"))
         assertTrue(UgcpSharedSchemaAlignment.meshTerms.contains("mesh_join"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("failed"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("partial"))
+    }
+
+    @Test
+    fun `runtime ws profile message families cover runtime and transfer scope`() {
+        val families = UgcpSharedSchemaAlignment.runtimeWsProfileMessageFamilies
+        assertTrue(families.contains(MsgType.DEVICE_REGISTER))
+        assertTrue(families.contains(MsgType.CAPABILITY_REPORT))
+        assertTrue(families.contains(MsgType.TASK_SUBMIT))
+        assertTrue(families.contains(MsgType.TASK_ASSIGN))
+        assertTrue(families.contains(MsgType.TASK_RESULT))
+        assertTrue(families.contains(MsgType.TAKEOVER_REQUEST))
+        assertTrue(families.contains(MsgType.TAKEOVER_RESPONSE))
+        assertTrue(families.contains(MsgType.DELEGATED_EXECUTION_SIGNAL))
+        assertTrue(families.contains(MsgType.MESH_JOIN))
+        assertTrue(families.contains(MsgType.MESH_LEAVE))
+        assertTrue(families.contains(MsgType.MESH_RESULT))
+    }
+
+    @Test
+    fun `session continuity terms include reconnect and attached-session semantics`() {
+        val terms = UgcpSharedSchemaAlignment.sessionContinuityTerms
+        assertTrue(terms.contains("runtime_session_id"))
+        assertTrue(terms.contains("attached_session_id"))
+        assertTrue(terms.contains("reconnect_recovery_state: idle|recovering|recovered|failed"))
+        assertTrue(terms.contains("attached_session_state: attached|detaching|detached"))
+        assertTrue(terms.contains("detach_cause: explicit_detach|disconnect|disable|invalidation"))
     }
 }

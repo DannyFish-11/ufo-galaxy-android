@@ -20,6 +20,11 @@ data class UgcpIdentityAlignment(
 )
 
 object UgcpSharedSchemaAlignment {
+    const val runtimeWsProfileName: String = "ugcp.runtime_ws_profile.android"
+
+    const val runtimeWsProfileTransport: String = "aip_ws"
+
+    const val runtimeWsProfileStatus: String = "incremental_alignment"
 
     val identityAlignments: List<UgcpIdentityAlignment> = listOf(
         UgcpIdentityAlignment("TaskId", "task_id"),
@@ -51,7 +56,37 @@ object UgcpSharedSchemaAlignment {
         MsgType.GOAL_EXECUTION_RESULT to UgcpSchemaFamily.TRUTH
     )
 
+    val runtimeWsProfileMessageFamilies: Set<MsgType> = setOf(
+        MsgType.DEVICE_REGISTER,
+        MsgType.CAPABILITY_REPORT,
+        MsgType.HEARTBEAT,
+        MsgType.HEARTBEAT_ACK,
+        MsgType.TASK_SUBMIT,
+        MsgType.TASK_ASSIGN,
+        MsgType.TASK_RESULT,
+        MsgType.COMMAND_RESULT,
+        MsgType.GOAL_RESULT,
+        MsgType.GOAL_EXECUTION_RESULT,
+        MsgType.TAKEOVER_REQUEST,
+        MsgType.TAKEOVER_RESPONSE,
+        MsgType.DELEGATED_EXECUTION_SIGNAL,
+        MsgType.MESH_JOIN,
+        MsgType.MESH_LEAVE,
+        MsgType.MESH_RESULT
+    )
+
+    val sessionContinuityTerms: Set<String> = setOf(
+        "session_id (control_session_id alias)",
+        "runtime_session_id",
+        "attached_session_id",
+        "mesh_id (mesh_session_id alias)",
+        "reconnect_recovery_state: idle|recovering|recovered|failed",
+        "attached_session_state: attached|detaching|detached",
+        "detach_cause: explicit_detach|disconnect|disable|invalidation"
+    )
+
     val readinessCapabilityTerms: Set<String> = setOf(
+        "source_runtime_posture",
         "model_ready",
         "accessibility_ready",
         "overlay_ready",
