@@ -13,6 +13,8 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.runtimeWsProfileStatus)
         assertEquals("ugcp.control_transfer_profile.android", UgcpSharedSchemaAlignment.controlTransferProfileName)
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.controlTransferProfileStatus)
+        assertEquals("ugcp.coordination_profile.android", UgcpSharedSchemaAlignment.coordinationProfileName)
+        assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.coordinationProfileStatus)
     }
 
     @Test
@@ -47,6 +49,11 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_adopt"))
         assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_resume"))
         assertTrue(UgcpSharedSchemaAlignment.meshTerms.contains("mesh_join"))
+        assertTrue(UgcpSharedSchemaAlignment.participantRoleTerms.contains("participant"))
+        assertTrue(UgcpSharedSchemaAlignment.participantRoleTerms.contains("coordinator"))
+        assertTrue(UgcpSharedSchemaAlignment.coordinationOutcomeTerms.contains("success"))
+        assertTrue(UgcpSharedSchemaAlignment.coordinationOutcomeTerms.contains("partial"))
+        assertTrue(UgcpSharedSchemaAlignment.coordinationOutcomeTerms.contains("error"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("failed"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("partial"))
     }
@@ -63,6 +70,26 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("transfer_reject", mapping["delegated_execution_signal.result_kind=rejected"])
         assertEquals("transfer_adopt", mapping["delegated_handoff_contract.continuation_token"])
         assertEquals("transfer_resume", mapping["delegated_handoff_contract.handoff_reason=continuation"])
+    }
+
+    @Test
+    fun `coordination event mapping aligns mesh participation with canonical coordination vocabulary`() {
+        val mapping = UgcpSharedSchemaAlignment.coordinationEventAlignments.associate {
+            it.androidEvent to it.canonicalCoordinationSemantic
+        }
+        assertEquals("coordination_participant_join", mapping["mesh_join"])
+        assertEquals(
+            "coordination_participant_leave_disconnect",
+            mapping["mesh_leave.reason=disconnect"]
+        )
+        assertEquals(
+            "coordination_participant_leave_complete",
+            mapping["mesh_leave.reason=task_complete"]
+        )
+        assertEquals("coordination_participant_leave_error", mapping["mesh_leave.reason=error"])
+        assertEquals("coordination_outcome_success", mapping["mesh_result.status=success"])
+        assertEquals("coordination_outcome_partial", mapping["mesh_result.status=partial"])
+        assertEquals("coordination_outcome_error", mapping["mesh_result.status=error"])
     }
 
     @Test
