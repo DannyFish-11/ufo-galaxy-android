@@ -40,13 +40,53 @@ enum class UgcpProtocolSemanticTier {
     TRANSITIONAL_COMPATIBILITY
 }
 
+enum class UgcpEnforcementDisposition {
+    CANONICAL_ACCEPT,
+    NORMALIZE_AND_ACCEPT,
+    TOLERATE_TRANSITIONAL,
+    FUTURE_REJECT_CANDIDATE
+}
+
+enum class UgcpDeprecationStage {
+    ACTIVE_CANONICAL,
+    NORMALIZED_LEGACY_ALIAS,
+    TRANSITIONAL_COMPATIBILITY,
+    DEPRECATION_CANDIDATE
+}
+
 data class UgcpTruthEventAlignment(
     val androidSignal: String,
     val canonicalTruthEventSemantic: String,
     val semanticClass: UgcpTruthEventSemanticClass
 )
 
+/**
+ * Additive Android-side UGCP handling decision for protocol/lifecycle inputs.
+ *
+ * This model is intentionally non-breaking scaffolding: it captures how an input is currently
+ * classified (canonical/normalized/transitional/reject-candidate), while preserving existing
+ * runtime behavior. It is used to make enforcement/deprecation boundaries explicit and reviewable.
+ */
+data class UgcpInputHandlingDecision(
+    val rawInput: String,
+    val normalizedInput: String,
+    val protocolTier: UgcpProtocolSemanticTier,
+    val disposition: UgcpEnforcementDisposition,
+    val deprecationStage: UgcpDeprecationStage,
+    val rationale: String
+)
+
 object UgcpSharedSchemaAlignment {
+    private val canonicalLifecycleStatusVocabulary: Set<String> = setOf(
+        "success",
+        "error",
+        "cancelled",
+        "timeout",
+        "rejected",
+        "partial",
+        "disabled"
+    )
+
     const val runtimeWsProfileName: String = "ugcp.runtime_ws_profile.android"
 
     const val runtimeWsProfileTransport: String = "aip_ws"
@@ -155,7 +195,24 @@ object UgcpSharedSchemaAlignment {
         "centralized legacy alias map: MsgType.LEGACY_TYPE_MAP",
         "explicit transitional message-family set: transitionalCompatibilityMessageFamilies",
         "explicit lifecycle/status normalization map: lifecycleStatusNormalizations",
-        "tier classification boundary: protocolTierFor(MsgType)"
+        "tier classification boundary: protocolTierFor(MsgType)",
+        "input handling boundary: classifyMessageTypeHandling(rawType)",
+        "lifecycle handling boundary: classifyLifecycleStatusHandling(rawStatus)",
+        "deprecation execution phases: deprecationExecutionPhases"
+    )
+
+    val deprecationExecutionPhases: List<String> = listOf(
+        "phase_1_warn_and_observe",
+        "phase_2_normalize_and_report",
+        "phase_3_migration_gate_candidate",
+        "phase_4_reject_after_explicit_rollout"
+    )
+
+    val enforcementHookSurfaces: Set<String> = setOf(
+        "runtime_ingress.type_normalization_and_tier_classification",
+        "transfer.result_kind_lifecycle_status_normalization",
+        "coordination.mesh_result_status_normalization",
+        "truth_event_authoritative_vs_observational_boundary_review"
     )
 
     val sessionContinuityTerms: Set<String> = setOf(
@@ -353,4 +410,96 @@ object UgcpSharedSchemaAlignment {
 
     fun normalizeLifecycleStatus(rawStatus: String): String =
         lifecycleStatusNormalizations[rawStatus] ?: rawStatus
+
+    fun classifyMessageTypeHandling(rawType: String): UgcpInputHandlingDecision {
+        val normalizedType = normalizeMessageType(rawType)
+        val normalizedMsgType = MsgType.fromValue(normalizedType)
+        if (normalizedMsgType == null) {
+            return UgcpInputHandlingDecision(
+                rawInput = rawType,
+                normalizedInput = normalizedType,
+                protocolTier = UgcpProtocolSemanticTier.TRANSITIONAL_COMPATIBILITY,
+                disposition = UgcpEnforcementDisposition.FUTURE_REJECT_CANDIDATE,
+                deprecationStage = UgcpDeprecationStage.DEPRECATION_CANDIDATE,
+                rationale = "unknown_type_tolerated_for_now_review_for_future_rejection"
+            )
+        }
+
+        return classifyKnownMessageTypeHandling(
+            rawType = rawType,
+            normalizedType = normalizedType,
+            tier = protocolTierFor(normalizedMsgType)
+        )
+    }
+
+    fun classifyLifecycleStatusHandling(rawStatus: String): UgcpInputHandlingDecision {
+        val normalizedStatus = normalizeLifecycleStatus(rawStatus)
+        val isCanonical = normalizedStatus in canonicalLifecycleStatusVocabulary
+
+        if (!isCanonical) {
+            return UgcpInputHandlingDecision(
+                rawInput = rawStatus,
+                normalizedInput = normalizedStatus,
+                protocolTier = UgcpProtocolSemanticTier.TRANSITIONAL_COMPATIBILITY,
+                disposition = UgcpEnforcementDisposition.FUTURE_REJECT_CANDIDATE,
+                deprecationStage = UgcpDeprecationStage.DEPRECATION_CANDIDATE,
+                rationale = "noncanonical_lifecycle_status_tolerated_for_now_review_for_future_rejection"
+            )
+        }
+
+        return if (rawStatus != normalizedStatus) {
+            UgcpInputHandlingDecision(
+                rawInput = rawStatus,
+                normalizedInput = normalizedStatus,
+                protocolTier = UgcpProtocolSemanticTier.CANONICAL,
+                disposition = UgcpEnforcementDisposition.NORMALIZE_AND_ACCEPT,
+                deprecationStage = UgcpDeprecationStage.NORMALIZED_LEGACY_ALIAS,
+                rationale = "legacy_lifecycle_term_normalized_to_canonical_status"
+            )
+        } else {
+            UgcpInputHandlingDecision(
+                rawInput = rawStatus,
+                normalizedInput = normalizedStatus,
+                protocolTier = UgcpProtocolSemanticTier.CANONICAL,
+                disposition = UgcpEnforcementDisposition.CANONICAL_ACCEPT,
+                deprecationStage = UgcpDeprecationStage.ACTIVE_CANONICAL,
+                rationale = "canonical_lifecycle_status_accepted"
+            )
+        }
+    }
+
+    private fun classifyKnownMessageTypeHandling(
+        rawType: String,
+        normalizedType: String,
+        tier: UgcpProtocolSemanticTier
+    ): UgcpInputHandlingDecision {
+        return when {
+            rawType != normalizedType -> UgcpInputHandlingDecision(
+                rawInput = rawType,
+                normalizedInput = normalizedType,
+                protocolTier = tier,
+                disposition = UgcpEnforcementDisposition.NORMALIZE_AND_ACCEPT,
+                deprecationStage = UgcpDeprecationStage.NORMALIZED_LEGACY_ALIAS,
+                rationale = "legacy_alias_normalized_before_canonical_routing"
+            )
+
+            tier == UgcpProtocolSemanticTier.TRANSITIONAL_COMPATIBILITY -> UgcpInputHandlingDecision(
+                rawInput = rawType,
+                normalizedInput = normalizedType,
+                protocolTier = tier,
+                disposition = UgcpEnforcementDisposition.TOLERATE_TRANSITIONAL,
+                deprecationStage = UgcpDeprecationStage.TRANSITIONAL_COMPATIBILITY,
+                rationale = "transitional_pathway_tolerated_until_explicit_retirement"
+            )
+
+            else -> UgcpInputHandlingDecision(
+                rawInput = rawType,
+                normalizedInput = normalizedType,
+                protocolTier = tier,
+                disposition = UgcpEnforcementDisposition.CANONICAL_ACCEPT,
+                deprecationStage = UgcpDeprecationStage.ACTIVE_CANONICAL,
+                rationale = "canonical_type_accepted"
+            )
+        }
+    }
 }

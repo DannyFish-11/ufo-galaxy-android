@@ -313,3 +313,27 @@ This is intentionally **incremental**:
 - Android does not claim strict-mode validation or immediate compatibility removal.
 - Canonical runtime/control-transfer/coordination/truth semantics are made easier to identify and review.
 - Transitional pathways are isolated so later compatibility retirement can be done in bounded, safer follow-up work.
+
+## 12) PR-10 Android enforcement scaffolding and deprecation execution path
+
+PR-10 extends Android’s additive UGCP groundwork with explicit enforcement/deprecation
+classification helpers in `UgcpSharedSchemaAlignment` (still non-breaking):
+
+- `classifyMessageTypeHandling(rawType)` now makes canonical handling decisions reviewable as:
+  - `CANONICAL_ACCEPT`
+  - `NORMALIZE_AND_ACCEPT`
+  - `TOLERATE_TRANSITIONAL`
+  - `FUTURE_REJECT_CANDIDATE`
+- `classifyLifecycleStatusHandling(rawStatus)` mirrors the same bounded handling semantics for
+  lifecycle/result status values.
+- `deprecationExecutionPhases` now documents progressive retirement intent:
+  `warn_and_observe → normalize_and_report → migration_gate_candidate → reject_after_explicit_rollout`.
+- `enforcementHookSurfaces` now marks where stricter review/tightening can later be applied across:
+  runtime ingress, transfer lifecycle normalization, coordination result normalization, and
+  truth/event boundary review.
+
+This is intentionally incremental:
+
+- Android runtime behavior is preserved (no global strict-mode hard break).
+- Non-canonical/legacy/transitional pathways are more explicitly classified and reviewable.
+- Deprecation-ready boundaries are clearer for future controlled tightening.
