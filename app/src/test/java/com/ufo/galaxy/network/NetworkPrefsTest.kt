@@ -60,21 +60,21 @@ class NetworkPrefsTest {
 
     @Test
     fun `effectiveGatewayWsUrl uses galaxyGatewayUrl when gatewayHost is blank`() {
-        val s = InMemoryAppSettings(galaxyGatewayUrl = "ws://192.168.1.1:9000")
-        // gatewayHost is blank → fall back to galaxyGatewayUrl, then append /ws/android
-        assertEquals("ws://192.168.1.1:9000/ws/android", s.effectiveGatewayWsUrl())
+        val s = InMemoryAppSettings(galaxyGatewayUrl = "ws://192.168.1.1:9000", deviceId = "device-a")
+        // gatewayHost is blank → fall back to galaxyGatewayUrl, then append canonical /ws/device/{device_id}
+        assertEquals("ws://192.168.1.1:9000/ws/device/device-a", s.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl builds ws URL from host+port when host is set`() {
-        val s = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = false)
-        assertEquals("ws://100.64.0.1:8765/ws/android", s.effectiveGatewayWsUrl())
+        val s = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = false, deviceId = "device-a")
+        assertEquals("ws://100.64.0.1:8765/ws/device/device-a", s.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl builds wss URL when useTls is true`() {
-        val s = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true)
-        assertEquals("wss://100.64.0.1:8765/ws/android", s.effectiveGatewayWsUrl())
+        val s = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true, deviceId = "device-a")
+        assertEquals("wss://100.64.0.1:8765/ws/device/device-a", s.effectiveGatewayWsUrl())
     }
 
     @Test
@@ -82,10 +82,11 @@ class NetworkPrefsTest {
         val s = InMemoryAppSettings(
             galaxyGatewayUrl = "ws://old-host:9999",
             gatewayHost = "100.64.0.2",
-            gatewayPort = 8765
+            gatewayPort = 8765,
+            deviceId = "device-a"
         )
         // host is set → ignore galaxyGatewayUrl
-        assertEquals("ws://100.64.0.2:8765/ws/android", s.effectiveGatewayWsUrl())
+        assertEquals("ws://100.64.0.2:8765/ws/device/device-a", s.effectiveGatewayWsUrl())
     }
 
     // ── effectiveRestBaseUrl — priority logic ─────────────────────────────────

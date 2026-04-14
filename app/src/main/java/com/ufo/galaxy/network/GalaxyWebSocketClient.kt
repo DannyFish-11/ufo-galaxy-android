@@ -84,11 +84,13 @@ import kotlin.random.Random
  *                           **Debug/dev only** — never use on public networks.
  */
 class GalaxyWebSocketClient(
-    private val serverUrl: String,
+    private var serverUrl: String,
     crossDeviceEnabled: Boolean = true,
     val offlineQueue: OfflineTaskQueue = OfflineTaskQueue(),
     private val allowSelfSigned: Boolean = false,
-    private val gatewayToken: String = ""
+    private var gatewayToken: String = "",
+    private var runtimeSessionId: String? = null,
+    private var configuredDeviceId: String = ""
 ) : GatewayClient {
     companion object {
         private const val TAG = "GalaxyWebSocket"
@@ -299,6 +301,35 @@ class GalaxyWebSocketClient(
         if (crossDeviceEnabled == enabled) return
         crossDeviceEnabled = enabled
         Log.i(TAG, "[WS:CONNECT] crossDeviceEnabled changed to $enabled")
+    }
+
+    /**
+     * Applies live runtime connection settings used by future (or immediate) WS connections.
+     *
+     * @return true when either URL or token changed.
+     */
+    fun updateRuntimeConnectionConfig(
+        serverUrl: String? = null,
+        gatewayToken: String? = null,
+        runtimeSessionId: String? = null,
+        deviceId: String? = null
+    ): Boolean {
+        var changed = false
+        if (serverUrl != null && serverUrl != this.serverUrl) {
+            this.serverUrl = serverUrl
+            changed = true
+        }
+        if (gatewayToken != null && gatewayToken != this.gatewayToken) {
+            this.gatewayToken = gatewayToken
+            changed = true
+        }
+        if (runtimeSessionId != null && runtimeSessionId != this.runtimeSessionId) {
+            this.runtimeSessionId = runtimeSessionId
+        }
+        if (deviceId != null && deviceId != this.configuredDeviceId) {
+            this.configuredDeviceId = deviceId
+        }
+        return changed
     }
 
     /**
@@ -701,6 +732,8 @@ class GalaxyWebSocketClient(
             addProperty("device_type", "Android_Agent")
             addProperty("trace_id", sessionTraceId)
             addProperty("timestamp", System.currentTimeMillis())
+            if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = MsgType.DEVICE_REGISTER.value))
             // PR-5: include runtime-host identity in device_register so the gateway
             // can immediately classify this device as a formal runtime host rather than
             // a generic endpoint.
@@ -755,6 +788,8 @@ class GalaxyWebSocketClient(
             addProperty("device_type", "Android_Agent")
             addProperty("trace_id", sessionTraceId)
             addProperty("route_mode", currentRouteMode())
+            if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(report.metadata))
@@ -804,7 +839,9 @@ class GalaxyWebSocketClient(
             type = MsgType.DIAGNOSTICS_PAYLOAD,
             payload = diagnosticsPayload,
             device_id = deviceId,
-            trace_id = sessionTraceId
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = taskId, type = MsgType.DIAGNOSTICS_PAYLOAD.value)
         )
 
         // Route through sendJson() so the cross-device gate and connection check
@@ -839,7 +876,9 @@ class GalaxyWebSocketClient(
             type = MsgType.MESH_JOIN,
             payload = payload,
             device_id = deviceId,
-            trace_id = sessionTraceId
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_JOIN.value)
         )
         val sent = sendJson(gson.toJson(envelope))
         if (sent) {
@@ -871,7 +910,9 @@ class GalaxyWebSocketClient(
             type = MsgType.MESH_LEAVE,
             payload = payload,
             device_id = deviceId,
-            trace_id = sessionTraceId
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_LEAVE.value)
         )
         val sent = sendJson(gson.toJson(envelope))
         currentMeshId = null
@@ -914,7 +955,9 @@ class GalaxyWebSocketClient(
             payload = payload,
             correlation_id = taskId,
             device_id = deviceId,
-            trace_id = sessionTraceId
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = taskId, type = MsgType.MESH_RESULT.value)
         )
         Log.i(TAG, "[MESH:RESULT] mesh_id=$meshId task_id=$taskId status=$status results=${results.size} trace_id=$sessionTraceId")
         return sendJson(gson.toJson(envelope))
@@ -1066,7 +1109,7 @@ class GalaxyWebSocketClient(
      * 发送心跳，附带 device_id、route_mode、device_type 与重连次数用于联调追踪。
      */
     private fun sendHeartbeat() {
-        val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        val deviceId = getDeviceId()
         val heartbeat = JsonObject().apply {
             addProperty("type", "heartbeat")
             addProperty("timestamp", System.currentTimeMillis())
@@ -1075,9 +1118,11 @@ class GalaxyWebSocketClient(
             addProperty("route_mode", currentRouteMode())
             addProperty("trace_id", sessionTraceId)
             addProperty("reconnect_attempts", reconnectAttempts)
+            if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = "heartbeat"))
         }
         val json = gson.toJson(heartbeat)
-        webSocket?.send(json)
+        sendJson(json)
         Log.d(TAG, "[WS:HEARTBEAT] device_id=$deviceId route_mode=${currentRouteMode()} reconnect_attempts=$reconnectAttempts")
     }
     
@@ -1178,7 +1223,14 @@ class GalaxyWebSocketClient(
      * 获取设备唯一标识
      */
     private fun getDeviceId(): String =
-        "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        configuredDeviceId.takeIf { it.isNotBlank() }
+            ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+
+    private fun buildIdempotencyKey(taskId: String, type: String): String {
+        val session = runtimeSessionId ?: "no_runtime_session"
+        val nonce = java.util.UUID.randomUUID().toString()
+        return "$session:$type:$taskId:$nonce"
+    }
 
     // ── PR-33 test-support simulation API ────────────────────────────────────
 

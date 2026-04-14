@@ -857,6 +857,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         reconnect: Boolean = false
     ) {
         val s = UFOGalaxyApplication.appSettings
+        val oldEffectiveWsUrl = s.effectiveGatewayWsUrl()
+        val oldEffectiveRestUrl = s.effectiveRestBaseUrl()
         s.gatewayHost = gatewayHost.trim()
         s.gatewayPort = gatewayPort
         s.useTls = useTls
@@ -865,8 +867,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Only update restBaseUrl when the user filled the field; otherwise leave existing value
         if (restBase.isNotBlank()) s.restBaseUrl = restBase.trim()
         s.metricsEndpoint = metricsEndpoint.trim()
+        val wsChanged = oldEffectiveWsUrl != s.effectiveGatewayWsUrl()
+        val restChanged = oldEffectiveRestUrl != s.effectiveRestBaseUrl()
+        UFOGalaxyApplication.webSocketClient.updateRuntimeConnectionConfig(
+            serverUrl = s.effectiveGatewayWsUrl(),
+            gatewayToken = s.gatewayToken,
+            runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
+            deviceId = s.deviceId
+        )
         Log.i(TAG, "saveNetworkSettings: host=${s.gatewayHost} port=${s.gatewayPort} tls=${s.useTls} reconnect=$reconnect")
-        if (reconnect && _uiState.value.crossDeviceEnabled) {
+        val shouldReconnect = _uiState.value.crossDeviceEnabled && (reconnect || wsChanged || restChanged)
+        if (shouldReconnect) {
             // PR-27: Use RuntimeController.reconnect() for atomic stop + startWithTimeout.
             viewModelScope.launch {
                 val ok = UFOGalaxyApplication.runtimeController.reconnect()

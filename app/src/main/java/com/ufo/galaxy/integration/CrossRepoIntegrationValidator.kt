@@ -30,7 +30,7 @@ import java.util.regex.Pattern
  * ```
  *
  * @param restBaseUrl  REST base URL, e.g. `"http://100.0.0.1:8765"` (no trailing slash).
- * @param wsUrl        WebSocket URL, e.g. `"ws://100.0.0.1:8765"`.
+ * @param wsUrl        WebSocket URL, e.g. `"ws://100.0.0.1:8765/ws/device/android-1"`.
  * @param httpClient   Optional [OkHttpClient]; a default client is created if not supplied.
  *                     Inject a custom client in tests to avoid real network calls.
  */
@@ -105,12 +105,17 @@ class CrossRepoIntegrationValidator(
     }
 
     private fun checkWsUrlFormat(): CheckResult {
-        val valid = WS_URL_PATTERN.matcher(wsUrl).matches()
+        val hasValidScheme = WS_URL_PATTERN.matcher(wsUrl).matches()
+        val canonicalPath = wsUrl.contains("/ws/device/")
+        val valid = hasValidScheme && canonicalPath
         return if (valid) {
-            CheckResult(name = "WS URL format (/ws/android)", passed = true)
+            CheckResult(name = "WS URL format (/ws/device/{device_id})", passed = true)
         } else {
-            CheckResult(name = "WS URL format (/ws/android)", passed = false,
-                error = "URL must start with ws:// or wss:// and should include /ws/android path — got: $wsUrl")
+            CheckResult(
+                name = "WS URL format (/ws/device/{device_id})",
+                passed = false,
+                error = "URL must start with ws:// or wss:// and include canonical /ws/device/{device_id} path — got: $wsUrl"
+            )
         }
     }
 
