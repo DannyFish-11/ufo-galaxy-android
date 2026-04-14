@@ -290,3 +290,24 @@ Android aligns with shared truth/event expectations in an incremental runtime-pr
 - **Offline result durability (bounded):** Android buffers selected outbound result payloads for reconnect replay (`OfflineTaskQueue`) as a bounded runtime durability aid, not as a full authoritative center-side persistence layer.
 
 This keeps Android behavior stable while making replay/recovery/resume and truth/event responsibilities explicit for later cross-repo hardening.
+
+## 11) PR-8 conformance and compatibility-retirement groundwork (Android)
+
+Android now keeps explicit **conformance-tier boundaries** in
+`app/src/main/java/com/ufo/galaxy/protocol/UgcpSharedSchemaAlignment.kt`:
+
+- `canonicalRuntimeMessageFamilies`: runtime-profile canonical message family surface.
+- `transitionalCompatibilityMessageFamilies`: bounded compatibility/minimal-compat surface.
+- `protocolTierFor(MsgType)`: stable canonical vs transitional classification helper.
+
+Compatibility and normalization boundaries are now explicitly frozen as additive scaffolding:
+
+- `compatibilityAliasNormalizations` (`MsgType.LEGACY_TYPE_MAP`) for legacy type aliases.
+- `normalizeMessageType(rawType)` for alias normalization before canonical routing.
+- `lifecycleStatusNormalizations` + `normalizeLifecycleStatus(rawStatus)` for lifecycle/result term normalization.
+
+This is intentionally **incremental**:
+
+- Android does not claim strict-mode validation or immediate compatibility removal.
+- Canonical runtime/control-transfer/coordination/truth semantics are made easier to identify and review.
+- Transitional pathways are isolated so later compatibility retirement can be done in bounded, safer follow-up work.

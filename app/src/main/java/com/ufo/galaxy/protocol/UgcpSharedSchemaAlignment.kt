@@ -35,6 +35,11 @@ enum class UgcpTruthEventSemanticClass {
     OBSERVATIONAL_EVENT_EMISSION
 }
 
+enum class UgcpProtocolSemanticTier {
+    CANONICAL,
+    TRANSITIONAL_COMPATIBILITY
+}
+
 data class UgcpTruthEventAlignment(
     val androidSignal: String,
     val canonicalTruthEventSemantic: String,
@@ -59,6 +64,10 @@ object UgcpSharedSchemaAlignment {
     const val truthEventModelName: String = "ugcp.truth_event_model.android"
 
     const val truthEventModelStatus: String = "incremental_alignment"
+
+    const val conformanceSurfaceName: String = "ugcp.conformance_surface.android"
+
+    const val conformanceSurfaceStatus: String = "incremental_alignment"
 
     val identityAlignments: List<UgcpIdentityAlignment> = listOf(
         UgcpIdentityAlignment("TaskId", "task_id"),
@@ -107,6 +116,43 @@ object UgcpSharedSchemaAlignment {
         MsgType.MESH_JOIN,
         MsgType.MESH_LEAVE,
         MsgType.MESH_RESULT
+    )
+
+    val canonicalRuntimeMessageFamilies: Set<MsgType> = runtimeWsProfileMessageFamilies
+
+    val transitionalCompatibilityMessageFamilies: Set<MsgType> =
+        MsgType.ADVANCED_TYPES -
+            setOf(
+                MsgType.TAKEOVER_REQUEST,
+                MsgType.TAKEOVER_RESPONSE
+            )
+
+    val compatibilityAliasNormalizations: Map<String, String> = MsgType.LEGACY_TYPE_MAP
+
+    val lifecycleStatusNormalizations: Map<String, String> = mapOf(
+        "completed" to "success",
+        "failed" to "error",
+        "cancelled" to "cancelled",
+        "timeout" to "timeout",
+        "rejected" to "rejected",
+        "success" to "success",
+        "error" to "error",
+        "partial" to "partial"
+    )
+
+    val conformanceInvariants: Set<String> = setOf(
+        "legacy aliases MUST normalize via MsgType.toV3Type before canonical routing",
+        "RuntimeController.hostSessionSnapshot and RuntimeController.targetReadinessProjection remain canonical runtime truth projections",
+        "takeover/delegated/mesh canonical semantics remain runtime-profile first-class and are not classified as transitional compatibility-only",
+        "observational lifecycle emissions MUST NOT replace authoritative truth surfaces",
+        "compatibility pathways remain additive and bounded until explicit retirement"
+    )
+
+    val compatibilityRetirementFoundations: Set<String> = setOf(
+        "centralized legacy alias map: MsgType.LEGACY_TYPE_MAP",
+        "explicit transitional message-family set: transitionalCompatibilityMessageFamilies",
+        "explicit lifecycle/status normalization map: lifecycleStatusNormalizations",
+        "tier classification boundary: protocolTierFor(MsgType)"
     )
 
     val sessionContinuityTerms: Set<String> = setOf(
@@ -292,4 +338,16 @@ object UgcpSharedSchemaAlignment {
     )
 
     fun familyFor(type: MsgType): UgcpSchemaFamily? = messageFamilyAlignments[type]
+
+    fun protocolTierFor(type: MsgType): UgcpProtocolSemanticTier =
+        if (type in transitionalCompatibilityMessageFamilies) {
+            UgcpProtocolSemanticTier.TRANSITIONAL_COMPATIBILITY
+        } else {
+            UgcpProtocolSemanticTier.CANONICAL
+        }
+
+    fun normalizeMessageType(rawType: String): String = MsgType.toV3Type(rawType)
+
+    fun normalizeLifecycleStatus(rawStatus: String): String =
+        lifecycleStatusNormalizations[rawStatus] ?: rawStatus
 }
