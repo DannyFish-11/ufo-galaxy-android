@@ -1122,7 +1122,7 @@ class GalaxyWebSocketClient(
             addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = "heartbeat"))
         }
         val json = gson.toJson(heartbeat)
-        sendJson(json)
+        webSocket?.send(json)
         Log.d(TAG, "[WS:HEARTBEAT] device_id=$deviceId route_mode=${currentRouteMode()} reconnect_attempts=$reconnectAttempts")
     }
     

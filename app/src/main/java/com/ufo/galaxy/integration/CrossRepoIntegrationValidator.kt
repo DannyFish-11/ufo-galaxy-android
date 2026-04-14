@@ -106,7 +106,7 @@ class CrossRepoIntegrationValidator(
 
     private fun checkWsUrlFormat(): CheckResult {
         val hasValidScheme = WS_URL_PATTERN.matcher(wsUrl).matches()
-        val canonicalPath = wsUrl.contains("/ws/device/")
+        val canonicalPath = WS_CANONICAL_PATH_PATTERN.matcher(wsUrl).matches()
         val valid = hasValidScheme && canonicalPath
         return if (valid) {
             CheckResult(name = "WS URL format (/ws/device/{device_id})", passed = true)
@@ -202,6 +202,8 @@ class CrossRepoIntegrationValidator(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val WS_URL_PATTERN: Pattern =
             Pattern.compile("^wss?://\\S+$", Pattern.CASE_INSENSITIVE)
+        private val WS_CANONICAL_PATH_PATTERN: Pattern =
+            Pattern.compile("^wss?://[^\\s]+/ws/device/[^/\\s]+/?$", Pattern.CASE_INSENSITIVE)
 
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
