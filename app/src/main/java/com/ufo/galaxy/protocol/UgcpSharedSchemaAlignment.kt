@@ -184,12 +184,6 @@ object UgcpSharedSchemaAlignment {
         "coordination_execution_terminal"
     )
 
-    val coordinationOutcomeVocabulary: Set<String> = setOf(
-        "success",
-        "partial",
-        "error"
-    )
-
     val coordinationEventAlignments: List<UgcpCoordinationEventAlignment> = listOf(
         UgcpCoordinationEventAlignment(
             androidEvent = "mesh_join",
@@ -218,6 +212,10 @@ object UgcpSharedSchemaAlignment {
         "timeout",
         "rejected",
         "partial"
+    )
+
+    val coordinationOutcomeVocabulary: Set<String> = terminalVocabulary.intersect(
+        setOf("success", "partial", "error")
     )
 
     fun familyFor(type: MsgType): UgcpSchemaFamily? = messageFamilyAlignments[type]
