@@ -1,6 +1,7 @@
 package com.ufo.galaxy.protocol
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,6 +18,8 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.coordinationProfileStatus)
         assertEquals("ugcp.truth_event_model.android", UgcpSharedSchemaAlignment.truthEventModelName)
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.truthEventModelStatus)
+        assertEquals("ugcp.conformance_surface.android", UgcpSharedSchemaAlignment.conformanceSurfaceName)
+        assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.conformanceSurfaceStatus)
     }
 
     @Test
@@ -162,6 +165,53 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals(
             UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION,
             mapping["RuntimeController.reconnectRecoveryState transition"]?.semanticClass
+        )
+    }
+
+    @Test
+    fun `conformance tiers distinguish canonical runtime scope from transitional compatibility scope`() {
+        assertEquals(
+            UgcpProtocolSemanticTier.CANONICAL,
+            UgcpSharedSchemaAlignment.protocolTierFor(MsgType.TAKEOVER_REQUEST)
+        )
+        assertEquals(
+            UgcpProtocolSemanticTier.CANONICAL,
+            UgcpSharedSchemaAlignment.protocolTierFor(MsgType.MESH_RESULT)
+        )
+        assertEquals(
+            UgcpProtocolSemanticTier.TRANSITIONAL_COMPATIBILITY,
+            UgcpSharedSchemaAlignment.protocolTierFor(MsgType.RELAY)
+        )
+        assertFalse(
+            UgcpSharedSchemaAlignment.transitionalCompatibilityMessageFamilies.contains(MsgType.TAKEOVER_RESPONSE)
+        )
+    }
+
+    @Test
+    fun `normalization boundaries freeze legacy alias and lifecycle status canonicalization`() {
+        assertEquals("device_register", UgcpSharedSchemaAlignment.normalizeMessageType("registration"))
+        assertEquals("task_assign", UgcpSharedSchemaAlignment.normalizeMessageType("task_execute"))
+        assertEquals("success", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("completed"))
+        assertEquals("error", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("failed"))
+        assertEquals("unknown_status", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("unknown_status"))
+    }
+
+    @Test
+    fun `conformance invariants and retirement foundations are explicit and reviewable`() {
+        assertTrue(
+            UgcpSharedSchemaAlignment.conformanceInvariants.contains(
+                "legacy aliases MUST normalize via MsgType.toV3Type before canonical routing"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.conformanceInvariants.contains(
+                "observational lifecycle emissions MUST NOT replace authoritative truth surfaces"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.compatibilityRetirementFoundations.contains(
+                "centralized legacy alias map: MsgType.LEGACY_TYPE_MAP"
+            )
         )
     }
 }
