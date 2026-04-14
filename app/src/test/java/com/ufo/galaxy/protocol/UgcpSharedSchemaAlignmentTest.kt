@@ -216,5 +216,78 @@ class UgcpSharedSchemaAlignmentTest {
                 "centralized legacy alias map: MsgType.LEGACY_TYPE_MAP"
             )
         )
+        assertTrue(
+            UgcpSharedSchemaAlignment.compatibilityRetirementFoundations.contains(
+                "deprecation execution phases: deprecationExecutionPhases"
+            )
+        )
+    }
+
+    @Test
+    fun `message type handling classification distinguishes canonical normalized transitional and reject-candidate paths`() {
+        val canonical = UgcpSharedSchemaAlignment.classifyMessageTypeHandling("takeover_request")
+        assertEquals(UgcpEnforcementDisposition.CANONICAL_ACCEPT, canonical.disposition)
+        assertEquals(UgcpDeprecationStage.ACTIVE_CANONICAL, canonical.deprecationStage)
+
+        val normalized = UgcpSharedSchemaAlignment.classifyMessageTypeHandling("task_execute")
+        assertEquals("task_assign", normalized.normalizedInput)
+        assertEquals(UgcpEnforcementDisposition.NORMALIZE_AND_ACCEPT, normalized.disposition)
+        assertEquals(UgcpDeprecationStage.NORMALIZED_LEGACY_ALIAS, normalized.deprecationStage)
+
+        val transitional = UgcpSharedSchemaAlignment.classifyMessageTypeHandling("relay")
+        assertEquals(UgcpEnforcementDisposition.TOLERATE_TRANSITIONAL, transitional.disposition)
+        assertEquals(
+            UgcpDeprecationStage.TRANSITIONAL_COMPATIBILITY,
+            transitional.deprecationStage
+        )
+
+        val rejectCandidate = UgcpSharedSchemaAlignment.classifyMessageTypeHandling("totally_unknown_type")
+        assertEquals(
+            UgcpEnforcementDisposition.FUTURE_REJECT_CANDIDATE,
+            rejectCandidate.disposition
+        )
+        assertEquals(
+            UgcpDeprecationStage.DEPRECATION_CANDIDATE,
+            rejectCandidate.deprecationStage
+        )
+    }
+
+    @Test
+    fun `lifecycle status handling classification keeps current behavior while exposing future tightening boundaries`() {
+        val canonical = UgcpSharedSchemaAlignment.classifyLifecycleStatusHandling("success")
+        assertEquals(UgcpEnforcementDisposition.CANONICAL_ACCEPT, canonical.disposition)
+
+        val normalized = UgcpSharedSchemaAlignment.classifyLifecycleStatusHandling("completed")
+        assertEquals("success", normalized.normalizedInput)
+        assertEquals(UgcpEnforcementDisposition.NORMALIZE_AND_ACCEPT, normalized.disposition)
+
+        val rejectCandidate = UgcpSharedSchemaAlignment.classifyLifecycleStatusHandling("legacy_unknown_status")
+        assertEquals(
+            UgcpEnforcementDisposition.FUTURE_REJECT_CANDIDATE,
+            rejectCandidate.disposition
+        )
+    }
+
+    @Test
+    fun `enforcement hooks and deprecation phases are explicit and reviewable`() {
+        assertTrue(
+            UgcpSharedSchemaAlignment.enforcementHookSurfaces.contains(
+                "runtime_ingress.type_normalization_and_tier_classification"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.enforcementHookSurfaces.contains(
+                "truth_event_authoritative_vs_observational_boundary_review"
+            )
+        )
+        assertEquals(
+            listOf(
+                "phase_1_warn_and_observe",
+                "phase_2_normalize_and_report",
+                "phase_3_migration_gate_candidate",
+                "phase_4_reject_after_explicit_rollout"
+            ),
+            UgcpSharedSchemaAlignment.deprecationExecutionPhases
+        )
     }
 }
