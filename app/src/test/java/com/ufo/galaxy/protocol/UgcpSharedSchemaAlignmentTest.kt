@@ -13,6 +13,8 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.runtimeWsProfileStatus)
         assertEquals("ugcp.control_transfer_profile.android", UgcpSharedSchemaAlignment.controlTransferProfileName)
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.controlTransferProfileStatus)
+        assertEquals("ugcp.coordination_profile.android", UgcpSharedSchemaAlignment.coordinationProfileName)
+        assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.coordinationProfileStatus)
     }
 
     @Test
@@ -47,8 +49,23 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_adopt"))
         assertTrue(UgcpSharedSchemaAlignment.transferLifecycleTerms.contains("transfer_resume"))
         assertTrue(UgcpSharedSchemaAlignment.meshTerms.contains("mesh_join"))
+        assertTrue(UgcpSharedSchemaAlignment.meshParticipantRoleTerms.contains("coordinator"))
+        assertTrue(UgcpSharedSchemaAlignment.meshParticipationOutcomeTerms.contains("task_complete"))
+        assertTrue(UgcpSharedSchemaAlignment.coordinationReadinessPostureTerms.contains("mesh_join.capabilities"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("failed"))
         assertTrue(UgcpSharedSchemaAlignment.terminalVocabulary.contains("partial"))
+    }
+
+    @Test
+    fun `mesh event mapping aligns Android coordination events with canonical coordination vocabulary`() {
+        val mapping = UgcpSharedSchemaAlignment.meshCoordinationEventAlignments.associate {
+            it.androidEvent to it.canonicalCoordinationSemantic
+        }
+        assertEquals("coordination_participant_join", mapping["mesh_join"])
+        assertEquals("coordination_participant_leave", mapping["mesh_leave"])
+        assertEquals("coordination_outcome_success", mapping["mesh_result.status=success"])
+        assertEquals("coordination_outcome_partial", mapping["mesh_result.status=partial"])
+        assertEquals("coordination_outcome_error", mapping["mesh_result.status=error"])
     }
 
     @Test

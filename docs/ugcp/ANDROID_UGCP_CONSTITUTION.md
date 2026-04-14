@@ -142,6 +142,31 @@ Notes:
 - Expiry semantics are currently aligned through delegated `timeout` terminal signaling.
 - Adoption/resume semantics are currently aligned through continuation-token and continuation-reason handoff contract fields.
 
+### 4.7 UGCP Coordination Profile alignment (Android)
+
+Android now explicitly declares participation in the **UGCP Coordination Profile**:
+
+- Profile identity: `ugcp.coordination_profile.android`
+- Current status: `incremental_alignment`
+- Behavior stance: preserve existing mesh/runtime behavior while tightening canonical coordination vocabulary.
+
+Android coordination event → canonical coordination semantic mapping:
+
+| Android runtime-facing event | Canonical coordination semantic |
+|---|---|
+| `mesh_join` | `coordination_participant_join` |
+| `mesh_leave` | `coordination_participant_leave` |
+| `mesh_result.status=success` | `coordination_outcome_success` |
+| `mesh_result.status=partial` | `coordination_outcome_partial` |
+| `mesh_result.status=error` | `coordination_outcome_error` |
+
+Mesh semantics frozen for incremental convergence:
+
+- Participant roles: `participant`, `coordinator`
+- Leave reasons: `disconnect`, `task_complete`, `error`
+- Aggregate outcomes: `success`, `partial`, `error`
+- Readiness/posture interaction references: `source_runtime_posture`, `model_ready`, `accessibility_ready`, `overlay_ready`, `degraded_mode`, and `mesh_join.capabilities`
+
 ## 5) Android message family → canonical phase graph mapping
 
 Canonical phases used here: **ingress → planning → assignment → execution → transfer → completion → recovery**.
@@ -201,6 +226,7 @@ This registry does **not** rewrite wire fields or runtime behavior. It documents
 - canonical identity lineage (`task_id`, `trace_id`, `control_session_id`, `runtime_session_id`, `mesh_session_id`, `source_node_id`, `target_node_id`, `execution_instance_id`)
 - message-family mapping to canonical schema families (`identity`, `control`, `runtime`, `coordination`, `truth`)
 - transfer/delegated/takeover vocabulary alignment
+- coordination profile identity and mesh event ↔ canonical coordination semantic mapping
 - control-transfer lifecycle vocabulary (`transfer_accept`, `transfer_reject`, `transfer_cancel`, `transfer_expire`, `transfer_adopt`, `transfer_resume`)
 - Android transfer event ↔ canonical transfer semantic mapping notes
 - readiness/capability semantics and mesh participation semantics
