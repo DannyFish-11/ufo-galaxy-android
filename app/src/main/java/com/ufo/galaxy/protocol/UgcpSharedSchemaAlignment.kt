@@ -54,6 +54,25 @@ enum class UgcpDeprecationStage {
     DEPRECATION_CANDIDATE
 }
 
+enum class UgcpMigrationReadinessTier {
+    READY_FOR_STAGED_TIGHTENING,
+    REQUIRES_PHASED_TOLERANCE
+}
+
+data class UgcpMigrationReadinessSurface(
+    val surface: String,
+    val canonicalScope: String,
+    val readinessTier: UgcpMigrationReadinessTier,
+    val rationale: String
+)
+
+data class UgcpRetirementSequencingGuidance(
+    val pathway: String,
+    val deprecationStage: UgcpDeprecationStage,
+    val sequencingPhase: String,
+    val rationale: String
+)
+
 data class UgcpTruthEventAlignment(
     val androidSignal: String,
     val canonicalTruthEventSemantic: String,
@@ -213,6 +232,33 @@ object UgcpSharedSchemaAlignment {
         "transfer.result_kind_lifecycle_status_normalization",
         "coordination.mesh_result_status_normalization",
         "truth_event_authoritative_vs_observational_boundary_review"
+    )
+
+    val migrationReadinessSurfaces: List<UgcpMigrationReadinessSurface> = listOf(
+        UgcpMigrationReadinessSurface(
+            surface = "runtime_ingress.type_normalization_and_tier_classification",
+            canonicalScope = "runtime_message_type_handling",
+            readinessTier = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            rationale = "canonical_and_normalized_paths_are_explicitly_classified"
+        ),
+        UgcpMigrationReadinessSurface(
+            surface = "transfer.result_kind_lifecycle_status_normalization",
+            canonicalScope = "transfer_lifecycle_status_handling",
+            readinessTier = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            rationale = "legacy_and_runtime_variant_status_terms_remain_tolerated_via_normalization"
+        ),
+        UgcpMigrationReadinessSurface(
+            surface = "coordination.mesh_result_status_normalization",
+            canonicalScope = "coordination_result_status_handling",
+            readinessTier = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            rationale = "mesh_result_compatibility_terms_require_gradual_retirement"
+        ),
+        UgcpMigrationReadinessSurface(
+            surface = "truth_event_authoritative_vs_observational_boundary_review",
+            canonicalScope = "truth_event_surface_boundary",
+            readinessTier = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            rationale = "authoritative_vs_observational_boundaries_are_explicit_and_reviewable"
+        )
     )
 
     val sessionContinuityTerms: Set<String> = setOf(
@@ -466,6 +512,22 @@ object UgcpSharedSchemaAlignment {
                 rationale = "canonical_lifecycle_status_accepted"
             )
         }
+    }
+
+    fun retirementSequencingForMessageType(rawType: String): UgcpRetirementSequencingGuidance {
+        val handling = classifyMessageTypeHandling(rawType)
+        val sequencingPhase = when (handling.deprecationStage) {
+            UgcpDeprecationStage.ACTIVE_CANONICAL -> "phase_1_warn_and_observe"
+            UgcpDeprecationStage.NORMALIZED_LEGACY_ALIAS -> "phase_2_normalize_and_report"
+            UgcpDeprecationStage.TRANSITIONAL_COMPATIBILITY -> "phase_3_migration_gate_candidate"
+            UgcpDeprecationStage.DEPRECATION_CANDIDATE -> "phase_4_reject_after_explicit_rollout"
+        }
+        return UgcpRetirementSequencingGuidance(
+            pathway = rawType,
+            deprecationStage = handling.deprecationStage,
+            sequencingPhase = sequencingPhase,
+            rationale = handling.rationale
+        )
     }
 
     private fun classifyKnownMessageTypeHandling(
