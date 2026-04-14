@@ -193,6 +193,9 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("task_assign", UgcpSharedSchemaAlignment.normalizeMessageType("task_execute"))
         assertEquals("success", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("completed"))
         assertEquals("error", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("failed"))
+        assertEquals("error", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("failure"))
+        assertEquals("disabled", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("disabled"))
+        assertEquals("disabled", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("no_op"))
         assertEquals("unknown_status", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("unknown_status"))
     }
 

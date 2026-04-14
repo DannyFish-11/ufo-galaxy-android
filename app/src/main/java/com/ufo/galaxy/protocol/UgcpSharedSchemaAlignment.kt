@@ -132,12 +132,15 @@ object UgcpSharedSchemaAlignment {
     val lifecycleStatusNormalizations: Map<String, String> = mapOf(
         "completed" to "success",
         "failed" to "error",
+        "failure" to "error",
         "cancelled" to "cancelled",
         "timeout" to "timeout",
         "rejected" to "rejected",
         "success" to "success",
         "error" to "error",
-        "partial" to "partial"
+        "partial" to "partial",
+        "disabled" to "disabled",
+        "no_op" to "disabled"
     )
 
     val conformanceInvariants: Set<String> = setOf(

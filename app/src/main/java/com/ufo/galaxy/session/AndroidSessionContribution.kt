@@ -2,6 +2,7 @@ package com.ufo.galaxy.session
 
 import com.ufo.galaxy.protocol.CancelResultPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment
 
 /**
  * Canonical Android-side session contribution envelope (PR-4).
@@ -140,7 +141,8 @@ data class AndroidSessionContribution(
             traceId: String? = null,
             routeMode: String? = null
         ): AndroidSessionContribution {
-            val kind = when (result.status) {
+            val normalizedStatus = UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)
+            val kind = when (normalizedStatus) {
                 STATUS_SUCCESS -> Kind.FINAL_COMPLETION
                 STATUS_CANCELLED -> Kind.CANCELLATION
                 STATUS_DISABLED -> Kind.DISABLED

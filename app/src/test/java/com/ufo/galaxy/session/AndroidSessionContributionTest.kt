@@ -103,6 +103,12 @@ class AndroidSessionContributionTest {
     }
 
     @Test
+    fun `fromGoalResult completed maps to FINAL_COMPLETION via canonical normalization`() {
+        val contrib = AndroidSessionContribution.fromGoalResult(goalResult(status = "completed"))
+        assertEquals(AndroidSessionContribution.Kind.FINAL_COMPLETION, contrib.kind)
+    }
+
+    @Test
     fun `fromGoalResult cancelled maps to CANCELLATION`() {
         val contrib = AndroidSessionContribution.fromGoalResult(goalResult(status = "cancelled"))
         assertEquals(AndroidSessionContribution.Kind.CANCELLATION, contrib.kind)
@@ -117,6 +123,12 @@ class AndroidSessionContributionTest {
     @Test
     fun `fromGoalResult error maps to FAILURE`() {
         val contrib = AndroidSessionContribution.fromGoalResult(goalResult(status = "error"))
+        assertEquals(AndroidSessionContribution.Kind.FAILURE, contrib.kind)
+    }
+
+    @Test
+    fun `fromGoalResult failed maps to FAILURE via canonical normalization`() {
+        val contrib = AndroidSessionContribution.fromGoalResult(goalResult(status = "failed"))
         assertEquals(AndroidSessionContribution.Kind.FAILURE, contrib.kind)
     }
 
