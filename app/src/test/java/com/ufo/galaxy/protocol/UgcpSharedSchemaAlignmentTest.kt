@@ -15,6 +15,8 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.controlTransferProfileStatus)
         assertEquals("ugcp.coordination_profile.android", UgcpSharedSchemaAlignment.coordinationProfileName)
         assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.coordinationProfileStatus)
+        assertEquals("ugcp.truth_event_model.android", UgcpSharedSchemaAlignment.truthEventModelName)
+        assertEquals("incremental_alignment", UgcpSharedSchemaAlignment.truthEventModelStatus)
     }
 
     @Test
@@ -111,5 +113,55 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(terms.contains("reconnect_recovery_state: idle|recovering|recovered|failed"))
         assertTrue(terms.contains("attached_session_state: attached|detaching|detached"))
         assertTrue(terms.contains("detach_cause: explicit_detach|disconnect|disable|invalidation"))
+    }
+
+    @Test
+    fun `truth event model distinguishes authoritative truth surfaces from observational notifications`() {
+        assertTrue(UgcpSharedSchemaAlignment.authoritativeTruthSurfaces.contains("RuntimeController.state"))
+        assertTrue(UgcpSharedSchemaAlignment.authoritativeTruthSurfaces.contains("RuntimeController.hostSessionSnapshot"))
+        assertTrue(
+            UgcpSharedSchemaAlignment.authoritativeTruthSurfaces.contains(
+                "task_result|command_result|goal_result|goal_execution_result terminal status"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.observationalNotificationSurfaces.contains(
+                "RuntimeController.takeoverFailure"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.observationalNotificationSurfaces.contains(
+                "delegated_execution_signal.ack/progress/result"
+            )
+        )
+    }
+
+    @Test
+    fun `truth event mapping aligns lifecycle status result and recovery semantics`() {
+        val mapping = UgcpSharedSchemaAlignment.truthEventAlignments.associateBy { it.androidSignal }
+        assertEquals(
+            UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION,
+            mapping["RuntimeController.state transition"]?.semanticClass
+        )
+        assertEquals(
+            "runtime_state_truth_updated",
+            mapping["RuntimeController.state transition"]?.canonicalTruthEventSemantic
+        )
+        assertEquals(
+            UgcpTruthEventSemanticClass.AUTHORITATIVE_RESULT_REPORT,
+            mapping["task_result|command_result|goal_result|goal_execution_result"]?.semanticClass
+        )
+        assertEquals(
+            UgcpTruthEventSemanticClass.OBSERVATIONAL_EVENT_EMISSION,
+            mapping["RuntimeController.takeoverFailure emission"]?.semanticClass
+        )
+        assertEquals(
+            "delegated_execution_lifecycle_notified",
+            mapping["delegated_execution_signal.signal_kind=ack|progress|result"]?.canonicalTruthEventSemantic
+        )
+        assertEquals(
+            UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION,
+            mapping["RuntimeController.reconnectRecoveryState transition"]?.semanticClass
+        )
     }
 }
