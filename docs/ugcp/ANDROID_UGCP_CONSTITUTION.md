@@ -143,3 +143,19 @@ Canonical phases used here: **ingress → planning → assignment → execution 
 | `takeover_request` / `takeover_response` | Explicit control-transfer handshake between source/target runtimes. |
 | `delegated_execution_signal` | Fine-grained delegated lifecycle stream for host-side tracker reconciliation. |
 | `mesh_join` / `mesh_leave` / `mesh_result` | Mesh participation lifecycle and aggregate contribution/result semantics. |
+
+## 8) Shared schema family preparation (incremental, non-disruptive)
+
+To keep convergence work incremental, Android now keeps a lightweight alignment registry in code:
+
+- `app/src/main/java/com/ufo/galaxy/protocol/UgcpSharedSchemaAlignment.kt`
+
+This registry does **not** rewrite wire fields or runtime behavior. It documents and freezes:
+
+- canonical identity lineage (`task_id`, `trace_id`, `control_session_id`, `runtime_session_id`, `mesh_session_id`, `source_node_id`, `target_node_id`, `execution_instance_id`)
+- message-family mapping to canonical schema families (`identity`, `control`, `runtime`, `coordination`, `truth`)
+- transfer/delegated/takeover vocabulary alignment
+- readiness/capability semantics and mesh participation semantics
+- terminal/result/failure vocabulary alignment used by Android runtime-facing paths
+
+This provides a stable Android-side bridge for later Runtime WS Profile and Control Transfer Profile convergence without destabilizing existing AIP/runtime implementations.
