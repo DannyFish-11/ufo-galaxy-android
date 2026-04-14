@@ -45,7 +45,7 @@ class CrossRepoIntegrationValidatorTest {
     /** Builds a validator using the supplied HTTP client and WS URL. */
     private fun validator(
         client: OkHttpClient = fakeClient(200),
-        wsUrl: String = "ws://100.0.0.1:8765"
+        wsUrl: String = "ws://100.0.0.1:8765/ws/device/android-1"
     ) = CrossRepoIntegrationValidator(
         restBaseUrl = "http://100.0.0.1:8765",
         wsUrl = wsUrl,
@@ -56,7 +56,7 @@ class CrossRepoIntegrationValidatorTest {
 
     @Test
     fun `all checks pass when server returns 200 and WS URL is valid`() {
-        val report = validator(fakeClient(200), "ws://100.0.0.1:8765").validate()
+        val report = validator(fakeClient(200), "ws://100.0.0.1:8765/ws/device/android-1").validate()
 
         assertTrue("allPassed must be true when all checks succeed", report.allPassed)
         assertEquals("All 5 checks should pass", 5, report.passedCount)
@@ -103,30 +103,30 @@ class CrossRepoIntegrationValidatorTest {
 
     @Test
     fun `WS URL format check passes for ws scheme`() {
-        val report = validator(wsUrl = "ws://192.168.1.1:8765").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
+        val report = validator(wsUrl = "ws://192.168.1.1:8765/ws/device/android-1").validate()
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/device/{device_id})" }
         assertTrue("ws:// URL should pass format check", wsCheck.passed)
     }
 
     @Test
     fun `WS URL format check passes for wss scheme`() {
-        val report = validator(wsUrl = "wss://example.com/ws").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
+        val report = validator(wsUrl = "wss://example.com/ws/device/android-1").validate()
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/device/{device_id})" }
         assertTrue("wss:// URL should pass format check", wsCheck.passed)
     }
 
     @Test
     fun `WS URL format check passes for short host`() {
         // Regression: old pattern required >=2 chars after scheme; fixed to accept any non-empty host.
-        val report = validator(wsUrl = "ws://a").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
+        val report = validator(wsUrl = "ws://a/ws/device/d").validate()
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/device/{device_id})" }
         assertTrue("short ws:// URL should pass format check", wsCheck.passed)
     }
 
     @Test
     fun `WS URL format check fails for http scheme`() {
         val report = validator(wsUrl = "http://100.0.0.1:8765").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/device/{device_id})" }
         assertFalse("http:// URL should fail WS format check", wsCheck.passed)
         assertNotNull("error should describe the problem", wsCheck.error)
         assertTrue("error should mention ws://", wsCheck.error!!.contains("ws://"))
@@ -135,7 +135,7 @@ class CrossRepoIntegrationValidatorTest {
     @Test
     fun `WS URL format check fails for blank URL`() {
         val report = validator(wsUrl = "").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/device/{device_id})" }
         assertFalse("blank URL should fail WS format check", wsCheck.passed)
     }
 
@@ -153,7 +153,7 @@ class CrossRepoIntegrationValidatorTest {
 
     @Test
     fun `ValidationReport passedCount and failedCount are consistent`() {
-        val report = validator(fakeClient(200), "ws://ok").validate()
+        val report = validator(fakeClient(200), "ws://ok/ws/device/id").validate()
         assertEquals(report.results.size, report.passedCount + report.failedCount)
     }
 
@@ -167,8 +167,8 @@ class CrossRepoIntegrationValidatorTest {
 
     @Test
     fun `CheckResult httpStatus is null for non-HTTP checks`() {
-        val report = validator(wsUrl = "ws://ok").validate()
-        val wsCheck = report.results.first { it.name == "WS URL format (/ws/android)" }
+        val report = validator(wsUrl = "ws://ok/ws/device/id").validate()
+        val wsCheck = report.results.first { it.name == "WS URL format (/ws/device/{device_id})" }
         assertNull("WS format check has no HTTP status", wsCheck.httpStatus)
     }
 

@@ -476,6 +476,7 @@ class RuntimeController(
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_start", "timeout_ms" to registrationTimeoutMs))
 
         // Enable WS client for this attempt.
+        syncWebSocketRuntimeSettings()
         webSocketClient.setCrossDeviceEnabled(true)
         settings.crossDeviceEnabled = true
 
@@ -580,6 +581,7 @@ class RuntimeController(
         Log.d(TAG, "[RUNTIME] connectIfEnabled: crossDevice=$crossDeviceOn state=${_state.value}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_connect_if_enabled", "cross_device" to crossDeviceOn))
 
+        syncWebSocketRuntimeSettings()
         webSocketClient.setCrossDeviceEnabled(crossDeviceOn)
 
         if (!crossDeviceOn) {
@@ -915,6 +917,7 @@ class RuntimeController(
     suspend fun reconnect(): Boolean {
         Log.i(TAG, "[RUNTIME] reconnect: stopping and restarting")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_reconnect"))
+        syncWebSocketRuntimeSettings()
         stop()
         val result = startWithTimeout()
         // PR-30: Log the reconnect outcome for operator diagnostics.
@@ -930,6 +933,16 @@ class RuntimeController(
 
     fun cancel() {
         controllerScope.cancel()
+    }
+
+    /** Applies latest AppSettings connection/auth/session values onto the live WS client. */
+    private fun syncWebSocketRuntimeSettings() {
+        webSocketClient.updateRuntimeConnectionConfig(
+            serverUrl = settings.effectiveGatewayWsUrl(),
+            gatewayToken = settings.gatewayToken,
+            runtimeSessionId = com.ufo.galaxy.UFOGalaxyApplication.runtimeSessionId,
+            deviceId = settings.deviceId
+        )
     }
 
     // ── Attached-runtime session management (PR-7) ────────────────────────────

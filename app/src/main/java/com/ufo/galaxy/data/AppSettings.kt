@@ -190,7 +190,7 @@ interface AppSettings {
      * Priority: gatewayHost/port/tls (SharedPrefs) → galaxyGatewayUrl (SharedPrefs or
      * assets/config.properties default) → compile-time default.
      *
-     * The server-required `/ws/android` path is appended automatically unless the
+     * The canonical gateway ingress `/ws/device/{device_id}` path is appended automatically unless the
      * URL already carries a path component (i.e. the part after `://` contains a `/`),
      * which lets users who have configured a full URL keep their path unchanged.
      */
@@ -199,9 +199,10 @@ interface AppSettings {
             val scheme = if (useTls) "wss" else "ws"
             "$scheme://$gatewayHost:$gatewayPort"
         } else galaxyGatewayUrl
-        // Append /ws/android only when the URL has no explicit path after the host:port.
+        // Append canonical /ws/device/{device_id} only when no explicit path exists.
         val afterScheme = base.substringAfter("://")
-        return if (afterScheme.contains('/')) base else "$base/ws/android"
+        val defaultPath = CANONICAL_WS_DEVICE_PATH_TEMPLATE.replace("{device_id}", resolveDeviceIdForPath())
+        return if (afterScheme.contains('/')) base else "$base$defaultPath"
     }
 
     /**
@@ -220,9 +221,11 @@ interface AppSettings {
      *
      * Recognised keys (all optional; unrecognised keys are silently ignored):
      * - `ws_url`        / `gateway_ws_url`   – full WebSocket URL (updates [galaxyGatewayUrl]).
+     * - `ws_base` + `ws_paths`               – structured WS contract fields.
      * - `gateway_host`                        – gateway hostname or IP (updates [gatewayHost]).
      * - `gateway_port`                        – gateway port number (updates [gatewayPort]).
      * - `use_tls`                             – TLS toggle (updates [useTls]).
+     * - `gateway_token` / `token`             – WS auth token (updates [gatewayToken]).
      *
      * Failure to parse any individual key is silently ignored; the remaining keys are still
      * applied. The caller is responsible for triggering a reconnect if the WS URL changed.
@@ -230,6 +233,7 @@ interface AppSettings {
     fun applyGatewayConfig(config: JSONObject) {
         val wsUrl = config.optString("ws_url").takeIf { it.isNotBlank() }
             ?: config.optString("gateway_ws_url").takeIf { it.isNotBlank() }
+            ?: resolveWsUrlFromStructuredConfig(config)
         if (wsUrl != null) galaxyGatewayUrl = wsUrl
 
         val host = config.optString("gateway_host").takeIf { it.isNotBlank() }
@@ -239,6 +243,42 @@ interface AppSettings {
         if (port != null) gatewayPort = port
 
         if (config.has("use_tls")) useTls = config.optBoolean("use_tls", useTls)
+
+        val token = config.optString("gateway_token").takeIf { it.isNotBlank() }
+            ?: config.optString("token").takeIf { it.isNotBlank() }
+        if (token != null) gatewayToken = token
+    }
+
+    /** Resolves a structured ws_base/ws_paths contract into a full WS URL when available. */
+    fun resolveWsUrlFromStructuredConfig(config: JSONObject): String? {
+        val wsBase = config.optString("ws_base").takeIf { it.isNotBlank() } ?: return null
+        val wsPaths = config.optJSONObject("ws_paths")
+        val canonicalPathTemplate = wsPaths?.optString("device").takeIf { !it.isNullOrBlank() }
+            ?: wsPaths?.optString("device_path").takeIf { !it.isNullOrBlank() }
+            ?: wsPaths?.optString("canonical").takeIf { !it.isNullOrBlank() }
+            ?: wsPaths?.optString("android").takeIf { !it.isNullOrBlank() } // compat fallback
+            ?: CANONICAL_WS_DEVICE_PATH_TEMPLATE
+        val resolvedPath = canonicalPathTemplate
+            .replace("{device_id}", resolveDeviceIdForPath())
+            .replace("{id}", resolveDeviceIdForPath())
+        return joinWsBaseAndPath(wsBase, resolvedPath)
+    }
+
+    fun resolveDeviceIdForPath(): String =
+        sanitizeDeviceIdForPath(
+            deviceId.takeIf { it.isNotBlank() }
+                ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        )
+
+    fun sanitizeDeviceIdForPath(rawDeviceId: String): String =
+        rawDeviceId
+            .trim()
+            .replace("\\s+".toRegex(), "_")
+            .replace("[^A-Za-z0-9._-]".toRegex(), "_")
+
+    fun joinWsBaseAndPath(base: String, path: String): String {
+        val normalisedPath = if (path.startsWith("/")) path else "/$path"
+        return "${base.trimEnd('/')}${normalisedPath}"
     }
 
     /**
@@ -273,6 +313,10 @@ interface AppSettings {
         "accessibility_ready" to accessibilityReady,
         "overlay_ready" to overlayReady
     )
+
+    companion object {
+        const val CANONICAL_WS_DEVICE_PATH_TEMPLATE = "/ws/device/{device_id}"
+    }
 }
 
 /**

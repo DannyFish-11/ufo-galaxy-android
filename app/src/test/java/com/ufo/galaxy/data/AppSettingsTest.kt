@@ -262,20 +262,20 @@ class AppSettingsTest {
 
     @Test
     fun `effectiveGatewayWsUrl falls back to galaxyGatewayUrl when host is blank`() {
-        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000")
-        assertEquals("ws://10.0.0.1:9000/ws/android", settings.effectiveGatewayWsUrl())
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000", deviceId = "d1")
+        assertEquals("ws://10.0.0.1:9000/ws/device/d1", settings.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl uses host+port when gatewayHost is set`() {
-        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765)
-        assertEquals("ws://100.64.0.1:8765/ws/android", settings.effectiveGatewayWsUrl())
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, deviceId = "d1")
+        assertEquals("ws://100.64.0.1:8765/ws/device/d1", settings.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl uses wss scheme when useTls is true`() {
-        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true)
-        assertEquals("wss://100.64.0.1:8765/ws/android", settings.effectiveGatewayWsUrl())
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 8765, useTls = true, deviceId = "d1")
+        assertEquals("wss://100.64.0.1:8765/ws/device/d1", settings.effectiveGatewayWsUrl())
     }
 
     @Test
@@ -378,18 +378,50 @@ class AppSettingsTest {
         assertEquals(720, SharedPrefsAppSettings.DEFAULT_SCALED_MAX_EDGE)
     }
 
-    // ── H1: /ws/android path appending ───────────────────────────────────────
+    // ── H1: canonical /ws/device path appending ─────────────────────────────
 
     @Test
     fun `effectiveGatewayWsUrl does not duplicate path when already present`() {
-        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000/ws/android")
-        assertEquals("ws://10.0.0.1:9000/ws/android", settings.effectiveGatewayWsUrl())
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000/ws/device/test-device")
+        assertEquals("ws://10.0.0.1:9000/ws/device/test-device", settings.effectiveGatewayWsUrl())
     }
 
     @Test
     fun `effectiveGatewayWsUrl respects custom path configured by user`() {
         val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000/custom/path")
         assertEquals("ws://10.0.0.1:9000/custom/path", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `effectiveGatewayWsUrl uses configured deviceId in canonical path`() {
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000", deviceId = "android-dev-01")
+        assertEquals("ws://10.0.0.1:9000/ws/device/android-dev-01", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `effectiveGatewayWsUrl sanitizes configured deviceId for URL path`() {
+        val settings = InMemoryAppSettings(galaxyGatewayUrl = "ws://10.0.0.1:9000", deviceId = "Pixel 8/Pro")
+        assertEquals("ws://10.0.0.1:9000/ws/device/Pixel_8_Pro", settings.effectiveGatewayWsUrl())
+    }
+
+    @Test
+    fun `applyGatewayConfig supports structured ws_base and ws_paths`() {
+        val settings = InMemoryAppSettings(deviceId = "device-777")
+        val cfg = org.json.JSONObject(
+            """{
+                "ws_base":"wss://gw.example.com:8765",
+                "ws_paths":{"device":"/ws/device/{device_id}"}
+            }"""
+        )
+        settings.applyGatewayConfig(cfg)
+        assertEquals("wss://gw.example.com:8765/ws/device/device-777", settings.galaxyGatewayUrl)
+    }
+
+    @Test
+    fun `applyGatewayConfig updates gatewayToken from config`() {
+        val settings = InMemoryAppSettings()
+        settings.applyGatewayConfig(org.json.JSONObject("""{"gateway_token":"abc123"}"""))
+        assertEquals("abc123", settings.gatewayToken)
     }
 
     // ── H3: gatewayToken key constant ─────────────────────────────────────────

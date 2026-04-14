@@ -302,8 +302,28 @@ class UFOGalaxyApplication : Application() {
                 val fetcher = RemoteConfigFetcher(restBaseUrl = appSettings.effectiveRestBaseUrl())
                 val config = fetcher.fetchConfig()
                 if (config != null) {
+                    val previousWsUrl = appSettings.effectiveGatewayWsUrl()
+                    val previousToken = appSettings.gatewayToken
                     appSettings.applyGatewayConfig(config)
-                    Log.i(TAG, "Remote gateway config applied: $config")
+                    val updatedWsUrl = appSettings.effectiveGatewayWsUrl()
+                    val updatedToken = appSettings.gatewayToken
+                    val connectionRelevantChanged = previousWsUrl != updatedWsUrl || previousToken != updatedToken
+                    if (::webSocketClient.isInitialized) {
+                        webSocketClient.updateRuntimeConnectionConfig(
+                            serverUrl = updatedWsUrl,
+                            gatewayToken = updatedToken,
+                            runtimeSessionId = runtimeSessionId,
+                            deviceId = appSettings.deviceId
+                        )
+                    }
+                    Log.i(
+                        TAG,
+                        "Remote gateway config applied (connection_changed=$connectionRelevantChanged)"
+                    )
+                    if (connectionRelevantChanged && ::runtimeController.isInitialized && appSettings.crossDeviceEnabled) {
+                        val reconnected = runtimeController.reconnect()
+                        Log.i(TAG, "Remote gateway config live reconnect result=$reconnected")
+                    }
                 } else {
                     Log.d(TAG, "Remote gateway config not available; keeping local config")
                 }
@@ -444,7 +464,9 @@ class UFOGalaxyApplication : Application() {
             crossDeviceEnabled = appSettings.crossDeviceEnabled,
             offlineQueue = offlineQueue,
             allowSelfSigned = appSettings.allowSelfSigned,
-            gatewayToken = appSettings.gatewayToken
+            gatewayToken = appSettings.gatewayToken,
+            runtimeSessionId = runtimeSessionId,
+            configuredDeviceId = appSettings.deviceId
         )
         webSocketClient.setDeviceMetadata(appSettings.toMetadataMap())
         Log.d(TAG, "WebSocket 客户端已初始化: url=$wsUrl allowSelfSigned=${appSettings.allowSelfSigned} (offlineQueue restored size=${offlineQueue.size})")

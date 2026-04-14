@@ -17,6 +17,7 @@ import com.ufo.galaxy.agent.DelegatedRuntimeReceiver
 import com.ufo.galaxy.agent.DelegatedTakeoverExecutor
 import com.ufo.galaxy.agent.GoalExecutionPipeline
 import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.HandoffContractValidator
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
@@ -37,6 +38,7 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.HybridDegradePayload
 import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.model.ModelDownloader
@@ -157,6 +159,7 @@ class GalaxyConnectionService : Service() {
      * [com.ufo.galaxy.runtime.AttachedRuntimeSession] is active.
      */
     private val delegatedRuntimeReceiver = DelegatedRuntimeReceiver()
+    private val handoffContractValidator = HandoffContractValidator()
 
     /**
      * Signal sink for delegated-execution lifecycle events (PR-12 / PR-16).
@@ -215,6 +218,12 @@ class GalaxyConnectionService : Service() {
             override fun onDisconnected() {
                 Log.d(TAG, "与 Galaxy 断开连接")
                 updateNotification("已断开")
+                emitRuntimeDiagnostics(
+                    taskId = activeTakeoverId ?: "runtime",
+                    nodeName = "ws_runtime",
+                    errorType = "ws_disconnected",
+                    errorContext = "websocket disconnected during runtime operation"
+                )
                 // Safety: unblock the local LoopController in case the Gateway disconnected
                 // while a remote task was in flight. The finally blocks in handleTaskAssign,
                 // handleGoalExecution, and handleParallelSubtask cover normal completion;
@@ -246,6 +255,12 @@ class GalaxyConnectionService : Service() {
             override fun onError(error: String) {
                 Log.e(TAG, "连接错误: $error")
                 updateNotification("连接错误")
+                emitRuntimeDiagnostics(
+                    taskId = activeTakeoverId ?: "runtime",
+                    nodeName = "ws_runtime",
+                    errorType = "ws_error",
+                    errorContext = error
+                )
             }
 
             override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String?) {
@@ -422,6 +437,12 @@ class GalaxyConnectionService : Service() {
             gson.fromJson(payloadJson, TaskAssignPayload::class.java)
         } catch (e: Exception) {
             Log.e(TAG, "task_assign payload 解析失败: ${e.message}", e)
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "task_assign_ingress",
+                errorType = "task_payload_parse_error",
+                errorContext = e.message ?: "unknown parse error"
+            )
             sendTaskError(taskId, "bad_payload: ${e.message}", inboundTraceId)
             return
         }
@@ -483,6 +504,12 @@ class GalaxyConnectionService : Service() {
                         "trace_id" to traceId,
                         "error" to handoffResult.error
                     )
+                )
+                emitRuntimeDiagnostics(
+                    taskId = taskId,
+                    nodeName = "bridge_handoff",
+                    errorType = "bridge_handoff_failed",
+                    errorContext = handoffResult.error ?: "unknown handoff failure"
                 )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
             }
@@ -566,6 +593,12 @@ class GalaxyConnectionService : Service() {
             updateNotification("任务 ${taskId.take(8)}: ${goalResult.status}")
         } catch (err: Exception) {
             Log.e(TAG, "executeLocalTaskAssign 执行失败 task_id=$taskId", err)
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "task_assign_local_execution",
+                errorType = "task_execution_failed",
+                errorContext = err.message ?: "unknown execution error"
+            )
             val errorResult = GoalResultPayload(
                 task_id = taskId,
                 correlation_id = taskId,
@@ -627,6 +660,12 @@ class GalaxyConnectionService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "goal_execution payload 解析失败: ${e.message}", e)
             val traceId = inboundTraceId ?: java.util.UUID.randomUUID().toString()
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "goal_execution_ingress",
+                errorType = "goal_payload_parse_error",
+                errorContext = e.message ?: "unknown parse error"
+            )
             sendGoalError(taskId, null, null, "bad_payload: ${e.message}", traceId, ROUTE_MODE_CROSS_DEVICE)
             taskCancelRegistry.deregister(taskId)
             return
@@ -659,6 +698,12 @@ class GalaxyConnectionService : Service() {
                 mapOf("task_id" to taskId, "timeout_ms" to timeoutMs, "type" to "goal_execution")
             )
             Log.w(TAG, "[TASK:TIMEOUT] goal_execution timed out task_id=$taskId timeout_ms=$timeoutMs")
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "goal_execution_pipeline",
+                errorType = "goal_execution_timeout",
+                errorContext = "timeout_ms=$timeoutMs"
+            )
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
@@ -711,6 +756,12 @@ class GalaxyConnectionService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "parallel_subtask payload 解析失败: ${e.message}", e)
             val traceId = inboundTraceId ?: java.util.UUID.randomUUID().toString()
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "parallel_subtask_ingress",
+                errorType = "parallel_payload_parse_error",
+                errorContext = e.message ?: "unknown parse error"
+            )
             sendGoalError(taskId, null, null, "bad_payload: ${e.message}", traceId, ROUTE_MODE_CROSS_DEVICE)
             taskCancelRegistry.deregister(taskId)
             return
@@ -722,10 +773,19 @@ class GalaxyConnectionService : Service() {
         // Preserve inbound trace_id for full-chain correlation; generate only when absent.
         val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
             ?: java.util.UUID.randomUUID().toString()
+        val meshId = payload.group_id?.takeIf { it.isNotBlank() }
+        var meshJoined = false
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
         try {
+            if (meshId != null) {
+                meshJoined = webSocketClient.sendMeshJoin(
+                    meshId = meshId,
+                    role = "participant",
+                    capabilities = listOf("parallel_subtask")
+                )
+            }
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
             }
@@ -741,6 +801,24 @@ class GalaxyConnectionService : Service() {
                         "group_id=${enriched.group_id} subtask_index=${enriched.subtask_index} " +
                         "latency=${enriched.latency_ms}ms trace_id=$traceId"
                 )
+                if (meshId != null && meshJoined) {
+                    webSocketClient.sendMeshResult(
+                        meshId = meshId,
+                        taskId = taskId,
+                        status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
+                        results = listOf(
+                            MeshSubtaskResult(
+                                device_id = localDeviceId,
+                                subtask_id = "${meshId}_${enriched.subtask_index ?: 0}",
+                                status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
+                                output = enriched.result_summary,
+                                error = enriched.error
+                            )
+                        ),
+                        summary = "parallel_subtask:${enriched.status}",
+                        latencyMs = enriched.latency_ms ?: 0L
+                    )
+                }
             }
         } catch (e: TimeoutCancellationException) {
             GalaxyLogger.log(
@@ -756,10 +834,24 @@ class GalaxyConnectionService : Service() {
                 "[TASK:TIMEOUT] parallel_subtask timed out task_id=$taskId " +
                     "group_id=${payload.group_id} subtask_index=${payload.subtask_index} timeout_ms=$timeoutMs"
             )
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "parallel_subtask_pipeline",
+                errorType = "parallel_subtask_timeout",
+                errorContext = "timeout_ms=$timeoutMs group_id=${payload.group_id ?: ""}"
+            )
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
         } finally {
+            if (meshId != null && meshJoined) {
+                val leaveReason = when (finalResult?.status) {
+                    EdgeExecutor.STATUS_SUCCESS -> "task_complete"
+                    EdgeExecutor.STATUS_CANCELLED -> "cancelled"
+                    else -> "error"
+                }
+                webSocketClient.sendMeshLeave(meshId, leaveReason)
+            }
             taskCancelRegistry.deregister(taskId)
             // Unblock local loop.
             UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
@@ -836,7 +928,7 @@ class GalaxyConnectionService : Service() {
             correlation_id = taskId,
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = buildIdempotencyKey(taskId, MsgType.CANCEL_RESULT)
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -849,7 +941,7 @@ class GalaxyConnectionService : Service() {
             correlation_id = result.task_id,
             device_id = result.device_id.ifEmpty { localDeviceId },
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = buildIdempotencyKey(result.task_id, MsgType.GOAL_RESULT)
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -872,7 +964,7 @@ class GalaxyConnectionService : Service() {
             trace_id = traceId,
             route_mode = routeMode,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = buildIdempotencyKey(result.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId)
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
@@ -925,6 +1017,35 @@ class GalaxyConnectionService : Service() {
         source_runtime_posture = payload.source_runtime_posture
     )
 
+    private fun buildIdempotencyKey(taskId: String, type: MsgType, traceId: String? = null): String {
+        val runtimeSession = UFOGalaxyApplication.runtimeSessionId
+        val nonce = java.util.UUID.randomUUID().toString()
+        return "$runtimeSession:${type.value}:$taskId:${traceId ?: "no_trace"}:$nonce"
+    }
+
+    private fun emitRuntimeDiagnostics(
+        taskId: String,
+        nodeName: String,
+        errorType: String,
+        errorContext: String
+    ) {
+        val safeTaskId = taskId.ifBlank { "runtime" }
+        webSocketClient.sendDiagnostics(
+            taskId = safeTaskId,
+            nodeName = nodeName,
+            errorType = errorType,
+            errorContext = errorContext
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "runtime_diagnostics_emitted",
+                "task_id" to safeTaskId,
+                "node_name" to nodeName,
+                "error_type" to errorType
+            )
+        )
+    }
+
     // ── PR-4 advanced-capability minimal helpers ──────────────────────────────────────────
 
     /**
@@ -948,7 +1069,7 @@ class GalaxyConnectionService : Service() {
             payload = ackPayload,
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = buildIdempotencyKey(ackPayload.message_id, MsgType.ACK)
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         Log.d(TAG, "[ADVANCED:ACK] type_acked=${type.value} message_id=${ackPayload.message_id} sent=$sent")
@@ -1043,7 +1164,7 @@ class GalaxyConnectionService : Service() {
             correlation_id = taskId.ifEmpty { null },
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = buildIdempotencyKey(taskId.ifBlank { "hybrid_degrade" }, MsgType.HYBRID_DEGRADE)
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
         Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent")
@@ -1106,6 +1227,12 @@ class GalaxyConnectionService : Service() {
             )
         } catch (e: Exception) {
             Log.w(TAG, "[PR3:TAKEOVER] Failed to parse takeover_request: ${e.message}")
+            emitRuntimeDiagnostics(
+                taskId = messageId ?: "unknown",
+                nodeName = "takeover_ingress",
+                errorType = "takeover_parse_error",
+                errorContext = e.message ?: "unknown parse error"
+            )
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "takeover_request_parse_error",
@@ -1119,11 +1246,41 @@ class GalaxyConnectionService : Service() {
                 taskId = "",
                 traceId = "",
                 accepted = false,
-                reason = "parse_error: ${e.message}"
+                reason = "invalid_takeover_request:parse_error"
             )
         }
 
         val resolvedPosture = envelope.resolvedPosture
+        val contractValidation = handoffContractValidator.validate(envelope)
+        if (contractValidation.isInvalid) {
+            val reason = "handoff_contract_invalid:${contractValidation.summary()}"
+            emitRuntimeDiagnostics(
+                taskId = envelope.task_id,
+                nodeName = "takeover_preflight",
+                errorType = "handoff_contract_invalid",
+                errorContext = contractValidation.summary()
+            )
+            sendTakeoverResponse(
+                TakeoverResponseEnvelope(
+                    takeover_id = envelope.takeover_id,
+                    task_id = envelope.task_id,
+                    trace_id = envelope.trace_id,
+                    accepted = false,
+                    rejection_reason = reason,
+                    device_id = localDeviceId,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    source_runtime_posture = envelope.source_runtime_posture,
+                    exec_mode = envelope.exec_mode
+                )
+            )
+            return TakeoverHandlingResult(
+                takeoverId = envelope.takeover_id,
+                taskId = envelope.task_id,
+                traceId = envelope.trace_id,
+                accepted = false,
+                reason = reason
+            )
+        }
 
         // ── Eligibility assessment (canonical PR-3 path) ──────────────────────
         // Capture the existing active takeover before setting the new one.
@@ -1162,6 +1319,12 @@ class GalaxyConnectionService : Service() {
             // If the device is not eligible, reject with the assessor's specific reason so
             // the main runtime can distinguish device-not-ready from executor-not-implemented.
             if (!eligibility.eligible) {
+                emitRuntimeDiagnostics(
+                    taskId = envelope.task_id,
+                    nodeName = "takeover_preflight",
+                    errorType = "takeover_ineligible",
+                    errorContext = eligibility.reason
+                )
                 sendTakeoverResponse(
                     TakeoverResponseEnvelope(
                         takeover_id = envelope.takeover_id,
@@ -1204,6 +1367,12 @@ class GalaxyConnectionService : Service() {
                         "rejection_outcome" to receiptResult.outcome.reason,
                         "reason" to receiptResult.reason
                     )
+                )
+                emitRuntimeDiagnostics(
+                    taskId = envelope.task_id,
+                    nodeName = "takeover_session_gate",
+                    errorType = "takeover_session_rejected",
+                    errorContext = receiptResult.reason
                 )
                 sendTakeoverResponse(
                     TakeoverResponseEnvelope(
@@ -1317,6 +1486,12 @@ class GalaxyConnectionService : Service() {
                                 "takeover_error: ${outcome.error}", envelope.trace_id,
                                 ROUTE_MODE_CROSS_DEVICE
                             )
+                            emitRuntimeDiagnostics(
+                                taskId = envelope.task_id,
+                                nodeName = "takeover_execution",
+                                errorType = "takeover_execution_failed",
+                                errorContext = outcome.error
+                            )
                             // PR-23: Notify RuntimeController — the canonical failure path —
                             // so all surface layers can clear stale "active" or "in-control"
                             // state.  Derive the cause from the last RESULT signal recorded
@@ -1372,7 +1547,11 @@ class GalaxyConnectionService : Service() {
             device_id = localDeviceId,
             trace_id = response.trace_id,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString(),
+            idempotency_key = buildIdempotencyKey(
+                taskId = response.task_id.ifBlank { response.takeover_id },
+                type = MsgType.TAKEOVER_RESPONSE,
+                traceId = response.trace_id
+            ),
             source_runtime_posture = response.source_runtime_posture
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
@@ -1416,7 +1595,7 @@ class GalaxyConnectionService : Service() {
             device_id = localDeviceId,
             trace_id = traceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString()
+            idempotency_key = buildIdempotencyKey(taskId, MsgType.TASK_RESULT, traceId)
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
