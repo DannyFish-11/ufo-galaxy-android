@@ -24,6 +24,11 @@ data class UgcpTransferEventAlignment(
     val canonicalTransferSemantic: String
 )
 
+data class UgcpCoordinationEventAlignment(
+    val androidEvent: String,
+    val canonicalCoordinationSemantic: String
+)
+
 object UgcpSharedSchemaAlignment {
     const val runtimeWsProfileName: String = "ugcp.runtime_ws_profile.android"
 
@@ -34,6 +39,10 @@ object UgcpSharedSchemaAlignment {
     const val controlTransferProfileName: String = "ugcp.control_transfer_profile.android"
 
     const val controlTransferProfileStatus: String = "incremental_alignment"
+
+    const val coordinationProfileName: String = "ugcp.coordination_profile.android"
+
+    const val coordinationProfileStatus: String = "incremental_alignment"
 
     val identityAlignments: List<UgcpIdentityAlignment> = listOf(
         UgcpIdentityAlignment("TaskId", "task_id"),
@@ -152,6 +161,52 @@ object UgcpSharedSchemaAlignment {
         "mesh_join",
         "mesh_leave",
         "mesh_result"
+    )
+
+    val coordinationRoleTerms: Set<String> = setOf(
+        "participant",
+        "coordinator"
+    )
+
+    val coordinationReadinessTerms: Set<String> = setOf(
+        "source_runtime_posture=join_runtime",
+        "source_runtime_posture=control_only",
+        "model_ready",
+        "accessibility_ready",
+        "overlay_ready",
+        "degraded_mode"
+    )
+
+    val coordinationLifecycleTerms: Set<String> = setOf(
+        "coordination_participant_joined",
+        "coordination_participant_left",
+        "coordination_execution_result_reported",
+        "coordination_execution_terminal"
+    )
+
+    val coordinationOutcomeVocabulary: Set<String> = setOf(
+        "success",
+        "partial",
+        "error"
+    )
+
+    val coordinationEventAlignments: List<UgcpCoordinationEventAlignment> = listOf(
+        UgcpCoordinationEventAlignment(
+            androidEvent = "mesh_join",
+            canonicalCoordinationSemantic = "coordination_participant_joined"
+        ),
+        UgcpCoordinationEventAlignment(
+            androidEvent = "mesh_leave",
+            canonicalCoordinationSemantic = "coordination_participant_left"
+        ),
+        UgcpCoordinationEventAlignment(
+            androidEvent = "mesh_result",
+            canonicalCoordinationSemantic = "coordination_execution_result_reported"
+        ),
+        UgcpCoordinationEventAlignment(
+            androidEvent = "mesh_result.status in {success,partial,error}",
+            canonicalCoordinationSemantic = "coordination_execution_terminal"
+        )
     )
 
     val terminalVocabulary: Set<String> = setOf(

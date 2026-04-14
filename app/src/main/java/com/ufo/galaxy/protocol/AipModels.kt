@@ -584,6 +584,7 @@ data class DiagnosticsPayload(
 /**
  * Uplink payload for [MsgType.MESH_JOIN].
  * Sent when the device joins a mesh session to report participation readiness.
+ * Canonical coordination semantic: `coordination_participant_joined`.
  *
  * @param mesh_id      Stable mesh session identifier shared by all participants.
  * @param device_id    Joining device identifier.
@@ -600,6 +601,7 @@ data class MeshJoinPayload(
 /**
  * Uplink payload for [MsgType.MESH_LEAVE].
  * Sent when the device leaves a mesh session (on disconnect or task completion).
+ * Canonical coordination semantic: `coordination_participant_left`.
  *
  * @param mesh_id   Mesh session identifier.
  * @param device_id Leaving device identifier.
@@ -632,6 +634,9 @@ data class MeshSubtaskResult(
  * Uplink payload for [MsgType.MESH_RESULT].
  * Reports aggregated parallel-subtask results when all participants in a mesh session
  * have completed their subtasks.
+ * Canonical coordination semantics:
+ * - `coordination_execution_result_reported`
+ * - terminal outcome via [status] (`success`/`partial`/`error`)
  *
  * @param mesh_id     Mesh session identifier.
  * @param task_id     Associated top-level task identifier.
