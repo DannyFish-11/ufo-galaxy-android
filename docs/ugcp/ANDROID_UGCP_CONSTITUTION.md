@@ -107,6 +107,41 @@ Android emits/interprets terminal outcomes across families, including:
 - Mesh aggregate status: `success`, `partial`, `error`
 - Takeover rejection reasons and setup/recovery error categories (runtime setup path)
 
+### 4.6 UGCP Control Transfer Profile alignment (Android)
+
+Android now explicitly declares participation in the **UGCP Control Transfer Profile**:
+
+- Profile identity: `ugcp.control_transfer_profile.android`
+- Current status: `incremental_alignment`
+- Behavior stance: preserve existing Android runtime behavior while tightening transfer vocabulary/mapping.
+
+Canonical transfer lifecycle vocabulary used for Android mapping:
+
+- `transfer_accept`
+- `transfer_reject`
+- `transfer_cancel`
+- `transfer_expire`
+- `transfer_adopt`
+- `transfer_resume`
+
+Android transfer event → canonical transfer semantic mapping:
+
+| Android runtime-facing event | Canonical transfer semantic |
+|---|---|
+| `takeover_response.accepted=true` | `transfer_accept` |
+| `takeover_response.accepted=false` | `transfer_reject` |
+| `delegated_execution_signal.result_kind=cancelled` | `transfer_cancel` |
+| `delegated_execution_signal.result_kind=timeout` | `transfer_expire` |
+| `delegated_execution_signal.result_kind=rejected` | `transfer_reject` |
+| `delegated_handoff_contract.continuation_token` present | `transfer_adopt` |
+| `delegated_handoff_contract.handoff_reason=continuation` | `transfer_resume` |
+
+Notes:
+
+- Android currently carries explicit cancellation/timeout terminal outcomes through delegated execution result signaling.
+- Expiry semantics are currently aligned through delegated `timeout` terminal signaling.
+- Adoption/resume semantics are currently aligned through continuation-token and continuation-reason handoff contract fields.
+
 ## 5) Android message family → canonical phase graph mapping
 
 Canonical phases used here: **ingress → planning → assignment → execution → transfer → completion → recovery**.
@@ -166,6 +201,8 @@ This registry does **not** rewrite wire fields or runtime behavior. It documents
 - canonical identity lineage (`task_id`, `trace_id`, `control_session_id`, `runtime_session_id`, `mesh_session_id`, `source_node_id`, `target_node_id`, `execution_instance_id`)
 - message-family mapping to canonical schema families (`identity`, `control`, `runtime`, `coordination`, `truth`)
 - transfer/delegated/takeover vocabulary alignment
+- control-transfer lifecycle vocabulary (`transfer_accept`, `transfer_reject`, `transfer_cancel`, `transfer_expire`, `transfer_adopt`, `transfer_resume`)
+- Android transfer event ↔ canonical transfer semantic mapping notes
 - readiness/capability semantics and mesh participation semantics
 - terminal/result/failure vocabulary alignment used by Android runtime-facing paths
 
