@@ -457,6 +457,12 @@ class Pr32StagedMeshTargetExecutionTest {
     }
 
     @Test
+    fun `fromGoalResult maps completed status to SUCCESS via canonical normalization`() {
+        val r = StagedMeshParticipationResult.fromGoalResult("m", "s", makeGoalResult(status = "completed"))
+        assertEquals(StagedMeshParticipationResult.ExecutionStatus.SUCCESS, r.executionStatus)
+    }
+
+    @Test
     fun `fromGoalResult maps error status to FAILURE`() {
         val r = StagedMeshParticipationResult.fromGoalResult("m", "s", makeGoalResult(status = "error"))
         assertEquals(StagedMeshParticipationResult.ExecutionStatus.FAILURE, r.executionStatus)

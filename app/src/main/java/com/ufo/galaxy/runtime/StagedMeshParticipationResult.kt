@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment
 import com.ufo.galaxy.session.AndroidSessionContribution
 
 /**
@@ -200,11 +201,12 @@ data class StagedMeshParticipationResult(
             subtaskId: String,
             result: GoalResultPayload
         ): StagedMeshParticipationResult {
-            val executionStatus = when (result.status) {
-                "success"   -> ExecutionStatus.SUCCESS
-                "cancelled" -> ExecutionStatus.CANCELLED
-                "disabled"  -> ExecutionStatus.BLOCKED
-                else        -> ExecutionStatus.FAILURE
+            val normalizedStatus = UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)
+            val executionStatus = when (normalizedStatus) {
+                AndroidSessionContribution.STATUS_SUCCESS -> ExecutionStatus.SUCCESS
+                AndroidSessionContribution.STATUS_CANCELLED -> ExecutionStatus.CANCELLED
+                AndroidSessionContribution.STATUS_DISABLED -> ExecutionStatus.BLOCKED
+                else -> ExecutionStatus.FAILURE
             }
             return StagedMeshParticipationResult(
                 meshId          = meshId,

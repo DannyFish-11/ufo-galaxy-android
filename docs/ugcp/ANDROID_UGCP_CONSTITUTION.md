@@ -305,6 +305,8 @@ Compatibility and normalization boundaries are now explicitly frozen as additive
 - `compatibilityAliasNormalizations` (`MsgType.LEGACY_TYPE_MAP`) for legacy type aliases.
 - `normalizeMessageType(rawType)` for alias normalization before canonical routing.
 - `lifecycleStatusNormalizations` + `normalizeLifecycleStatus(rawStatus)` for lifecycle/result term normalization.
+  - Includes bounded canonicalization for transitional status variants such as
+    `completed→success`, `failed|failure→error`, and `no_op→disabled`.
 
 This is intentionally **incremental**:
 
