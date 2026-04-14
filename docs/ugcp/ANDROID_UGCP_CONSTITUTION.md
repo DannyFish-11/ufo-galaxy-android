@@ -97,6 +97,8 @@ This document freezes Android-side semantics and aliases for convergence.
   - `signal_kind`: `ack` / `progress` / `result`
   - `result_kind`: `completed` / `failed` / `timeout` / `cancelled` / `rejected`
 - Mesh participation: `mesh_join` / `mesh_leave` / `mesh_result`
+  - `mesh_join.role`: `participant` / `coordinator`
+  - `mesh_leave.reason`: `disconnect` / `task_complete` / `error`
 
 ### 4.5 Terminal/result/failure terms
 
@@ -107,7 +109,30 @@ Android emits/interprets terminal outcomes across families, including:
 - Mesh aggregate status: `success`, `partial`, `error`
 - Takeover rejection reasons and setup/recovery error categories (runtime setup path)
 
-### 4.6 UGCP Control Transfer Profile alignment (Android)
+### 4.6 UGCP Coordination Profile alignment (Android)
+
+Android now explicitly declares participation in the **UGCP Coordination Profile**:
+
+- Profile identity: `ugcp.coordination_profile.android`
+- Current status: `incremental_alignment`
+- Behavior stance: preserve existing runtime behavior while tightening coordination vocabulary/mapping.
+
+Canonical coordination mapping anchors used by Android:
+
+| Android runtime-facing event | Canonical coordination semantic |
+|---|---|
+| `mesh_join` | `coordination_participant_joined` |
+| `mesh_leave` | `coordination_participant_left` |
+| `mesh_result` | `coordination_execution_result_reported` |
+| `mesh_result.status in {success,partial,error}` | `coordination_execution_terminal` |
+
+Coordination posture/readiness interaction notes (incremental, non-disruptive):
+
+- `source_runtime_posture=join_runtime` means Android is posture-eligible for coordinated execution participation.
+- `source_runtime_posture=control_only` means Android remains a control-plane participant without joining execution participation.
+- `model_ready` / `accessibility_ready` / `overlay_ready` / `degraded_mode` remain runtime capability-readiness signals consumed by selection/coordination logic.
+
+### 4.7 UGCP Control Transfer Profile alignment (Android)
 
 Android now explicitly declares participation in the **UGCP Control Transfer Profile**:
 
@@ -188,7 +213,7 @@ Canonical phases used here: **ingress → planning → assignment → execution 
 | `task_result` / `command_result` / `goal_result` / `goal_execution_result` | Execution and terminal outcome projection back to control plane. |
 | `takeover_request` / `takeover_response` | Explicit control-transfer handshake between source/target runtimes. |
 | `delegated_execution_signal` | Fine-grained delegated lifecycle stream for host-side tracker reconciliation. |
-| `mesh_join` / `mesh_leave` / `mesh_result` | Mesh participation lifecycle and aggregate contribution/result semantics. |
+| `mesh_join` / `mesh_leave` / `mesh_result` | Mesh participation lifecycle and aggregate contribution/result semantics (`coordination_participant_joined` / `coordination_participant_left` / `coordination_execution_result_reported`). |
 
 ## 8) Shared schema family preparation (incremental, non-disruptive)
 
@@ -203,6 +228,7 @@ This registry does **not** rewrite wire fields or runtime behavior. It documents
 - transfer/delegated/takeover vocabulary alignment
 - control-transfer lifecycle vocabulary (`transfer_accept`, `transfer_reject`, `transfer_cancel`, `transfer_expire`, `transfer_adopt`, `transfer_resume`)
 - Android transfer event ↔ canonical transfer semantic mapping notes
+- coordination profile declaration (`ugcp.coordination_profile.android`) and mesh lifecycle/outcome mapping notes
 - readiness/capability semantics and mesh participation semantics
 - terminal/result/failure vocabulary alignment used by Android runtime-facing paths
 
