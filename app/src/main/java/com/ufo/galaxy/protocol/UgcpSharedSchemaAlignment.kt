@@ -120,13 +120,12 @@ object UgcpSharedSchemaAlignment {
 
     val canonicalRuntimeMessageFamilies: Set<MsgType> = runtimeWsProfileMessageFamilies
 
-    val transitionalCompatibilityMessageFamilies: Set<MsgType> = (
+    val transitionalCompatibilityMessageFamilies: Set<MsgType> =
         MsgType.ADVANCED_TYPES -
             setOf(
                 MsgType.TAKEOVER_REQUEST,
                 MsgType.TAKEOVER_RESPONSE
             )
-        ).toSet()
 
     val compatibilityAliasNormalizations: Map<String, String> = MsgType.LEGACY_TYPE_MAP
 
