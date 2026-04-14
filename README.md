@@ -168,6 +168,7 @@ ufo-galaxy-android/
 | [`docs/architecture.md`](docs/architecture.md) | System overview, canonical component index, legacy components, authority model |
 | [`docs/execution-flows.md`](docs/execution-flows.md) | Local and cross-device execution flow maps, gateway task dispatch, runtime lifecycle |
 | [`docs/maintainer-guide.md`](docs/maintainer-guide.md) | Onboarding guide, canonical vs deprecated API, configuration model, build guidance |
+| [`docs/ugcp/ANDROID_UGCP_CONSTITUTION.md`](docs/ugcp/ANDROID_UGCP_CONSTITUTION.md) | Android-side UGCP constitution, canonical vocabulary, and control-plane phase/field alignment |
 | [`docs/PR_FIX_WORKFLOW.md`](docs/PR_FIX_WORKFLOW.md) | Standard workflow for bug-fix / regression-fix PRs |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Logging, metrics, tracing |
 | [`docs/LOCAL_LOOP_TESTING.md`](docs/LOCAL_LOOP_TESTING.md) | Local loop test harness |
