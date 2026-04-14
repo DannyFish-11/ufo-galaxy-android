@@ -168,10 +168,9 @@ object UgcpSharedSchemaAlignment {
         "coordinator"
     )
 
-    val meshParticipationOutcomeTerms: Set<String> = setOf(
-        "success",
-        "partial",
-        "error",
+    private val meshAggregateOutcomeTerms: Set<String> = setOf("success", "partial", "error")
+
+    val meshParticipationOutcomeTerms: Set<String> = meshAggregateOutcomeTerms + setOf(
         "disconnect",
         "task_complete"
     )
@@ -208,15 +207,12 @@ object UgcpSharedSchemaAlignment {
         )
     )
 
-    val terminalVocabulary: Set<String> = setOf(
-        "success",
-        "error",
+    val terminalVocabulary: Set<String> = meshAggregateOutcomeTerms + setOf(
         "cancelled",
         "completed",
         "failed",
         "timeout",
-        "rejected",
-        "partial"
+        "rejected"
     )
 
     fun familyFor(type: MsgType): UgcpSchemaFamily? = messageFamilyAlignments[type]
