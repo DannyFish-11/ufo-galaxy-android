@@ -103,6 +103,20 @@ Both chains use the same on-device execution engine (`EdgeExecutor`). Only the e
 
 `RuntimeController` is the **sole authority** for WS connect/disconnect and `AppSettings.crossDeviceEnabled` mutations. No other component should call `GalaxyWebSocketClient.connect`, `GalaxyWebSocketClient.disconnect`, or toggle `crossDeviceEnabled` directly.
 
+#### Runtime-host lifecycle transition governance (Android)
+
+`RuntimeController` also owns attached runtime-host session transitions and host participation-state synchronization.
+
+| Lifecycle trigger | Session transition | Host participation state | Ownership note |
+|---|---|---|---|
+| User enable / `start()` success | create/attach new session (`SessionOpenSource.USER_ACTIVATION`) | `INACTIVE → ACTIVE` | Canonical activation path |
+| Background restore / `connectIfEnabled()` success | create/attach new session (`SessionOpenSource.BACKGROUND_RESTORE`) | `INACTIVE → ACTIVE` | Restore path; no independent authority outside controller |
+| Active WS disconnect | detach existing session (`DetachCause.DISCONNECT`) | `ACTIVE → INACTIVE` | Recovery phase begins |
+| Active WS reconnect | replace detached session with fresh attach (`SessionOpenSource.RECONNECT_RECOVERY`) | `INACTIVE → ACTIVE` | Canonical reconnect replacement semantics |
+| Explicit stop | detach session (`DetachCause.DISABLE`) | `ACTIVE/other → INACTIVE` | Canonical retirement path |
+| Explicit invalidate | detach session (`DetachCause.INVALIDATION`) | `ACTIVE/other → INACTIVE` | Trust reset without changing runtime authority owner |
+| Registration/start failure fallback | detach session (`DetachCause.DISCONNECT`) + fallback local-only | `ACTIVE/other → INACTIVE` | Failure recovery remains controller-owned |
+
 ### Uplink authority
 
 `GalaxyWebSocketClient` is the **sole cross-device uplink**. All outbound cross-device messages — device registration, capability reports, heartbeats, task results, goal results, cancel results — flow through this class. Use `GatewayClient` (the thin wrapper) for task-submit calls.
