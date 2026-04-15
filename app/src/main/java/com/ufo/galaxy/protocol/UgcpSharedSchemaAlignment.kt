@@ -130,6 +130,14 @@ data class UgcpRuntimeContractVerificationResult(
     val details: String
 )
 
+data class UgcpRuntimeResidualDebtMarker(
+    val pathway: String,
+    val debtKind: String,
+    val containmentBoundary: String,
+    val canonicalReplacement: String,
+    val followUpSimplification: String
+)
+
 /**
  * Additive Android-side UGCP handling decision for protocol/lifecycle inputs.
  *
@@ -475,6 +483,37 @@ object UgcpSharedSchemaAlignment {
             verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
             strictnessStage = UgcpRuntimeStrictnessStage.NORMALIZE_FIRST,
             rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
+        )
+    )
+
+    val runtimeResidualDebtMarkers: List<UgcpRuntimeResidualDebtMarker> = listOf(
+        UgcpRuntimeResidualDebtMarker(
+            pathway = "runtime_setup_error_legacy_string_bridge",
+            debtKind = "compatibility_bridge",
+            containmentBoundary = "runtime.setup_error_typed_vs_legacy_string_bridge",
+            canonicalReplacement = "RuntimeController.setupError",
+            followUpSimplification = "retire RuntimeController.registrationError after all UI and diagnostics collectors migrate to setupError"
+        ),
+        UgcpRuntimeResidualDebtMarker(
+            pathway = "runtime_host_session_legacy_map_projection_bridge",
+            debtKind = "compatibility_bridge",
+            containmentBoundary = "runtime.host_session_typed_projection_vs_legacy_map_bridge",
+            canonicalReplacement = "RuntimeController.hostSessionSnapshot/currentHostSessionSnapshot",
+            followUpSimplification = "retire RuntimeController.currentSessionSnapshot() when host-facing consumers no longer require legacy map metadata"
+        ),
+        UgcpRuntimeResidualDebtMarker(
+            pathway = "runtime_ingress_legacy_alias_normalization",
+            debtKind = "legacy_alias_tolerance",
+            containmentBoundary = "runtime_ingress.type_normalization_and_tier_classification",
+            canonicalReplacement = "canonical message type routing via MsgType",
+            followUpSimplification = "tighten alias acceptance only after center/android coordinated schema rollout"
+        ),
+        UgcpRuntimeResidualDebtMarker(
+            pathway = "runtime_lifecycle_legacy_status_normalization",
+            debtKind = "legacy_status_tolerance",
+            containmentBoundary = "transfer.result_kind_lifecycle_status_normalization",
+            canonicalReplacement = "canonical lifecycle status vocabulary",
+            followUpSimplification = "remove non-canonical lifecycle aliases once transfer result producers emit canonical terminal statuses only"
         )
     )
 

@@ -506,6 +506,42 @@ class UgcpSharedSchemaAlignmentTest {
     }
 
     @Test
+    fun `runtime residual debt markers expose compatibility containment and follow-up simplification targets`() {
+        val byPathway = UgcpSharedSchemaAlignment.runtimeResidualDebtMarkers.associateBy { it.pathway }
+        val inventoryPathways = UgcpSharedSchemaAlignment.runtimeToCanonicalPathwayInventory.map { it.pathway }.toSet()
+
+        assertTrue(byPathway.keys.all { it in inventoryPathways })
+        assertEquals(
+            "RuntimeController.setupError",
+            byPathway["runtime_setup_error_legacy_string_bridge"]?.canonicalReplacement
+        )
+        assertTrue(
+            byPathway["runtime_setup_error_legacy_string_bridge"]
+                ?.followUpSimplification
+                ?.contains("registrationError")
+                ?: false
+        )
+        assertEquals(
+            "RuntimeController.hostSessionSnapshot/currentHostSessionSnapshot",
+            byPathway["runtime_host_session_legacy_map_projection_bridge"]?.canonicalReplacement
+        )
+        assertTrue(
+            byPathway["runtime_host_session_legacy_map_projection_bridge"]
+                ?.followUpSimplification
+                ?.contains("currentSessionSnapshot")
+                ?: false
+        )
+        assertEquals(
+            "legacy_alias_tolerance",
+            byPathway["runtime_ingress_legacy_alias_normalization"]?.debtKind
+        )
+        assertEquals(
+            "legacy_status_tolerance",
+            byPathway["runtime_lifecycle_legacy_status_normalization"]?.debtKind
+        )
+    }
+
+    @Test
     fun `runtime to shared contract verification report is explicit and pass-oriented by default`() {
         val checks = UgcpSharedSchemaAlignment.verifyRuntimeToSharedContractConsistency()
         val checkById = checks.associateBy { it.checkId }
