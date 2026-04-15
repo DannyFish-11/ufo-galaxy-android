@@ -64,6 +64,12 @@ data class ParticipantSessionLinkage(
     val sourceRuntimePosture: String?
 )
 
+data class ParticipantTruthBoundary(
+    val ownsRuntimeAttachmentTruth: Boolean = false,
+    val ownsDelegatedSelectionTruth: Boolean = false,
+    val ownsReconnectLifecycleTruth: Boolean = false
+)
+
 data class CanonicalParticipantModel(
     val participantId: String,
     val participantKind: ParticipantKind,
@@ -78,7 +84,8 @@ data class CanonicalParticipantModel(
     val supportsCommandExecution: Boolean,
     val deviceLinkage: ParticipantDeviceLinkage,
     val capabilityLinkage: ParticipantCapabilityLinkage,
-    val sessionLinkage: ParticipantSessionLinkage
+    val sessionLinkage: ParticipantSessionLinkage,
+    val truthBoundary: ParticipantTruthBoundary = ParticipantTruthBoundary()
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         "participant_id" to participantId,
@@ -103,11 +110,23 @@ data class CanonicalParticipantModel(
             "attached_session_id" to sessionLinkage.attachedSessionId,
             "runtime_session_id" to sessionLinkage.runtimeSessionId,
             "source_runtime_posture" to sessionLinkage.sourceRuntimePosture
+        ),
+        "truth_boundary" to mapOf(
+            "owns_runtime_attachment_truth" to truthBoundary.ownsRuntimeAttachmentTruth,
+            "owns_delegated_selection_truth" to truthBoundary.ownsDelegatedSelectionTruth,
+            "owns_reconnect_lifecycle_truth" to truthBoundary.ownsReconnectLifecycleTruth
         )
     )
 }
 
 object AndroidParticipantModelMapper {
+    /**
+     * Builds an additive participant **projection/read-model** from runtime-host signals.
+     *
+     * This mapper does not become an authoritative lifecycle owner. Canonical attached-session,
+     * delegated-readiness, and reconnect lifecycle truth remain owned by RuntimeController
+     * projections (`hostSessionSnapshot`, `targetReadinessProjection`, `reconnectRecoveryState`).
+     */
     fun fromRuntimeHostDescriptor(
         descriptor: RuntimeHostDescriptor,
         hostSessionSnapshot: AttachedRuntimeHostSessionSnapshot? = null,

@@ -38,5 +38,8 @@ class CanonicalDeviceModelTest {
         assertEquals(DeviceRuntimeHostStrength.FULL_RUNTIME_HOST, device.runtimeHostSemantics.runtimeStrength)
         assertTrue(device.runtimeHostSemantics.supportsRuntimeHostExecution)
         assertFalse(device.runtimeHostSemantics.appliesUniversally)
+        assertFalse(device.truthBoundary.ownsAttachedSessionTruth)
+        assertFalse(device.truthBoundary.ownsDelegatedSelectionTruth)
+        assertFalse(device.truthBoundary.ownsReconnectLifecycleTruth)
     }
 }
