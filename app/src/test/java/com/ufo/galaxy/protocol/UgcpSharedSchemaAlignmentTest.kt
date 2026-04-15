@@ -38,6 +38,7 @@ class UgcpSharedSchemaAlignmentTest {
         val byConcept = UgcpSharedSchemaAlignment.canonicalConceptVocabulary.associateBy { it.concept }
         assertEquals("participant_node_id", byConcept["participant_node"]?.canonicalTerm)
         assertEquals("device_id", byConcept["device"]?.canonicalTerm)
+        assertEquals("device_category", byConcept["device_category"]?.canonicalTerm)
         assertEquals("runtime_host_participant", byConcept["runtime_host"]?.canonicalTerm)
         assertEquals("runtime_capability_report", byConcept["capability_reporting"]?.canonicalTerm)
         assertEquals("capability_provider_ref", byConcept["capability_provider"]?.canonicalTerm)
@@ -57,6 +58,10 @@ class UgcpSharedSchemaAlignmentTest {
         )
         assertTrue(
             byConcept["conversation_history_session"]?.boundary?.contains("not runtime attachment identity")
+                ?: false
+        )
+        assertTrue(
+            byConcept["device_category"]?.boundary?.contains("not a default assumption for all devices")
                 ?: false
         )
         assertTrue(

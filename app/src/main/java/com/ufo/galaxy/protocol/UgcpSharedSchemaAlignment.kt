@@ -211,6 +211,12 @@ object UgcpSharedSchemaAlignment {
             boundary = "hardware/device identity (not runtime-host lifecycle authority)"
         ),
         UgcpCanonicalConceptAlignment(
+            concept = "device_category",
+            canonicalTerm = "device_category",
+            androidMapping = "CanonicalDeviceModel + AndroidDeviceModelMapper",
+            boundary = "device-class/category semantics; Android maps to a strong full-runtime category and this is not a default assumption for all devices"
+        ),
+        UgcpCanonicalConceptAlignment(
             concept = "runtime_host",
             canonicalTerm = "runtime_host_participant",
             androidMapping = "RuntimeHostDescriptor(hostId, formationRole, participationState)",

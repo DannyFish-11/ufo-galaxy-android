@@ -81,6 +81,7 @@ Android now keeps explicit concept-boundary alignment in
 |---|---|---|---|
 | participant / node | `participant_node_id` | `device_id + runtime_host_id` | Cross-device participant identity (not only hardware identity). |
 | device | `device_id` | `AipMessage.device_id`, `AndroidSessionContribution.deviceId` | Hardware/device identity carrier. |
+| device category | `device_category` | `CanonicalDeviceModel`, `AndroidDeviceModelMapper` | Device-class/category semantics; Android maps to strong/full-runtime host category and this is not the baseline assumption for all devices. |
 | runtime host / runtime | `runtime_host_participant` | `RuntimeHostDescriptor(hostId, formationRole, participationState)` | Runtime-host lifecycle participation authority. |
 | capability reporting | `runtime_capability_report` | `capability_report`, `ReadinessChecker`, `AndroidCapabilityVector` | Runtime capability/readiness declaration surface (provider publication only; not runtime/device/participant identity authority). |
 | capability provider | `capability_provider_ref` | `CanonicalCapabilityProviderModel`, `AndroidCapabilityProviderModelMapper` | Capability-plane provider contract; does not own runtime identity, attachment/reconnect truth, or participant truth. |
