@@ -17,10 +17,10 @@ enum class DeviceCategory(val wireValue: String) {
 }
 
 enum class DeviceRuntimeHostStrength(val wireValue: String) {
-    FULL_RUNTIME_HOST("full_runtime_host"),
-    PARTIAL_RUNTIME_NODE("partial_runtime_node"),
-    COMMAND_ENDPOINT("command_endpoint"),
-    OBSERVER("observer")
+    FULL_RUNTIME_HOST(RuntimeTierContracts.FULL_RUNTIME_HOST),
+    PARTIAL_RUNTIME_NODE(RuntimeTierContracts.PARTIAL_RUNTIME_NODE),
+    COMMAND_ENDPOINT(RuntimeTierContracts.COMMAND_ENDPOINT),
+    OBSERVER(RuntimeTierContracts.OBSERVER)
 }
 
 data class DeviceRuntimeHostSemantics(
@@ -77,7 +77,9 @@ object AndroidDeviceModelMapper {
             runtimeHostId = descriptor.hostId
         ),
         runtimeHostSemantics = DeviceRuntimeHostSemantics(
-            runtimeStrength = DeviceRuntimeHostStrength.FULL_RUNTIME_HOST,
+            runtimeStrength = RuntimeTierContracts.deviceRuntimeStrengthFor(
+                ParticipantRuntimeTier.FULL_RUNTIME_HOST
+            ),
             supportsRuntimeHostExecution = true,
             appliesUniversally = false
         )

@@ -15,22 +15,22 @@ enum class ParticipantRuntimeTier(val wireValue: String) {
     /**
      * Strongest participant tier. Android maps to this tier today.
      */
-    FULL_RUNTIME_HOST("full_runtime_host"),
+    FULL_RUNTIME_HOST(RuntimeTierContracts.FULL_RUNTIME_HOST),
 
     /**
      * Shared-model lighter tier for nodes that host only part of runtime execution semantics.
      */
-    PARTIAL_RUNTIME_NODE("partial_runtime_node"),
+    PARTIAL_RUNTIME_NODE(RuntimeTierContracts.PARTIAL_RUNTIME_NODE),
 
     /**
      * Shared-model lighter tier for endpoints that can execute commands but do not host full runtime.
      */
-    COMMAND_ENDPOINT("command_endpoint"),
+    COMMAND_ENDPOINT(RuntimeTierContracts.COMMAND_ENDPOINT),
 
     /**
      * Shared-model lighter tier for observer-style participants with no execution ownership.
      */
-    OBSERVER("observer")
+    OBSERVER(RuntimeTierContracts.OBSERVER)
 }
 
 enum class ParticipantAutonomyLevel(val wireValue: String) {
@@ -138,7 +138,9 @@ object AndroidParticipantModelMapper {
             runtimeHostId = descriptor.hostId
         ),
         participantKind = ParticipantKind.ANDROID_RUNTIME_HOST,
-        runtimeTier = ParticipantRuntimeTier.FULL_RUNTIME_HOST,
+        runtimeTier = RuntimeTierContracts.participantTierFor(
+            DeviceRuntimeHostStrength.FULL_RUNTIME_HOST
+        ),
         autonomyLevel = ParticipantAutonomyLevel.HIGH_AUTONOMY,
         coordinationRole = coordinationRoleFrom(descriptor.formationRole),
         readinessState = readinessStateFrom(descriptor, readinessProjection),
