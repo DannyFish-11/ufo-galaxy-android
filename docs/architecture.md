@@ -107,6 +107,17 @@ Both chains use the same on-device execution engine (`EdgeExecutor`). Only the e
 
 `GalaxyWebSocketClient` is the **sole cross-device uplink**. All outbound cross-device messages — device registration, capability reports, heartbeats, task results, goal results, cancel results — flow through this class. Use `GatewayClient` (the thin wrapper) for task-submit calls.
 
+### Truth vs projection boundary (Android-side)
+
+Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:
+
+| Surface | Kind | Ownership note |
+|---------|------|----------------|
+| `RuntimeController.hostSessionSnapshot` | authoritative host-facing truth projection | Canonical Android attached-session truth surface for host/session continuity semantics. |
+| `RuntimeController.targetReadinessProjection` | authoritative host-facing truth projection | Canonical Android delegated-selection/readiness truth surface. |
+| `RuntimeController.reconnectRecoveryState` | authoritative runtime lifecycle truth | Canonical Android reconnect recovery state surface. |
+| `CanonicalParticipantModel` / `CanonicalDeviceModel` / `CanonicalCapabilityProviderModel` | additive projection/read-model contracts | Compatibility-safe convergence models; **not** lifecycle truth owners. They must not be treated as session/reconnect/readiness authorities. |
+
 ---
 
 ## Legacy / compatibility components

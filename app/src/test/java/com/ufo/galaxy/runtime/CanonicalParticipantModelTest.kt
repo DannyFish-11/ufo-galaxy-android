@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,6 +72,9 @@ class CanonicalParticipantModelTest {
         assertEquals("attached-1", participant.sessionLinkage.attachedSessionId)
         assertEquals("runtime-1", participant.sessionLinkage.runtimeSessionId)
         assertEquals(SourceRuntimePosture.JOIN_RUNTIME, participant.sessionLinkage.sourceRuntimePosture)
+        assertFalse(participant.truthBoundary.ownsRuntimeAttachmentTruth)
+        assertFalse(participant.truthBoundary.ownsDelegatedSelectionTruth)
+        assertFalse(participant.truthBoundary.ownsReconnectLifecycleTruth)
     }
 
     @Test

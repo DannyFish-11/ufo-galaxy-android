@@ -29,12 +29,19 @@ data class DeviceRuntimeHostSemantics(
     val appliesUniversally: Boolean = false
 )
 
+data class DeviceTruthBoundary(
+    val ownsAttachedSessionTruth: Boolean = false,
+    val ownsDelegatedSelectionTruth: Boolean = false,
+    val ownsReconnectLifecycleTruth: Boolean = false
+)
+
 data class CanonicalDeviceModel(
     val deviceId: String,
     val deviceCategory: DeviceCategory,
     val runtimeHostId: String?,
     val linkedParticipantId: String?,
-    val runtimeHostSemantics: DeviceRuntimeHostSemantics
+    val runtimeHostSemantics: DeviceRuntimeHostSemantics,
+    val truthBoundary: DeviceTruthBoundary = DeviceTruthBoundary()
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         "device_id" to deviceId,
@@ -45,11 +52,22 @@ data class CanonicalDeviceModel(
             "runtime_strength" to runtimeHostSemantics.runtimeStrength.wireValue,
             "supports_runtime_host_execution" to runtimeHostSemantics.supportsRuntimeHostExecution,
             "applies_universally" to runtimeHostSemantics.appliesUniversally
+        ),
+        "truth_boundary" to mapOf(
+            "owns_attached_session_truth" to truthBoundary.ownsAttachedSessionTruth,
+            "owns_delegated_selection_truth" to truthBoundary.ownsDelegatedSelectionTruth,
+            "owns_reconnect_lifecycle_truth" to truthBoundary.ownsReconnectLifecycleTruth
         )
     )
 }
 
 object AndroidDeviceModelMapper {
+    /**
+     * Builds an additive device-plane **projection/read-model** for convergence.
+     *
+     * This contract is intentionally non-authoritative for session/readiness/reconnect truth.
+     * RuntimeController remains the lifecycle truth owner on Android runtime-host surfaces.
+     */
     fun fromRuntimeHostDescriptor(descriptor: RuntimeHostDescriptor): CanonicalDeviceModel = CanonicalDeviceModel(
         deviceId = descriptor.deviceId,
         deviceCategory = DeviceCategory.ANDROID_FULL_RUNTIME_HOST,
