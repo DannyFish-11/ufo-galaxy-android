@@ -95,6 +95,19 @@ data class UgcpRuntimeCanonicalPathwayAudit(
     val verificationReadiness: UgcpMigrationReadinessTier
 )
 
+enum class UgcpRuntimeContractVerificationStatus {
+    PASS,
+    REPORT_ONLY_DIVERGENCE
+}
+
+data class UgcpRuntimeContractVerificationResult(
+    val checkId: String,
+    val status: UgcpRuntimeContractVerificationStatus,
+    val pathway: String?,
+    val expectation: String,
+    val details: String
+)
+
 /**
  * Additive Android-side UGCP handling decision for protocol/lifecycle inputs.
  *
@@ -571,6 +584,133 @@ object UgcpSharedSchemaAlignment {
             semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_RESULT_REPORT
         )
     )
+
+    fun verifyRuntimeToSharedContractConsistency(
+        pathwayInventory: List<UgcpRuntimeCanonicalPathwayAudit> = runtimeToCanonicalPathwayInventory,
+        transferMappings: List<UgcpTransferEventAlignment> = transferEventAlignments,
+        truthMappings: List<UgcpTruthEventAlignment> = truthEventAlignments,
+        authoritativeSurfaces: Set<String> = authoritativeTruthSurfaces,
+        observationalSurfaces: Set<String> = observationalNotificationSurfaces,
+        enforcementSurfaces: Set<String> = enforcementHookSurfaces
+    ): List<UgcpRuntimeContractVerificationResult> {
+        val checks = mutableListOf<UgcpRuntimeContractVerificationResult>()
+        pathwayInventory.forEach { pathway ->
+            val canonicalReadinessViolation =
+                pathway.pathwayClass == UgcpRuntimePathwayClass.CANONICAL &&
+                    pathway.verificationReadiness != UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+            checks += UgcpRuntimeContractVerificationResult(
+                checkId = "pathway_canonical_readiness:${pathway.pathway}",
+                status = if (canonicalReadinessViolation) {
+                    UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+                } else {
+                    UgcpRuntimeContractVerificationStatus.PASS
+                },
+                pathway = pathway.pathway,
+                expectation = "canonical_pathways_should_be_ready_for_staged_tightening",
+                details = "pathway_class=${pathway.pathwayClass} readiness=${pathway.verificationReadiness}"
+            )
+
+            val requiresCompatibilityNote = pathway.pathwayClass != UgcpRuntimePathwayClass.CANONICAL
+            val missingCompatibilityNote = requiresCompatibilityNote && pathway.fallbackOrWorkaround.isNullOrBlank()
+            checks += UgcpRuntimeContractVerificationResult(
+                checkId = "pathway_compatibility_note:${pathway.pathway}",
+                status = if (missingCompatibilityNote) {
+                    UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+                } else {
+                    UgcpRuntimeContractVerificationStatus.PASS
+                },
+                pathway = pathway.pathway,
+                expectation = "transitional_or_workaround_pathways_should_carry_reportable_compatibility_notes",
+                details = "pathway_class=${pathway.pathwayClass} fallback_or_workaround=${pathway.fallbackOrWorkaround ?: "none"}"
+            )
+
+            val requiresEnforcementBoundary = pathway.pathwayClass != UgcpRuntimePathwayClass.CANONICAL
+            val missingEnforcementBoundary =
+                requiresEnforcementBoundary &&
+                    pathway.normalizationBoundary !in enforcementSurfaces
+            checks += UgcpRuntimeContractVerificationResult(
+                checkId = "pathway_normalization_boundary:${pathway.pathway}",
+                status = if (missingEnforcementBoundary) {
+                    UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+                } else {
+                    UgcpRuntimeContractVerificationStatus.PASS
+                },
+                pathway = pathway.pathway,
+                expectation = "transitional_or_workaround_pathways_should_map_to_known_enforcement_boundaries",
+                details = "normalization_boundary=${pathway.normalizationBoundary}"
+            )
+        }
+
+        val requiredTransferSemantics = setOf(
+            "transfer_accept",
+            "transfer_reject",
+            "transfer_cancel",
+            "transfer_expire"
+        )
+        val mappedTransferSemantics = transferMappings.map { it.canonicalTransferSemantic }.toSet()
+        val missingTransferSemantics = requiredTransferSemantics - mappedTransferSemantics
+        checks += UgcpRuntimeContractVerificationResult(
+            checkId = "transfer_lifecycle_semantics_coverage",
+            status = if (missingTransferSemantics.isEmpty()) {
+                UgcpRuntimeContractVerificationStatus.PASS
+            } else {
+                UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+            },
+            pathway = "transfer_lifecycle_result_mapping",
+            expectation = "transfer_lifecycle_mapping_should_cover_accept_reject_cancel_expire",
+            details = if (missingTransferSemantics.isEmpty()) {
+                "all_required_transfer_lifecycle_semantics_are_mapped"
+            } else {
+                "missing_transfer_semantics=${missingTransferSemantics.sorted().joinToString(",")}"
+            }
+        )
+
+        val reconnectTruthMapping = truthMappings.find {
+            it.androidSignal == "RuntimeController.reconnectRecoveryState transition"
+        }
+        checks += UgcpRuntimeContractVerificationResult(
+            checkId = "truth_reconnect_recovery_authoritative_alignment",
+            status = if (
+                reconnectTruthMapping?.semanticClass ==
+                    UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION &&
+                    "RuntimeController.reconnectRecoveryState" in authoritativeSurfaces
+            ) {
+                UgcpRuntimeContractVerificationStatus.PASS
+            } else {
+                UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+            },
+            pathway = "connectivity_recovery_and_local_fallback_observability",
+            expectation = "reconnect_recovery_truth_should_remain_authoritative_and_surface_bound",
+            details = "semantic_class=${reconnectTruthMapping?.semanticClass ?: "missing"} authoritative_surface_present=${"RuntimeController.reconnectRecoveryState" in authoritativeSurfaces}"
+        )
+
+        val fallbackTruthMapping = truthMappings.find {
+            it.androidSignal == "RuntimeController.takeoverFailure emission"
+        }
+        checks += UgcpRuntimeContractVerificationResult(
+            checkId = "truth_fallback_observational_alignment",
+            status = if (
+                fallbackTruthMapping?.semanticClass ==
+                    UgcpTruthEventSemanticClass.OBSERVATIONAL_EVENT_EMISSION &&
+                    "RuntimeController.takeoverFailure" in observationalSurfaces
+            ) {
+                UgcpRuntimeContractVerificationStatus.PASS
+            } else {
+                UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+            },
+            pathway = "connectivity_recovery_and_local_fallback_observability",
+            expectation = "fallback_notifications_should_remain_observational_and_non_authoritative",
+            details = "semantic_class=${fallbackTruthMapping?.semanticClass ?: "missing"} observational_surface_present=${"RuntimeController.takeoverFailure" in observationalSurfaces}"
+        )
+
+        return checks
+    }
+
+    val runtimeContractReportOnlyDivergenceCheckIds: Set<String>
+        get() = verifyRuntimeToSharedContractConsistency()
+            .filter { it.status == UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE }
+            .map { it.checkId }
+            .toSet()
 
     fun familyFor(type: MsgType): UgcpSchemaFamily? = messageFamilyAlignments[type]
 

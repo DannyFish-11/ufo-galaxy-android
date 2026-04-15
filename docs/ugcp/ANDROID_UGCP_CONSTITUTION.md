@@ -382,3 +382,22 @@ Coverage is intentionally incremental and review-first:
 - transfer/coordination result mapping remains visible as transitional tolerance surfaces;
 - legacy ingress/status normalization and reconnect/fallback observability are explicitly marked as
   compatibility/workaround pathways retained for runtime resilience.
+
+## 15) PR-12 runtime-to-shared contract verification scaffolding (Android)
+
+Android now adds report-only runtime contract verification surfaces in
+`UgcpSharedSchemaAlignment.verifyRuntimeToSharedContractConsistency(...)`:
+
+- pathway-level checks for canonical readiness, compatibility note presence, and transitional/workaround
+  normalization-boundary mapping into known enforcement surfaces;
+- transfer lifecycle coverage checks for `transfer_accept|transfer_reject|transfer_cancel|transfer_expire`;
+- truth/event boundary checks that keep reconnect recovery authoritative while keeping fallback emission
+  observational.
+
+These checks are intentionally non-disruptive and report-oriented:
+
+- findings are returned as `UgcpRuntimeContractVerificationResult` with
+  `PASS` vs `REPORT_ONLY_DIVERGENCE`;
+- `runtimeContractReportOnlyDivergenceCheckIds` provides a reviewable divergence surface for staged
+  strictness layering later;
+- no runtime hard-fail or canonical-only enforcement behavior is introduced in this phase.
