@@ -47,6 +47,14 @@ data class SessionHistorySummary(
     val actionCount: Int,
     val savedAtMs: Long = System.currentTimeMillis()
 ) {
+    /**
+     * Alias that makes the session layer explicit for convergence work.
+     *
+     * This is a ConversationSession identity, not a runtime attachment identity.
+     */
+    val conversationSessionId: String
+        get() = sessionId
+
     companion object {
         /**
          * Creates a [SessionHistorySummary] from a completed [LocalLoopTrace].

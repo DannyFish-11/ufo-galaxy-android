@@ -246,6 +246,15 @@ data class DelegatedExecutionSignal(
     val isResult: Boolean
         get() = kind == Kind.RESULT
 
+    /**
+     * Alias that makes transfer-layer semantics explicit for convergence work.
+     *
+     * Delegated transfer continuity is bound to the attached runtime session context and
+     * should not be treated as a generic session identifier.
+     */
+    val delegationTransferSessionId: String
+        get() = attachedSessionId
+
     // ── Replay helpers ────────────────────────────────────────────────────────
 
     /**

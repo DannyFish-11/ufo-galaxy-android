@@ -53,6 +53,15 @@ data class LocalLoopTrace(
     val stepCount: Int
         get() = stepObservations.size
 
+    /**
+     * Alias that makes the session layer explicit for convergence work.
+     *
+     * This value is semantically a ConversationSession identity and is intentionally distinct
+     * from runtime attachment / delegated transfer session identifiers.
+     */
+    val conversationSessionId: String
+        get() = sessionId
+
     /** True while [terminalResult] is null (session is still running). */
     val isRunning: Boolean
         get() = terminalResult == null
