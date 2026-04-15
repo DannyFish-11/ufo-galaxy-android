@@ -56,6 +56,9 @@ Authoritative Android runtime surfaces:
 
 Android session terms are frozen as:
 
+- **ConversationSession**: local conversation/history timeline identity (`LocalLoopTrace.sessionId`, `SessionHistorySummary.sessionId`, task-submit `session_id`).
+- **RuntimeAttachmentSession**: Android runtime host attachment continuity identity (`AttachedRuntimeSession.sessionId`, `AttachedRuntimeHostSessionSnapshot.sessionId`).
+- **DelegationTransferSession**: takeover/delegation lifecycle continuity context (`takeover_request.session_id`, `takeover_response`, `delegated_execution_signal`).
 - **Control session**: `session_id` scope used for request grouping / orchestration context.
 - **Runtime session**: `runtime_session_id` carried on envelopes and takeover/handoff contracts.
 - **Attached runtime host session**: `AttachedRuntimeSession.sessionId` + projected `runtimeSessionId` in `AttachedRuntimeHostSessionSnapshot`.

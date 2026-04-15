@@ -327,6 +327,7 @@ object UgcpSharedSchemaAlignment {
         "legacy aliases MUST normalize via MsgType.toV3Type before canonical routing",
         "RuntimeController.hostSessionSnapshot and RuntimeController.targetReadinessProjection remain canonical runtime truth projections",
         "takeover/delegated/mesh canonical semantics remain runtime-profile first-class and are not classified as transitional compatibility-only",
+        "session-layer split is explicit: ConversationSession vs RuntimeAttachmentSession vs DelegationTransferSession",
         "observational lifecycle emissions MUST NOT replace authoritative truth surfaces",
         "compatibility pathways remain additive and bounded until explicit retirement"
     )
@@ -565,6 +566,9 @@ object UgcpSharedSchemaAlignment {
         "detach_cause: explicit_detach|disconnect|disable|invalidation"
     )
 
+    val sessionLayerContracts: List<AndroidSessionLayerContract> =
+        AndroidSessionLayerContracts.contracts
+
     val readinessCapabilityTerms: Set<String> = setOf(
         "source_runtime_posture",
         "model_ready",
@@ -736,6 +740,9 @@ object UgcpSharedSchemaAlignment {
             semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_RESULT_REPORT
         )
     )
+
+    fun sessionLayerForCarrier(carrier: String): AndroidSessionLayerKind? =
+        AndroidSessionLayerContracts.layerForCarrier(carrier)
 
     fun verifyRuntimeToSharedContractConsistency(
         pathwayInventory: List<UgcpRuntimeCanonicalPathwayAudit> = runtimeToCanonicalPathwayInventory,

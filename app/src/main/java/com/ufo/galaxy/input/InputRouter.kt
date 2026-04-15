@@ -198,8 +198,10 @@ class InputRouter(
      *  - [taskId]: the message-level correlation identifier included in [AipMessage.correlation_id]
      *    so that the reply (`task_assign`) can be matched to this submission.  [taskId] is also
      *    copied into [TaskSubmitPayload.task_id] so the gateway can see it in the payload.
-     *  - `sessionId`: the session-level identifier in [TaskSubmitPayload.session_id] that the
-     *    Gateway uses to group steps within a single user request.
+     *  - `conversationSessionId`: the conversation/control-session identifier in
+     *    [TaskSubmitPayload.session_id] that the Gateway uses to group steps within a single
+     *    user request. It is distinct from runtime attachment session identity
+     *    ([com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId]).
      *
      * [posture] is propagated into both [TaskSubmitPayload.source_runtime_posture] and the
      * [AipMessage] envelope's `source_runtime_posture` field so the gateway receives it at both
@@ -210,11 +212,11 @@ class InputRouter(
      * failure is treated as an internal error and surfaced via [onError].
      */
     private fun sendViaWebSocket(text: String, deviceId: String, taskId: String, posture: String): RouteMode {
-        val sessionId = UUID.randomUUID().toString() // session-level ID within the payload
+        val conversationSessionId = UUID.randomUUID().toString()
         val payload = TaskSubmitPayload(
             task_text = text,
             device_id = deviceId,
-            session_id = sessionId,
+            session_id = conversationSessionId,
             task_id = taskId,
             source_runtime_posture = posture
         )
@@ -245,7 +247,7 @@ class InputRouter(
                 TAG, mapOf(
                     "event" to "route_cross_device",
                     "task_id" to taskId,
-                    "session_id" to sessionId,
+                    "session_id" to conversationSessionId,
                     "posture" to posture
                 )
             )

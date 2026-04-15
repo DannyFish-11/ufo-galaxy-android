@@ -206,6 +206,15 @@ data class AttachedRuntimeSession(
         get() = state == State.ATTACHED
 
     /**
+     * Alias that makes runtime-layer semantics explicit for convergence work.
+     *
+     * This value identifies a RuntimeAttachmentSession and must not be confused with
+     * conversation/history session IDs.
+     */
+    val runtimeAttachmentSessionId: String
+        get() = sessionId
+
+    /**
      * `true` when the host may safely direct additional delegated tasks to this session.
      *
      * Reuse is valid for as long as [state] remains [State.ATTACHED].  Once any

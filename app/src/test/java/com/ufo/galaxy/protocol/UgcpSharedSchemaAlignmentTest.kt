@@ -58,6 +58,18 @@ class UgcpSharedSchemaAlignmentTest {
             byConcept["runtime_attachment_session"]?.androidMapping?.contains("attached_session_id")
                 ?: false
         )
+        assertEquals(
+            AndroidSessionLayerKind.CONVERSATION_SESSION,
+            UgcpSharedSchemaAlignment.sessionLayerForCarrier("LocalLoopTrace.sessionId")
+        )
+        assertEquals(
+            AndroidSessionLayerKind.RUNTIME_ATTACHMENT_SESSION,
+            UgcpSharedSchemaAlignment.sessionLayerForCarrier("AttachedRuntimeSession.sessionId")
+        )
+        assertEquals(
+            AndroidSessionLayerKind.DELEGATION_TRANSFER_SESSION,
+            UgcpSharedSchemaAlignment.sessionLayerForCarrier("takeover_request.session_id")
+        )
     }
 
     @Test
@@ -236,6 +248,11 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(
             UgcpSharedSchemaAlignment.conformanceInvariants.contains(
                 "observational lifecycle emissions MUST NOT replace authoritative truth surfaces"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.conformanceInvariants.contains(
+                "session-layer split is explicit: ConversationSession vs RuntimeAttachmentSession vs DelegationTransferSession"
             )
         )
         assertTrue(
