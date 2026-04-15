@@ -98,6 +98,8 @@ Android now keeps explicit concept-boundary alignment in
 - Runtime state: `Idle`, `Starting`, `Active`, `Failed`, `LocalOnly` (`RuntimeController.RuntimeState`)
 - Attached session state: `attached`, `detaching`, `detached`
 - Detach causes: `explicit_detach`, `disconnect`, `disable`, `invalidation`
+- Runtime-host tier vocabulary is shared across participant/device additive contracts via `RuntimeTierContracts`:
+  `full_runtime_host`, `partial_runtime_node`, `command_endpoint`, `observer`
 
 ### 4.2 Source posture and readiness semantics
 
