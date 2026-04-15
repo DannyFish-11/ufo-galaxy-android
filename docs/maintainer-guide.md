@@ -113,6 +113,17 @@ metricsRecorder.recordLocalLoopStep()
 
 These classes (`GalaxyApiClient.registerDevice`, `GalaxyApiClient.sendHeartbeat`) are retained because they serve valid diagnostic or compatibility purposes. They are annotated `@Deprecated` in source. Do not add new call sites. `MessageRouter` has been removed from the codebase entirely.
 
+### Runtime compatibility bridges (PR-12 visibility)
+
+These paths are intentionally retained for compatibility but are **not** canonical runtime truth surfaces:
+
+| Compatibility bridge | Canonical path | Why retained |
+|----------------------|----------------|--------------|
+| `RuntimeController.registrationError` (`SharedFlow<String>`) | `RuntimeController.setupError` (`SharedFlow<CrossDeviceSetupError>`) | Existing UI/diagnostic collectors may still depend on string reasons |
+| `RuntimeController.currentSessionSnapshot()` (`Map<String, Any>`) | `RuntimeController.hostSessionSnapshot` / `currentHostSessionSnapshot()` | Legacy host-facing consumers may still require map metadata |
+
+When adding or refactoring code, prefer canonical typed paths and avoid introducing new dependencies on these bridges.
+
 ---
 
 ## Configuration model

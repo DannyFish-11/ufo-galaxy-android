@@ -968,8 +968,12 @@ class RuntimeController(
     }
 
     /**
-     * Returns an authoritative **host-facing snapshot** of the current attached session's
-     * reuse state as a [Map], or `null` when no session is active (PR-17).
+     * Returns a legacy host-facing snapshot of the current attached session's reuse state
+     * as a [Map], or `null` when no session is active (PR-17).
+     *
+     * Compatibility note:
+     * this map accessor is retained for backward compatibility only. Canonical host-session
+     * truth flows through [hostSessionSnapshot] / [currentHostSessionSnapshot].
      *
      * The returned map is identical to [AttachedRuntimeSession.toMetadataMap] and always
      * contains at minimum:
@@ -980,9 +984,8 @@ class RuntimeController(
      *  - [AttachedRuntimeSession.KEY_IS_REUSE_VALID]
      *  - [AttachedRuntimeSession.KEY_DETACH_CAUSE] (when applicable)
      *
-     * Use this as the canonical input for host-side reuse binding decisions.  The snapshot
-     * is a point-in-time copy; observe [attachedSession] as a [kotlinx.coroutines.flow.StateFlow]
-     * for continuous updates.
+     * Prefer [hostSessionSnapshot] for reactive canonical truth and
+     * [currentHostSessionSnapshot] for point-in-time typed reads.
      *
      * @return An immutable [Map] with all host-facing session fields; `null` if no session exists.
      */
