@@ -37,6 +37,6 @@ class CanonicalDeviceModelTest {
         assertEquals("device-1:host-1", device.linkedParticipantId)
         assertEquals(DeviceRuntimeHostStrength.FULL_RUNTIME_HOST, device.runtimeHostSemantics.runtimeStrength)
         assertTrue(device.runtimeHostSemantics.supportsRuntimeHostExecution)
-        assertFalse(device.runtimeHostSemantics.isDefaultAssumptionForAllDevices)
+        assertFalse(device.runtimeHostSemantics.appliesUniversally)
     }
 }

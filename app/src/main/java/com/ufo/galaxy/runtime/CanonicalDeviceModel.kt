@@ -26,7 +26,7 @@ enum class DeviceRuntimeHostStrength(val wireValue: String) {
 data class DeviceRuntimeHostSemantics(
     val runtimeStrength: DeviceRuntimeHostStrength,
     val supportsRuntimeHostExecution: Boolean,
-    val isDefaultAssumptionForAllDevices: Boolean = false
+    val appliesUniversally: Boolean = false
 )
 
 data class CanonicalDeviceModel(
@@ -44,7 +44,7 @@ data class CanonicalDeviceModel(
         "runtime_host_semantics" to mapOf(
             "runtime_strength" to runtimeHostSemantics.runtimeStrength.wireValue,
             "supports_runtime_host_execution" to runtimeHostSemantics.supportsRuntimeHostExecution,
-            "is_default_assumption_for_all_devices" to runtimeHostSemantics.isDefaultAssumptionForAllDevices
+            "applies_universally" to runtimeHostSemantics.appliesUniversally
         )
     )
 }
@@ -58,7 +58,7 @@ object AndroidDeviceModelMapper {
         runtimeHostSemantics = DeviceRuntimeHostSemantics(
             runtimeStrength = DeviceRuntimeHostStrength.FULL_RUNTIME_HOST,
             supportsRuntimeHostExecution = true,
-            isDefaultAssumptionForAllDevices = false
+            appliesUniversally = false
         )
     )
 }
