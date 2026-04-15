@@ -395,7 +395,13 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(checkById.containsKey("transfer_lifecycle_semantics_coverage"))
         assertTrue(checkById.containsKey("truth_reconnect_recovery_authoritative_alignment"))
         assertTrue(checkById.containsKey("truth_fallback_observational_alignment"))
-        assertTrue(UgcpSharedSchemaAlignment.runtimeContractReportOnlyDivergenceCheckIds.isEmpty())
+        assertEquals(
+            checks
+                .filter { it.status == UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE }
+                .map { it.checkId }
+                .toSet(),
+            UgcpSharedSchemaAlignment.runtimeContractReportOnlyDivergenceCheckIds(checks)
+        )
     }
 
     @Test

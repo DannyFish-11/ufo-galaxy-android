@@ -398,6 +398,6 @@ These checks are intentionally non-disruptive and report-oriented:
 
 - findings are returned as `UgcpRuntimeContractVerificationResult` with
   `PASS` vs `REPORT_ONLY_DIVERGENCE`;
-- `runtimeContractReportOnlyDivergenceCheckIds` provides a reviewable divergence surface for staged
+- `runtimeContractReportOnlyDivergenceCheckIds(...)` provides a reviewable divergence surface for staged
   strictness layering later;
 - no runtime hard-fail or canonical-only enforcement behavior is introduced in this phase.
