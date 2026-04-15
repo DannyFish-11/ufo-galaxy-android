@@ -332,4 +332,77 @@ class RuntimeControllerAttachedSessionTest {
             controller.attachedSession.value
         )
     }
+
+    @Test
+    fun `setActiveForTest promotes host participation to ACTIVE in canonical projection`() {
+        val descriptor = buildTestHostDescriptor()
+        val (controller, _) = buildController(hostDescriptor = descriptor)
+
+        controller.setActiveForTest()
+
+        val participant = controller.currentCanonicalParticipant()
+        assertNotNull("Canonical participant projection must be available after activation", participant)
+        assertEquals(
+            "Host participation must be ACTIVE once attached session is opened",
+            RuntimeHostDescriptor.HostParticipationState.ACTIVE,
+            participant!!.participationState
+        )
+    }
+
+    @Test
+    fun `disconnect then reconnect drives host participation INACTIVE to ACTIVE`() {
+        val descriptor = buildTestHostDescriptor()
+        val (controller, client) = buildController(hostDescriptor = descriptor)
+        controller.setActiveForTest()
+        assertEquals(
+            RuntimeHostDescriptor.HostParticipationState.ACTIVE,
+            controller.currentCanonicalParticipant()!!.participationState
+        )
+
+        client.simulateDisconnected()
+        assertEquals(
+            "Host participation must retire to INACTIVE during disconnect",
+            RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+            controller.currentCanonicalParticipant()!!.participationState
+        )
+
+        client.simulateConnected()
+        assertEquals(
+            "Host participation must re-activate to ACTIVE after reconnect replacement",
+            RuntimeHostDescriptor.HostParticipationState.ACTIVE,
+            controller.currentCanonicalParticipant()!!.participationState
+        )
+    }
+
+    @Test
+    fun `stop retains detached session with DISABLE cause for retirement semantics`() {
+        val (controller, _) = buildController(hostDescriptor = buildTestHostDescriptor())
+        controller.setActiveForTest()
+
+        controller.stop()
+
+        val detached = controller.attachedSession.value
+        assertNotNull("stop() must retain detached session projection", detached)
+        assertTrue("Session must be detached after stop()", detached!!.isDetached)
+        assertEquals(
+            AttachedRuntimeSession.DetachCause.DISABLE,
+            detached.detachCause
+        )
+    }
+
+    @Test
+    fun `invalidateSession retains detached session with INVALIDATION cause`() {
+        val (controller, _) = buildController(hostDescriptor = buildTestHostDescriptor())
+        controller.setActiveForTest()
+
+        controller.invalidateSession()
+
+        val detached = controller.attachedSession.value
+        assertNotNull("invalidateSession() must retain detached session projection", detached)
+        assertTrue("Session must be detached after invalidation", detached!!.isDetached)
+        assertEquals(
+            AttachedRuntimeSession.DetachCause.INVALIDATION,
+            detached.detachCause
+        )
+    }
 }

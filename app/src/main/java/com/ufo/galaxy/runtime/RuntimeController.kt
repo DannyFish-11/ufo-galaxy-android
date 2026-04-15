@@ -211,8 +211,13 @@ class RuntimeController(
      * Lifecycle:
      *  - Set to a new [AttachedRuntimeSession] in [AttachedRuntimeSession.State.ATTACHED]
      *    when the runtime transitions to [RuntimeState.Active].
-     *  - Transitioned to [AttachedRuntimeSession.State.DETACHED] (and then cleared to `null`
-     *    after a brief period) on [stop], WS disconnect, registration failure, or [invalidateSession].
+     *  - Transitioned to [AttachedRuntimeSession.State.DETACHED] on [stop], WS disconnect,
+     *    registration failure, or [invalidateSession].
+     *
+     * The latest detached value is intentionally retained (instead of being cleared to `null`)
+     * so consumers can still observe detachment cause and retirement semantics in a stable,
+     * queryable form through [attachedSession], [hostSessionSnapshot], and
+     * [targetReadinessProjection].
      *
      * (PR-7 — Android Attached-Runtime Session Semantics)
      */
@@ -389,7 +394,7 @@ class RuntimeController(
             if (_state.value == RuntimeState.Active && _attachedSession.value?.isAttached != true) {
                 Log.i(TAG, "[RUNTIME] WS reconnected while Active — reopening attached session")
                 GalaxyLogger.log(TAG, mapOf("event" to "runtime_ws_reconnected"))
-                openAttachedSession()
+                openAttachedSession(SessionOpenSource.RECONNECT_RECOVERY)
                 // PR-33: Mark recovery as successful if we were in the middle of recovery so
                 // the UI can transition from "Recovering…" to "Connected" / normal state.
                 if (_reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING) {
@@ -524,7 +529,7 @@ class RuntimeController(
 
         return if (connected) {
             _state.value = RuntimeState.Active
-            openAttachedSession()
+            openAttachedSession(SessionOpenSource.USER_ACTIVATION)
             Log.i(TAG, "[RUNTIME] Runtime is now Active")
             true
         } else {
@@ -602,7 +607,7 @@ class RuntimeController(
                     webSocketClient.removeListener(this)
                     if (_state.value == RuntimeState.Starting) {
                         _state.value = RuntimeState.Active
-                        openAttachedSession()
+                        openAttachedSession(SessionOpenSource.BACKGROUND_RESTORE)
                     }
                 }
 
@@ -1124,12 +1129,36 @@ class RuntimeController(
      *
      * No-op if a session is already in [AttachedRuntimeSession.State.ATTACHED] to prevent
      * duplicate session creation on redundant connection events.
+     *
+     * [source] explicitly records lifecycle authority for session creation/replacement:
+     *  - [SessionOpenSource.USER_ACTIVATION]   : user initiated enable/start
+     *  - [SessionOpenSource.BACKGROUND_RESTORE]: process/service restore path
+     *  - [SessionOpenSource.RECONNECT_RECOVERY]: transparent reconnect replacement
+     *  - [SessionOpenSource.TEST_ONLY]         : test-only synthetic activation
      */
-    private fun openAttachedSession() {
+    private enum class SessionOpenSource(val wireValue: String) {
+        USER_ACTIVATION("user_activation"),
+        BACKGROUND_RESTORE("background_restore"),
+        RECONNECT_RECOVERY("reconnect_recovery"),
+        TEST_ONLY("test_only")
+    }
+
+    private fun syncHostDescriptorParticipationState(
+        state: RuntimeHostDescriptor.HostParticipationState
+    ) {
+        val descriptor = hostDescriptor ?: return
+        if (descriptor.participationState == state) return
+        val updated = descriptor.withState(state)
+        hostDescriptor = updated
+        webSocketClient.setRuntimeHostDescriptor(updated)
+    }
+
+    private fun openAttachedSession(source: SessionOpenSource) {
         if (_attachedSession.value?.isAttached == true) {
             Log.d(TAG, "[RUNTIME] openAttachedSession: session already attached — no-op")
             return
         }
+        val replacingDetachedSessionId = _attachedSession.value?.sessionId
         val descriptor = hostDescriptor
         if (descriptor == null) {
             Log.w(TAG, "[RUNTIME] openAttachedSession: no hostDescriptor available; session will use unknown-host identity")
@@ -1142,14 +1171,22 @@ class RuntimeController(
         _currentRuntimeSessionId = UUID.randomUUID().toString()
         _attachedSession.value = session
         updateHostSessionSnapshot()
-        Log.i(TAG, "[RUNTIME] Attached runtime session opened: session_id=${session.sessionId} host_id=${session.hostId} runtime_session_id=${_currentRuntimeSessionId}")
-        GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_attached") + session.toMetadataMap())
-        // Sync host descriptor participation state to ACTIVE.
-        if (descriptor != null) {
-            val updated = descriptor.withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
-            hostDescriptor = updated
-            webSocketClient.setRuntimeHostDescriptor(updated)
+        Log.i(
+            TAG,
+            "[RUNTIME] Attached runtime session opened: source=${source.wireValue} " +
+                "session_id=${session.sessionId} host_id=${session.hostId} " +
+                "runtime_session_id=${_currentRuntimeSessionId}"
+        )
+        val attachLog = mutableMapOf<String, Any>(
+            "event" to "runtime_session_attached",
+            "source" to source.wireValue
+        )
+        replacingDetachedSessionId?.let {
+            attachLog["replaces_detached_session_id"] = it
         }
+        GalaxyLogger.log(TAG, attachLog + session.toMetadataMap())
+        // Sync host descriptor participation state to ACTIVE.
+        syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
     }
 
     /**
@@ -1176,12 +1213,7 @@ class RuntimeController(
             _emittedFailureTakeoverIds.clear()
         }
         // Sync host descriptor participation state to INACTIVE.
-        val descriptor = hostDescriptor
-        if (descriptor != null) {
-            val updated = descriptor.withState(RuntimeHostDescriptor.HostParticipationState.INACTIVE)
-            hostDescriptor = updated
-            webSocketClient.setRuntimeHostDescriptor(updated)
-        }
+        syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.INACTIVE)
     }
 
     // ── Snapshot projection sync ──────────────────────────────────────────────
@@ -1243,7 +1275,7 @@ class RuntimeController(
      */
     internal fun setActiveForTest() {
         _state.value = RuntimeState.Active
-        openAttachedSession()
+        openAttachedSession(SessionOpenSource.TEST_ONLY)
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
