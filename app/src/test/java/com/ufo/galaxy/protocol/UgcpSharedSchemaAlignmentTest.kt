@@ -387,4 +387,70 @@ class UgcpSharedSchemaAlignmentTest {
             )
         )
     }
+
+    @Test
+    fun `runtime to shared contract verification report is explicit and pass-oriented by default`() {
+        val checks = UgcpSharedSchemaAlignment.verifyRuntimeToSharedContractConsistency()
+        val checkById = checks.associateBy { it.checkId }
+        assertTrue(checkById.containsKey("transfer_lifecycle_semantics_coverage"))
+        assertTrue(checkById.containsKey("truth_reconnect_recovery_authoritative_alignment"))
+        assertTrue(checkById.containsKey("truth_fallback_observational_alignment"))
+        assertEquals(
+            checks
+                .filter { it.status == UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE }
+                .map { it.checkId }
+                .toSet(),
+            UgcpSharedSchemaAlignment.runtimeContractReportOnlyDivergenceCheckIds(checks)
+        )
+    }
+
+    @Test
+    fun `runtime to shared contract verification surfaces report-only divergence without changing behavior`() {
+        val divergentChecks = UgcpSharedSchemaAlignment.verifyRuntimeToSharedContractConsistency(
+            pathwayInventory = listOf(
+                UgcpRuntimeCanonicalPathwayAudit(
+                    pathway = "runtime_lifecycle_state_truth",
+                    runtimeSurface = "RuntimeController.state",
+                    canonicalSemantic = "runtime_state_truth_updated",
+                    pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
+                    normalizationBoundary = "runtime_state_projection",
+                    fallbackOrWorkaround = null,
+                    verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+                ),
+                UgcpRuntimeCanonicalPathwayAudit(
+                    pathway = "transfer_lifecycle_result_mapping",
+                    runtimeSurface = "delegated_execution_signal.result_kind + takeover_response.accepted",
+                    canonicalSemantic = "transfer_accept|reject|cancel|expire",
+                    pathwayClass = UgcpRuntimePathwayClass.TRANSITIONAL,
+                    normalizationBoundary = "missing.enforcement.boundary",
+                    fallbackOrWorkaround = null,
+                    verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+                )
+            ),
+            transferMappings = listOf(
+                UgcpTransferEventAlignment(
+                    androidEvent = "takeover_response.accepted=true",
+                    canonicalTransferSemantic = "transfer_accept"
+                )
+            ),
+            truthMappings = listOf(
+                UgcpTruthEventAlignment(
+                    androidSignal = "RuntimeController.takeoverFailure emission",
+                    canonicalTruthEventSemantic = "transfer_fallback_notified",
+                    semanticClass = UgcpTruthEventSemanticClass.AUTHORITATIVE_STATE_TRANSITION
+                )
+            ),
+            authoritativeSurfaces = emptySet(),
+            observationalSurfaces = emptySet(),
+            enforcementSurfaces = emptySet()
+        ).filter { it.status == UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE }
+            .associateBy { it.checkId }
+
+        assertTrue(divergentChecks.containsKey("pathway_canonical_readiness:runtime_lifecycle_state_truth"))
+        assertTrue(divergentChecks.containsKey("pathway_compatibility_note:transfer_lifecycle_result_mapping"))
+        assertTrue(divergentChecks.containsKey("pathway_normalization_boundary:transfer_lifecycle_result_mapping"))
+        assertTrue(divergentChecks.containsKey("transfer_lifecycle_semantics_coverage"))
+        assertTrue(divergentChecks.containsKey("truth_reconnect_recovery_authoritative_alignment"))
+        assertTrue(divergentChecks.containsKey("truth_fallback_observational_alignment"))
+    }
 }
