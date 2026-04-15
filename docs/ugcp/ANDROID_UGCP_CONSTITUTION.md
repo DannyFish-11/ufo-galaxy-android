@@ -405,6 +405,9 @@ Coverage is intentionally incremental and review-first:
 - transfer/coordination result mapping remains visible as transitional tolerance surfaces;
 - legacy ingress/status normalization and reconnect/fallback observability are explicitly marked as
   compatibility/workaround pathways retained for runtime resilience.
+- legacy string setup-error bridging (`RuntimeController.registrationError`) and legacy map host-session
+  snapshot projection (`RuntimeController.currentSessionSnapshot()`) are explicitly marked as
+  compatibility-only bridges, while typed canonical projections remain preferred.
 
 ## 15) PR-12 runtime-to-shared contract verification scaffolding (Android)
 

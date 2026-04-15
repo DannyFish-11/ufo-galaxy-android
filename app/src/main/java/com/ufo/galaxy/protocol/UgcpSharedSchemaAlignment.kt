@@ -453,6 +453,28 @@ object UgcpSharedSchemaAlignment {
             verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
             strictnessStage = UgcpRuntimeStrictnessStage.WARN_AND_DIAGNOSE,
             rolloutGate = UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_setup_error_legacy_string_bridge",
+            runtimeSurface = "RuntimeController.registrationError",
+            canonicalSemantic = "runtime_setup_error_categorized",
+            pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            normalizationBoundary = "runtime.setup_error_typed_vs_legacy_string_bridge",
+            fallbackOrWorkaround = "legacy string error flow retained for backward compatibility while setupError remains canonical typed pathway",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.NORMALIZE_FIRST,
+            rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_host_session_legacy_map_projection_bridge",
+            runtimeSurface = "RuntimeController.currentSessionSnapshot()",
+            canonicalSemantic = "attached_runtime_host_session_snapshot_projection",
+            pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            normalizationBoundary = "runtime.host_session_typed_projection_vs_legacy_map_bridge",
+            fallbackOrWorkaround = "legacy map snapshot accessor retained while hostSessionSnapshot/currentHostSessionSnapshot stays canonical typed projection",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.NORMALIZE_FIRST,
+            rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
         )
     )
 
@@ -538,7 +560,9 @@ object UgcpSharedSchemaAlignment {
         "runtime_ingress.type_normalization_and_tier_classification",
         "transfer.result_kind_lifecycle_status_normalization",
         "coordination.mesh_result_status_normalization",
-        "truth_event_authoritative_vs_observational_boundary_review"
+        "truth_event_authoritative_vs_observational_boundary_review",
+        "runtime.setup_error_typed_vs_legacy_string_bridge",
+        "runtime.host_session_typed_projection_vs_legacy_map_bridge"
     )
 
     val migrationReadinessSurfaces: List<UgcpMigrationReadinessSurface> = listOf(

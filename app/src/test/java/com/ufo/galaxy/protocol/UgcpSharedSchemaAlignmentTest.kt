@@ -401,9 +401,27 @@ class UgcpSharedSchemaAlignmentTest {
             UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
             byPathway["runtime_ingress_legacy_alias_normalization"]?.pathwayClass
         )
+        assertEquals(
+            UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            byPathway["runtime_setup_error_legacy_string_bridge"]?.pathwayClass
+        )
+        assertEquals(
+            UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            byPathway["runtime_host_session_legacy_map_projection_bridge"]?.pathwayClass
+        )
         assertTrue(
             UgcpSharedSchemaAlignment.runtimeNormalizationBoundarySurfaces.contains(
                 "runtime_ingress.type_normalization_and_tier_classification"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizationBoundarySurfaces.contains(
+                "runtime.setup_error_typed_vs_legacy_string_bridge"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizationBoundarySurfaces.contains(
+                "runtime.host_session_typed_projection_vs_legacy_map_bridge"
             )
         )
         assertTrue(
@@ -443,6 +461,16 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(
             UgcpSharedSchemaAlignment.runtimeNormalizeFirstPathways.contains(
                 "runtime_ingress_legacy_alias_normalization"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizeFirstPathways.contains(
+                "runtime_setup_error_legacy_string_bridge"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizeFirstPathways.contains(
+                "runtime_host_session_legacy_map_projection_bridge"
             )
         )
         assertTrue(
