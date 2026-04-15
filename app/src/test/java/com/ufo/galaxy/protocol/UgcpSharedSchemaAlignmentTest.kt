@@ -386,6 +386,41 @@ class UgcpSharedSchemaAlignmentTest {
                 "runtime_ingress_legacy_alias_normalization"
             )
         )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizeFirstPathways.contains(
+                "runtime_ingress_legacy_alias_normalization"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeWarnAndDiagnosePathways.contains(
+                "transfer_lifecycle_result_mapping"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeCanonicalPreferredPathways.contains(
+                "runtime_session_continuity_truth"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeRejectReadyCandidatePathways.contains(
+                "runtime_lifecycle_state_truth"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeEarlyAndroidTighteningPathways.contains(
+                "runtime_session_continuity_truth"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeEvidenceGatedPathways.contains(
+                "runtime_lifecycle_state_truth"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeCoordinationGatedPathways.contains(
+                "runtime_ingress_legacy_alias_normalization"
+            )
+        )
     }
 
     @Test
@@ -415,7 +450,9 @@ class UgcpSharedSchemaAlignmentTest {
                     pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
                     normalizationBoundary = "runtime_state_projection",
                     fallbackOrWorkaround = null,
-                    verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+                    verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+                    strictnessStage = UgcpRuntimeStrictnessStage.NORMALIZE_FIRST,
+                    rolloutGate = UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED
                 ),
                 UgcpRuntimeCanonicalPathwayAudit(
                     pathway = "transfer_lifecycle_result_mapping",
@@ -424,7 +461,9 @@ class UgcpSharedSchemaAlignmentTest {
                     pathwayClass = UgcpRuntimePathwayClass.TRANSITIONAL,
                     normalizationBoundary = "missing.enforcement.boundary",
                     fallbackOrWorkaround = null,
-                    verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+                    verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+                    strictnessStage = UgcpRuntimeStrictnessStage.REJECT_READY_CANDIDATE,
+                    rolloutGate = UgcpRuntimeRolloutGate.ANDROID_LOCAL_TIGHTENING_READY
                 )
             ),
             transferMappings = listOf(
@@ -449,6 +488,9 @@ class UgcpSharedSchemaAlignmentTest {
         assertTrue(divergentChecks.containsKey("pathway_canonical_readiness:runtime_lifecycle_state_truth"))
         assertTrue(divergentChecks.containsKey("pathway_compatibility_note:transfer_lifecycle_result_mapping"))
         assertTrue(divergentChecks.containsKey("pathway_normalization_boundary:transfer_lifecycle_result_mapping"))
+        assertTrue(divergentChecks.containsKey("pathway_strictness_stage_alignment:runtime_lifecycle_state_truth"))
+        assertTrue(divergentChecks.containsKey("pathway_strictness_stage_alignment:transfer_lifecycle_result_mapping"))
+        assertTrue(divergentChecks.containsKey("pathway_reject_ready_rollout_gate:transfer_lifecycle_result_mapping"))
         assertTrue(divergentChecks.containsKey("transfer_lifecycle_semantics_coverage"))
         assertTrue(divergentChecks.containsKey("truth_reconnect_recovery_authoritative_alignment"))
         assertTrue(divergentChecks.containsKey("truth_fallback_observational_alignment"))

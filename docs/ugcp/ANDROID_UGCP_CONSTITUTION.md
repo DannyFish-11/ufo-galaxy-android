@@ -367,7 +367,7 @@ Inventory/classification surfaces now include:
 
 - `runtimeToCanonicalPathwayInventory`: pathway-by-pathway mapping audit entries with:
   runtime surface, canonical semantic, pathway class, normalization boundary, compatibility/fallback
-  note, and verification readiness.
+  note, verification readiness, strictness stage, and rollout gate.
 - `runtimeCanonicalPathways`: pathways already mapping cleanly into canonical shared semantics.
 - `runtimeTransitionalPathways`: operationally necessary transitional pathways.
 - `runtimeCompatibilityWorkaroundPathways`: compatibility/fallback/workaround pathways still shaping
@@ -401,3 +401,35 @@ These checks are intentionally non-disruptive and report-oriented:
 - `runtimeContractReportOnlyDivergenceCheckIds(...)` provides a reviewable divergence surface for staged
   strictness layering later;
 - no runtime hard-fail or canonical-only enforcement behavior is introduced in this phase.
+
+## 16) PR-14 Android staged strictness controls and rollout gating
+
+Android now extends runtime-to-shared convergence scaffolding with explicit staged strictness and
+rollout gating surfaces in `UgcpSharedSchemaAlignment.runtimeToCanonicalPathwayInventory`:
+
+- `strictnessStage` makes each pathway reviewable as one of:
+  - `NORMALIZE_FIRST`
+  - `WARN_AND_DIAGNOSE`
+  - `CANONICAL_PREFERRED`
+  - `REJECT_READY_CANDIDATE` (still gated; not immediate hard rejection)
+- `rolloutGate` marks rollout readiness:
+  - `ANDROID_LOCAL_TIGHTENING_READY`
+  - `ANDROID_EVIDENCE_REQUIRED`
+  - `CENTER_ANDROID_COORDINATION_REQUIRED`
+- grouped review surfaces now expose staged tightening boundaries directly:
+  - `runtimeNormalizeFirstPathways`
+  - `runtimeWarnAndDiagnosePathways`
+  - `runtimeCanonicalPreferredPathways`
+  - `runtimeRejectReadyCandidatePathways`
+  - `runtimeEarlyAndroidTighteningPathways`
+  - `runtimeEvidenceGatedPathways`
+  - `runtimeCoordinationGatedPathways`
+
+`verifyRuntimeToSharedContractConsistency(...)` remains report-only while now adding staged governance
+checks for strictness-stage alignment and reject-ready rollout-gate safety.
+
+This is intentionally rollout-safe:
+
+- normalize/warn/canonical-preferred/reject-ready distinctions are explicit and reviewable;
+- reject-ready remains evidence/coordination gated;
+- no abrupt canonical-only runtime rejection is introduced in this phase.

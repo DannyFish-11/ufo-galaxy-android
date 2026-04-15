@@ -85,6 +85,19 @@ enum class UgcpRuntimePathwayClass {
     COMPATIBILITY_WORKAROUND
 }
 
+enum class UgcpRuntimeStrictnessStage {
+    NORMALIZE_FIRST,
+    WARN_AND_DIAGNOSE,
+    CANONICAL_PREFERRED,
+    REJECT_READY_CANDIDATE
+}
+
+enum class UgcpRuntimeRolloutGate {
+    ANDROID_LOCAL_TIGHTENING_READY,
+    ANDROID_EVIDENCE_REQUIRED,
+    CENTER_ANDROID_COORDINATION_REQUIRED
+}
+
 data class UgcpRuntimeCanonicalPathwayAudit(
     val pathway: String,
     val runtimeSurface: String,
@@ -92,7 +105,9 @@ data class UgcpRuntimeCanonicalPathwayAudit(
     val pathwayClass: UgcpRuntimePathwayClass,
     val normalizationBoundary: String,
     val fallbackOrWorkaround: String?,
-    val verificationReadiness: UgcpMigrationReadinessTier
+    val verificationReadiness: UgcpMigrationReadinessTier,
+    val strictnessStage: UgcpRuntimeStrictnessStage,
+    val rolloutGate: UgcpRuntimeRolloutGate
 )
 
 enum class UgcpRuntimeContractVerificationStatus {
@@ -264,7 +279,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
             normalizationBoundary = "runtime_state_projection",
             fallbackOrWorkaround = null,
-            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            strictnessStage = UgcpRuntimeStrictnessStage.REJECT_READY_CANDIDATE,
+            rolloutGate = UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "runtime_session_continuity_truth",
@@ -273,7 +290,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
             normalizationBoundary = "host_session_projection",
             fallbackOrWorkaround = null,
-            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            strictnessStage = UgcpRuntimeStrictnessStage.CANONICAL_PREFERRED,
+            rolloutGate = UgcpRuntimeRolloutGate.ANDROID_LOCAL_TIGHTENING_READY
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "runtime_readiness_selection_truth",
@@ -282,7 +301,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
             normalizationBoundary = "target_readiness_projection",
             fallbackOrWorkaround = null,
-            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            strictnessStage = UgcpRuntimeStrictnessStage.CANONICAL_PREFERRED,
+            rolloutGate = UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "runtime_posture_capability_signal",
@@ -291,7 +312,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
             normalizationBoundary = "capability_and_handshake_reporting",
             fallbackOrWorkaround = null,
-            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING,
+            strictnessStage = UgcpRuntimeStrictnessStage.CANONICAL_PREFERRED,
+            rolloutGate = UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "transfer_lifecycle_result_mapping",
@@ -300,7 +323,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.TRANSITIONAL,
             normalizationBoundary = "transfer.result_kind_lifecycle_status_normalization",
             fallbackOrWorkaround = "delegated result variants are normalized for canonical transfer lifecycle",
-            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.WARN_AND_DIAGNOSE,
+            rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "coordination_result_mapping",
@@ -309,7 +334,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.TRANSITIONAL,
             normalizationBoundary = "coordination.mesh_result_status_normalization",
             fallbackOrWorkaround = "mesh status terms remain tolerance-first until phased retirement",
-            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.WARN_AND_DIAGNOSE,
+            rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "runtime_ingress_legacy_alias_normalization",
@@ -318,7 +345,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
             normalizationBoundary = "runtime_ingress.type_normalization_and_tier_classification",
             fallbackOrWorkaround = "legacy message aliases tolerated via compatibilityAliasNormalizations",
-            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.NORMALIZE_FIRST,
+            rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "runtime_lifecycle_legacy_status_normalization",
@@ -327,7 +356,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
             normalizationBoundary = "transfer.result_kind_lifecycle_status_normalization",
             fallbackOrWorkaround = "legacy lifecycle/status terms tolerated via lifecycleStatusNormalizations",
-            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.NORMALIZE_FIRST,
+            rolloutGate = UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED
         ),
         UgcpRuntimeCanonicalPathwayAudit(
             pathway = "connectivity_recovery_and_local_fallback_observability",
@@ -336,7 +367,9 @@ object UgcpSharedSchemaAlignment {
             pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
             normalizationBoundary = "truth_event_authoritative_vs_observational_boundary_review",
             fallbackOrWorkaround = "reconnect and fallback paths are retained for runtime resilience while canonical truth surfaces remain authoritative",
-            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE,
+            strictnessStage = UgcpRuntimeStrictnessStage.WARN_AND_DIAGNOSE,
+            rolloutGate = UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED
         )
     )
 
@@ -366,6 +399,48 @@ object UgcpSharedSchemaAlignment {
     val runtimeVerificationCandidatePathways: Set<String> =
         runtimeToCanonicalPathwayInventory
             .filter { it.verificationReadiness == UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeNormalizeFirstPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.strictnessStage == UgcpRuntimeStrictnessStage.NORMALIZE_FIRST }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeWarnAndDiagnosePathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.strictnessStage == UgcpRuntimeStrictnessStage.WARN_AND_DIAGNOSE }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeCanonicalPreferredPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.strictnessStage == UgcpRuntimeStrictnessStage.CANONICAL_PREFERRED }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeRejectReadyCandidatePathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.strictnessStage == UgcpRuntimeStrictnessStage.REJECT_READY_CANDIDATE }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeEarlyAndroidTighteningPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.rolloutGate == UgcpRuntimeRolloutGate.ANDROID_LOCAL_TIGHTENING_READY }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeEvidenceGatedPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.rolloutGate == UgcpRuntimeRolloutGate.ANDROID_EVIDENCE_REQUIRED }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeCoordinationGatedPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.rolloutGate == UgcpRuntimeRolloutGate.CENTER_ANDROID_COORDINATION_REQUIRED }
             .map { it.pathway }
             .toSet()
 
@@ -646,6 +721,40 @@ object UgcpSharedSchemaAlignment {
                 pathway = pathway.pathway,
                 expectation = "transitional_or_workaround_pathways_should_map_to_known_enforcement_boundaries",
                 details = "normalization_boundary=${pathway.normalizationBoundary}"
+            )
+
+            val strictnessMisaligned = when (pathway.pathwayClass) {
+                UgcpRuntimePathwayClass.CANONICAL ->
+                    pathway.strictnessStage == UgcpRuntimeStrictnessStage.NORMALIZE_FIRST
+                UgcpRuntimePathwayClass.TRANSITIONAL,
+                UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND ->
+                    pathway.strictnessStage == UgcpRuntimeStrictnessStage.REJECT_READY_CANDIDATE
+            }
+            checks += UgcpRuntimeContractVerificationResult(
+                checkId = "pathway_strictness_stage_alignment:${pathway.pathway}",
+                status = if (strictnessMisaligned) {
+                    UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+                } else {
+                    UgcpRuntimeContractVerificationStatus.PASS
+                },
+                pathway = pathway.pathway,
+                expectation = "pathway_strictness_stage_should_match_pathway_class_and_rollout_readiness",
+                details = "pathway_class=${pathway.pathwayClass} strictness_stage=${pathway.strictnessStage}"
+            )
+
+            val rejectReadyWithoutGate =
+                pathway.strictnessStage == UgcpRuntimeStrictnessStage.REJECT_READY_CANDIDATE &&
+                    pathway.rolloutGate == UgcpRuntimeRolloutGate.ANDROID_LOCAL_TIGHTENING_READY
+            checks += UgcpRuntimeContractVerificationResult(
+                checkId = "pathway_reject_ready_rollout_gate:${pathway.pathway}",
+                status = if (rejectReadyWithoutGate) {
+                    UgcpRuntimeContractVerificationStatus.REPORT_ONLY_DIVERGENCE
+                } else {
+                    UgcpRuntimeContractVerificationStatus.PASS
+                },
+                pathway = pathway.pathway,
+                expectation = "reject_ready_candidate_pathways_should_remain_evidence_or_coordination_gated",
+                details = "strictness_stage=${pathway.strictnessStage} rollout_gate=${pathway.rolloutGate}"
             )
         }
 
