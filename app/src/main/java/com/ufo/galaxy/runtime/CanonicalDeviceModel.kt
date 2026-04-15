@@ -72,7 +72,10 @@ object AndroidDeviceModelMapper {
         deviceId = descriptor.deviceId,
         deviceCategory = DeviceCategory.ANDROID_FULL_RUNTIME_HOST,
         runtimeHostId = descriptor.hostId,
-        linkedParticipantId = "${descriptor.deviceId}:${descriptor.hostId}",
+        linkedParticipantId = RuntimeIdentityContracts.participantNodeId(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        ),
         runtimeHostSemantics = DeviceRuntimeHostSemantics(
             runtimeStrength = DeviceRuntimeHostStrength.FULL_RUNTIME_HOST,
             supportsRuntimeHostExecution = true,

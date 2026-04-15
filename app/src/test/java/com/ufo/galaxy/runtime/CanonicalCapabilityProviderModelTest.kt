@@ -39,7 +39,10 @@ class CanonicalCapabilityProviderModelTest {
             metadataKeys = setOf("model_ready", "overlay_ready")
         )
 
-        assertEquals("capability_provider:device-1:host-1", provider.providerId)
+        assertEquals(
+            RuntimeIdentityContracts.capabilityProviderRef("device-1", "host-1"),
+            provider.providerId
+        )
         assertEquals(CapabilityProviderKind.ANDROID_RUNTIME_HOST_PROVIDER, provider.providerKind)
         assertEquals("device-1", provider.identityLinkage.deviceId)
         assertEquals("host-1", provider.identityLinkage.runtimeHostId)
