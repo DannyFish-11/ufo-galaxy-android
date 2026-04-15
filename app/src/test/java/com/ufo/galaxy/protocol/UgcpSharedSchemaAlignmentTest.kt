@@ -188,7 +188,7 @@ class UgcpSharedSchemaAlignmentTest {
     }
 
     @Test
-    fun `normalization boundaries freeze legacy alias and lifecycle status canonicalization`() {
+    fun `normalization boundaries keep legacy lifecycle aliases while canonical statuses pass through without alias table entries`() {
         assertEquals("device_register", UgcpSharedSchemaAlignment.normalizeMessageType("registration"))
         assertEquals("task_assign", UgcpSharedSchemaAlignment.normalizeMessageType("task_execute"))
         assertEquals("success", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("completed"))
@@ -197,6 +197,13 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("disabled", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("disabled"))
         assertEquals("disabled", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("no_op"))
         assertEquals("unknown_status", UgcpSharedSchemaAlignment.normalizeLifecycleStatus("unknown_status"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("success"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("error"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("cancelled"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("timeout"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("rejected"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("partial"))
+        assertFalse(UgcpSharedSchemaAlignment.lifecycleStatusNormalizations.containsKey("disabled"))
     }
 
     @Test
