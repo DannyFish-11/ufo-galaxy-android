@@ -45,6 +45,11 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("transfer_session_context", byConcept["delegation_transfer_session"]?.canonicalTerm)
         assertEquals("source_runtime_posture", byConcept["posture"]?.canonicalTerm)
         assertEquals("coordination_role", byConcept["coordination_role"]?.canonicalTerm)
+        assertEquals("canonical_participant_model", byConcept["participant_model"]?.canonicalTerm)
+        assertTrue(
+            byConcept["participant_model"]?.androidMapping?.contains("CanonicalParticipantModel")
+                ?: false
+        )
         assertTrue(
             byConcept["conversation_history_session"]?.boundary?.contains("not runtime attachment identity")
                 ?: false

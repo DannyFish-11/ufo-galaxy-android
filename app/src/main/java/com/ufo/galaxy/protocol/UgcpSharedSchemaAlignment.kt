@@ -251,6 +251,12 @@ object UgcpSharedSchemaAlignment {
             canonicalTerm = "coordination_role",
             androidMapping = "mesh_join.role(participant|coordinator)",
             boundary = "coordination-plane role semantics"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "participant_model",
+            canonicalTerm = "canonical_participant_model",
+            androidMapping = "CanonicalParticipantModel + AndroidParticipantModelMapper + RuntimeController.currentCanonicalParticipant",
+            boundary = "explicit participant semantics bridge (kind/tier/autonomy/coordination/readiness/participation/session/capability linkage)"
         )
     )
 
