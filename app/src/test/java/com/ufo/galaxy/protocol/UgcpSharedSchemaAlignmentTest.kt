@@ -40,6 +40,7 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("device_id", byConcept["device"]?.canonicalTerm)
         assertEquals("runtime_host_participant", byConcept["runtime_host"]?.canonicalTerm)
         assertEquals("runtime_capability_report", byConcept["capability_reporting"]?.canonicalTerm)
+        assertEquals("capability_provider_ref", byConcept["capability_provider"]?.canonicalTerm)
         assertEquals("conversation_session_id", byConcept["conversation_history_session"]?.canonicalTerm)
         assertEquals("attached_runtime_session_id", byConcept["runtime_attachment_session"]?.canonicalTerm)
         assertEquals("transfer_session_context", byConcept["delegation_transfer_session"]?.canonicalTerm)
@@ -48,6 +49,10 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals("canonical_participant_model", byConcept["participant_model"]?.canonicalTerm)
         assertTrue(
             byConcept["participant_model"]?.androidMapping?.contains("CanonicalParticipantModel")
+                ?: false
+        )
+        assertTrue(
+            byConcept["capability_provider"]?.boundary?.contains("does not own runtime identity")
                 ?: false
         )
         assertTrue(

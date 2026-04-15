@@ -68,8 +68,10 @@ data class AIPMessage(
  * AIP v3.0 能力上报载荷
  * 用于 Loop 3（自动扩展）：服务端依据此信息推断能力差距
  *
- * This is the **canonical runtime identity payload** consumed by the server to determine
- * device capability and readiness without any Android-specific interpretation.
+ * This is the canonical **capability-provider publication payload** consumed by the server
+ * to determine device capability and readiness without any Android-specific interpretation.
+ * It is not the source of truth for Android runtime identity, participant identity, attachment
+ * state, or reconnect lifecycle semantics.
  * Every sent payload **must** contain all keys in [REQUIRED_METADATA_KEYS].
  *
  * @param platform           Device platform identifier (e.g., "android").
@@ -130,8 +132,7 @@ data class CapabilityReport(
     companion object {
         /**
          * The canonical set of metadata keys that every `capability_report` payload
-         * **must** contain for the server to treat this device as a fully-identified
-         * runtime peer.
+         * **must** contain for scheduling/readiness evaluation at the gateway.
          *
          * | Key                       | Type    | Meaning |
          * |---------------------------|---------|---------|

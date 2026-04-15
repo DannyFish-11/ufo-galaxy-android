@@ -220,7 +220,13 @@ object UgcpSharedSchemaAlignment {
             concept = "capability_reporting",
             canonicalTerm = "runtime_capability_report",
             androidMapping = "capability_report + ReadinessChecker + AndroidCapabilityVector",
-            boundary = "runtime capability and readiness declaration surface"
+            boundary = "runtime capability and readiness declaration surface; not runtime/device/participant identity authority"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "capability_provider",
+            canonicalTerm = "capability_provider_ref",
+            androidMapping = "CanonicalCapabilityProviderModel + AndroidCapabilityProviderModelMapper",
+            boundary = "capability publication provider behavior; does not own runtime identity, attachment truth, reconnect truth, or participant truth"
         ),
         UgcpCanonicalConceptAlignment(
             concept = "conversation_history_session",
