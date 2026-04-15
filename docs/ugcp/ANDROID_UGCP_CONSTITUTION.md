@@ -433,3 +433,22 @@ This is intentionally rollout-safe:
 - normalize/warn/canonical-preferred/reject-ready distinctions are explicit and reviewable;
 - reject-ready remains evidence/coordination gated;
 - no abrupt canonical-only runtime rejection is introduced in this phase.
+
+## 17) PR-15 Android first-phase low-risk compatibility retirement
+
+Android now executes a first low-risk retirement slice by tightening
+`UgcpSharedSchemaAlignment.lifecycleStatusNormalizations`:
+
+- retired now: redundant canonical self-mappings (`success/error/cancelled/timeout/rejected/partial/disabled`)
+  are removed from the alias table;
+- intentionally preserved: legacy compatibility aliases with ongoing normalization value
+  (`completed→success`, `failed|failure→error`, `no_op→disabled`).
+
+Why this is first-phase low-risk:
+
+- behavior stays stable because canonical statuses still pass through unchanged via
+  `normalizeLifecycleStatus(rawStatus)`;
+- runtime-to-shared signal-to-noise improves by limiting normalization tables to actual
+  compatibility aliases;
+- transitional and workaround pathways with potential center/Android interoperability impact
+  remain explicitly preserved for later evidence-gated retirement phases.
