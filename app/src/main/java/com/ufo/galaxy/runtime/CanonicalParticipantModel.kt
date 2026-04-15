@@ -133,7 +133,10 @@ object AndroidParticipantModelMapper {
         readinessProjection: DelegatedTargetReadinessProjection? = null,
         capabilityRefs: Set<String> = emptySet()
     ): CanonicalParticipantModel = CanonicalParticipantModel(
-        participantId = "${descriptor.deviceId}:${descriptor.hostId}",
+        participantId = RuntimeIdentityContracts.participantNodeId(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        ),
         participantKind = ParticipantKind.ANDROID_RUNTIME_HOST,
         runtimeTier = ParticipantRuntimeTier.FULL_RUNTIME_HOST,
         autonomyLevel = ParticipantAutonomyLevel.HIGH_AUTONOMY,

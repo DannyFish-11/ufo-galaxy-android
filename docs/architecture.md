@@ -118,6 +118,17 @@ Android runtime-host surfaces intentionally include both authoritative lifecycle
 | `RuntimeController.reconnectRecoveryState` | authoritative runtime lifecycle truth | Canonical Android reconnect recovery state surface. |
 | `CanonicalParticipantModel` / `CanonicalDeviceModel` / `CanonicalCapabilityProviderModel` | additive projection/read-model contracts | Compatibility-safe convergence models; **not** lifecycle truth owners. They must not be treated as session/reconnect/readiness authorities. |
 
+### Identity-linkage contract (Android runtime-host side)
+
+To keep participant/device/capability identity boundaries easy to scan, Android runtime-host
+identity composition is centralized in
+`app/src/main/java/com/ufo/galaxy/runtime/RuntimeIdentityContracts.kt`:
+
+| Contract | Canonical format | Used by |
+|---------|------------------|---------|
+| Participant/node identity | `device_id:runtime_host_id` | `CanonicalParticipantModel.participantId`, `CanonicalDeviceModel.linkedParticipantId` |
+| Capability-provider reference | `capability_provider:<device_id:runtime_host_id>` | `CanonicalCapabilityProviderModel.providerId` |
+
 ---
 
 ## Legacy / compatibility components

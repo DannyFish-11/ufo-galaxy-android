@@ -34,7 +34,10 @@ class CanonicalDeviceModelTest {
         assertEquals("device-1", device.deviceId)
         assertEquals(DeviceCategory.ANDROID_FULL_RUNTIME_HOST, device.deviceCategory)
         assertEquals("host-1", device.runtimeHostId)
-        assertEquals("device-1:host-1", device.linkedParticipantId)
+        assertEquals(
+            RuntimeIdentityContracts.participantNodeId("device-1", "host-1"),
+            device.linkedParticipantId
+        )
         assertEquals(DeviceRuntimeHostStrength.FULL_RUNTIME_HOST, device.runtimeHostSemantics.runtimeStrength)
         assertTrue(device.runtimeHostSemantics.supportsRuntimeHostExecution)
         assertFalse(device.runtimeHostSemantics.appliesUniversally)

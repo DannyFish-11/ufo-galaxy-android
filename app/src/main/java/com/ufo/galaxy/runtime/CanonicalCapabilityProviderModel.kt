@@ -74,7 +74,10 @@ object AndroidCapabilityProviderModelMapper {
         capabilityRefs: Set<String> = emptySet(),
         metadataKeys: Set<String> = emptySet()
     ): CanonicalCapabilityProviderModel = CanonicalCapabilityProviderModel(
-        providerId = "capability_provider:${descriptor.deviceId}:${descriptor.hostId}",
+        providerId = RuntimeIdentityContracts.capabilityProviderRef(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        ),
         providerKind = CapabilityProviderKind.ANDROID_RUNTIME_HOST_PROVIDER,
         identityLinkage = CapabilityProviderIdentityLinkage(
             deviceId = descriptor.deviceId,

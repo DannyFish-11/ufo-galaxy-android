@@ -55,7 +55,10 @@ class CanonicalParticipantModelTest {
             capabilityRefs = setOf("autonomous_goal_execution", "cross_device_coordination")
         )
 
-        assertEquals("device-1:host-1", participant.participantId)
+        assertEquals(
+            RuntimeIdentityContracts.participantNodeId("device-1", "host-1"),
+            participant.participantId
+        )
         assertEquals(ParticipantKind.ANDROID_RUNTIME_HOST, participant.participantKind)
         assertEquals(ParticipantRuntimeTier.FULL_RUNTIME_HOST, participant.runtimeTier)
         assertEquals(ParticipantAutonomyLevel.HIGH_AUTONOMY, participant.autonomyLevel)
