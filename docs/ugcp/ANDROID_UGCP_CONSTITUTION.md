@@ -40,7 +40,8 @@ Authoritative Android runtime surfaces:
 ### 2.2 Cross-repository constitutional alignment (center-governed system)
 
 This Android constitution is aligned to the canonical center-governed constitution in
-`ufo-galaxy-realization-v2` and does **not** define a parallel global authority model.
+`DannyFish-11/ufo-galaxy-realization-v2` (main repository) and does **not** define a parallel
+global authority model.
 
 - **Center governance authority:** orchestration, system governance, and cross-device policy authority
   are center-governed responsibilities. Android participates as a governed runtime profile.
@@ -59,7 +60,7 @@ This Android constitution is aligned to the canonical center-governed constituti
 
 Android keeps explicit layer boundaries so convergence work can target canonical architecture first:
 
-| Layer | Android role | Constitution status |
+| Layer | Android role | Constitutional classification |
 |---|---|---|
 | Truth | `RuntimeController.state`, `hostSessionSnapshot`, `targetReadinessProjection`, `reconnectRecoveryState`, terminal result payload families | Canonical authority-bearing Android truth surfaces |
 | Projection | `CanonicalParticipantModel` / `CanonicalDeviceModel` / `CanonicalCapabilityProviderModel` and related mappers | Canonical read/projection contracts (non-truth owners) |
