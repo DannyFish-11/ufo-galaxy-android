@@ -331,4 +331,60 @@ class UgcpSharedSchemaAlignmentTest {
         assertEquals(UgcpDeprecationStage.DEPRECATION_CANDIDATE, rejectCandidate.deprecationStage)
         assertEquals("phase_4_reject_after_explicit_rollout", rejectCandidate.sequencingPhase)
     }
+
+    @Test
+    fun `runtime to canonical pathway inventory distinguishes canonical transitional and compatibility pathways`() {
+        val byPathway = UgcpSharedSchemaAlignment.runtimeToCanonicalPathwayInventory.associateBy { it.pathway }
+        assertEquals(
+            UgcpRuntimePathwayClass.CANONICAL,
+            byPathway["runtime_lifecycle_state_truth"]?.pathwayClass
+        )
+        assertEquals(
+            UgcpRuntimePathwayClass.TRANSITIONAL,
+            byPathway["transfer_lifecycle_result_mapping"]?.pathwayClass
+        )
+        assertEquals(
+            UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            byPathway["runtime_ingress_legacy_alias_normalization"]?.pathwayClass
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizationBoundarySurfaces.contains(
+                "runtime_ingress.type_normalization_and_tier_classification"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeNormalizationBoundarySurfaces.contains(
+                "truth_event_authoritative_vs_observational_boundary_review"
+            )
+        )
+    }
+
+    @Test
+    fun `runtime pathway visibility surfaces expose verification and retirement candidates without behavior changes`() {
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeCanonicalPathways.contains(
+                "runtime_posture_capability_signal"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeTransitionalPathways.contains(
+                "coordination_result_mapping"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeCompatibilityWorkaroundPathways.contains(
+                "connectivity_recovery_and_local_fallback_observability"
+            )
+        )
+        assertTrue(
+            UgcpSharedSchemaAlignment.runtimeVerificationCandidatePathways.contains(
+                "runtime_session_continuity_truth"
+            )
+        )
+        assertFalse(
+            UgcpSharedSchemaAlignment.runtimeVerificationCandidatePathways.contains(
+                "runtime_ingress_legacy_alias_normalization"
+            )
+        )
+    }
 }

@@ -79,6 +79,22 @@ data class UgcpTruthEventAlignment(
     val semanticClass: UgcpTruthEventSemanticClass
 )
 
+enum class UgcpRuntimePathwayClass {
+    CANONICAL,
+    TRANSITIONAL,
+    COMPATIBILITY_WORKAROUND
+}
+
+data class UgcpRuntimeCanonicalPathwayAudit(
+    val pathway: String,
+    val runtimeSurface: String,
+    val canonicalSemantic: String,
+    val pathwayClass: UgcpRuntimePathwayClass,
+    val normalizationBoundary: String,
+    val fallbackOrWorkaround: String?,
+    val verificationReadiness: UgcpMigrationReadinessTier
+)
+
 /**
  * Additive Android-side UGCP handling decision for protocol/lifecycle inputs.
  *
@@ -219,6 +235,119 @@ object UgcpSharedSchemaAlignment {
         "lifecycle handling boundary: classifyLifecycleStatusHandling(rawStatus)",
         "deprecation execution phases: deprecationExecutionPhases"
     )
+
+    val runtimeToCanonicalPathwayInventory: List<UgcpRuntimeCanonicalPathwayAudit> = listOf(
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_lifecycle_state_truth",
+            runtimeSurface = "RuntimeController.state",
+            canonicalSemantic = "runtime_state_truth_updated",
+            pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
+            normalizationBoundary = "runtime_state_projection",
+            fallbackOrWorkaround = null,
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_session_continuity_truth",
+            runtimeSurface = "RuntimeController.hostSessionSnapshot",
+            canonicalSemantic = "attached_runtime_session_truth_updated",
+            pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
+            normalizationBoundary = "host_session_projection",
+            fallbackOrWorkaround = null,
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_readiness_selection_truth",
+            runtimeSurface = "RuntimeController.targetReadinessProjection",
+            canonicalSemantic = "delegated_target_selection_truth_updated",
+            pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
+            normalizationBoundary = "target_readiness_projection",
+            fallbackOrWorkaround = null,
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_posture_capability_signal",
+            runtimeSurface = "AipMessage.source_runtime_posture + capability_report readiness flags",
+            canonicalSemantic = "source_posture_and_runtime_readiness_capability",
+            pathwayClass = UgcpRuntimePathwayClass.CANONICAL,
+            normalizationBoundary = "capability_and_handshake_reporting",
+            fallbackOrWorkaround = null,
+            verificationReadiness = UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "transfer_lifecycle_result_mapping",
+            runtimeSurface = "delegated_execution_signal.result_kind + takeover_response.accepted",
+            canonicalSemantic = "transfer_accept|reject|cancel|expire",
+            pathwayClass = UgcpRuntimePathwayClass.TRANSITIONAL,
+            normalizationBoundary = "transfer.result_kind_lifecycle_status_normalization",
+            fallbackOrWorkaround = "delegated result variants are normalized for canonical transfer lifecycle",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "coordination_result_mapping",
+            runtimeSurface = "mesh_result.status",
+            canonicalSemantic = "coordination_execution_terminal_reported",
+            pathwayClass = UgcpRuntimePathwayClass.TRANSITIONAL,
+            normalizationBoundary = "coordination.mesh_result_status_normalization",
+            fallbackOrWorkaround = "mesh status terms remain tolerance-first until phased retirement",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_ingress_legacy_alias_normalization",
+            runtimeSurface = "MsgType.toV3Type + classifyMessageTypeHandling(rawType)",
+            canonicalSemantic = "canonical_message_type_routing",
+            pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            normalizationBoundary = "runtime_ingress.type_normalization_and_tier_classification",
+            fallbackOrWorkaround = "legacy message aliases tolerated via compatibilityAliasNormalizations",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "runtime_lifecycle_legacy_status_normalization",
+            runtimeSurface = "classifyLifecycleStatusHandling(rawStatus)",
+            canonicalSemantic = "canonical_lifecycle_status_handling",
+            pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            normalizationBoundary = "transfer.result_kind_lifecycle_status_normalization",
+            fallbackOrWorkaround = "legacy lifecycle/status terms tolerated via lifecycleStatusNormalizations",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+        ),
+        UgcpRuntimeCanonicalPathwayAudit(
+            pathway = "connectivity_recovery_and_local_fallback_observability",
+            runtimeSurface = "RuntimeController.reconnectRecoveryState + RuntimeController.takeoverFailure",
+            canonicalSemantic = "runtime_reconnect_recovery_truth_updated + transfer_fallback_notified",
+            pathwayClass = UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND,
+            normalizationBoundary = "truth_event_authoritative_vs_observational_boundary_review",
+            fallbackOrWorkaround = "reconnect and fallback paths are retained for runtime resilience while canonical truth surfaces remain authoritative",
+            verificationReadiness = UgcpMigrationReadinessTier.REQUIRES_PHASED_TOLERANCE
+        )
+    )
+
+    val runtimeCanonicalPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.pathwayClass == UgcpRuntimePathwayClass.CANONICAL }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeTransitionalPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.pathwayClass == UgcpRuntimePathwayClass.TRANSITIONAL }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeCompatibilityWorkaroundPathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.pathwayClass == UgcpRuntimePathwayClass.COMPATIBILITY_WORKAROUND }
+            .map { it.pathway }
+            .toSet()
+
+    val runtimeNormalizationBoundarySurfaces: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .map { it.normalizationBoundary }
+            .toSet()
+
+    val runtimeVerificationCandidatePathways: Set<String> =
+        runtimeToCanonicalPathwayInventory
+            .filter { it.verificationReadiness == UgcpMigrationReadinessTier.READY_FOR_STAGED_TIGHTENING }
+            .map { it.pathway }
+            .toSet()
 
     val deprecationExecutionPhases: List<String> = listOf(
         "phase_1_warn_and_observe",

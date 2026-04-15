@@ -356,3 +356,29 @@ This remains intentionally incremental:
 - Lifecycle/transfer/coordination/truth-event-adjacent pathways are more explicitly reviewable
   for phased tightening.
 - Transitional handling remains operationally tolerated until explicitly sequenced retirement.
+
+## 14) Runtime-to-canonical convergence audit visibility surfaces (Android)
+
+Android now adds a focused runtime-to-canonical audit inventory in
+`UgcpSharedSchemaAlignment.runtimeToCanonicalPathwayInventory` to make current behavior easier to
+review without changing runtime logic.
+
+Inventory/classification surfaces now include:
+
+- `runtimeToCanonicalPathwayInventory`: pathway-by-pathway mapping audit entries with:
+  runtime surface, canonical semantic, pathway class, normalization boundary, compatibility/fallback
+  note, and verification readiness.
+- `runtimeCanonicalPathways`: pathways already mapping cleanly into canonical shared semantics.
+- `runtimeTransitionalPathways`: operationally necessary transitional pathways.
+- `runtimeCompatibilityWorkaroundPathways`: compatibility/fallback/workaround pathways still shaping
+  shared-facing behavior.
+- `runtimeNormalizationBoundarySurfaces`: explicit local-to-shared normalization/mapping boundaries.
+- `runtimeVerificationCandidatePathways`: pathways likely suitable for future staged contract
+  verification/strictness layering.
+
+Coverage is intentionally incremental and review-first:
+
+- lifecycle/session/readiness/posture truth projections are explicitly marked as canonical pathways;
+- transfer/coordination result mapping remains visible as transitional tolerance surfaces;
+- legacy ingress/status normalization and reconnect/fallback observability are explicitly marked as
+  compatibility/workaround pathways retained for runtime resilience.
