@@ -24,6 +24,13 @@ data class UgcpTransferEventAlignment(
     val canonicalTransferSemantic: String
 )
 
+data class UgcpCanonicalConceptAlignment(
+    val concept: String,
+    val canonicalTerm: String,
+    val androidMapping: String,
+    val boundary: String
+)
+
 data class UgcpCoordinationEventAlignment(
     val androidEvent: String,
     val canonicalCoordinationSemantic: String
@@ -188,6 +195,63 @@ object UgcpSharedSchemaAlignment {
         UgcpIdentityAlignment("NodeId(source)", "device_id"),
         UgcpIdentityAlignment("NodeId(target)", "target_device_id / target_node"),
         UgcpIdentityAlignment("ExecutionInstanceId", "signal_id or idempotency_key")
+    )
+
+    val canonicalConceptVocabulary: List<UgcpCanonicalConceptAlignment> = listOf(
+        UgcpCanonicalConceptAlignment(
+            concept = "participant_node",
+            canonicalTerm = "participant_node_id",
+            androidMapping = "device_id + runtime_host_id",
+            boundary = "participant identity (cross-device execution identity)"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "device",
+            canonicalTerm = "device_id",
+            androidMapping = "AipMessage.device_id + AndroidSessionContribution.deviceId",
+            boundary = "hardware/device identity (not runtime-host lifecycle authority)"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "runtime_host",
+            canonicalTerm = "runtime_host_participant",
+            androidMapping = "RuntimeHostDescriptor(hostId, formationRole, participationState)",
+            boundary = "Android runtime-host lifecycle participation authority"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "capability_reporting",
+            canonicalTerm = "runtime_capability_report",
+            androidMapping = "capability_report + ReadinessChecker + AndroidCapabilityVector",
+            boundary = "runtime capability and readiness declaration surface"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "conversation_history_session",
+            canonicalTerm = "conversation_session_id",
+            androidMapping = "LocalLoopTrace.sessionId + SessionHistorySummary.sessionId",
+            boundary = "conversation/history timeline identity; not runtime attachment identity"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "runtime_attachment_session",
+            canonicalTerm = "attached_runtime_session_id",
+            androidMapping = "AttachedRuntimeSession.sessionId + delegated_execution_signal.attached_session_id",
+            boundary = "runtime host attachment continuity identity"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "delegation_transfer_session",
+            canonicalTerm = "transfer_session_context",
+            androidMapping = "takeover_request.session_id + takeover_response + delegated_execution_signal",
+            boundary = "control transfer/delegation lifecycle context"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "posture",
+            canonicalTerm = "source_runtime_posture",
+            androidMapping = "AipMessage.source_runtime_posture",
+            boundary = "participation posture for scheduling/selection"
+        ),
+        UgcpCanonicalConceptAlignment(
+            concept = "coordination_role",
+            canonicalTerm = "coordination_role",
+            androidMapping = "mesh_join.role(participant|coordinator)",
+            boundary = "coordination-plane role semantics"
+        )
     )
 
     val messageFamilyAlignments: Map<MsgType, UgcpSchemaFamily> = mapOf(
