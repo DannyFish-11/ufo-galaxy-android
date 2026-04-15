@@ -1,11 +1,20 @@
 package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class CanonicalParticipantModelTest {
+
+    @Test
+    fun `runtime-tier enum explicitly includes lighter shared-model tiers`() {
+        val availableTiers = ParticipantRuntimeTier.entries.map { it.wireValue }.toSet()
+        assertTrue("full_runtime_host" in availableTiers)
+        assertTrue("partial_runtime_node" in availableTiers)
+        assertTrue("command_endpoint" in availableTiers)
+        assertTrue("observer" in availableTiers)
+    }
 
     private fun descriptor(
         formationRole: RuntimeHostDescriptor.FormationRole = RuntimeHostDescriptor.FormationRole.PRIMARY,

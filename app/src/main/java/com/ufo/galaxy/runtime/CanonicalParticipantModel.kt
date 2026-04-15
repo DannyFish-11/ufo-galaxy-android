@@ -12,7 +12,25 @@ enum class ParticipantKind(val wireValue: String) {
 }
 
 enum class ParticipantRuntimeTier(val wireValue: String) {
-    FULL_RUNTIME_HOST("full_runtime_host")
+    /**
+     * Strongest participant tier. Android maps to this tier today.
+     */
+    FULL_RUNTIME_HOST("full_runtime_host"),
+
+    /**
+     * Shared-model lighter tier for nodes that host only part of runtime execution semantics.
+     */
+    PARTIAL_RUNTIME_NODE("partial_runtime_node"),
+
+    /**
+     * Shared-model lighter tier for endpoints that can execute commands but do not host full runtime.
+     */
+    COMMAND_ENDPOINT("command_endpoint"),
+
+    /**
+     * Shared-model lighter tier for observer-style participants with no execution ownership.
+     */
+    OBSERVER("observer")
 }
 
 enum class ParticipantAutonomyLevel(val wireValue: String) {
