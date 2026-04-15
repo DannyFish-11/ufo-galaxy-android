@@ -1054,6 +1054,27 @@ class RuntimeController(
     }
 
     /**
+     * Returns the additive canonical participant-model projection for this Android runtime host.
+     *
+     * This is a non-breaking compatibility layer for cross-repo convergence: existing runtime,
+     * session, readiness, capability, and transport behavior is unchanged.
+     *
+     * @param capabilityRefs Optional capability IDs/names to link into the participant model.
+     * @return A [CanonicalParticipantModel] when [hostDescriptor] exists; otherwise `null`.
+     */
+    fun currentCanonicalParticipant(capabilityRefs: Set<String> = emptySet()): CanonicalParticipantModel? {
+        val descriptor = hostDescriptor ?: return null
+        val snapshot = currentHostSessionSnapshot()
+        val readiness = snapshot?.let { DelegatedTargetReadinessProjection.from(it) }
+        return AndroidParticipantModelMapper.fromRuntimeHostDescriptor(
+            descriptor = descriptor,
+            hostSessionSnapshot = snapshot,
+            readinessProjection = readiness,
+            capabilityRefs = capabilityRefs
+        )
+    }
+
+    /**
      * Records that a delegated execution has been accepted under the current
      * [AttachedRuntimeSession], incrementing
      * [AttachedRuntimeSession.delegatedExecutionCount] by one (PR-14).
