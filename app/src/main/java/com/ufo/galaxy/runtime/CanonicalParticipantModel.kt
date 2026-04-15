@@ -138,9 +138,7 @@ object AndroidParticipantModelMapper {
             runtimeHostId = descriptor.hostId
         ),
         participantKind = ParticipantKind.ANDROID_RUNTIME_HOST,
-        runtimeTier = RuntimeTierContracts.participantTierFor(
-            DeviceRuntimeHostStrength.FULL_RUNTIME_HOST
-        ),
+        runtimeTier = ParticipantRuntimeTier.FULL_RUNTIME_HOST,
         autonomyLevel = ParticipantAutonomyLevel.HIGH_AUTONOMY,
         coordinationRole = coordinationRoleFrom(descriptor.formationRole),
         readinessState = readinessStateFrom(descriptor, readinessProjection),

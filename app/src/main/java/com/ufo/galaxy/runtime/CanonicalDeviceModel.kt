@@ -77,9 +77,7 @@ object AndroidDeviceModelMapper {
             runtimeHostId = descriptor.hostId
         ),
         runtimeHostSemantics = DeviceRuntimeHostSemantics(
-            runtimeStrength = RuntimeTierContracts.deviceRuntimeStrengthFor(
-                ParticipantRuntimeTier.FULL_RUNTIME_HOST
-            ),
+            runtimeStrength = DeviceRuntimeHostStrength.FULL_RUNTIME_HOST,
             supportsRuntimeHostExecution = true,
             appliesUniversally = false
         )
