@@ -34,6 +34,28 @@ class UgcpSharedSchemaAlignmentTest {
     }
 
     @Test
+    fun `canonical concept vocabulary distinguishes participant device runtime host and session boundaries`() {
+        val byConcept = UgcpSharedSchemaAlignment.canonicalConceptVocabulary.associateBy { it.concept }
+        assertEquals("participant_node_id", byConcept["participant_node"]?.canonicalTerm)
+        assertEquals("device_id", byConcept["device"]?.canonicalTerm)
+        assertEquals("runtime_host_participant", byConcept["runtime_host"]?.canonicalTerm)
+        assertEquals("runtime_capability_report", byConcept["capability_reporting"]?.canonicalTerm)
+        assertEquals("conversation_session_id", byConcept["conversation_history_session"]?.canonicalTerm)
+        assertEquals("attached_runtime_session_id", byConcept["runtime_attachment_session"]?.canonicalTerm)
+        assertEquals("transfer_session_context", byConcept["delegation_transfer_session"]?.canonicalTerm)
+        assertEquals("source_runtime_posture", byConcept["posture"]?.canonicalTerm)
+        assertEquals("coordination_role", byConcept["coordination_role"]?.canonicalTerm)
+        assertTrue(
+            byConcept["conversation_history_session"]?.boundary?.contains("not runtime attachment identity")
+                ?: false
+        )
+        assertTrue(
+            byConcept["runtime_attachment_session"]?.androidMapping?.contains("attached_session_id")
+                ?: false
+        )
+    }
+
+    @Test
     fun `message types map to canonical schema families`() {
         assertEquals(UgcpSchemaFamily.IDENTITY, UgcpSharedSchemaAlignment.familyFor(MsgType.DEVICE_REGISTER))
         assertEquals(UgcpSchemaFamily.CONTROL, UgcpSharedSchemaAlignment.familyFor(MsgType.TAKEOVER_REQUEST))

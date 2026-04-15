@@ -68,6 +68,24 @@ Android session terms are frozen as:
 No claim is made that all repos already expose all canonical names as first-class wire keys.
 This document freezes Android-side semantics and aliases for convergence.
 
+### 3.3 Canonical concept boundary glossary (Android runtime side)
+
+Android now keeps explicit concept-boundary alignment in
+`UgcpSharedSchemaAlignment.canonicalConceptVocabulary` so `participant/node`, `device`, and
+`runtime host` semantics stay distinct while runtime behavior remains unchanged.
+
+| Concept | Canonical term | Android mapping | Boundary |
+|---|---|---|---|
+| participant / node | `participant_node_id` | `device_id + runtime_host_id` | Cross-device participant identity (not only hardware identity). |
+| device | `device_id` | `AipMessage.device_id`, `AndroidSessionContribution.deviceId` | Hardware/device identity carrier. |
+| runtime host / runtime | `runtime_host_participant` | `RuntimeHostDescriptor(hostId, formationRole, participationState)` | Runtime-host lifecycle participation authority. |
+| capability reporting | `runtime_capability_report` | `capability_report`, `ReadinessChecker`, `AndroidCapabilityVector` | Runtime capability/readiness declaration surface. |
+| conversation/history session | `conversation_session_id` | `LocalLoopTrace.sessionId`, `SessionHistorySummary.sessionId` | Conversation/history timeline identity. |
+| runtime attachment session | `attached_runtime_session_id` | `AttachedRuntimeSession.sessionId`, `delegated_execution_signal.attached_session_id` | Runtime attachment continuity identity. |
+| delegation/transfer session | `transfer_session_context` | `takeover_request.session_id`, `takeover_response`, delegated signal lifecycle | Transfer/delegation lifecycle context. |
+| posture | `source_runtime_posture` | `AipMessage.source_runtime_posture` | Participation posture for selection/scheduling. |
+| coordination role | `coordination_role` | `mesh_join.role` (`participant`/`coordinator`) | Coordination-plane role semantics. |
+
 ## 4) Runtime/control/state vocabulary freeze (Android)
 
 ### 4.1 Runtime and session lifecycle terms

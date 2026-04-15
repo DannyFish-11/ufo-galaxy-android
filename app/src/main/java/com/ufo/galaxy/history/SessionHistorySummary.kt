@@ -10,6 +10,10 @@ import com.ufo.galaxy.trace.TerminalResult
  * and is the unit of persistence in [SessionHistoryStore]. It intentionally omits raw
  * step records, screenshots, and any large data to keep the persisted footprint small.
  *
+ * This `sessionId` is a **conversation/history** timeline identifier for the local loop.
+ * It is intentionally distinct from cross-device runtime attachment/session identifiers
+ * (for example `AttachedRuntimeSession.sessionId` and delegated `attached_session_id`).
+ *
  * **Serialization**: all fields are primitive JVM types or strings so Gson can
  * round-trip instances without any custom adapter.
  *
