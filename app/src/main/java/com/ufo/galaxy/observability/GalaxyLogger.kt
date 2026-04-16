@@ -50,6 +50,7 @@ import kotlin.concurrent.withLock
  * | `GALAXY:KILL:SWITCH`      | Kill-switch activated — all remote paths disabled (PR-31)   |
  * | `GALAXY:STAGED:MESH`      | Staged-mesh target execution event (PR-32)                  |
  * | `GALAXY:RECONNECT:RECOVERY`| Reconnect recovery state transition (PR-33)                |
+ * | `GALAXY:SESSION:AXIS`      | Session-axis boundary event for cross-repo reconciliation (PR-3) |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -221,6 +222,33 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_RECONNECT_RECOVERY = "GALAXY:RECONNECT:RECOVERY"
+
+    // ── PR-3: Canonical session axis observability tag ────────────────────────
+
+    /**
+     * PR-3 — Fired when a session-axis boundary event is detected or logged for
+     * diagnostic and cross-repo reconciliation purposes.
+     *
+     * Emitted when a session family transition occurs at a tracked axis boundary:
+     *
+     * - `attach`        — A new [com.ufo.galaxy.runtime.AttachedRuntimeSession] was opened.
+     * - `detach`        — An [com.ufo.galaxy.runtime.AttachedRuntimeSession] was detached.
+     * - `reconnect`     — An attached session was reopened after a WS reconnect.
+     * - `transfer_open` — A delegation/transfer session lifecycle started (ACK emitted).
+     * - `transfer_close`— A delegation/transfer session lifecycle ended (RESULT emitted).
+     *
+     * Required fields: `event`, `session_family`
+     * (wire value from [com.ufo.galaxy.runtime.CanonicalSessionFamily.canonicalTerm]).
+     *
+     * Optional fields: `session_id`, `runtime_session_id`, `attached_session_id`,
+     * `detach_cause`, `continuity_behavior`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:SESSION:AXIS","fields":{"event":"attach","session_family":"attached_runtime_session_id","session_id":"s-1","runtime_session_id":"r-1"}}
+     * ```
+     */
+    const val TAG_SESSION_AXIS = "GALAXY:SESSION:AXIS"
 
     // ── PR-34: Runtime and interaction acceptance tag ─────────────────────────
 
