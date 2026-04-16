@@ -126,6 +126,63 @@ When adding or refactoring code, prefer canonical typed paths and avoid introduc
 
 ---
 
+## Compatibility surface retirement roadmap (PR-10)
+
+The full inventory of high-risk compatibility surfaces is maintained in
+`CompatibilitySurfaceRetirementRegistry` (`runtime/`).  Each surface is tagged with a
+`RetirementTier` and the condition that must be met before the surface can be removed.
+
+### Retirement tiers
+
+| Tier | Meaning | Action required |
+|------|---------|-----------------|
+| `HIGH_RISK_ACTIVE` | Active and operationally visible. Risk of being mistaken for canonical governance. | Do not extend. Use canonical replacement for all new code. |
+| `RETIRE_AFTER_MIGRATION` | Canonical replacement ready. Gated on consumer migration. | Remove call sites; verify no production path remains. |
+| `RETIRE_AFTER_COORDINATION` | Retirement requires cross-repo or center-Android coordination. | Track externally; retire after coordination gate clears. |
+| `DECOMMISSION_CANDIDATE` | Lowest utility, no active extension. | Remove in next cleanup pass. |
+
+### High-risk surfaces (must not be extended)
+
+| Surface | Kind | Canonical replacement |
+|---------|------|-----------------------|
+| `RuntimeController.registrationError` (`SharedFlow<String>`) | Runtime bridge | `RuntimeController.setupError` (`SharedFlow<CrossDeviceSetupError>`) |
+| `RuntimeController.currentSessionSnapshot()` (`Map<String,Any>?`) | Runtime bridge | `RuntimeController.hostSessionSnapshot` / `currentHostSessionSnapshot()` |
+| `ProtocolSurface.SESSION_IDENTIFIER_CARRIER` (TRANSITIONAL_COMPATIBILITY) | Protocol surface | Canonical session family vocabulary (`CanonicalSessionFamily`) |
+| `ProtocolSurface.STAGED_MESH_EXECUTION_STATUS` (TRANSITIONAL_COMPATIBILITY) | Protocol surface | Canonical terminal status vocabulary (`UgcpProtocolConsistencyRules.terminalStateVocabularyRule`) |
+
+### Retirement-ready surfaces (pending migration completion)
+
+| Surface | Kind | Canonical replacement |
+|---------|------|-----------------------|
+| `GalaxyApiClient.registerDevice` (`@Deprecated`) | Deprecated API | `GalaxyWebSocketClient` automatic `capability_report` on WS connect |
+| `GalaxyApiClient.sendHeartbeat` (`@Deprecated`) | Deprecated API | `GalaxyWebSocketClient` automatic heartbeat every 30 s |
+
+### Coordination-gated surfaces (cannot retire unilaterally)
+
+These 11 surfaces require external coordination before retirement.
+See `CompatibilitySurfaceRetirementRegistry.byTier(RetirementTier.RETIRE_AFTER_COORDINATION)`
+for the complete list.  Key examples:
+
+| Surface | What blocks retirement |
+|---------|------------------------|
+| `MsgType.LEGACY_TYPE_MAP` + `toV3Type()` | Gateway must stop emitting legacy type aliases |
+| `UgcpSharedSchemaAlignment.lifecycleStatusNormalizations` | Result producers must emit canonical terminal statuses |
+| Long-tail dispatch adapters (RELAY, FORWARD, REPLY, etc.) | Center must formally retire or promote each message type |
+
+### Decommission candidates (remove in next cleanup pass)
+
+- `MsgType.LOCK` minimal-compat handler
+- `MsgType.UNLOCK` minimal-compat handler
+
+(Low production frequency; generic-ACK only. Remove when center confirms these types are no longer sent.)
+
+### Observability
+
+Use `GalaxyLogger.TAG_COMPAT_SURFACE` (`"GALAXY:COMPAT:SURFACE"`) to log when a compatibility
+surface is exercised at runtime.  Required fields: `event`, `surface_id`, `tier`.
+
+---
+
 ## Configuration model
 
 Configuration has three layers. The app reads them in priority order at runtime:

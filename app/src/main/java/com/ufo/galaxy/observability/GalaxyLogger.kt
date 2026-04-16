@@ -51,6 +51,12 @@ import kotlin.concurrent.withLock
  * | `GALAXY:STAGED:MESH`      | Staged-mesh target execution event (PR-32)                  |
  * | `GALAXY:RECONNECT:RECOVERY`| Reconnect recovery state transition (PR-33)                |
  * | `GALAXY:SESSION:AXIS`      | Session-axis boundary event for cross-repo reconciliation (PR-3) |
+ * | `GALAXY:LONG_TAIL:COMPAT` | Long-tail compatibility path exercised (PR-35)              |
+ * | `GALAXY:PEER:EXCHANGE`    | PEER_EXCHANGE received and processed (PR-35)                |
+ * | `GALAXY:MESH:TOPOLOGY`    | MESH_TOPOLOGY received and processed (PR-35)                |
+ * | `GALAXY:COORD:SYNC`       | COORD_SYNC ack sent with sequence-aware payload (PR-35)     |
+ * | `GALAXY:INTERACTION:ACCEPTANCE` | Product-grade interaction acceptance checkpoint (PR-34) |
+ * | `GALAXY:COMPAT:SURFACE`   | Compatibility surface exercised at runtime (PR-10)          |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -329,6 +335,25 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_COORD_SYNC = "GALAXY:COORD:SYNC"
+
+    // ── PR-10: Compatibility surface retirement observability tag ─────────────
+
+    /**
+     * PR-10 — Emitted when a high-risk or retiring compatibility surface is exercised
+     * at runtime.  Helps operators identify which compatibility surfaces remain in active
+     * use, supporting evidence-based retirement sequencing.
+     *
+     * Required fields: `event`, `surface_id`
+     * ([com.ufo.galaxy.runtime.CompatibilitySurfaceRetirementRegistry.CompatibilitySurfaceEntry.surfaceId]),
+     * `tier` (lowercase retirement tier name: `"high_risk_active"`, `"retire_after_migration"`,
+     * `"retire_after_coordination"`, or `"decommission_candidate"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:COMPAT:SURFACE","fields":{"event":"compat_surface_exercised","surface_id":"runtime_registration_error_string_bridge","tier":"high_risk_active"}}
+     * ```
+     */
+    const val TAG_COMPAT_SURFACE = "GALAXY:COMPAT:SURFACE"
 
     // ── Internal constants ────────────────────────────────────────────────────
 
