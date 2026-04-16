@@ -539,9 +539,8 @@ class Pr12CrossRepoConsistencyGatesTest {
     }
 
     @Test
-    fun `GateSurfaceResult summary is non-blank for both pass and fail outcomes`() {
+    fun `GateSurfaceResult summary is non-blank for passing outcomes`() {
         val passingResult = CrossRepoConsistencyGate.checkReconnectRecoveryStates()
-        assertTrue(passingResult.summary.isNotBlank())
         assertEquals(GateOutcome.PASS, passingResult.outcome)
         assertTrue(passingResult.summary.isNotBlank())
     }
