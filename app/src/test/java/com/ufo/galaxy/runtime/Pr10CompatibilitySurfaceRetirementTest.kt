@@ -22,7 +22,7 @@ import org.junit.Test
  *     - Both transitional PROTOCOL_SURFACE entries are present and HIGH_RISK_ACTIVE.
  *     - Deprecated API surfaces are RETIRE_AFTER_MIGRATION.
  *     - Protocol alias surfaces are RETIRE_AFTER_COORDINATION.
- *     - All 9 dispatch adapters are present (7 RETIRE_AFTER_COORDINATION + 2 DECOMMISSION_CANDIDATE).
+ *     - All 11 dispatch adapters are present (9 RETIRE_AFTER_COORDINATION + 2 DECOMMISSION_CANDIDATE).
  *     - [CompatibilitySurfaceRetirementRegistry.byTier],
  *       [CompatibilitySurfaceRetirementRegistry.byKind],
  *       [CompatibilitySurfaceRetirementRegistry.forId],
@@ -191,6 +191,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_forward_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -198,6 +199,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_reply_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -205,6 +207,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_rag_query_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -212,6 +215,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_code_execute_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -219,6 +223,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_peer_announce_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -226,6 +231,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_wake_event_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -233,6 +239,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_session_migrate_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test
@@ -240,6 +247,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_broadcast_transitional")
         assertNotNull(entry)
         assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
     @Test

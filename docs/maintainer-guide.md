@@ -159,9 +159,10 @@ The full inventory of high-risk compatibility surfaces is maintained in
 
 ### Coordination-gated surfaces (cannot retire unilaterally)
 
-These 11 surfaces require external coordination before retirement.
-See `CompatibilitySurfaceRetirementRegistry.byTier(RetirementTier.RETIRE_AFTER_COORDINATION)`
-for the complete list.  Key examples:
+These surfaces require external coordination before retirement.  The authoritative count and full
+list are maintained in
+`CompatibilitySurfaceRetirementRegistry.byTier(RetirementTier.RETIRE_AFTER_COORDINATION)`;
+that registry is the source of truth.  Key examples:
 
 | Surface | What blocks retirement |
 |---------|------------------------|
