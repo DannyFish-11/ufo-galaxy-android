@@ -274,6 +274,62 @@ object GalaxyLogger {
      */
     const val TAG_INTERACTION_ACCEPTANCE = "GALAXY:INTERACTION:ACCEPTANCE"
 
+    // ── PR-35: Long-tail compatibility surface observability tags ─────────────
+
+    /**
+     * Emitted by [com.ufo.galaxy.service.GalaxyConnectionService] when any minimal-compat
+     * long-tail path is exercised.  Helps operators identify which transitional surfaces
+     * are still being used in production.
+     *
+     * Required fields: `event`, `type` (MsgType wire value), `tier`
+     * (one of `"promoted"`, `"transitional"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:LONG_TAIL:COMPAT","fields":{"event":"transitional_path_exercised","type":"relay","tier":"transitional"}}
+     * ```
+     */
+    const val TAG_LONG_TAIL_COMPAT = "GALAXY:LONG_TAIL:COMPAT"
+
+    /**
+     * Emitted by the dedicated PEER_EXCHANGE handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `source_device_id`, `exchange_id`, `capability_count`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:PEER:EXCHANGE","fields":{"event":"peer_exchange_received","source_device_id":"Pixel_8","capability_count":3}}
+     * ```
+     */
+    const val TAG_PEER_EXCHANGE = "GALAXY:PEER:EXCHANGE"
+
+    /**
+     * Emitted by the dedicated MESH_TOPOLOGY handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `mesh_id`, `node_count`, `topology_seq`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:MESH:TOPOLOGY","fields":{"event":"mesh_topology_received","mesh_id":"mesh-1","node_count":3,"topology_seq":5}}
+     * ```
+     */
+    const val TAG_MESH_TOPOLOGY = "GALAXY:MESH:TOPOLOGY"
+
+    /**
+     * Emitted by the dedicated COORD_SYNC handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `sync_id`, `sync_seq`, `tick_count`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:COORD:SYNC","fields":{"event":"coord_sync_ack_sent","sync_id":"s1","tick_count":4}}
+     * ```
+     */
+    const val TAG_COORD_SYNC = "GALAXY:COORD:SYNC"
+
     // ── Internal constants ────────────────────────────────────────────────────
 
     private const val ANDROID_TAG     = "GalaxyLogger"

@@ -81,10 +81,12 @@ enum class MsgType(val value: String) {
      *  @status minimal-compat — logged; no peer-state tracking yet. */
     PEER_ANNOUNCE("peer_announce"),
     /** Downlink/Uplink: peer capability exchange between devices.
-     *  @status minimal-compat — logged; no capability-negotiation logic yet. */
+     *  @status pr35-promoted — [PeerExchangePayload] parsed; capability record retained per peer;
+     *  structured ACK sent. Promoted from minimal-compat (logged only) in PR-35. */
     PEER_EXCHANGE("peer_exchange"),
     /** Downlink: gateway pushes a mesh topology update (node list / adjacency).
-     *  @status minimal-compat — logged; no topology-aware routing yet. */
+     *  @status pr35-promoted — [MeshTopologyPayload] parsed; topology snapshot retained;
+     *  structured ACK sent. Promoted from minimal-compat (logged only) in PR-35. */
     MESH_TOPOLOGY("mesh_topology"),
 
     /** Downlink: gateway sends a wake event to resume an idle or suspended device.
@@ -95,7 +97,8 @@ enum class MsgType(val value: String) {
     SESSION_MIGRATE("session_migrate"),
 
     /** Downlink/Uplink: coordination synchronisation tick between coordinator and participants.
-     *  @status minimal-compat — logged; ack sent; no sync-state machine yet. */
+     *  @status pr35-promoted — sequence-aware [CoordSyncAckPayload] response with per-session
+     *  tick counter. Promoted from minimal-compat (generic ACK only) in PR-35. */
     COORD_SYNC("coord_sync"),
     /** Downlink: gateway broadcasts a message to all devices in a session.
      *  @status minimal-compat — logged; no broadcast fan-out yet. */
@@ -188,10 +191,12 @@ enum class MsgType(val value: String) {
         /**
          * Set of advanced / low-priority message types added in PR-4.
          * These types receive minimal-compat handling (log + optional ack) in
-         * [GalaxyWebSocketClient] and [GalaxyConnectionService].
+         * [GalaxyWebSocketClient] and [GalaxyConnectionService], except for the three types
+         * promoted in PR-35 (PEER_EXCHANGE, MESH_TOPOLOGY, COORD_SYNC) which now have
+         * dedicated stateful handlers.
          *
-         * TODO(PR-5+): promote individual types to dedicated handlers as business
-         * requirements are confirmed.
+         * Transitional types must not be extended as canonical architecture.
+         * @see com.ufo.galaxy.runtime.LongTailCompatibilityRegistry
          */
         val ADVANCED_TYPES: Set<MsgType> = setOf(
             RELAY, FORWARD, REPLY, ACK,
@@ -206,10 +211,15 @@ enum class MsgType(val value: String) {
 
         /**
          * Advanced types for which the device should send an [AckPayload] reply
-         * to confirm receipt, even though full business logic is not yet implemented.
+         * to confirm receipt via the generic minimal-compat path.
+         *
+         * Note: [COORD_SYNC] was removed from this set in PR-35; it now receives a
+         * dedicated sequence-aware [CoordSyncAckPayload] response via [GalaxyConnectionService].
+         * [PEER_EXCHANGE] and [MESH_TOPOLOGY] were never in this set; they also received
+         * dedicated handling in PR-35.
          */
         val ACK_ON_RECEIPT_TYPES: Set<MsgType> = setOf(
-            RELAY, WAKE_EVENT, COORD_SYNC, LOCK, UNLOCK,
+            RELAY, WAKE_EVENT, LOCK, UNLOCK,
             TAKEOVER_REQUEST
         )
     }
@@ -786,4 +796,73 @@ data class DelegatedExecutionSignalPayload(
     val activation_status_hint: String,
     val timestamp_ms: Long,
     val result_kind: String? = null
+)
+
+// ── PR-35: Promoted long-tail payload models ──────────────────────────────────────────────
+// These models replace generic-forward / logged-only handling for the three highest-value
+// long-tail message types: PEER_EXCHANGE, MESH_TOPOLOGY, and COORD_SYNC.
+
+/**
+ * Inbound/uplink payload for [MsgType.PEER_EXCHANGE].
+ *
+ * Carries peer device capability records during multi-device session capability exchange.
+ * Promoted from minimal-compat (logged only) to dedicated stateful handling in PR-35.
+ *
+ * @param source_device_id  Device identifier of the peer announcing its capabilities.
+ * @param capabilities      List of capability names the peer device supports.
+ *                          May be empty when the peer has no additional capabilities to advertise.
+ * @param mesh_id           Optional mesh session this exchange belongs to.
+ * @param exchange_id       Unique identifier for this capability exchange round; echoed in the ack.
+ */
+data class PeerExchangePayload(
+    val source_device_id: String,
+    val capabilities: List<String> = emptyList(),
+    val mesh_id: String? = null,
+    val exchange_id: String? = null
+)
+
+/**
+ * Inbound payload for [MsgType.MESH_TOPOLOGY].
+ *
+ * Carries a snapshot of the current mesh topology (node list / adjacency) pushed by the
+ * gateway when the mesh configuration changes.  Promoted from minimal-compat (logged only)
+ * to dedicated stateful handling in PR-35.
+ *
+ * @param mesh_id       Mesh session identifier this topology snapshot belongs to.
+ * @param nodes         List of device identifiers currently participating in the mesh.
+ * @param topology_seq  Monotonic sequence number for topology updates.
+ *                      Consumers should discard updates with lower sequence numbers than the
+ *                      last received value to handle out-of-order delivery.
+ * @param coordinator   Device identifier of the current mesh coordinator, if known.
+ */
+data class MeshTopologyPayload(
+    val mesh_id: String,
+    val nodes: List<String> = emptyList(),
+    val topology_seq: Int = 0,
+    val coordinator: String? = null
+)
+
+/**
+ * Uplink acknowledgement payload for [MsgType.COORD_SYNC].
+ *
+ * Sent by the device in response to a coordination sync tick received from the gateway.
+ * Promoted from generic [AckPayload] response to a dedicated sequence-aware payload in PR-35,
+ * so the coordinator can verify sequence continuity across devices.
+ *
+ * @param sync_id       Identifier of the inbound sync tick being acknowledged
+ *                      (echoed from the inbound `message_id` field, or a new UUID when absent).
+ * @param device_id     Acknowledging device identifier.
+ * @param sync_seq      Sync tick sequence number echoed from the inbound payload; `0` when absent.
+ *                      Allows the coordinator to detect gaps in the acknowledgement sequence.
+ * @param tick_count    Number of COORD_SYNC ticks received by this device in the current session.
+ *                      Monotonically increasing; the coordinator can use this to detect missed ticks.
+ * @param phase         Current coordination lifecycle phase on this device.
+ *                      Always `"active"` in PR-35; reserved for future phase-state tracking.
+ */
+data class CoordSyncAckPayload(
+    val sync_id: String,
+    val device_id: String,
+    val sync_seq: Int = 0,
+    val tick_count: Int,
+    val phase: String = "active"
 )
