@@ -37,6 +37,42 @@ Authoritative Android runtime surfaces:
 - Current status: `incremental_alignment`
 - Stability posture: preserve current runtime behavior; align semantics and vocabulary incrementally.
 
+### 2.2 Cross-repository constitutional alignment (center-governed system)
+
+This Android constitution is aligned to the canonical center-governed constitution in
+`DannyFish-11/ufo-galaxy-realization-v2` (main repository) and does **not** define a parallel
+global authority model.
+
+- **Center governance authority:** orchestration, system governance, and cross-device policy authority
+  are center-governed responsibilities. Android participates as a governed runtime profile.
+- **Android role:** Android is a runtime-hosted execution participant that provides capability hosting,
+  local autonomy for on-device execution, and delegated/multi-device execution participation under
+  protocol-governed control-plane semantics.
+- **Device domain vs node domain:** these are related but distinct:
+  - device domain = hardware/runtime-host identity and capability/readiness declaration context.
+  - node domain = dispatch/delegation/execution target context in the governed cross-device graph.
+  Android bridges the two through identity linkage, attached-session continuity, and runtime posture.
+- **Session continuity and cross-device delegation:** Android provides runtime session continuity,
+  attached host-session continuity, transfer/delegated lifecycle signaling, and mesh participation as
+  governed interoperability surfaces (not independent governance surfaces).
+
+### 2.3 Canonical vs transitional layer boundaries (Android side)
+
+Android keeps explicit layer boundaries so convergence work can target canonical architecture first:
+
+| Layer | Android role | Constitutional classification |
+|---|---|---|
+| Truth | `RuntimeController.state`, `hostSessionSnapshot`, `targetReadinessProjection`, `reconnectRecoveryState`, terminal result payload families | Canonical authority-bearing Android truth surfaces |
+| Projection | `CanonicalParticipantModel` / `CanonicalDeviceModel` / `CanonicalCapabilityProviderModel` and related mappers | Canonical read/projection contracts (non-truth owners) |
+| Registry | `UgcpSharedSchemaAlignment` family maps/inventories/classifiers | Canonical alignment registry surface for shared semantic mapping |
+| Cache | bounded replay/idempotency helpers (for example `OfflineTaskQueue`, runtime dedupe caches) | Operational cache surfaces; never canonical truth authority |
+| Compatibility | legacy alias/status normalization and compatibility bridges in `UgcpSharedSchemaAlignment`; legacy setup-error/session-map bridges | Transitional compatibility-era surfaces |
+| Adapter | adapter/bridge mapping boundaries that normalize Android runtime semantics to shared canonical vocabulary | Transitional-to-canonical bridge surfaces; not governance authority |
+
+Canonical architecture surfaces are the authority-bearing/runtime-profile contract surfaces above.
+Compatibility-era and adapter surfaces are intentionally retained as transitional pathways and must not
+be treated as the system end-state architecture.
+
 ## 3) Canonical identity/session vocabulary freeze (Android side)
 
 ### 3.1 Canonical UGCP term → Android mapping
