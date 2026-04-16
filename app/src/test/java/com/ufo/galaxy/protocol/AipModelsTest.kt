@@ -670,11 +670,13 @@ class AipModelsTest {
     }
 
     @Test
-    fun `MsgType ACK_ON_RECEIPT_TYPES contains relay wake_event coord_sync lock unlock`() {
+    fun `MsgType ACK_ON_RECEIPT_TYPES contains relay wake_event lock unlock but not coord_sync after PR-35`() {
         val ackSet = MsgType.ACK_ON_RECEIPT_TYPES
         assertTrue(ackSet.contains(MsgType.RELAY))
         assertTrue(ackSet.contains(MsgType.WAKE_EVENT))
-        assertTrue(ackSet.contains(MsgType.COORD_SYNC))
+        // COORD_SYNC was removed from ACK_ON_RECEIPT_TYPES in PR-35: it now receives a
+        // dedicated sequence-aware CoordSyncAckPayload response via handleCoordSync().
+        assertFalse(ackSet.contains(MsgType.COORD_SYNC))
         assertTrue(ackSet.contains(MsgType.LOCK))
         assertTrue(ackSet.contains(MsgType.UNLOCK))
     }

@@ -33,12 +33,15 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.AckPayload
+import com.ufo.galaxy.protocol.CoordSyncAckPayload
 import com.ufo.galaxy.protocol.CancelResultPayload
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.HybridDegradePayload
+import com.ufo.galaxy.protocol.MeshTopologyPayload
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.MeshSubtaskResult
+import com.ufo.galaxy.protocol.PeerExchangePayload
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.model.ModelDownloader
@@ -196,6 +199,44 @@ class GalaxyConnectionService : Service() {
         )
     }
 
+    // ── PR-35: Promoted long-tail lifecycle state ─────────────────────────────
+
+    /**
+     * Per-peer capability record from the most recent PEER_EXCHANGE message received from
+     * each peer device in this session.  Keyed by `source_device_id`; value is the list of
+     * capability names that peer advertised.
+     *
+     * Volatile so that any thread can safely read the latest snapshot.  Written only on the
+     * IO dispatcher inside [handlePeerExchange].
+     */
+    @Volatile
+    private var lastPeerCapabilities: Map<String, List<String>> = emptyMap()
+
+    /**
+     * Most recent mesh topology snapshot received via MESH_TOPOLOGY.
+     *
+     * Updated by [handleMeshTopology] each time a topology message arrives; later messages
+     * with a lower [MeshTopologyPayload.topology_seq] are silently ignored so out-of-order
+     * delivery does not overwrite a newer snapshot.
+     */
+    @Volatile
+    private var lastMeshTopologyNodes: List<String> = emptyList()
+
+    /**
+     * The [MeshTopologyPayload.topology_seq] of the last retained topology snapshot.
+     * Initialised to `-1` so that the first arriving topology (seq ≥ 0) is always accepted.
+     */
+    @Volatile
+    private var lastMeshTopologySeq: Int = -1
+
+    /**
+     * Monotonic count of COORD_SYNC ticks received in this service lifecycle.
+     * Incremented by [handleCoordSync] and echoed in every [CoordSyncAckPayload] so the
+     * coordinator can detect gaps in the device's acknowledgement sequence.
+     */
+    @Volatile
+    private var coordSyncTickCount: Int = 0
+
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
     inner class LocalBinder : Binder() {
@@ -297,16 +338,25 @@ class GalaxyConnectionService : Service() {
             }
 
             /**
-             * Minimal-compat handler for PR-4 advanced capability channels.
+             * Advanced message dispatcher for PR-4 capability channels.
              *
-             * For types in [MsgType.ACK_ON_RECEIPT_TYPES] a structured ack is sent back so
-             * the server knows the message was received. All other advanced types are logged
-             * only.  Full business-logic implementations are deferred to future PRs.
+             * ## PR-35 routing
+             * The three highest-value long-tail types are dispatched to dedicated handlers that
+             * provide stateful handling and stronger lifecycle semantics:
+             * - [MsgType.PEER_EXCHANGE]  → [handlePeerExchange] (peer capability record + ack)
+             * - [MsgType.MESH_TOPOLOGY]  → [handleMeshTopology] (topology snapshot + ack)
+             * - [MsgType.COORD_SYNC]     → [handleCoordSync] (sequence-aware CoordSyncAckPayload)
              *
-             * PR-3 addition: [MsgType.TAKEOVER_REQUEST] is dispatched to
-             * [handleTakeoverRequest] which parses the canonical [TakeoverRequestEnvelope],
-             * sends an ack, and returns a [TakeoverResponseEnvelope] rejection (full takeover
-             * executor is deferred to PR-5).
+             * ## Generic minimal-compat path (transitional)
+             * All other types in [MsgType.ADVANCED_TYPES] continue to use the minimal-compat
+             * path: a generic [AckPayload] is sent for [MsgType.ACK_ON_RECEIPT_TYPES], and all
+             * types are logged via [GalaxyLogger.TAG_LONG_TAIL_COMPAT].  These transitional
+             * surfaces must not be extended as canonical architecture.
+             *
+             * ## TAKEOVER_REQUEST
+             * [MsgType.TAKEOVER_REQUEST] is dispatched to [handleTakeoverRequest] (PR-5+).
+             *
+             * @see com.ufo.galaxy.runtime.LongTailCompatibilityRegistry
              */
             override fun onAdvancedMessage(
                 type: MsgType,
@@ -314,12 +364,31 @@ class GalaxyConnectionService : Service() {
                 rawJson: String
             ) {
                 Log.i(TAG, "[ADVANCED:RECV] type=${type.value} message_id=$messageId")
+
+                // ── PR-35: Route promoted types to dedicated stateful handlers ─────────
+                when (type) {
+                    MsgType.PEER_EXCHANGE -> {
+                        serviceScope.launch { handlePeerExchange(messageId, rawJson) }
+                        return
+                    }
+                    MsgType.MESH_TOPOLOGY -> {
+                        serviceScope.launch { handleMeshTopology(messageId, rawJson) }
+                        return
+                    }
+                    MsgType.COORD_SYNC -> {
+                        serviceScope.launch { handleCoordSync(messageId, rawJson) }
+                        return
+                    }
+                    else -> Unit
+                }
+
+                // ── Generic minimal-compat path (transitional) ────────────────────────
                 GalaxyLogger.log(
-                    TAG, mapOf(
-                        "event" to "advanced_message_handled",
+                    GalaxyLogger.TAG_LONG_TAIL_COMPAT, mapOf(
+                        "event" to "transitional_path_exercised",
                         "type" to type.value,
                         "message_id" to (messageId ?: ""),
-                        "handler" to "minimal_compat"
+                        "tier" to "transitional"
                     )
                 )
                 // Send ack for types that require delivery confirmation.
@@ -1175,6 +1244,183 @@ class GalaxyConnectionService : Service() {
                 "reason" to "hybrid_executor_not_implemented"
             )
         )
+    }
+
+    // ── PR-35: Promoted long-tail stateful handlers ───────────────────────────
+
+    /**
+     * Extracts a list of non-null strings from a named JSON array field inside [obj].
+     *
+     * Returns an empty list when [obj] is null or the field is absent or not a JSON array.
+     * Null / non-string elements within the array are silently skipped.
+     *
+     * Used by [handlePeerExchange] and [handleMeshTopology] to parse capability and node
+     * list fields without duplicating the Gson array-traversal logic.
+     *
+     * @param obj   JSON object from which to extract the array.
+     * @param key   Name of the array field inside [obj].
+     */
+    private fun parseJsonStringArray(obj: com.google.gson.JsonObject?, key: String): List<String> {
+        val arr = obj?.getAsJsonArray(key) ?: return emptyList()
+        return arr.mapNotNull { it?.asString }
+    }
+
+    /**
+     * Dedicated handler for inbound [MsgType.PEER_EXCHANGE] messages (PR-35 promoted).
+     *
+     * Replaces the minimal-compat (log-only) path with structured capability exchange:
+     * 1. Parses the inbound message into a [PeerExchangePayload].
+     * 2. Updates [lastPeerCapabilities] with the advertised capability list for this peer.
+     * 3. Sends a delivery [AckPayload] back to the gateway.
+     * 4. Emits a structured [GalaxyLogger.TAG_PEER_EXCHANGE] log entry.
+     *
+     * @param messageId Optional message_id from the inbound AIP v3 envelope.
+     * @param rawJson   Raw JSON string of the inbound peer_exchange message.
+     */
+    private fun handlePeerExchange(messageId: String?, rawJson: String) {
+        val payload = try {
+            val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
+            val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
+            PeerExchangePayload(
+                source_device_id = p?.get("source_device_id")?.asString ?: "",
+                capabilities = parseJsonStringArray(p, "capabilities"),
+                mesh_id = p?.get("mesh_id")?.asString,
+                exchange_id = p?.get("exchange_id")?.asString
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "[PEER_EXCHANGE] failed to parse payload: ${e.message}")
+            PeerExchangePayload(source_device_id = "")
+        }
+
+        // Update per-peer capability record when we have a valid source device.
+        if (payload.source_device_id.isNotBlank()) {
+            lastPeerCapabilities = lastPeerCapabilities + (payload.source_device_id to payload.capabilities)
+        }
+
+        // Send delivery ack.
+        sendAdvancedAck(MsgType.PEER_EXCHANGE, messageId)
+
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_PEER_EXCHANGE, mapOf(
+                "event" to "peer_exchange_received",
+                "source_device_id" to payload.source_device_id,
+                "exchange_id" to (payload.exchange_id ?: ""),
+                "capability_count" to payload.capabilities.size,
+                "mesh_id" to (payload.mesh_id ?: ""),
+                "message_id" to (messageId ?: ""),
+                "known_peer_count" to lastPeerCapabilities.size
+            )
+        )
+        Log.i(TAG, "[PEER_EXCHANGE] source=${payload.source_device_id} capabilities=${payload.capabilities.size} known_peers=${lastPeerCapabilities.size}")
+    }
+
+    /**
+     * Dedicated handler for inbound [MsgType.MESH_TOPOLOGY] messages (PR-35 promoted).
+     *
+     * Replaces the minimal-compat (log-only) path with structured topology tracking:
+     * 1. Parses the inbound message into a [MeshTopologyPayload].
+     * 2. Updates [lastMeshTopologyNodes] and [lastMeshTopologySeq] when the incoming
+     *    [MeshTopologyPayload.topology_seq] is greater than the last retained value
+     *    (out-of-order messages are silently ignored).
+     * 3. Sends a delivery [AckPayload] back to the gateway.
+     * 4. Emits a structured [GalaxyLogger.TAG_MESH_TOPOLOGY] log entry.
+     *
+     * @param messageId Optional message_id from the inbound AIP v3 envelope.
+     * @param rawJson   Raw JSON string of the inbound mesh_topology message.
+     */
+    private fun handleMeshTopology(messageId: String?, rawJson: String) {
+        val payload = try {
+            val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
+            val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
+            MeshTopologyPayload(
+                mesh_id = p?.get("mesh_id")?.asString ?: "",
+                nodes = parseJsonStringArray(p, "nodes"),
+                topology_seq = p?.get("topology_seq")?.asInt ?: 0,
+                coordinator = p?.get("coordinator")?.asString
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "[MESH_TOPOLOGY] failed to parse payload: ${e.message}")
+            MeshTopologyPayload(mesh_id = "")
+        }
+
+        // Only retain topology updates that are newer than what we already have.
+        val accepted = payload.topology_seq > lastMeshTopologySeq
+        if (accepted) {
+            lastMeshTopologyNodes = payload.nodes
+            lastMeshTopologySeq = payload.topology_seq
+        }
+
+        // Send delivery ack regardless of whether we retained the snapshot.
+        sendAdvancedAck(MsgType.MESH_TOPOLOGY, messageId)
+
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_MESH_TOPOLOGY, mapOf(
+                "event" to "mesh_topology_received",
+                "mesh_id" to payload.mesh_id,
+                "node_count" to payload.nodes.size,
+                "topology_seq" to payload.topology_seq,
+                "accepted" to accepted,
+                "coordinator" to (payload.coordinator ?: ""),
+                "message_id" to (messageId ?: "")
+            )
+        )
+        Log.i(TAG, "[MESH_TOPOLOGY] mesh_id=${payload.mesh_id} nodes=${payload.nodes.size} seq=${payload.topology_seq} accepted=$accepted")
+    }
+
+    /**
+     * Dedicated handler for inbound [MsgType.COORD_SYNC] messages (PR-35 promoted).
+     *
+     * Replaces the minimal-compat generic [AckPayload] response with a sequence-aware
+     * [CoordSyncAckPayload] that enables the coordinator to detect gaps in the
+     * acknowledgement sequence:
+     * 1. Increments [coordSyncTickCount].
+     * 2. Parses `sync_seq` from the inbound payload (defaults to 0 when absent).
+     * 3. Sends a [CoordSyncAckPayload] carrying `sync_id`, `sync_seq`, and `tick_count`.
+     * 4. Emits a structured [GalaxyLogger.TAG_COORD_SYNC] log entry.
+     *
+     * @param messageId Optional message_id from the inbound AIP v3 envelope.
+     * @param rawJson   Raw JSON string of the inbound coord_sync message.
+     */
+    private fun handleCoordSync(messageId: String?, rawJson: String) {
+        coordSyncTickCount++
+        val currentTickCount = coordSyncTickCount
+
+        val syncSeq = try {
+            val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
+            val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
+            p?.get("sync_seq")?.asInt ?: 0
+        } catch (e: Exception) {
+            Log.w(TAG, "[COORD_SYNC] failed to extract sync_seq: ${e.message}")
+            0
+        }
+        val syncId = messageId ?: java.util.UUID.randomUUID().toString()
+
+        val ackPayload = CoordSyncAckPayload(
+            sync_id = syncId,
+            device_id = localDeviceId,
+            sync_seq = syncSeq,
+            tick_count = currentTickCount,
+            phase = "active"
+        )
+        val envelope = AipMessage(
+            type = MsgType.ACK,
+            payload = ackPayload,
+            device_id = localDeviceId,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(syncId, MsgType.COORD_SYNC)
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_COORD_SYNC, mapOf(
+                "event" to "coord_sync_ack_sent",
+                "sync_id" to syncId,
+                "sync_seq" to syncSeq,
+                "tick_count" to currentTickCount,
+                "sent" to sent
+            )
+        )
+        Log.i(TAG, "[COORD_SYNC] sync_id=$syncId seq=$syncSeq tick=$currentTickCount sent=$sent")
     }
 
     // ── PR-3: Canonical takeover request/response path ────────────────────────────────────
