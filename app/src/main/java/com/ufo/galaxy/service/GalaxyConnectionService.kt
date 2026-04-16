@@ -379,7 +379,7 @@ class GalaxyConnectionService : Service() {
                         serviceScope.launch { handleCoordSync(messageId, rawJson) }
                         return
                     }
-                    else -> { /* fall through to generic minimal-compat path */ }
+                    else -> Unit
                 }
 
                 // ── Generic minimal-compat path (transitional) ────────────────────────
@@ -1249,6 +1249,23 @@ class GalaxyConnectionService : Service() {
     // ── PR-35: Promoted long-tail stateful handlers ───────────────────────────
 
     /**
+     * Extracts a list of non-null strings from a named JSON array field inside [obj].
+     *
+     * Returns an empty list when [obj] is null or the field is absent or not a JSON array.
+     * Null / non-string elements within the array are silently skipped.
+     *
+     * Used by [handlePeerExchange] and [handleMeshTopology] to parse capability and node
+     * list fields without duplicating the Gson array-traversal logic.
+     *
+     * @param obj   JSON object from which to extract the array.
+     * @param key   Name of the array field inside [obj].
+     */
+    private fun parseJsonStringArray(obj: com.google.gson.JsonObject?, key: String): List<String> {
+        val arr = obj?.getAsJsonArray(key) ?: return emptyList()
+        return arr.mapNotNull { it?.asString }
+    }
+
+    /**
      * Dedicated handler for inbound [MsgType.PEER_EXCHANGE] messages (PR-35 promoted).
      *
      * Replaces the minimal-compat (log-only) path with structured capability exchange:
@@ -1264,13 +1281,9 @@ class GalaxyConnectionService : Service() {
         val payload = try {
             val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
             val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
-            val capArray = p?.getAsJsonArray("capabilities")
-            val capList = if (capArray != null) {
-                (0 until capArray.size()).map { capArray[it].asString }
-            } else emptyList()
             PeerExchangePayload(
                 source_device_id = p?.get("source_device_id")?.asString ?: "",
-                capabilities = capList,
+                capabilities = parseJsonStringArray(p, "capabilities"),
                 mesh_id = p?.get("mesh_id")?.asString,
                 exchange_id = p?.get("exchange_id")?.asString
             )
@@ -1319,13 +1332,9 @@ class GalaxyConnectionService : Service() {
         val payload = try {
             val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
             val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
-            val nodesArray = p?.getAsJsonArray("nodes")
-            val nodeList = if (nodesArray != null) {
-                (0 until nodesArray.size()).map { nodesArray[it].asString }
-            } else emptyList()
             MeshTopologyPayload(
                 mesh_id = p?.get("mesh_id")?.asString ?: "",
-                nodes = nodeList,
+                nodes = parseJsonStringArray(p, "nodes"),
                 topology_seq = p?.get("topology_seq")?.asInt ?: 0,
                 coordinator = p?.get("coordinator")?.asString
             )
