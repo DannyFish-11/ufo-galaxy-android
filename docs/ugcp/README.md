@@ -8,3 +8,7 @@ This folder freezes the Android-side alignment to the shared UGCP control-plane 
   - participant/device/runtime/capability, device-domain vs node-domain, session families, delegated execution signals
   - protocol alignment, registry/facade/cache/adapter/authority surfaces, and runtime identity
 - [`../../app/src/main/java/com/ufo/galaxy/protocol/UgcpSharedSchemaAlignment.kt`](../../app/src/main/java/com/ufo/galaxy/protocol/UgcpSharedSchemaAlignment.kt): lightweight Android runtime schema-family alignment registry for canonical identity/control/runtime/coordination/truth mapping, canonical concept boundary glossary (`canonicalConceptVocabulary`), authoritative-vs-observational truth/event semantics, and replay/recovery-facing alignment notes.
+
+See also (at docs/ root):
+
+- [`../CANONICAL_DISPATCH_CHAIN.md`](../CANONICAL_DISPATCH_CHAIN.md): canonical end-to-end task dispatch and delegated execution chain across both repositories (PR-12). Defines canonical, fallback, staged, delegated, local, and compatibility paths; signal emission and reconciliation responsibilities; result handling distribution; and the Android-side code anchor `CanonicalDispatchChain` (`runtime/`).
