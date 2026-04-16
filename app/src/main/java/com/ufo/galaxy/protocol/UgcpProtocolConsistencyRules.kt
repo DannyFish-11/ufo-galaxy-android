@@ -40,7 +40,7 @@ package com.ufo.galaxy.protocol
  *
  * ## Scope
  *
- * The ten load-bearing shared surfaces covered are:
+ * The eleven load-bearing shared surfaces covered are:
  *
  * | Surface | [ProtocolSurface] |
  * |---------|------------------|
@@ -54,6 +54,7 @@ package com.ufo.galaxy.protocol
  * | Capability / readiness descriptor fields | [ProtocolSurface.CAPABILITY_READINESS_DESCRIPTOR] |
  * | Truth-event payload identifiers | [ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER] |
  * | Transfer lifecycle vocabulary | [ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY] |
+ * | Staged-mesh execution status | [ProtocolSurface.STAGED_MESH_EXECUTION_STATUS] |
  */
 
 // ── Classification types ──────────────────────────────────────────────────────
@@ -118,6 +119,10 @@ enum class ProtocolSurface(
     TRANSFER_LIFECYCLE_VOCABULARY(
         description = "Canonical control-transfer lifecycle event vocabulary",
         surfaceClass = ProtocolSurfaceClass.CANONICAL
+    ),
+    STAGED_MESH_EXECUTION_STATUS(
+        description = "Terminal execution status values for staged-mesh subtask results (StagedMeshParticipationResult.ExecutionStatus)",
+        surfaceClass = ProtocolSurfaceClass.TRANSITIONAL_COMPATIBILITY
     )
 }
 
@@ -494,6 +499,48 @@ object UgcpProtocolConsistencyRules {
     )
 
     /**
+     * Staged-mesh subtask execution status vocabulary.
+     *
+     * These are the terminal execution status values carried in
+     * [com.ufo.galaxy.runtime.StagedMeshParticipationResult.ExecutionStatus.wireValue]
+     * and in staged-mesh result payloads consumed by the V2 coordinator.
+     *
+     * Canonical values (using the cross-repo terminal state vocabulary):
+     *  - `success`   — subtask completed successfully
+     *  - `error`     — canonical error/failure terminal state
+     *  - `cancelled` — subtask was cancelled before or during execution
+     *  - `blocked`   — execution blocked by a rollout-control gate
+     *
+     * Transitional alias (Android-side wire value differs from canonical term):
+     *  - `failure` → `error` — [StagedMeshParticipationResult.ExecutionStatus.FAILURE] uses
+     *    `failure` as its wire value; the canonical terminal state vocabulary term is `error`.
+     *    This alias is explicitly tolerated here and tracked for future naming convergence.
+     */
+    val stagedMeshExecutionStatusRule: ConsistencyRule = ConsistencyRule(
+        surface = ProtocolSurface.STAGED_MESH_EXECUTION_STATUS,
+        canonicalValues = setOf(
+            "success",
+            "error",
+            "cancelled",
+            "blocked"
+        ),
+        transitionalAliases = listOf(
+            TransitionalAlias(
+                aliasValue = "failure",
+                canonicalTarget = "error",
+                reason = "StagedMeshParticipationResult.ExecutionStatus.FAILURE uses 'failure' as its wire value; " +
+                    "the canonical cross-repo terminal state vocabulary term is 'error'. " +
+                    "Naming convergence deferred to a follow-up phase per TERMINAL_STATE_VOCABULARY rule."
+            )
+        ),
+        notes = "Carried by StagedMeshParticipationResult.ExecutionStatus.wireValue. " +
+            "The 'blocked' value is staged-mesh-specific (rollout-control gate) and does not appear " +
+            "in the general TERMINAL_STATE_VOCABULARY. " +
+            "The 'failure' wire value is a transitional alias — do not add new execution status values " +
+            "without updating this rule and coordinating with V2 coordinator consumers."
+    )
+
+    /**
      * All consistency rules, indexed by [ProtocolSurface].
      */
     val allRules: Map<ProtocolSurface, ConsistencyRule> = mapOf(
@@ -506,7 +553,8 @@ object UgcpProtocolConsistencyRules {
         ProtocolSurface.RUNTIME_PROFILE_DESCRIPTOR to runtimeProfileDescriptorRule,
         ProtocolSurface.CAPABILITY_READINESS_DESCRIPTOR to capabilityReadinessDescriptorRule,
         ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER to truthEventPayloadIdentifierRule,
-        ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY to transferLifecycleVocabularyRule
+        ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY to transferLifecycleVocabularyRule,
+        ProtocolSurface.STAGED_MESH_EXECUTION_STATUS to stagedMeshExecutionStatusRule
     )
 
     /**
