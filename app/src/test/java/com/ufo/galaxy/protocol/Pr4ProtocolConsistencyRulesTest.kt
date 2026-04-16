@@ -37,6 +37,7 @@ class Pr4ProtocolConsistencyRulesTest {
         assertTrue(registered.contains(ProtocolSurface.CAPABILITY_READINESS_DESCRIPTOR))
         assertTrue(registered.contains(ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER))
         assertTrue(registered.contains(ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY))
+        assertTrue(registered.contains(ProtocolSurface.STAGED_MESH_EXECUTION_STATUS))
         assertEquals(ProtocolSurface.entries.size, registered.size)
     }
 
@@ -59,6 +60,9 @@ class Pr4ProtocolConsistencyRulesTest {
 
         assertTrue(transitional.contains(ProtocolSurface.SESSION_IDENTIFIER_CARRIER))
         assertFalse(canonical.contains(ProtocolSurface.SESSION_IDENTIFIER_CARRIER))
+
+        assertTrue(transitional.contains(ProtocolSurface.STAGED_MESH_EXECUTION_STATUS))
+        assertFalse(canonical.contains(ProtocolSurface.STAGED_MESH_EXECUTION_STATUS))
 
         assertTrue(canonical.intersect(transitional).isEmpty())
         assertEquals(ProtocolSurface.entries.size, canonical.size + transitional.size)
