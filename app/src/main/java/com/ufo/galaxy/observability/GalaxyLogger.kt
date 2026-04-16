@@ -355,6 +355,15 @@ object GalaxyLogger {
      */
     const val TAG_COMPAT_SURFACE = "GALAXY:COMPAT:SURFACE"
 
+    /**
+     * PR-11 — Architecture stabilization baseline.
+     *
+     * Marks log events that record stabilization-baseline governance decisions:
+     * which surfaces are considered canonically stable, which remain transitional,
+     * and where future contributors should extend versus converge.
+     */
+    const val TAG_STABILIZATION_BASELINE = "GALAXY:STABILIZATION:BASELINE"
+
     // ── Internal constants ────────────────────────────────────────────────────
 
     private const val ANDROID_TAG     = "GalaxyLogger"
