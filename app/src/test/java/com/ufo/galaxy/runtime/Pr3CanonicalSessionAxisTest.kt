@@ -643,7 +643,7 @@ class Pr3CanonicalSessionAxisTest {
     // ── GalaxyLogger.TAG_SESSION_AXIS ─────────────────────────────────────────
 
     @Test
-    fun `TAG_SESSION_AXIS value is GALAXY-SESSION-AXIS`() {
+    fun `TAG_SESSION_AXIS value is GALAXY:SESSION:AXIS`() {
         assertEquals("GALAXY:SESSION:AXIS", GalaxyLogger.TAG_SESSION_AXIS)
     }
 
