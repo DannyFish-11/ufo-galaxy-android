@@ -61,6 +61,8 @@ import kotlin.concurrent.withLock
  * | `GALAXY:FORMATION:REBALANCE` | Formation rebalance event evaluated or emitted (PR-2)  |
  * | `GALAXY:FORMATION:ROLE`  | Formation role reassignment decision (PR-2)                 |
  * | `GALAXY:FORMATION:HEALTH`| Participant health state change processed (PR-2)            |
+ * | `GALAXY:RUNTIME:LIFECYCLE` | Runtime lifecycle state transition event (PR-37)          |
+ * | `GALAXY:PROTOCOL:CONVERGENCE` | Protocol convergence boundary enforcement event (PR-38) |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -462,6 +464,35 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_RUNTIME_LIFECYCLE = "GALAXY:RUNTIME:LIFECYCLE"
+
+    // ── PR-38: Protocol convergence boundary observability tag ────────────────
+
+    /**
+     * PR-38 — Fired when a protocol convergence boundary enforcement event occurs.
+     *
+     * Emitted when the [com.ufo.galaxy.runtime.ProtocolConvergenceBoundary] or a
+     * convergence-aware component detects that a protocol/runtime interaction surface
+     * is being accessed in a way that requires convergence tracking.
+     *
+     * Event vocabulary:
+     * - `isolated_surface_accessed`  — an [ProtocolConvergenceBoundary.SurfaceConvergenceStatus.ISOLATED]
+     *   surface was exercised; serves as an observability signal for remaining transitional usage.
+     * - `converging_surface_accessed`— a [ProtocolConvergenceBoundary.SurfaceConvergenceStatus.CONVERGING]
+     *   surface was exercised; tracks how frequently the transitional paths are hit.
+     * - `canonical_path_confirmed`   — the canonical protocol interaction path was confirmed
+     *   at a boundary check point.
+     *
+     * Required fields: `event`, `surface_id`
+     * ([com.ufo.galaxy.runtime.ProtocolConvergenceBoundary.ProtocolSurfaceConvergenceEntry.surfaceId]),
+     * `status` (wire value from
+     * [com.ufo.galaxy.runtime.ProtocolConvergenceBoundary.SurfaceConvergenceStatus.wireValue]).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:PROTOCOL:CONVERGENCE","fields":{"event":"isolated_surface_accessed","surface_id":"long-tail-relay-isolated","status":"isolated"}}
+     * ```
+     */
+    const val TAG_PROTOCOL_CONVERGENCE = "GALAXY:PROTOCOL:CONVERGENCE"
 
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
