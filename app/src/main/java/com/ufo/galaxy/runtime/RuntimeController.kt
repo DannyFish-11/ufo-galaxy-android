@@ -1376,7 +1376,7 @@ class RuntimeController(
         // Sync host descriptor participation state to ACTIVE.
         syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
         // PR-37: Verify session/state alignment after opening.
-        assertSessionStateAlignment()
+        checkSessionStateAlignment()
     }
 
     /**
@@ -1406,7 +1406,7 @@ class RuntimeController(
         syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.INACTIVE)
         // PR-37: Verify session/state alignment after closing.  A closed session while
         // Active is expected during transient WS disconnect (recovery in progress).
-        assertSessionStateAlignment()
+        checkSessionStateAlignment()
     }
 
     // ── Snapshot projection sync ──────────────────────────────────────────────
@@ -1572,18 +1572,22 @@ class RuntimeController(
         )
 
     /**
-     * PR-37 — Validates that the current session state is consistent with the current
+     * PR-37 — Checks that the current session state is consistent with the current
      * runtime state, and logs a diagnostic warning if drift is detected.
+     *
+     * This is an **observability-only** check — it never throws and never mutates state.
+     * Drift warnings in the log indicate a potential lifecycle ordering issue that warrants
+     * investigation, but do not affect runtime behavior.
      *
      * Called internally after state transitions that should produce or remove a session
      * (e.g. moving to Active without an ATTACHED session, or remaining Active after a
-     * detach event).  This is an observability-only check; it never mutates state.
+     * detach event).
      *
      * Drift conditions detected:
      *  - Runtime is [RuntimeState.Active] but no ATTACHED session exists.
      *  - Runtime is NOT [RuntimeState.Active] but an ATTACHED session still exists.
      */
-    private fun assertSessionStateAlignment() {
+    private fun checkSessionStateAlignment() {
         val state = _state.value
         val sessionIsAttached = _attachedSession.value?.isAttached == true
         val driftDetected = (state is RuntimeState.Active && !sessionIsAttached) ||

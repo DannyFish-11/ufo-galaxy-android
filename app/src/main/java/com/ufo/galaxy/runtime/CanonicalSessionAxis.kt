@@ -494,14 +494,19 @@ object CanonicalSessionAxis {
      *  - [SessionContinuityLayer.CONTROL], [SessionContinuityLayer.CONVERSATION], and
      *    [SessionContinuityLayer.MESH] families are governed by the center and may be
      *    live independent of the Android runtime state.
-     *  - [SessionContinuityLayer.DURABLE] families are live whenever a durable era exists,
-     *    which corresponds to the runtime being or having been Active since the last stop.
+     *  - [SessionContinuityLayer.DURABLE] families are approximated as live when the runtime
+     *    is currently [RuntimeController.RuntimeState.Active].  **Limitation**: the durable
+     *    era actually persists across short WS disconnects (until explicit stop or invalidation),
+     *    so this approximation may return `false` during a transient disconnect even though the
+     *    durable era is still valid.  Callers that need accurate durable-era liveness must pass
+     *    the actual [RuntimeController.durableSessionContinuityRecord] to a separate check;
+     *    this stateless helper uses `isActive` as a conservative proxy.
      *
-     * @param runtimeState    Current [RuntimeController.RuntimeState].
+     * @param runtimeState      Current [RuntimeController.RuntimeState].
      * @param sessionIsAttached `true` when [RuntimeController.attachedSession] is in
      *                          [AttachedRuntimeSession.State.ATTACHED].
-     * @return                A [Map] from [CanonicalSessionFamily] to `true` (live) or
-     *                        `false` (not live) for each registered family.
+     * @return                  A [Map] from [CanonicalSessionFamily] to `true` (live) or
+     *                          `false` (not live) for each registered family.
      */
     fun resolveDispatchAlignmentForState(
         runtimeState: RuntimeController.RuntimeState,
@@ -517,9 +522,8 @@ object CanonicalSessionAxis {
                 SessionContinuityBehavior.MESH_SCOPED             -> isActive
                 SessionContinuityBehavior.CONVERSATION_SCOPED     -> true
                 SessionContinuityBehavior.DURABLE_ACROSS_ACTIVATION ->
-                    // Durable era exists whenever runtime has been Active at least once;
-                    // the durableSessionContinuityRecord is non-null in that case.
-                    // Since this is a stateless helper, we approximate with isActive.
+                    // Conservative approximation: treat durable era as live only when Active.
+                    // See method KDoc for the known limitation with transient disconnects.
                     isActive
             }
         }
