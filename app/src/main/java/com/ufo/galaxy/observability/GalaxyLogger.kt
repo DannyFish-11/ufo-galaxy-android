@@ -441,7 +441,27 @@ object GalaxyLogger {
      */
     const val TAG_FORMATION_HEALTH = "GALAXY:FORMATION:HEALTH"
 
-    // ── Internal constants ────────────────────────────────────────────────────
+    /**
+     * PR-37 — Fired on every runtime lifecycle state transition managed by
+     * [com.ufo.galaxy.runtime.RuntimeController.transitionState].
+     *
+     * Covers both governed transitions (expected, matching the canonical state machine)
+     * and unexpected transitions (potential race conditions or lifecycle ordering issues).
+     *
+     * Required fields: `event`, `from`, `to`, `trigger`.
+     * Conditional field (`runtime_unexpected_state_transition` events only): `reason`.
+     *
+     * Example (governed):
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RUNTIME:LIFECYCLE","fields":{"event":"runtime_state_transition","from":"starting","to":"active","trigger":"ws_connected"}}
+     * ```
+     *
+     * Example (unexpected):
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RUNTIME:LIFECYCLE","fields":{"event":"runtime_unexpected_state_transition","from":"local_only","to":"active","trigger":"ws_connected","reason":"transition_not_in_allowed_set"}}
+     * ```
+     */
+    const val TAG_RUNTIME_LIFECYCLE = "GALAXY:RUNTIME:LIFECYCLE"
 
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"

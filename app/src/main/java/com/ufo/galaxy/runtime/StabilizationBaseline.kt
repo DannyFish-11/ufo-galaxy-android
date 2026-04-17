@@ -459,6 +459,75 @@ object StabilizationBaseline {
             retirementGate = "cross-repo protocol consistency rule tightening pass",
             rationale = "Protocol surfaces still classified as TRANSITIONAL_COMPATIBILITY pending cross-repo tightening.",
             introducedPr = 8
+        ),
+
+        // ── PR-37: Android runtime lifecycle hardening surfaces ───────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-lifecycle-transition-event",
+            displayName = "RuntimeLifecycleTransitionEvent",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeLifecycleTransitionEvent",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical observable lifecycle state transition event — " +
+                "explicit governed/unexpected classification with stable trigger vocabulary.",
+            introducedPr = 37
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-dispatch-readiness-coordinator",
+            displayName = "RuntimeDispatchReadinessCoordinator",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeDispatchReadinessCoordinator",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical authority for combining runtime state + session state + " +
+                "rollout flags into a single dispatch eligibility answer.",
+            introducedPr = 37
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-lifecycle-transition-events",
+            displayName = "RuntimeController.lifecycleTransitionEvents",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Observable SharedFlow of runtime lifecycle transitions, " +
+                "enabling diagnostics and test assertions without polling the raw state flow.",
+            introducedPr = 37
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-current-dispatch-readiness",
+            displayName = "RuntimeController.currentDispatchReadiness()",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Point-in-time dispatch eligibility query combining runtime/session/rollout state.",
+            introducedPr = 37
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-dispatch-chain-eligible-paths-for-state",
+            displayName = "CanonicalDispatchChain.resolveEligiblePathsForState()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalDispatchChain",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "State-aware dispatch path resolver — returns eligible paths given runtime/session/rollout truth.",
+            introducedPr = 37
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-session-axis-dispatch-alignment",
+            displayName = "CanonicalSessionAxis.resolveDispatchAlignmentForState()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalSessionAxis",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Session family liveness resolver — maps runtime/session state to live session families.",
+            introducedPr = 37
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-runtime-lifecycle",
+            displayName = "GalaxyLogger.TAG_RUNTIME_LIFECYCLE",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Stable structured log tag for all runtime lifecycle state transition events.",
+            introducedPr = 37
         )
     )
 

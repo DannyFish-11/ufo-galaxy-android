@@ -475,6 +475,55 @@ object CanonicalSessionAxis {
      */
     fun crossRepoTermFor(androidCarrier: String): String? =
         entryForCarrier(androidCarrier)?.crossRepoTerm
+
+    // ── PR-37: Session/dispatch alignment helpers ─────────────────────────────
+
+    /**
+     * PR-37 — Resolves which session families are "live" (can participate in dispatch)
+     * given the current runtime/session state.
+     *
+     * A session family is "live" when:
+     *  - Its [SessionContinuityLayer] aligns with the current runtime mode.
+     *  - The runtime state is compatible with that family being active.
+     *
+     * Rules:
+     *  - [SessionContinuityLayer.RUNTIME] and [SessionContinuityLayer.ATTACHMENT] families
+     *    require [RuntimeController.RuntimeState.Active] to be live.
+     *  - [SessionContinuityLayer.TRANSFER] families additionally require the session to be
+     *    ATTACHED (i.e. a delegated task can only be in-flight when ATTACHED).
+     *  - [SessionContinuityLayer.CONTROL], [SessionContinuityLayer.CONVERSATION], and
+     *    [SessionContinuityLayer.MESH] families are governed by the center and may be
+     *    live independent of the Android runtime state.
+     *  - [SessionContinuityLayer.DURABLE] families are live whenever a durable era exists,
+     *    which corresponds to the runtime being or having been Active since the last stop.
+     *
+     * @param runtimeState    Current [RuntimeController.RuntimeState].
+     * @param sessionIsAttached `true` when [RuntimeController.attachedSession] is in
+     *                          [AttachedRuntimeSession.State.ATTACHED].
+     * @return                A [Map] from [CanonicalSessionFamily] to `true` (live) or
+     *                        `false` (not live) for each registered family.
+     */
+    fun resolveDispatchAlignmentForState(
+        runtimeState: RuntimeController.RuntimeState,
+        sessionIsAttached: Boolean
+    ): Map<CanonicalSessionFamily, Boolean> {
+        val isActive = runtimeState is RuntimeController.RuntimeState.Active
+        return CanonicalSessionFamily.entries.associateWith { family ->
+            val model = continuityModelFor(family) ?: return@associateWith false
+            when (model.continuityBehavior) {
+                SessionContinuityBehavior.REFRESHED_ON_RECONNECT  -> isActive
+                SessionContinuityBehavior.STABLE_ACROSS_RECONNECT -> isActive
+                SessionContinuityBehavior.TRANSFER_SCOPED         -> isActive && sessionIsAttached
+                SessionContinuityBehavior.MESH_SCOPED             -> isActive
+                SessionContinuityBehavior.CONVERSATION_SCOPED     -> true
+                SessionContinuityBehavior.DURABLE_ACROSS_ACTIVATION ->
+                    // Durable era exists whenever runtime has been Active at least once;
+                    // the durableSessionContinuityRecord is non-null in that case.
+                    // Since this is a stateless helper, we approximate with isActive.
+                    isActive
+            }
+        }
+    }
 }
 
 // ── Data model ────────────────────────────────────────────────────────────────

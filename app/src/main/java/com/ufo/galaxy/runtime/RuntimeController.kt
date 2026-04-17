@@ -6,6 +6,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -368,6 +369,41 @@ class RuntimeController(
         _reconnectRecoveryState.asStateFlow()
 
     /**
+     * PR-37 — Observable runtime lifecycle state transition event stream.
+     *
+     * Emits a [RuntimeLifecycleTransitionEvent] for every state change driven by
+     * [transitionState].  Both [RuntimeLifecycleTransitionEvent.Governed] (expected)
+     * and [RuntimeLifecycleTransitionEvent.Unexpected] (race/ordering anomaly) events
+     * are emitted so consumers can observe both normal and anomalous transitions.
+     *
+     * Backed by a buffer of [LIFECYCLE_TRANSITION_EVENT_BUFFER_CAPACITY] entries.
+     * Observers should drain promptly to avoid event loss.
+     */
+    private val _lifecycleTransitionEvents =
+        MutableSharedFlow<RuntimeLifecycleTransitionEvent>(
+            extraBufferCapacity = LIFECYCLE_TRANSITION_EVENT_BUFFER_CAPACITY
+        )
+
+    /**
+     * Observable stream of [RuntimeLifecycleTransitionEvent] instances (PR-37).
+     *
+     * Collect from a coroutine scope scoped to the component's lifetime to observe
+     * all governed and unexpected state transitions for diagnostics and test assertions.
+     */
+    val lifecycleTransitionEvents: SharedFlow<RuntimeLifecycleTransitionEvent> =
+        _lifecycleTransitionEvents.asSharedFlow()
+
+    /**
+     * PR-37 — Concurrency guard for [start].
+     *
+     * Prevents two concurrent callers from both passing the Active-guard in [start] and
+     * entering the connection handshake simultaneously.  [AtomicBoolean.compareAndSet]
+     * ensures exactly one caller proceeds; others find the guard already set and return
+     * the current state.
+     */
+    private val _startInProgress = AtomicBoolean(false)
+
+    /**
      * PR-2 — Observable formation rebalance event stream.
      *
      * Emits a [FormationRebalanceEvent] whenever a participant health or readiness change,
@@ -575,7 +611,16 @@ class RuntimeController(
             return true
         }
 
-        _state.value = RuntimeState.Starting
+        // PR-37: Concurrency guard — if a start is already in progress, return the current
+        // active state rather than racing into a second connection handshake.
+        if (!_startInProgress.compareAndSet(false, true)) {
+            Log.d(TAG, "[RUNTIME] start() called while another start is in progress — returning current active state")
+            GalaxyLogger.log(TAG, mapOf("event" to "runtime_start_concurrent_guard_hit"))
+            return _state.value == RuntimeState.Active
+        }
+
+        try {
+        transitionState(to = RuntimeState.Starting, expectedFrom = null, trigger = "start")
         Log.i(TAG, "[RUNTIME] Starting cross-device runtime (timeout=${registrationTimeoutMs}ms)")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_start", "timeout_ms" to registrationTimeoutMs))
 
@@ -627,7 +672,7 @@ class RuntimeController(
         registrationListener?.let { webSocketClient.removeListener(it) }
 
         return if (connected) {
-            _state.value = RuntimeState.Active
+            transitionState(to = RuntimeState.Active, expectedFrom = RuntimeState.Starting, trigger = "ws_connected")
             openAttachedSession(SessionOpenSource.USER_ACTIVATION)
             Log.i(TAG, "[RUNTIME] Runtime is now Active")
             true
@@ -635,6 +680,9 @@ class RuntimeController(
             val reason = "跨设备注册失败：无法连接到 Gateway。请检查网络或服务器设置。"
             handleFailure(reason)
             false
+        }
+        } finally {
+            _startInProgress.set(false)
         }
     }
 
@@ -690,7 +738,7 @@ class RuntimeController(
 
         if (!crossDeviceOn) {
             if (_state.value !is RuntimeState.LocalOnly) {
-                _state.value = RuntimeState.LocalOnly
+                transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "connect_if_enabled_local_only")
             }
             return
         }
@@ -698,14 +746,14 @@ class RuntimeController(
         // Only install a state-transition listener when we are not already in the middle of
         // a start() or already active — avoid double-listener races.
         if (_state.value !is RuntimeState.Starting && _state.value !is RuntimeState.Active) {
-            _state.value = RuntimeState.Starting
+            transitionState(to = RuntimeState.Starting, expectedFrom = null, trigger = "connect_if_enabled_cross_device")
             webSocketClient.addListener(object : GalaxyWebSocketClient.Listener {
                 override fun onConnected() {
                     Log.i(TAG, "[RUNTIME] connectIfEnabled: WS connected → Active")
                     GalaxyLogger.log(TAG, mapOf("event" to "runtime_restore_active"))
                     webSocketClient.removeListener(this)
                     if (_state.value == RuntimeState.Starting) {
-                        _state.value = RuntimeState.Active
+                        transitionState(to = RuntimeState.Active, expectedFrom = RuntimeState.Starting, trigger = "connect_if_enabled_ws_connected")
                         openAttachedSession(SessionOpenSource.BACKGROUND_RESTORE)
                     }
                 }
@@ -715,7 +763,7 @@ class RuntimeController(
                     if (_state.value == RuntimeState.Starting) {
                         // Transient failure — fall back to LocalOnly; WS reconnect will retry.
                         closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
-                        _state.value = RuntimeState.LocalOnly
+                        transitionState(to = RuntimeState.LocalOnly, expectedFrom = RuntimeState.Starting, trigger = "connect_if_enabled_ws_failure")
                     }
                 }
 
@@ -723,7 +771,7 @@ class RuntimeController(
                     webSocketClient.removeListener(this)
                     if (_state.value == RuntimeState.Starting) {
                         closeAttachedSession(AttachedRuntimeSession.DetachCause.DISCONNECT)
-                        _state.value = RuntimeState.LocalOnly
+                        transitionState(to = RuntimeState.LocalOnly, expectedFrom = RuntimeState.Starting, trigger = "connect_if_enabled_ws_failure")
                     }
                 }
 
@@ -760,7 +808,9 @@ class RuntimeController(
         // PR-1: Terminate the durable session era on explicit stop.  The next activation
         // will start a fresh era with a new durableSessionId.
         _durableSessionContinuityRecord.value = null
-        _state.value = RuntimeState.LocalOnly
+        // PR-37: Use transitionState() so the transition event is observable and any
+        // unexpected prior state is surfaced as a diagnostic event.
+        transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "stop")
         // PR-31: Refresh the rollout snapshot after stopping.
         refreshRolloutControlSnapshot()
     }
@@ -979,7 +1029,7 @@ class RuntimeController(
      */
     private suspend fun handleFailure(reason: String) {
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_failed", "reason" to reason))
-        _state.value = RuntimeState.Failed(reason)
+        transitionState(to = RuntimeState.Failed(reason), expectedFrom = RuntimeState.Starting, trigger = "start_failure")
         _registrationError.emit(reason)
         // PR-27: Classify and emit on the typed setup-error flow.
         val setupErr = CrossDeviceSetupError.classify(reason, isGatewayConfigured())
@@ -999,7 +1049,7 @@ class RuntimeController(
         if (webSocketClient.isConnected()) {
             webSocketClient.disconnect()
         }
-        _state.value = RuntimeState.LocalOnly
+        transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "failure_fallback")
         Log.w(TAG, "[RUNTIME] Fell back to LocalOnly after failure: $reason (category=${setupErr.category.wireValue})")
     }
 
@@ -1325,6 +1375,8 @@ class RuntimeController(
         GalaxyLogger.log(TAG, attachLog + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
         syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
+        // PR-37: Verify session/state alignment after opening.
+        assertSessionStateAlignment()
     }
 
     /**
@@ -1352,6 +1404,9 @@ class RuntimeController(
         }
         // Sync host descriptor participation state to INACTIVE.
         syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.INACTIVE)
+        // PR-37: Verify session/state alignment after closing.  A closed session while
+        // Active is expected during transient WS disconnect (recovery in progress).
+        assertSessionStateAlignment()
     }
 
     // ── Snapshot projection sync ──────────────────────────────────────────────
@@ -1412,11 +1467,143 @@ class RuntimeController(
      * **Do not call from production code.**
      */
     internal fun setActiveForTest() {
-        _state.value = RuntimeState.Active
+        // PR-37: Use transitionState() so test paths also emit lifecycle events.
+        transitionState(to = RuntimeState.Active, expectedFrom = null, trigger = "test_activation")
         openAttachedSession(SessionOpenSource.TEST_ONLY)
     }
 
-    // ── PR-2: Formation rebalance and recovery hooks ──────────────────────────
+    // ── PR-37: Lifecycle hardening helpers ────────────────────────────────────
+
+    /**
+     * PR-37 — Validates and applies a runtime state transition.
+     *
+     * Checks whether the transition from the current state to [to] is a governed
+     * (expected) transition according to [RuntimeDispatchReadinessCoordinator.ALLOWED_TRANSITIONS].
+     * Emits a [RuntimeLifecycleTransitionEvent.Governed] on a valid transition and a
+     * [RuntimeLifecycleTransitionEvent.Unexpected] on any transition that is not in the
+     * allowed set — without blocking the transition.  The state is always applied, even
+     * if unexpected, to preserve existing runtime behavior.
+     *
+     * The [expectedFrom] parameter provides an additional call-site assertion: if the
+     * actual current state does not match [expectedFrom] (when non-null), an [Unexpected]
+     * event is emitted regardless of whether the transition is in the allowed set.
+     *
+     * This is the **single write point** for [_state] inside [RuntimeController]; all
+     * state mutations must go through this method so the [lifecycleTransitionEvents] flow
+     * is always accurate.
+     *
+     * @param to           The target [RuntimeState].
+     * @param expectedFrom Optional prior state assertion for extra call-site safety.
+     *                     `null` means "no specific prior state expected" (e.g. [stop]).
+     * @param trigger      Machine-readable label for the operation causing the transition.
+     */
+    private fun transitionState(
+        to: RuntimeState,
+        expectedFrom: RuntimeState?,
+        trigger: String
+    ) {
+        val from = _state.value
+        val isGoverned = RuntimeDispatchReadinessCoordinator.isGoverned(from, to)
+        val mismatch = expectedFrom != null && from::class != expectedFrom::class
+
+        _state.value = to
+
+        val event: RuntimeLifecycleTransitionEvent = if (isGoverned && !mismatch) {
+            RuntimeLifecycleTransitionEvent.Governed(from = from, to = to, trigger = trigger)
+        } else {
+            val reason = when {
+                !isGoverned -> "transition_not_in_allowed_set"
+                mismatch    -> "prior_state_mismatch_expected_${expectedFrom!!.wireLabel}"
+                else        -> "unexpected"
+            }
+            Log.w(
+                TAG,
+                "[RUNTIME] Unexpected state transition: $from → $to " +
+                    "(trigger=$trigger, reason=$reason)"
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_RUNTIME_LIFECYCLE,
+                mapOf(
+                    "event"       to "runtime_unexpected_state_transition",
+                    "from"        to from.wireLabel,
+                    "to"          to to.wireLabel,
+                    "trigger"     to trigger,
+                    "reason"      to reason
+                )
+            )
+            RuntimeLifecycleTransitionEvent.Unexpected(
+                from         = from,
+                to           = to,
+                expectedFrom = expectedFrom ?: from,
+                reason       = reason
+            )
+        }
+
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_RUNTIME_LIFECYCLE,
+            mapOf(
+                "event"   to "runtime_state_transition",
+                "from"    to from.wireLabel,
+                "to"      to to.wireLabel,
+                "trigger" to trigger
+            )
+        )
+        _lifecycleTransitionEvents.tryEmit(event)
+    }
+
+    /**
+     * PR-37 — Returns the current dispatch readiness assessment for this runtime.
+     *
+     * Combines the current [state], [attachedSession], and [rolloutControlSnapshot] via
+     * [RuntimeDispatchReadinessCoordinator.resolve] into a single, authoritative
+     * [RuntimeDispatchReadinessCoordinator.DispatchReadiness] result.
+     *
+     * This is the canonical place to ask: "Is this Android device currently eligible to
+     * dispatch work via the canonical cross-device path, and if not, why?"
+     *
+     * The result is a point-in-time snapshot; call this immediately before making a
+     * dispatch decision or use [lifecycleTransitionEvents] to react to changes.
+     */
+    fun currentDispatchReadiness(): RuntimeDispatchReadinessCoordinator.DispatchReadiness =
+        RuntimeDispatchReadinessCoordinator.resolve(
+            runtimeState    = _state.value,
+            attachedSession = _attachedSession.value,
+            rollout         = _rolloutControlSnapshot.value
+        )
+
+    /**
+     * PR-37 — Validates that the current session state is consistent with the current
+     * runtime state, and logs a diagnostic warning if drift is detected.
+     *
+     * Called internally after state transitions that should produce or remove a session
+     * (e.g. moving to Active without an ATTACHED session, or remaining Active after a
+     * detach event).  This is an observability-only check; it never mutates state.
+     *
+     * Drift conditions detected:
+     *  - Runtime is [RuntimeState.Active] but no ATTACHED session exists.
+     *  - Runtime is NOT [RuntimeState.Active] but an ATTACHED session still exists.
+     */
+    private fun assertSessionStateAlignment() {
+        val state = _state.value
+        val sessionIsAttached = _attachedSession.value?.isAttached == true
+        val driftDetected = (state is RuntimeState.Active && !sessionIsAttached) ||
+            (state !is RuntimeState.Active && sessionIsAttached)
+        if (driftDetected) {
+            Log.w(
+                TAG,
+                "[RUNTIME] Session/state alignment drift: state=${state.wireLabel} " +
+                    "sessionIsAttached=$sessionIsAttached"
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_RUNTIME_LIFECYCLE,
+                mapOf(
+                    "event"              to "runtime_session_state_drift",
+                    "runtime_state"      to state.wireLabel,
+                    "session_is_attached" to sessionIsAttached
+                )
+            )
+        }
+    }
 
     /**
      * PR-2 — Notifies the runtime that this participant's execution environment health has
@@ -1656,5 +1843,14 @@ class RuntimeController(
          * observers are briefly slow to drain the flow.
          */
         private const val FORMATION_REBALANCE_EVENT_BUFFER_CAPACITY = 16
+
+        /**
+         * PR-37 — Buffer capacity for [_lifecycleTransitionEvents].
+         *
+         * Sized to accommodate a sequence of rapid state transitions (e.g. start → active
+         * → disconnect → reconnect → active) without dropping events when observers are
+         * briefly slow to drain.
+         */
+        private const val LIFECYCLE_TRANSITION_EVENT_BUFFER_CAPACITY = 32
     }
 }
