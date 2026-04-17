@@ -59,6 +59,19 @@ import com.ufo.galaxy.protocol.MsgType
  * These surfaces **must not** be extended as canonical architecture.  Future work should
  * promote individual entries to [CompatTier.PROMOTED] or [CompatTier.CANONICAL] rather
  * than adding logic to the generic minimal-compat path.
+ *
+ * ## Protocol convergence actions (PR-38)
+ *
+ * Each entry now carries a [ConvergenceAction] that describes the convergence work
+ * required to move the surface toward the canonical path:
+ *
+ * | [ConvergenceAction]                      | Applies to                                        |
+ * |------------------------------------------|---------------------------------------------------|
+ * | [ConvergenceAction.NO_ACTION]            | [CompatTier.CANONICAL] entries.                   |
+ * | [ConvergenceAction.PROMOTE_TO_CANONICAL] | [CompatTier.PROMOTED] entries (converging).       |
+ * | [ConvergenceAction.ISOLATE_BEHIND_BOUNDARY] | [CompatTier.TRANSITIONAL] entries (isolated). |
+ *
+ * See [ProtocolConvergenceBoundary] for the surface-level convergence authority view.
  */
 object LongTailCompatibilityRegistry {
 
@@ -88,20 +101,62 @@ object LongTailCompatibilityRegistry {
     }
 
     /**
+     * PR-38 — Protocol convergence action for a long-tail entry.
+     *
+     * Describes the convergence work required to move a [LongTailEntry] toward
+     * the canonical protocol/runtime path.  All entries carry an explicit action so
+     * that the convergence intent is machine-readable and reviewable.
+     *
+     * @see ProtocolConvergenceBoundary.ConvergenceAction
+     */
+    enum class ConvergenceAction(val wireValue: String) {
+        /**
+         * No convergence work needed.
+         * The surface is [CompatTier.CANONICAL] and already on the primary dispatch path.
+         */
+        NO_ACTION("no_action"),
+
+        /**
+         * The surface has been partially promoted ([CompatTier.PROMOTED]) and is converging
+         * toward full canonical status.  Implementation work is needed to integrate it into
+         * the canonical formation/session/runtime model.
+         */
+        PROMOTE_TO_CANONICAL("promote_to_canonical"),
+
+        /**
+         * The surface must be isolated behind an explicit convergence boundary.
+         * [CompatTier.TRANSITIONAL] entries are assigned this action: they must not receive
+         * new logic, and future work must first promote them to [CompatTier.PROMOTED] before
+         * extending them.
+         */
+        ISOLATE_BEHIND_BOUNDARY("isolate_behind_boundary")
+    }
+
+    /**
      * Registry entry for a single long-tail message type.
      *
-     * @param type             The [MsgType] this entry describes.
-     * @param tier             The current [CompatTier] classification.
-     * @param description      Human-readable description of what this message type does.
-     * @param transitionalNote For [CompatTier.TRANSITIONAL] entries: explains what the
-     *                         minimal-compat path does and why it must not be extended.
-     *                         `null` for [CompatTier.CANONICAL] and [CompatTier.PROMOTED] entries.
+     * @param type              The [MsgType] this entry describes.
+     * @param tier              The current [CompatTier] classification.
+     * @param description       Human-readable description of what this message type does.
+     * @param transitionalNote  For [CompatTier.TRANSITIONAL] entries: explains what the
+     *                          minimal-compat path does and why it must not be extended.
+     *                          `null` for [CompatTier.CANONICAL] and [CompatTier.PROMOTED] entries.
+     * @param convergenceAction PR-38 — The [ConvergenceAction] required for this entry.
+     *                          Defaults to the tier-appropriate value:
+     *                          [CompatTier.CANONICAL] → [ConvergenceAction.NO_ACTION];
+     *                          [CompatTier.PROMOTED] → [ConvergenceAction.PROMOTE_TO_CANONICAL];
+     *                          [CompatTier.TRANSITIONAL] → [ConvergenceAction.ISOLATE_BEHIND_BOUNDARY].
      */
     data class LongTailEntry(
         val type: MsgType,
         val tier: CompatTier,
         val description: String,
-        val transitionalNote: String? = null
+        val transitionalNote: String? = null,
+        val convergenceAction: ConvergenceAction = when (tier) {
+            CompatTier.CANONICAL    -> ConvergenceAction.NO_ACTION
+            CompatTier.PROMOTED     -> ConvergenceAction.PROMOTE_TO_CANONICAL
+            CompatTier.TRANSITIONAL -> ConvergenceAction.ISOLATE_BEHIND_BOUNDARY
+        }
     )
 
     /**
@@ -267,4 +322,38 @@ object LongTailCompatibilityRegistry {
      */
     val promotedTypes: Set<MsgType>
         get() = byTier(CompatTier.PROMOTED).map { it.type }.toSet()
+
+    // ── PR-38: Convergence action helpers ─────────────────────────────────────
+
+    /**
+     * PR-38 — Returns all entries with the given [convergenceAction].
+     *
+     * Use to enumerate all surfaces that need a specific convergence treatment:
+     * - [ConvergenceAction.ISOLATE_BEHIND_BOUNDARY] → all transitional types that must not
+     *   be extended.
+     * - [ConvergenceAction.PROMOTE_TO_CANONICAL] → all promoted types still converging.
+     * - [ConvergenceAction.NO_ACTION] → all canonical types; no convergence work needed.
+     */
+    fun byConvergenceAction(convergenceAction: ConvergenceAction): List<LongTailEntry> =
+        entries.filter { it.convergenceAction == convergenceAction }
+
+    /**
+     * PR-38 — Set of all message types whose [ConvergenceAction] is
+     * [ConvergenceAction.ISOLATE_BEHIND_BOUNDARY].
+     *
+     * These types are explicitly isolated — they must not receive new dispatch logic.
+     * Future work must first promote them via [CompatTier.PROMOTED] before extending them.
+     */
+    val isolatedTypes: Set<MsgType>
+        get() = byConvergenceAction(ConvergenceAction.ISOLATE_BEHIND_BOUNDARY).map { it.type }.toSet()
+
+    /**
+     * PR-38 — Set of all message types whose [ConvergenceAction] is
+     * [ConvergenceAction.PROMOTE_TO_CANONICAL].
+     *
+     * These types are on a convergence path toward canonical status.
+     * They have been promoted but require further integration work.
+     */
+    val convergingTypes: Set<MsgType>
+        get() = byConvergenceAction(ConvergenceAction.PROMOTE_TO_CANONICAL).map { it.type }.toSet()
 }

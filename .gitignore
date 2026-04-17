@@ -27,3 +27,5 @@ signing.properties
 # Profiling / captures
 *.hprof
 captures/
+META-INF/
+com/

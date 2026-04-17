@@ -528,6 +528,40 @@ object StabilizationBaseline {
             extensionGuidance = ExtensionGuidance.EXTEND,
             rationale = "Stable structured log tag for all runtime lifecycle state transition events.",
             introducedPr = 37
+        ),
+
+        // ── PR-38: Android protocol convergence surfaces ──────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "protocol-convergence-boundary",
+            displayName = "ProtocolConvergenceBoundary",
+            packagePath = "com.ufo.galaxy.runtime.ProtocolConvergenceBoundary",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical protocol/runtime interaction surface convergence authority — " +
+                "classifies every protocol surface as CANONICAL, CONVERGING, ISOLATED, or RETIRED " +
+                "and records the required convergence action per surface.",
+            introducedPr = 38
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "long-tail-compatibility-registry-convergence-actions",
+            displayName = "LongTailCompatibilityRegistry.ConvergenceAction + LongTailEntry.convergenceAction",
+            packagePath = "com.ufo.galaxy.runtime.LongTailCompatibilityRegistry",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-38 addition: convergence action per long-tail entry makes protocol " +
+                "convergence intent machine-readable; isolatedTypes and convergingTypes queries " +
+                "expose the boundary surface sets.",
+            introducedPr = 38
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-protocol-convergence",
+            displayName = "GalaxyLogger.TAG_PROTOCOL_CONVERGENCE",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Stable structured log tag for all protocol convergence boundary enforcement events.",
+            introducedPr = 38
         )
     )
 
