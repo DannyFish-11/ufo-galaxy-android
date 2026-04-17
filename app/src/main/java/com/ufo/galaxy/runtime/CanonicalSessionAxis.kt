@@ -476,6 +476,135 @@ object CanonicalSessionAxis {
     fun crossRepoTermFor(androidCarrier: String): String? =
         entryForCarrier(androidCarrier)?.crossRepoTerm
 
+    // ── PR-39: Session truth binding ─────────────────────────────────────────
+
+    /**
+     * PR-39 — Classifies each session family by where its authoritative identity
+     * value is owned (i.e. which [RuntimeTruthPrecedenceRules.TruthTier] tier the
+     * identity lives in and which [RuntimeController] field is the primary truth owner).
+     *
+     * The binding is used by host-facing projection logic to confirm that snapshot and
+     * projection values are derived from the correct authoritative source, and not from
+     * a parallel or redundant carrier.
+     *
+     * @param family              The [CanonicalSessionFamily] this binding describes.
+     * @param authoritativeSource The [RuntimeTruthPrecedenceRules.TruthEntry.surfaceId]
+     *                            of the Tier-1 or Tier-2 truth field that owns this
+     *                            family's canonical identity value.
+     * @param snapshotCarrier     The [AttachedRuntimeHostSessionSnapshot] field name
+     *                            that carries this identity in the Tier-2 snapshot, or
+     *                            `null` if the family has no snapshot carrier.
+     * @param projectionNote      One-sentence note explaining how this family's identity
+     *                            flows into host-facing projections.
+     */
+    data class SessionTruthBinding(
+        val family: CanonicalSessionFamily,
+        val authoritativeSource: String,
+        val snapshotCarrier: String?,
+        val projectionNote: String
+    )
+
+    /**
+     * Registry of truth bindings for all seven session families.
+     *
+     * Maps each [CanonicalSessionFamily] to its authoritative truth source and
+     * snapshot/projection carrier, making the derivation path machine-readable.
+     */
+    val truthBindings: List<SessionTruthBinding> = listOf(
+
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.CONTROL_SESSION,
+            authoritativeSource = "auth-runtime-state",
+            snapshotCarrier = null,
+            projectionNote = "Control session is echo-carried from inbound envelopes; not " +
+                "owned by RuntimeController.  Not present in AttachedRuntimeHostSessionSnapshot; " +
+                "consumers must read it from AipMessage.session_id directly."
+        ),
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.RUNTIME_SESSION,
+            authoritativeSource = "auth-runtime-session-id",
+            snapshotCarrier = "AttachedRuntimeHostSessionSnapshot.runtimeSessionId",
+            projectionNote = "RuntimeController._currentRuntimeSessionId is the authoritative " +
+                "source; projected into the Tier-2 snapshot as runtimeSessionId by " +
+                "updateHostSessionSnapshot()."
+        ),
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION,
+            authoritativeSource = "auth-attached-session",
+            snapshotCarrier = "AttachedRuntimeHostSessionSnapshot.sessionId",
+            projectionNote = "AttachedRuntimeSession.sessionId is the authoritative source; " +
+                "projected into the Tier-2 snapshot as sessionId; stable across reconnects."
+        ),
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION,
+            authoritativeSource = "auth-attached-session",
+            snapshotCarrier = null,
+            projectionNote = "Transfer session context is scoped to one DelegatedExecutionSignal " +
+                "chain (ACK→PROGRESS→RESULT) and is not directly projected into the host-session " +
+                "snapshot; consumers should read it from DelegatedExecutionSignal.attachedSessionId."
+        ),
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.CONVERSATION_SESSION,
+            authoritativeSource = "auth-runtime-state",
+            snapshotCarrier = null,
+            projectionNote = "Conversation session is scoped to local-loop execution and is " +
+                "independent of cross-device attachment; not projected into the host-session " +
+                "snapshot.  Consumers read it from LocalLoopTrace.sessionId."
+        ),
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.MESH_SESSION,
+            authoritativeSource = "auth-runtime-state",
+            snapshotCarrier = null,
+            projectionNote = "Mesh session is scoped to one MeshJoin/MeshLeave cycle; not " +
+                "projected into the host-session snapshot.  Consumers read it from " +
+                "MeshJoinPayload.mesh_id / MeshLeavePayload.mesh_id."
+        ),
+        SessionTruthBinding(
+            family = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            authoritativeSource = "auth-durable-session-record",
+            snapshotCarrier = "AttachedRuntimeHostSessionSnapshot.durableSessionId",
+            projectionNote = "DurableSessionContinuityRecord.durableSessionId is the " +
+                "authoritative source; projected into the Tier-2 snapshot as durableSessionId " +
+                "and sessionContinuityEpoch when a durable era is active."
+        )
+    )
+
+    private val truthBindingIndex: Map<CanonicalSessionFamily, SessionTruthBinding> =
+        truthBindings.associateBy { it.family }
+
+    /**
+     * PR-39 — Returns the [SessionTruthBinding] for [family], documenting which
+     * [RuntimeTruthPrecedenceRules.TruthTier] tier owns this family's identity
+     * and how it is projected into host-facing snapshots.
+     *
+     * Returns `null` if [family] has no registered binding (defensive; all seven
+     * current families have a binding).
+     */
+    fun truthBindingFor(family: CanonicalSessionFamily): SessionTruthBinding? =
+        truthBindingIndex[family]
+
+    /**
+     * PR-39 — Returns the set of session families that have a carrier in the Tier-2
+     * [AttachedRuntimeHostSessionSnapshot] (i.e. whose identity is projected into
+     * the canonical host-facing snapshot).
+     *
+     * Families **not** in this set are not projected into the snapshot; consumers
+     * reading those families' identities must go directly to the authoritative source
+     * field or wire carrier.
+     */
+    val familiesWithSnapshotCarrier: Set<CanonicalSessionFamily> =
+        truthBindings.filter { it.snapshotCarrier != null }.map { it.family }.toSet()
+
+    /**
+     * PR-39 — Returns the set of session families that are **not** projected into
+     * the [AttachedRuntimeHostSessionSnapshot].
+     *
+     * These families' identities must be read from the authoritative source directly,
+     * not from the snapshot.
+     */
+    val familiesWithoutSnapshotCarrier: Set<CanonicalSessionFamily> =
+        truthBindings.filter { it.snapshotCarrier == null }.map { it.family }.toSet()
+
     // ── PR-37: Session/dispatch alignment helpers ─────────────────────────────
 
     /**
