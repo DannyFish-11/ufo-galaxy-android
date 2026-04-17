@@ -58,6 +58,9 @@ import kotlin.concurrent.withLock
  * | `GALAXY:COORD:SYNC`       | COORD_SYNC ack sent with sequence-aware payload (PR-35)     |
  * | `GALAXY:INTERACTION:ACCEPTANCE` | Product-grade interaction acceptance checkpoint (PR-34) |
  * | `GALAXY:COMPAT:SURFACE`   | Compatibility surface exercised at runtime (PR-10)          |
+ * | `GALAXY:FORMATION:REBALANCE` | Formation rebalance event evaluated or emitted (PR-2)  |
+ * | `GALAXY:FORMATION:ROLE`  | Formation role reassignment decision (PR-2)                 |
+ * | `GALAXY:FORMATION:HEALTH`| Participant health state change processed (PR-2)            |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -378,6 +381,65 @@ object GalaxyLogger {
      * and where future contributors should extend versus converge.
      */
     const val TAG_STABILIZATION_BASELINE = "GALAXY:STABILIZATION:BASELINE"
+
+    // ── PR-2: Formation rebalance and recovery hooks tags ─────────────────────
+
+    /**
+     * PR-2 — Fired when a formation rebalance event is evaluated or emitted.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.FormationParticipationRebalancer] and
+     * [com.ufo.galaxy.coordination.FormationCoordinationSurface] on all formation
+     * rebalance and recovery-related events:
+     *
+     * - `formation_readiness_changed`          — participant readiness/participation state changed.
+     * - `formation_participant_lost`           — a formation participant became unreachable.
+     * - `formation_participant_rejoined`       — a lost participant rejoined the formation.
+     * - `formation_role_reassignment_requested`— role reassignment was proposed.
+     * - `formation_degraded_detected`          — formation is operating below full capacity.
+     * - `formation_recovery_completed`         — a prior degraded state was resolved.
+     *
+     * Required fields: `event` (wire value from [com.ufo.galaxy.runtime.FormationRebalanceEvent]),
+     * `rationale`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:FORMATION:REBALANCE","fields":{"event":"formation_readiness_changed","trigger":"ws_reconnect_in_progress","rationale":"WS reconnect in progress"}}
+     * ```
+     */
+    const val TAG_FORMATION_REBALANCE = "GALAXY:FORMATION:REBALANCE"
+
+    /**
+     * PR-2 — Fired when role reassignment evaluation produces a decision.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.FormationParticipationRebalancer.evaluateRoleReassignment]
+     * on every role reassignment evaluation:
+     *
+     * - `role_reassignment_accepted`  — role change was accepted; descriptor will be updated.
+     * - `role_reassignment_declined`  — role change was declined; current role preserved.
+     * - `role_reassignment_deferred`  — role change could not be applied now but may be re-attempted.
+     *
+     * Required fields: `event`, `previous_role`, `requested_role`.
+     * Optional fields: `decline_reason`, `deferrable`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:FORMATION:ROLE","fields":{"event":"role_reassignment_declined","previous_role":"primary","requested_role":"secondary","decline_reason":"ws_reconnect_in_progress"}}
+     * ```
+     */
+    const val TAG_FORMATION_ROLE = "GALAXY:FORMATION:ROLE"
+
+    /**
+     * PR-2 — Fired when [com.ufo.galaxy.coordination.FormationCoordinationSurface] processes
+     * a participant health state change.
+     *
+     * Required fields: `event`, `health_state`, `continuation_mode`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:FORMATION:HEALTH","fields":{"event":"participant_health_changed","health_state":"degraded","continuation_mode":"degraded_continuation"}}
+     * ```
+     */
+    const val TAG_FORMATION_HEALTH = "GALAXY:FORMATION:HEALTH"
 
     // ── Internal constants ────────────────────────────────────────────────────
 

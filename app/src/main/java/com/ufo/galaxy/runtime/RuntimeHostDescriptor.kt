@@ -178,6 +178,20 @@ data class RuntimeHostDescriptor(
         get() = formationRole == FormationRole.PRIMARY
 
     /**
+     * Returns `true` when this host is in a participation state that is actively contributing
+     * to the formation (ACTIVE or STANDBY), regardless of formation role.
+     *
+     * Useful for formation-level checks that need to distinguish "present in formation"
+     * (ACTIVE/STANDBY) from "absent from formation" (INACTIVE/DRAINING).
+     *
+     * PR-2: Added to support formation rebalance evaluation in
+     * [FormationParticipationRebalancer][com.ufo.galaxy.runtime.FormationParticipationRebalancer].
+     */
+    val isFormationPresent: Boolean
+        get() = participationState == HostParticipationState.ACTIVE
+            || participationState == HostParticipationState.STANDBY
+
+    /**
      * Returns a copy of this descriptor with [participationState] set to [newState].
      *
      * Use this to produce updated descriptors on lifecycle transitions without
@@ -187,6 +201,21 @@ data class RuntimeHostDescriptor(
      */
     fun withState(newState: HostParticipationState): RuntimeHostDescriptor =
         copy(participationState = newState)
+
+    /**
+     * Returns a copy of this descriptor with [formationRole] set to [newRole].
+     *
+     * Use this to produce an updated descriptor when a role reassignment is accepted via
+     * [FormationParticipationRebalancer.evaluateRoleReassignment][com.ufo.galaxy.runtime.FormationParticipationRebalancer.evaluateRoleReassignment].
+     * The caller is responsible for propagating the updated descriptor to
+     * [GalaxyWebSocketClient.setRuntimeHostDescriptor] so that the Gateway observes the new role.
+     *
+     * PR-2: Added to support role reassignment in the formation rebalance path.
+     *
+     * @param newRole The new [FormationRole] to apply.
+     */
+    fun withRole(newRole: FormationRole): RuntimeHostDescriptor =
+        copy(formationRole = newRole)
 
     /**
      * Builds the canonical metadata map that is merged into the AIP v3 `device_register`

@@ -368,6 +368,34 @@ class RuntimeController(
         _reconnectRecoveryState.asStateFlow()
 
     /**
+     * PR-2 — Observable formation rebalance event stream.
+     *
+     * Emits a [FormationRebalanceEvent] whenever a participant health or readiness change,
+     * a reconnect-driven recovery state transition, or a role reassignment request
+     * produces a rebalance-relevant condition.
+     *
+     * Events are produced by [notifyParticipantHealthChanged], [requestRoleReassessment],
+     * and internally by the permanent WS listener when the reconnect recovery state
+     * transitions.  Observers can collect this flow to drive formation-aware behavior
+     * without inspecting raw [reconnectRecoveryState] transitions directly.
+     *
+     * Backed by a buffer of [FORMATION_REBALANCE_EVENT_BUFFER_CAPACITY] entries; if the
+     * buffer is full, the oldest events are dropped.  Callers that need guaranteed delivery
+     * must drain the flow promptly.
+     */
+    private val _formationRebalanceEvent =
+        MutableSharedFlow<FormationRebalanceEvent>(extraBufferCapacity = FORMATION_REBALANCE_EVENT_BUFFER_CAPACITY)
+
+    /**
+     * Observable stream of [FormationRebalanceEvent] instances.
+     *
+     * Collect from a coroutine scope scoped to the component's lifetime
+     * (e.g. `viewModelScope`, `serviceScope`).
+     */
+    val formationRebalanceEvent: SharedFlow<FormationRebalanceEvent> =
+        _formationRebalanceEvent.asSharedFlow()
+
+    /**
      * PR-1 — Observable durable session continuity record for this Android runtime.
      *
      * Tracks the **durable session identity** that persists across WS reconnects within a
@@ -460,6 +488,12 @@ class RuntimeController(
                         )
                     )
                     Log.i(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → RECOVERED")
+                    // PR-2: Emit a ParticipantRejoined formation rebalance event so formation
+                    // observers know this participant is back and formation can re-evaluate.
+                    emitFormationRebalanceForRecovery(
+                        previousRecoveryState = ReconnectRecoveryState.RECOVERING,
+                        newRecoveryState = ReconnectRecoveryState.RECOVERED
+                    )
                 }
             }
         }
@@ -483,6 +517,12 @@ class RuntimeController(
                     )
                 )
                 Log.i(TAG, "[RUNTIME] Reconnect recovery: IDLE → RECOVERING")
+                // PR-2: Emit a ReadinessChanged formation rebalance event so formation
+                // observers know this participant is temporarily unavailable.
+                emitFormationRebalanceForRecovery(
+                    previousRecoveryState = ReconnectRecoveryState.IDLE,
+                    newRecoveryState = ReconnectRecoveryState.RECOVERING
+                )
             }
         }
 
@@ -501,6 +541,12 @@ class RuntimeController(
                     )
                 )
                 Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error)")
+                // PR-2: Emit a ReadinessChanged formation rebalance event so formation
+                // observers know this participant has been withdrawn from formation.
+                emitFormationRebalanceForRecovery(
+                    previousRecoveryState = ReconnectRecoveryState.RECOVERING,
+                    newRecoveryState = ReconnectRecoveryState.FAILED
+                )
             }
         }
 
@@ -1370,6 +1416,228 @@ class RuntimeController(
         openAttachedSession(SessionOpenSource.TEST_ONLY)
     }
 
+    // ── PR-2: Formation rebalance and recovery hooks ──────────────────────────
+
+    /**
+     * PR-2 — Notifies the runtime that this participant's execution environment health has
+     * changed.  The runtime evaluates the new health state via [FormationParticipationRebalancer]
+     * and emits a [FormationRebalanceEvent] on [formationRebalanceEvent] if a rebalance is
+     * warranted.
+     *
+     * This is the canonical hook for external health-change signals that originate outside
+     * the WS reconnect lifecycle (e.g. inference model crash, accessibility service failure).
+     * WS-driven health changes are handled automatically by the permanent WS listener and
+     * do not need to go through this hook.
+     *
+     * This method is **non-suspending** and safe to call from any thread.
+     *
+     * @param newHealthState The new [ParticipantHealthState] to evaluate.
+     * @param readinessState Optional current [ParticipantReadinessState]; defaults to UNKNOWN.
+     */
+    fun notifyParticipantHealthChanged(
+        newHealthState: ParticipantHealthState,
+        readinessState: ParticipantReadinessState = ParticipantReadinessState.UNKNOWN
+    ) {
+        val descriptor = hostDescriptor ?: run {
+            Log.d(TAG, "[RUNTIME] notifyParticipantHealthChanged: no hostDescriptor — skipping")
+            return
+        }
+        Log.d(TAG, "[RUNTIME] notifyParticipantHealthChanged: health=${newHealthState.wireValue}")
+
+        val rebalancer = FormationParticipationRebalancer()
+        val decision = rebalancer.evaluateParticipation(
+            descriptor = descriptor,
+            healthState = newHealthState,
+            reconnectRecoveryState = _reconnectRecoveryState.value,
+            readinessState = readinessState,
+            activeSessionSnapshot = currentHostSessionSnapshot()
+        )
+
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_FORMATION_HEALTH,
+            mapOf(
+                "event" to "participant_health_changed",
+                "health_state" to newHealthState.wireValue,
+                "requires_rebalance" to decision.requiresRebalance,
+                "continuation_mode" to decision.continuationMode.wireValue
+            )
+        )
+
+        if (decision.requiresRebalance) {
+            val event = decision.suggestedEvent
+                ?: FormationRebalanceEvent.ReadinessChanged(
+                    previousReadiness = readinessState,
+                    currentReadiness = ParticipantReadinessState.UNKNOWN,
+                    previousParticipation = descriptor.participationState,
+                    currentParticipation = descriptor.participationState,
+                    trigger = "health_${newHealthState.wireValue}"
+                )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_FORMATION_REBALANCE,
+                mapOf(
+                    "event" to event.wireValue,
+                    "rationale" to decision.rationale
+                )
+            )
+            _formationRebalanceEvent.tryEmit(event)
+        }
+    }
+
+    /**
+     * PR-2 — Requests role reassessment for this participant.
+     *
+     * Evaluates whether this device should accept a change from its current
+     * [RuntimeHostDescriptor.formationRole] to [requestedRole] via
+     * [FormationParticipationRebalancer.evaluateRoleReassignment].  If the reassignment is
+     * accepted, the [hostDescriptor] is updated in-place and propagated to
+     * [GalaxyWebSocketClient.setRuntimeHostDescriptor], and a
+     * [FormationRebalanceEvent.RoleReassignmentRequested] event is emitted.
+     *
+     * If the reassignment is declined or deferred, the current role is preserved and
+     * only a diagnostic log entry is emitted (no flow event for declined cases).
+     *
+     * This method is **non-suspending** and safe to call from any thread.
+     *
+     * @param requestedRole          The new [RuntimeHostDescriptor.FormationRole] being proposed.
+     * @param healthState            Current [ParticipantHealthState] of this device.
+     *                               Defaults to [ParticipantHealthState.HEALTHY]; callers that
+     *                               track health state independently should pass the current value.
+     * @param requestingCoordinator  Identifier of the entity requesting the reassignment.
+     *                               Used for diagnostics; does not affect the evaluation result.
+     * @param sessionId              Optional session identity scoping the reassignment.
+     * @return The [FormationParticipationRebalancer.RoleReassignmentDecision] describing
+     *         whether the change was accepted, declined, or deferred.
+     */
+    fun requestRoleReassessment(
+        requestedRole: RuntimeHostDescriptor.FormationRole,
+        healthState: ParticipantHealthState = ParticipantHealthState.HEALTHY,
+        requestingCoordinator: String = "local",
+        sessionId: String? = null
+    ): FormationParticipationRebalancer.RoleReassignmentDecision {
+        val descriptor = hostDescriptor ?: return FormationParticipationRebalancer.RoleReassignmentDecision(
+            accepted = false,
+            deferrable = false,
+            previousRole = RuntimeHostDescriptor.FormationRole.DEFAULT,
+            requestedRole = requestedRole,
+            declineReason = "no_host_descriptor"
+        )
+
+        Log.d(
+            TAG,
+            "[RUNTIME] requestRoleReassessment: " +
+                "${descriptor.formationRole.wireValue}→${requestedRole.wireValue} " +
+                "health=${healthState.wireValue}"
+        )
+
+        val rebalancer = FormationParticipationRebalancer()
+        val decision = rebalancer.evaluateRoleReassignment(
+            descriptor = descriptor,
+            requestedRole = requestedRole,
+            healthState = healthState,
+            reconnectRecoveryState = _reconnectRecoveryState.value
+        )
+
+        val outcomeTag = when {
+            decision.accepted -> "role_reassignment_accepted"
+            decision.deferrable -> "role_reassignment_deferred"
+            else -> "role_reassignment_declined"
+        }
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_FORMATION_ROLE,
+            buildMap {
+                put("event", outcomeTag)
+                put("previous_role", decision.previousRole.wireValue)
+                put("requested_role", decision.requestedRole.wireValue)
+                put("accepted", decision.accepted)
+                put("deferrable", decision.deferrable)
+                decision.declineReason?.let { put("decline_reason", it) }
+            }
+        )
+
+        if (decision.accepted && requestedRole != descriptor.formationRole) {
+            // Apply the role change: update descriptor and propagate to the WS client.
+            val updatedDescriptor = descriptor.withRole(requestedRole)
+            hostDescriptor = updatedDescriptor
+            webSocketClient.setRuntimeHostDescriptor(updatedDescriptor)
+            Log.i(
+                TAG,
+                "[RUNTIME] Formation role updated: " +
+                    "${decision.previousRole.wireValue}→${decision.requestedRole.wireValue}"
+            )
+            // Emit a RoleReassignmentRequested event to signal observers that the role changed.
+            val event = FormationRebalanceEvent.RoleReassignmentRequested(
+                requestedRole = requestedRole,
+                previousRole = descriptor.formationRole,
+                requestingCoordinator = requestingCoordinator,
+                sessionId = sessionId
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_FORMATION_REBALANCE,
+                mapOf(
+                    "event" to event.wireValue,
+                    "previous_role" to descriptor.formationRole.wireValue,
+                    "requested_role" to requestedRole.wireValue
+                )
+            )
+            _formationRebalanceEvent.tryEmit(event)
+        }
+
+        return decision
+    }
+
+    // ── PR-2: Internal formation rebalance helpers ────────────────────────────
+
+    /**
+     * Emits a [FormationRebalanceEvent] corresponding to a [ReconnectRecoveryState]
+     * transition.  Called by the permanent WS listener on each recovery-state change so
+     * that formation observers receive typed events without needing to interpret raw
+     * [reconnectRecoveryState] values.
+     *
+     * @param previousRecoveryState The recovery state before the transition.
+     * @param newRecoveryState      The recovery state after the transition.
+     */
+    private fun emitFormationRebalanceForRecovery(
+        previousRecoveryState: ReconnectRecoveryState,
+        newRecoveryState: ReconnectRecoveryState
+    ) {
+        val descriptor = hostDescriptor ?: return
+        val event: FormationRebalanceEvent = when (newRecoveryState) {
+            ReconnectRecoveryState.RECOVERING -> FormationRebalanceEvent.ReadinessChanged(
+                previousReadiness = ParticipantReadinessState.READY,
+                currentReadiness = ParticipantReadinessState.NOT_READY,
+                previousParticipation = RuntimeHostDescriptor.HostParticipationState.ACTIVE,
+                currentParticipation = RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                trigger = "ws_disconnect_active"
+            )
+            ReconnectRecoveryState.RECOVERED -> FormationRebalanceEvent.ParticipantRejoined(
+                rejoinedParticipantId = RuntimeIdentityContracts.participantNodeId(
+                    deviceId = descriptor.deviceId,
+                    runtimeHostId = descriptor.hostId
+                ),
+                rejoinedDeviceId = descriptor.deviceId,
+                sessionContinuityEpoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch,
+                affectedMeshId = null
+            )
+            ReconnectRecoveryState.FAILED -> FormationRebalanceEvent.ReadinessChanged(
+                previousReadiness = ParticipantReadinessState.NOT_READY,
+                currentReadiness = ParticipantReadinessState.NOT_READY,
+                previousParticipation = RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                currentParticipation = RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                trigger = "ws_recovery_failed"
+            )
+            ReconnectRecoveryState.IDLE -> return
+        }
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_FORMATION_REBALANCE,
+            mapOf(
+                "event" to event.wireValue,
+                "previous_recovery_state" to previousRecoveryState.wireValue,
+                "new_recovery_state" to newRecoveryState.wireValue
+            )
+        )
+        _formationRebalanceEvent.tryEmit(event)
+    }
+
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
@@ -1377,5 +1645,14 @@ class RuntimeController(
 
         /** Default maximum time to wait for a WS connection during [startWithTimeout]. */
         const val DEFAULT_REGISTRATION_TIMEOUT_MS = 15_000L
+
+        /**
+         * PR-2 — Buffer capacity for [_formationRebalanceEvent].
+         *
+         * Sized to accommodate a burst of formation events (e.g. multiple participants
+         * transitioning simultaneously in a mesh session) without dropping events when
+         * observers are briefly slow to drain the flow.
+         */
+        private const val FORMATION_REBALANCE_EVENT_BUFFER_CAPACITY = 16
     }
 }
