@@ -1565,9 +1565,11 @@ class RuntimeController(
                     "${decision.previousRole.wireValue}→${decision.requestedRole.wireValue}"
             )
             // Emit a RoleReassignmentRequested event to signal observers that the role changed.
+            // Use decision.previousRole (captured before the update) to avoid referring to
+            // the already-mutated hostDescriptor.
             val event = FormationRebalanceEvent.RoleReassignmentRequested(
                 requestedRole = requestedRole,
-                previousRole = descriptor.formationRole,
+                previousRole = decision.previousRole,
                 requestingCoordinator = requestingCoordinator,
                 sessionId = sessionId
             )
@@ -1575,7 +1577,7 @@ class RuntimeController(
                 GalaxyLogger.TAG_FORMATION_REBALANCE,
                 mapOf(
                     "event" to event.wireValue,
-                    "previous_role" to descriptor.formationRole.wireValue,
+                    "previous_role" to decision.previousRole.wireValue,
                     "requested_role" to requestedRole.wireValue
                 )
             )

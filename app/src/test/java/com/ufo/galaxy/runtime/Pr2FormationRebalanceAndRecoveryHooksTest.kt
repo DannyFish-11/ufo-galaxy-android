@@ -232,7 +232,18 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
     @Test
     fun `all six FormationRebalanceEvent wire values are distinct`() {
         val values = FormationRebalanceEvent.ALL_WIRE_VALUES
-        assertEquals(6, values.size)
+        assertEquals("Expected 6 distinct wire values", 6, values.size)
+        // Verify by counting unique values — if any duplicate existed, the set would be smaller.
+        val valuesList = listOf(
+            FormationRebalanceEvent.WIRE_READINESS_CHANGED,
+            FormationRebalanceEvent.WIRE_PARTICIPANT_LOST,
+            FormationRebalanceEvent.WIRE_PARTICIPANT_REJOINED,
+            FormationRebalanceEvent.WIRE_ROLE_REASSIGNMENT_REQUESTED,
+            FormationRebalanceEvent.WIRE_DEGRADED_FORMATION_DETECTED,
+            FormationRebalanceEvent.WIRE_RECOVERY_COMPLETED
+        )
+        val distinctValues = valuesList.toSet()
+        assertEquals("All 6 wire values must be distinct", 6, distinctValues.size)
     }
 
     @Test
