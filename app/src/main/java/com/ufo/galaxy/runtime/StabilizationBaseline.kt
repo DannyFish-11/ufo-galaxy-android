@@ -65,7 +65,8 @@ package com.ufo.galaxy.runtime
  * - Legacy wire-value alias surfaces in `UgcpSharedSchemaAlignment`
  *   (entries classified as `TRANSITIONAL_COMPATIBILITY`).
  * - `CompatibilitySurfaceRetirementRegistry` entries with tier `HIGH_RISK_ACTIVE`
- *   (specifically `registrationError` and `currentSessionSnapshot` legacy bridges).
+ *   (specifically `currentSessionSnapshot` legacy bridge; `registrationError` has been
+ *   deprecated and its consumers migrated in PR-36).
  * - `LongTailCompatibilityRegistry` entries with tier `TRANSITIONAL`.
  * - Protocol surfaces still classified as `ProtocolSurfaceClass.TRANSITIONAL_COMPATIBILITY`
  *   in `UgcpProtocolConsistencyRules`.
@@ -406,10 +407,12 @@ object StabilizationBaseline {
             surfaceId = "legacy-registration-error-bridge",
             displayName = "RuntimeController.registrationError (legacy SharedFlow<String>)",
             packagePath = "com.ufo.galaxy.runtime.RuntimeController",
-            stability = SurfaceStability.TRANSITIONAL,
+            stability = SurfaceStability.RETIREMENT_GATED,
             extensionGuidance = ExtensionGuidance.CONVERGE,
             canonicalReplacement = "RuntimeController.setupError (SharedFlow<CrossDeviceSetupError>)",
-            rationale = "Legacy untyped registration error bridge retained while consumers migrate to CrossDeviceSetupError.",
+            rationale = "Deprecated in PR-36 after all known consumers (MainViewModel, EnhancedFloatingService) " +
+                "were migrated to setupError. Surface is @Deprecated but retained for backward compatibility " +
+                "pending confirmation that no external call sites remain.",
             introducedPr = 10
         ),
         BaselineSurfaceEntry(
@@ -578,7 +581,7 @@ object StabilizationBaseline {
      * the canonical replacements recorded in the corresponding [BaselineSurfaceEntry].
      */
     val convergenceTargets: Set<String> = setOf(
-        "RuntimeController.registrationError → RuntimeController.setupError",
+        "RuntimeController.registrationError → retired (deprecated in PR-36; consumers migrated to setupError)",
         "RuntimeController.currentSessionSnapshot() → RuntimeController.hostSessionSnapshot",
         "UgcpSharedSchemaAlignment legacy alias maps → canonical vocabulary sets",
         "LongTailCompatibilityRegistry TRANSITIONAL entries → PROMOTED or CANONICAL",

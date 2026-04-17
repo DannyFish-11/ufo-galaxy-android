@@ -138,13 +138,12 @@ object CompatibilitySurfaceRetirementRegistry {
             surfaceId = "runtime_registration_error_string_bridge",
             surfaceKind = SurfaceKind.RUNTIME_BRIDGE,
             description = "RuntimeController.registrationError: SharedFlow<String> — legacy untyped " +
-                "string error emission. Operationally visible to UI and diagnostic collectors. " +
-                "Cannot be distinguished from canonical error surfaces without reading source.",
+                "string error emission. Annotated @Deprecated in PR-36. All known consumers " +
+                "(MainViewModel, EnhancedFloatingService) have been migrated to setupError.",
             canonicalReplacement = "RuntimeController.setupError (SharedFlow<CrossDeviceSetupError>)",
-            retirementTier = RetirementTier.HIGH_RISK_ACTIVE,
-            retirementGate = "All UI and diagnostics collectors must migrate to setupError " +
-                "before this bridge is removed.",
-            notes = "Retained for backward compatibility (PR-27). Do not add new observers."
+            retirementTier = RetirementTier.RETIRE_AFTER_MIGRATION,
+            retirementGate = "Confirm no remaining call sites observe registrationError before removal.",
+            notes = "Deprecated in PR-36 after consumer migration. Safe to remove when gate clears."
         ),
 
         CompatibilitySurfaceEntry(
@@ -304,12 +303,13 @@ object CompatibilitySurfaceRetirementRegistry {
         CompatibilitySurfaceEntry(
             surfaceId = "dispatch_adapter_peer_announce_transitional",
             surfaceKind = SurfaceKind.DISPATCH_ADAPTER,
-            description = "MsgType.PEER_ANNOUNCE minimal-compat handler: logged only; " +
-                "no peer-state tracking implemented.",
-            canonicalReplacement = "Dedicated peer-state tracker (not yet implemented)",
-            retirementTier = RetirementTier.RETIRE_AFTER_COORDINATION,
-            retirementGate = "Center must formally retire PEER_ANNOUNCE or promote to dedicated tracker.",
-            notes = "See LongTailCompatibilityRegistry.forType(MsgType.PEER_ANNOUNCE)."
+            description = "MsgType.PEER_ANNOUNCE — promoted to dedicated stateful handler in PR-36. " +
+                "PeerAnnouncePayload parsed; per-session peer presence record retained; ACK sent.",
+            canonicalReplacement = "GalaxyConnectionService.handlePeerAnnounce (PR-36 promoted)",
+            retirementTier = RetirementTier.DECOMMISSION_CANDIDATE,
+            retirementGate = "Entry retained for registry completeness; the minimal-compat path " +
+                "is no longer exercised — PEER_ANNOUNCE is fully handled by the dedicated handler.",
+            notes = "See LongTailCompatibilityRegistry.forType(MsgType.PEER_ANNOUNCE). Promoted in PR-36."
         ),
 
         CompatibilitySurfaceEntry(

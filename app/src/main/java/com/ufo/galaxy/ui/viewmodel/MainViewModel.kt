@@ -329,19 +329,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(reconnectAttempt = attempts) }
             }
         }
-        // Observe RuntimeController registration failures and surface them as dialogs.
-        // SharedFlow: each emission is a one-time event (failure reason string).
-        UFOGalaxyApplication.runtimeController.registrationError
-            .onEach { reason ->
-                Log.w(TAG, "RuntimeController registration failure: $reason")
-                UFOGalaxyApplication.metricsRecorder.recordRegistrationFailure()
-                pushError(reason)
-                _uiState.update { it.copy(registrationFailure = reason, crossDeviceEnabled = false) }
-            }
-            .launchIn(viewModelScope)
-        // PR-27: Observe typed setup errors and surface the category so the failure dialog
-        // can present context-appropriate recovery actions (open settings vs. retry vs.
-        // open permissions) rather than a single generic "Retry" button.
+        // PR-27: Observe typed setup errors as the single canonical failure observer.
+        // This consolidates the deprecated registrationError (string) and setupError (typed)
+        // observers into one: CrossDeviceSetupError.reason carries the same human-readable
+        // string, while category drives recovery UI branching.
         // PR-30: Also update [MainUiState.lastSetupFailureCategory] — a persistent diagnostic
         // field that is never cleared, unlike [registrationFailureCategory].
         UFOGalaxyApplication.runtimeController.setupError
@@ -351,8 +342,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "CrossDevice setup error: category=${err.category.wireValue} " +
                         "canRetry=${err.canRetry} reason=${err.reason}"
                 )
+                UFOGalaxyApplication.metricsRecorder.recordRegistrationFailure()
+                pushError(err.reason)
                 _uiState.update {
                     it.copy(
+                        registrationFailure = err.reason,
+                        crossDeviceEnabled = false,
                         registrationFailureCategory = err.category,
                         // PR-30: persist last category for operator-facing diagnostics.
                         lastSetupFailureCategory = err.category
@@ -738,7 +733,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
                 if (!ok) {
-                    // Registration failed — registrationError observer will update UI.
+                    // Registration failed — setupError observer will update UI with category-aware error.
                     _uiState.update { it.copy(crossDeviceEnabled = false) }
                 }
             }

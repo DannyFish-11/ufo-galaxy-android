@@ -61,7 +61,7 @@ import org.junit.Test
  *  - REPLY entry exists and is TRANSITIONAL
  *  - RAG_QUERY entry exists and is TRANSITIONAL
  *  - CODE_EXECUTE entry exists and is TRANSITIONAL
- *  - PEER_ANNOUNCE entry exists and is TRANSITIONAL
+ *  - PEER_ANNOUNCE entry exists and is PROMOTED (promoted to stateful handler in PR-36)
  *  - WAKE_EVENT entry exists and is TRANSITIONAL
  *  - SESSION_MIGRATE entry exists and is TRANSITIONAL
  *  - BROADCAST entry exists and is TRANSITIONAL
@@ -69,13 +69,13 @@ import org.junit.Test
  *  - UNLOCK entry exists and is TRANSITIONAL
  *  - HYBRID_EXECUTE entry exists and is CANONICAL
  *  - TAKEOVER_REQUEST entry exists and is CANONICAL
- *  - transitional types set does not contain promoted types
+ *  - transitional types set does not contain promoted types (including PEER_ANNOUNCE after PR-36)
  *  - transitional types set does not contain canonical types
  *  - transitional entries all have non-null transitionalNote
  *  - promoted entries all have null transitionalNote
  *  - forType returns null for an unregistered canonical-path type
- *  - byTier(TRANSITIONAL) count is 11
- *  - byTier(PROMOTED) count is 3
+ *  - byTier(TRANSITIONAL) count is 10 (after PR-36 promotes PEER_ANNOUNCE)
+ *  - byTier(PROMOTED) count is 4 (after PR-36 adds PEER_ANNOUNCE)
  *  - byTier(CANONICAL) count is 2
  *
  * ### PeerExchangePayload — typed model
@@ -150,12 +150,13 @@ class Pr35LongTailCompatHandlingTest {
     }
 
     @Test
-    fun `promoted types set contains exactly the three expected PR-35 types`() {
+    fun `promoted types set contains the four expected types including PR-36 PEER_ANNOUNCE`() {
         val promoted = LongTailCompatibilityRegistry.promotedTypes
         assertTrue("PEER_EXCHANGE must be in promotedTypes", MsgType.PEER_EXCHANGE in promoted)
         assertTrue("MESH_TOPOLOGY must be in promotedTypes", MsgType.MESH_TOPOLOGY in promoted)
         assertTrue("COORD_SYNC must be in promotedTypes", MsgType.COORD_SYNC in promoted)
-        assertEquals("exactly 3 promoted types in PR-35", 3, promoted.size)
+        assertTrue("PEER_ANNOUNCE must be in promotedTypes after PR-36 promotion", MsgType.PEER_ANNOUNCE in promoted)
+        assertEquals("exactly 4 promoted types after PR-35 + PR-36", 4, promoted.size)
     }
 
     @Test
@@ -194,10 +195,14 @@ class Pr35LongTailCompatHandlingTest {
     }
 
     @Test
-    fun `PEER_ANNOUNCE entry exists and is TRANSITIONAL`() {
+    fun `PEER_ANNOUNCE entry exists and is PROMOTED`() {
         val entry = LongTailCompatibilityRegistry.forType(MsgType.PEER_ANNOUNCE)
-        assertNotNull(entry)
-        assertEquals(LongTailCompatibilityRegistry.CompatTier.TRANSITIONAL, entry!!.tier)
+        assertNotNull("PEER_ANNOUNCE must be registered in LongTailCompatibilityRegistry", entry)
+        assertEquals(
+            "PEER_ANNOUNCE must be PROMOTED after PR-36 stateful handler promotion",
+            LongTailCompatibilityRegistry.CompatTier.PROMOTED,
+            entry!!.tier
+        )
     }
 
     @Test
@@ -250,11 +255,12 @@ class Pr35LongTailCompatHandlingTest {
     }
 
     @Test
-    fun `transitional types set does not contain the three promoted types`() {
+    fun `transitional types set does not contain the four promoted types`() {
         val transitional = LongTailCompatibilityRegistry.transitionalTypes
         assertFalse("PEER_EXCHANGE must not be transitional", MsgType.PEER_EXCHANGE in transitional)
         assertFalse("MESH_TOPOLOGY must not be transitional", MsgType.MESH_TOPOLOGY in transitional)
         assertFalse("COORD_SYNC must not be transitional", MsgType.COORD_SYNC in transitional)
+        assertFalse("PEER_ANNOUNCE must not be transitional after PR-36 promotion", MsgType.PEER_ANNOUNCE in transitional)
     }
 
     @Test
@@ -308,19 +314,19 @@ class Pr35LongTailCompatHandlingTest {
     }
 
     @Test
-    fun `byTier TRANSITIONAL returns 11 entries`() {
+    fun `byTier TRANSITIONAL returns 10 entries after PR-36 PEER_ANNOUNCE promotion`() {
         assertEquals(
-            "exactly 11 TRANSITIONAL entries expected in PR-35 registry",
-            11,
+            "exactly 10 TRANSITIONAL entries expected after PR-36 promotes PEER_ANNOUNCE",
+            10,
             LongTailCompatibilityRegistry.byTier(LongTailCompatibilityRegistry.CompatTier.TRANSITIONAL).size
         )
     }
 
     @Test
-    fun `byTier PROMOTED returns 3 entries`() {
+    fun `byTier PROMOTED returns 4 entries after PR-36 PEER_ANNOUNCE promotion`() {
         assertEquals(
-            "exactly 3 PROMOTED entries expected in PR-35 registry",
-            3,
+            "exactly 4 PROMOTED entries expected after PR-35 (3) + PR-36 (PEER_ANNOUNCE)",
+            4,
             LongTailCompatibilityRegistry.byTier(LongTailCompatibilityRegistry.CompatTier.PROMOTED).size
         )
     }
