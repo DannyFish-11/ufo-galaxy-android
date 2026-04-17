@@ -28,4 +28,5 @@ signing.properties
 *.hprof
 captures/
 META-INF/
-com/
+# compiled .class file output from kotlinc (project-root temporary output, not source)
+/com/
