@@ -38,6 +38,7 @@ class Pr4ProtocolConsistencyRulesTest {
         assertTrue(registered.contains(ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER))
         assertTrue(registered.contains(ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY))
         assertTrue(registered.contains(ProtocolSurface.STAGED_MESH_EXECUTION_STATUS))
+        assertTrue(registered.contains(ProtocolSurface.DURABLE_SESSION_CONTINUITY))
         assertEquals(ProtocolSurface.entries.size, registered.size)
     }
 
@@ -57,6 +58,7 @@ class Pr4ProtocolConsistencyRulesTest {
         assertTrue(canonical.contains(ProtocolSurface.CAPABILITY_READINESS_DESCRIPTOR))
         assertTrue(canonical.contains(ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER))
         assertTrue(canonical.contains(ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY))
+        assertTrue(canonical.contains(ProtocolSurface.DURABLE_SESSION_CONTINUITY))
 
         assertTrue(transitional.contains(ProtocolSurface.SESSION_IDENTIFIER_CARRIER))
         assertFalse(canonical.contains(ProtocolSurface.SESSION_IDENTIFIER_CARRIER))
@@ -237,7 +239,7 @@ class Pr4ProtocolConsistencyRulesTest {
     fun `runtime session id and attached session id are canonical carriers`() {
         val surface = ProtocolSurface.SESSION_IDENTIFIER_CARRIER
         for (carrier in listOf("runtime_session_id", "attached_session_id", "signal_id",
-            "control_session_id", "mesh_session_id")) {
+            "control_session_id", "mesh_session_id", "durable_session_id")) {
             val result = UgcpProtocolConsistencyRules.checkValue(surface, carrier)
             assertEquals(
                 "$carrier should be a CANONICAL session identifier carrier",

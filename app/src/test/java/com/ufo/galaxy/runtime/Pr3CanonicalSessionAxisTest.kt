@@ -17,21 +17,21 @@ import org.junit.Test
  *
  * Regression and acceptance test suite for all PR-3 additions:
  *
- *  1. [CanonicalSessionFamily] enum — six session families ([CanonicalSessionFamily.CONTROL_SESSION],
+ *  1. [CanonicalSessionFamily] enum — seven session families ([CanonicalSessionFamily.CONTROL_SESSION],
  *     [CanonicalSessionFamily.RUNTIME_SESSION], [CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION],
  *     [CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION], [CanonicalSessionFamily.CONVERSATION_SESSION],
- *     [CanonicalSessionFamily.MESH_SESSION]) with stable [CanonicalSessionFamily.canonicalTerm]
- *     and [CanonicalSessionFamily.wireAlias] values.
+ *     [CanonicalSessionFamily.MESH_SESSION], [CanonicalSessionFamily.DURABLE_RUNTIME_SESSION]) with stable
+ *     [CanonicalSessionFamily.canonicalTerm] and [CanonicalSessionFamily.wireAlias] values.
  *
  *  2. [SessionIdentifierRole] enum — three identifier role classifications
  *     ([SessionIdentifierRole.CANONICAL], [SessionIdentifierRole.TRANSITIONAL_ALIAS],
  *     [SessionIdentifierRole.CONTEXTUAL_ALIAS]) with stable [SessionIdentifierRole.label] values.
  *
- *  3. [SessionContinuityBehavior] enum — five behavior values covering all session lifetime
- *     patterns present in the Android codebase.
+ *  3. [SessionContinuityBehavior] enum — six behavior values covering all session lifetime
+ *     patterns present in the Android codebase (including PR-1 [SessionContinuityBehavior.DURABLE_ACROSS_ACTIVATION]).
  *
- *  4. [SessionContinuityLayer] enum — six layers corresponding to each session family's
- *     runtime plane.
+ *  4. [SessionContinuityLayer] enum — seven layers corresponding to each session family's
+ *     runtime plane (including PR-1 [SessionContinuityLayer.DURABLE]).
  *
  *  5. [AndroidSessionAxisEntry] data class — per-carrier registry entry with all required
  *     fields.
@@ -48,7 +48,7 @@ import org.junit.Test
  *     - [CanonicalSessionAxis.transitionalAliases]: returns all TRANSITIONAL_ALIAS carriers.
  *     - [CanonicalSessionAxis.canonicalCarriers]: returns all CANONICAL carriers.
  *     - [CanonicalSessionAxis.contextualAliases]: returns all CONTEXTUAL_ALIAS carriers.
- *     - [CanonicalSessionAxis.continuityModels]: all six families have continuity models.
+ *     - [CanonicalSessionAxis.continuityModels]: all seven families have continuity models.
  *     - [CanonicalSessionAxis.continuityModelFor]: returns model for a given family.
  *     - [CanonicalSessionAxis.crossRepoTermFor]: maps carrier to canonical cross-repo term.
  *
@@ -56,8 +56,8 @@ import org.junit.Test
  *     session-axis boundary events.
  *
  *  9. Cross-layer consistency:
- *     - All six session families are covered in the carrier registry.
- *     - All six session families have a continuity model.
+ *     - All seven session families are covered in the carrier registry.
+ *     - All seven session families have a continuity model.
  *     - [AndroidSessionLayerContracts] three-layer model is consistent with the axis families.
  *     - [AttachedRuntimeSession.runtimeAttachmentSessionId] alias is consistent with
  *       [CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION] canonical term.
@@ -279,8 +279,8 @@ class Pr3CanonicalSessionAxisTest {
     // ── SessionContinuityBehavior — enum completeness ─────────────────────────
 
     @Test
-    fun `five distinct continuity behaviors exist`() {
-        assertEquals(5, SessionContinuityBehavior.entries.size)
+    fun `six distinct continuity behaviors exist after PR-1`() {
+        assertEquals(6, SessionContinuityBehavior.entries.size)
     }
 
     @Test
@@ -291,13 +291,14 @@ class Pr3CanonicalSessionAxisTest {
         assertTrue(values.contains(SessionContinuityBehavior.CONVERSATION_SCOPED))
         assertTrue(values.contains(SessionContinuityBehavior.TRANSFER_SCOPED))
         assertTrue(values.contains(SessionContinuityBehavior.MESH_SCOPED))
+        assertTrue(values.contains(SessionContinuityBehavior.DURABLE_ACROSS_ACTIVATION))
     }
 
     // ── SessionContinuityLayer — enum completeness ────────────────────────────
 
     @Test
-    fun `six distinct continuity layers exist`() {
-        assertEquals(6, SessionContinuityLayer.entries.size)
+    fun `seven distinct continuity layers exist after PR-1`() {
+        assertEquals(7, SessionContinuityLayer.entries.size)
     }
 
     @Test
@@ -309,20 +310,22 @@ class Pr3CanonicalSessionAxisTest {
         assertTrue(values.contains(SessionContinuityLayer.TRANSFER))
         assertTrue(values.contains(SessionContinuityLayer.CONVERSATION))
         assertTrue(values.contains(SessionContinuityLayer.MESH))
+        assertTrue(values.contains(SessionContinuityLayer.DURABLE))
     }
 
     // ── CanonicalSessionAxis.carriers — registry completeness ─────────────────
 
     @Test
-    fun `all six session families appear in carrier registry`() {
+    fun `all seven session families appear in carrier registry after PR-1`() {
         val families = CanonicalSessionAxis.carriers.map { it.sessionFamily }.toSet()
-        assertEquals(6, families.size)
+        assertEquals(7, families.size)
         assertTrue(families.contains(CanonicalSessionFamily.CONTROL_SESSION))
         assertTrue(families.contains(CanonicalSessionFamily.RUNTIME_SESSION))
         assertTrue(families.contains(CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION))
         assertTrue(families.contains(CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION))
         assertTrue(families.contains(CanonicalSessionFamily.CONVERSATION_SESSION))
         assertTrue(families.contains(CanonicalSessionFamily.MESH_SESSION))
+        assertTrue(families.contains(CanonicalSessionFamily.DURABLE_RUNTIME_SESSION))
     }
 
     @Test
@@ -513,14 +516,14 @@ class Pr3CanonicalSessionAxisTest {
     // ── CanonicalSessionAxis.continuityModels — completeness ──────────────────
 
     @Test
-    fun `all six families have a continuity model`() {
-        assertEquals(6, CanonicalSessionAxis.continuityModels.size)
+    fun `all seven families have a continuity model after PR-1`() {
+        assertEquals(7, CanonicalSessionAxis.continuityModels.size)
         val families = CanonicalSessionAxis.continuityModels.map { it.family }.toSet()
-        assertEquals(6, families.size)
+        assertEquals(7, families.size)
     }
 
     @Test
-    fun `continuityModelFor returns non-null for all six families`() {
+    fun `continuityModelFor returns non-null for all seven families`() {
         CanonicalSessionFamily.entries.forEach { family ->
             assertNotNull(
                 "continuityModelFor($family) should be non-null",

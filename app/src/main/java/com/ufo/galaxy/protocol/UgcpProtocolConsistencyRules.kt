@@ -40,7 +40,7 @@ package com.ufo.galaxy.protocol
  *
  * ## Scope
  *
- * The eleven load-bearing shared surfaces covered are:
+ * The twelve load-bearing shared surfaces covered are:
  *
  * | Surface | [ProtocolSurface] |
  * |---------|------------------|
@@ -55,6 +55,7 @@ package com.ufo.galaxy.protocol
  * | Truth-event payload identifiers | [ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER] |
  * | Transfer lifecycle vocabulary | [ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY] |
  * | Staged-mesh execution status | [ProtocolSurface.STAGED_MESH_EXECUTION_STATUS] |
+ * | Durable session continuity | [ProtocolSurface.DURABLE_SESSION_CONTINUITY] |
  */
 
 // ── Classification types ──────────────────────────────────────────────────────
@@ -123,6 +124,18 @@ enum class ProtocolSurface(
     STAGED_MESH_EXECUTION_STATUS(
         description = "Terminal execution status values for staged-mesh subtask results (StagedMeshParticipationResult.ExecutionStatus)",
         surfaceClass = ProtocolSurfaceClass.TRANSITIONAL_COMPATIBILITY
+    ),
+
+    /**
+     * PR-1 — Durable session continuity contract.
+     *
+     * Covers the wire key values and activation-source vocabulary used by
+     * [com.ufo.galaxy.runtime.DurableSessionContinuityRecord] and the corresponding
+     * [com.ufo.galaxy.runtime.AttachedRuntimeHostSessionSnapshot] durable projection fields.
+     */
+    DURABLE_SESSION_CONTINUITY(
+        description = "Durable session continuity wire key vocabulary and activation-source values (PR-1)",
+        surfaceClass = ProtocolSurfaceClass.CANONICAL
     )
 }
 
@@ -352,6 +365,7 @@ object UgcpProtocolConsistencyRules {
      *  - `signal_id`            — direct canonical match to `execution_instance_id`
      *  - `control_session_id`   — canonical cross-repo term; Android currently uses `session_id` as wire alias
      *  - `mesh_session_id`      — canonical cross-repo term; Android currently uses `mesh_id` as wire alias
+     *  - `durable_session_id`   — canonical cross-repo term; PR-1 durable runtime session era identity
      *
      * Transitional aliases (Android wire names that differ from the canonical cross-repo term):
      *  - `session_id`  → `control_session_id`  (TRANSITIONAL_ALIAS)
@@ -364,7 +378,8 @@ object UgcpProtocolConsistencyRules {
             "attached_session_id",
             "signal_id",
             "control_session_id",
-            "mesh_session_id"
+            "mesh_session_id",
+            "durable_session_id"
         ),
         transitionalAliases = listOf(
             TransitionalAlias(
@@ -541,6 +556,53 @@ object UgcpProtocolConsistencyRules {
     )
 
     /**
+     * PR-1 — Durable session continuity vocabulary.
+     *
+     * Covers the activation-source values used by [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.activationSource]
+     * (i.e., the SessionOpenSource.wireValue values that can start a new durable era) and the
+     * canonical wire key strings carried in
+     * [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.toMetadataMap] and
+     * [com.ufo.galaxy.runtime.AttachedRuntimeHostSessionSnapshot.toMap].
+     *
+     * Canonical activation-source values:
+     *  - `user_activation`   — user-initiated enable/start path
+     *  - `background_restore`— process/service restore path
+     *  - `test_only`         — synthetic test-only activation
+     *
+     * Canonical wire key values:
+     *  - `durable_session_id`
+     *  - `session_continuity_epoch`
+     *  - `durable_session_activation_epoch_ms`
+     *  - `durable_session_activation_source`
+     *  - `snapshot_durable_session_id`
+     *  - `snapshot_session_continuity_epoch`
+     */
+    val durableSessionContinuityRule: ConsistencyRule = ConsistencyRule(
+        surface = ProtocolSurface.DURABLE_SESSION_CONTINUITY,
+        canonicalValues = setOf(
+            // Activation source values (DurableSessionContinuityRecord.activationSource)
+            "user_activation",
+            "background_restore",
+            "test_only",
+            // Wire key names (DurableSessionContinuityRecord companion + snapshot keys)
+            "durable_session_id",
+            "session_continuity_epoch",
+            "durable_session_activation_epoch_ms",
+            "durable_session_activation_source",
+            "snapshot_durable_session_id",
+            "snapshot_session_continuity_epoch"
+        ),
+        transitionalAliases = emptyList(),
+        notes = "PR-1 durable session continuity. " +
+            "DurableSessionContinuityRecord.durableSessionId is the top-level stable Android session " +
+            "identity; it persists across WS reconnects within a single activation era and resets " +
+            "only on stop() or invalidateSession(). " +
+            "The sessionContinuityEpoch counter increments on each RECONNECT_RECOVERY open. " +
+            "These values are canonical; do not add new activation-source values without updating " +
+            "SessionOpenSource and coordinating with the center-side durable session registry."
+    )
+
+    /**
      * All consistency rules, indexed by [ProtocolSurface].
      */
     val allRules: Map<ProtocolSurface, ConsistencyRule> = mapOf(
@@ -554,7 +616,8 @@ object UgcpProtocolConsistencyRules {
         ProtocolSurface.CAPABILITY_READINESS_DESCRIPTOR to capabilityReadinessDescriptorRule,
         ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER to truthEventPayloadIdentifierRule,
         ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY to transferLifecycleVocabularyRule,
-        ProtocolSurface.STAGED_MESH_EXECUTION_STATUS to stagedMeshExecutionStatusRule
+        ProtocolSurface.STAGED_MESH_EXECUTION_STATUS to stagedMeshExecutionStatusRule,
+        ProtocolSurface.DURABLE_SESSION_CONTINUITY to durableSessionContinuityRule
     )
 
     /**
