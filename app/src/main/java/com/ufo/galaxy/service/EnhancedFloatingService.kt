@@ -34,6 +34,7 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.runtime.CrossDeviceSetupError
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
@@ -188,15 +189,17 @@ class EnhancedFloatingService : Service() {
         // 设置 WebSocket 监听
         setupWebSocketListener()
 
-        // Observe RuntimeController registration failures and show floating dialog.
+        // Observe typed setup errors (canonical path — supersedes deprecated registrationError).
+        // CrossDeviceSetupError carries both the human-readable reason and the category for
+        // category-appropriate recovery actions in the overlay dialog.
         serviceScope.launch {
-            UFOGalaxyApplication.runtimeController.registrationError.collect { reason ->
-                Log.w(TAG, "[FLOAT] Registration failure: $reason")
+            UFOGalaxyApplication.runtimeController.setupError.collect { err ->
+                Log.w(TAG, "[FLOAT] Setup error: category=${err.category.wireValue} reason=${err.reason}")
                 // Reset switch state on main thread.
                 crossDeviceSwitch?.post {
                     crossDeviceSwitch?.isChecked = false
                 }
-                showRegistrationFailureDialog(reason)
+                showRegistrationFailureDialog(err)
             }
         }
 
@@ -347,11 +350,11 @@ class EnhancedFloatingService : Service() {
                         updateStatusLabel()
                         if (isChecked) {
                             // Delegate to RuntimeController; it handles registration and
-                            // emits a registrationError event on failure (observed above).
+                            // emits a setupError event on failure (observed above).
                             serviceScope.launch {
                                 val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
                                 if (!ok) {
-                                    // Revert switch; dialog is shown via registrationError observer.
+                                    // Revert switch; dialog is shown via setupError observer.
                                     crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = false }
                                 }
                             }
@@ -642,17 +645,24 @@ class EnhancedFloatingService : Service() {
     }
 
     /**
-     * Shows a floating overlay dialog when cross-device device registration fails.
+     * Shows a category-aware floating overlay dialog when cross-device registration fails.
+     *
+     * Replaces the generic "重试" button with context-appropriate recovery actions based on
+     * [CrossDeviceSetupError.category]:
+     *  - [CrossDeviceSetupError.Category.CONFIGURATION] → "打开设置" button (opens network settings).
+     *  - [CrossDeviceSetupError.Category.NETWORK] → "重试" button (retries the connection).
+     *  - [CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED] → "打开权限" button.
      *
      * Because [EnhancedFloatingService] is a [Service] (not an [Activity]), we cannot use
      * the standard [android.app.AlertDialog] API directly. Instead, we create a small
      * overlay view using the [WindowManager] with [TYPE_APPLICATION_OVERLAY] type, which
      * is the same mechanism used for the floating island itself.
      *
-     * The dialog auto-dismisses when the user taps "确定". If the overlay permission has
+     * The dialog auto-dismisses when the user taps "关闭跨设备". If the overlay permission has
      * not been granted yet, the error is logged (overlay cannot be shown without permission).
      */
-    private fun showRegistrationFailureDialog(reason: String) {
+    private fun showRegistrationFailureDialog(err: CrossDeviceSetupError) {
+        val reason = err.reason
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
             !android.provider.Settings.canDrawOverlays(this)
         ) {
@@ -712,38 +722,92 @@ class EnhancedFloatingService : Service() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).also { it.bottomMargin = dpToPx(8) })
 
-        // Retry button: re-attempts cross-device registration.
-        dialogView.addView(android.widget.Button(context).apply {
-            text = "重试"
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF1976D2.toInt())
-            setOnClickListener {
-                try { windowManager.removeView(dialogView) } catch (_: Exception) {}
-                serviceScope.launch {
-                    val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
-                    crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = ok }
-                    if (!ok) {
-                        // Notify the user that the retry also failed.
-                        android.widget.Toast.makeText(
-                            context,
-                            "重试失败，请检查网络或 Gateway 配置后再试。",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
+        // Category-aware recovery button.
+        when (err.category) {
+            CrossDeviceSetupError.Category.CONFIGURATION -> {
+                // Configuration error: guide the user to open network / gateway settings.
+                dialogView.addView(android.widget.Button(context).apply {
+                    text = "打开设置"
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(0xFF1976D2.toInt())
+                    setOnClickListener {
+                        try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+                        try {
+                            startActivity(
+                                android.content.Intent(context, com.ufo.galaxy.ui.MainActivity::class.java).apply {
+                                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                    putExtra("open_network_settings", true)
+                                }
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "[FLOAT] Failed to open settings: ${e.message}")
+                        }
                     }
-                }
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
             }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+            CrossDeviceSetupError.Category.CAPABILITY_NOT_SATISFIED -> {
+                // Capability/permission error: guide the user to open app settings.
+                dialogView.addView(android.widget.Button(context).apply {
+                    text = "打开权限"
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(0xFFE65100.toInt())
+                    setOnClickListener {
+                        try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+                        try {
+                            startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", packageName, null)
+                                ).apply { flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK }
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "[FLOAT] Failed to open app settings: ${e.message}")
+                        }
+                    }
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+            }
+            CrossDeviceSetupError.Category.NETWORK -> {
+                // Network error: offer a direct retry.
+                dialogView.addView(android.widget.Button(context).apply {
+                    text = "重试"
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(0xFF1976D2.toInt())
+                    setOnClickListener {
+                        try { windowManager.removeView(dialogView) } catch (_: Exception) {}
+                        serviceScope.launch {
+                            val ok = UFOGalaxyApplication.runtimeController.startWithTimeout()
+                            crossDeviceSwitch?.post { crossDeviceSwitch?.isChecked = ok }
+                            if (!ok) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "重试失败，请检查网络或 Gateway 配置后再试。",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+            }
+        }
 
         try {
             windowManager.addView(dialogView, dialogParams)
-            Log.i(TAG, "[FLOAT] Registration failure dialog shown: $reason")
+            Log.i(TAG, "[FLOAT] Registration failure dialog shown: category=${err.category.wireValue} reason=$reason")
         } catch (e: Exception) {
             Log.e(TAG, "[FLOAT] Failed to show registration failure dialog", e)
         }
     }
+
 
     /**
      * 发送消息

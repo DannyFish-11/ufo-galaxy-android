@@ -43,11 +43,11 @@ import kotlin.coroutines.resume
  *    and triggers a best-effort reconnect — without emitting [registrationError] or
  *    modifying settings on transient failure.
  *  - **Failure**: Any registration or network failure inside [start] / [startWithTimeout]
- *    emits a human-readable reason via [registrationError] and a typed
- *    [CrossDeviceSetupError] via [setupError] so both
+ *    emits a typed [CrossDeviceSetupError] via [setupError] so both
  *    [com.ufo.galaxy.ui.MainActivity] and [com.ufo.galaxy.service.EnhancedFloatingService]
- *    can show a dialog/alert with context-appropriate recovery actions — **never** silently
- *    log-only.
+ *    can show a dialog/alert with category-appropriate recovery actions — **never** silently
+ *    log-only.  The legacy [registrationError] string bridge is also emitted for backward
+ *    compatibility but is deprecated; new code must use [setupError].
  *  - **Reconnect** ([reconnect]): convenience method that cleanly stops and then
  *    re-starts the runtime in one atomic step; intended for "save settings and reconnect"
  *    flows and category-aware retry logic.
@@ -144,19 +144,36 @@ class RuntimeController(
      * One-time registration failure events.
      *
      * Emits a human-readable failure reason whenever [start] fails (network error,
-     * timeout, or explicit WS error). Both [com.ufo.galaxy.ui.MainActivity] and
-     * [com.ufo.galaxy.service.EnhancedFloatingService] must collect this flow and
-     * show an AlertDialog/overlay dialog — **never** silently swallow the event.
+     * timeout, or explicit WS error).
+     *
+     * @deprecated Consumers must migrate to [setupError] which provides typed
+     * [CrossDeviceSetupError] classification for category-appropriate recovery actions.
+     * This legacy string bridge is retained for backward compatibility only and must not
+     * receive new observers.  See [CompatibilitySurfaceRetirementRegistry] entry
+     * `"runtime_registration_error_string_bridge"`.
      */
+    @Deprecated(
+        message = "Migrate to setupError (SharedFlow<CrossDeviceSetupError>) for typed, " +
+            "category-aware error handling. This string bridge is a HIGH_RISK_ACTIVE " +
+            "compatibility surface — see CompatibilitySurfaceRetirementRegistry.",
+        replaceWith = ReplaceWith("setupError")
+    )
     private val _registrationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    @Deprecated(
+        message = "Migrate to setupError (SharedFlow<CrossDeviceSetupError>) for typed, " +
+            "category-aware error handling. This string bridge is a HIGH_RISK_ACTIVE " +
+            "compatibility surface — see CompatibilitySurfaceRetirementRegistry.",
+        replaceWith = ReplaceWith("setupError")
+    )
     val registrationError: SharedFlow<String> = _registrationError.asSharedFlow()
 
     /**
      * PR-27 — Typed setup error events for product-grade error differentiation.
      *
-     * Emits a [CrossDeviceSetupError] alongside every [registrationError] emission so that
-     * surface layers can present **category-appropriate** recovery actions rather than a
-     * single generic "retry" option:
+     * The **canonical failure signal** for cross-device setup errors.  All consumers must
+     * observe this flow (not the deprecated [registrationError] string bridge) to present
+     * **category-appropriate** recovery actions:
      *
      *  - [CrossDeviceSetupError.Category.CONFIGURATION] — gateway not configured; recovery
      *    action is to open network settings.
@@ -167,10 +184,9 @@ class RuntimeController(
      *
      * The [CrossDeviceSetupError.canRetry] flag indicates whether the retry path is
      * meaningful for the given category without a settings change.
-     *
-     * Both [registrationError] and [setupError] are emitted atomically in [handleFailure];
-     * consumers should prefer [setupError] for new code but [registrationError] remains
-     * available for backward compatibility.
+     * The [CrossDeviceSetupError.reason] carries the same human-readable string that the
+     * deprecated [registrationError] bridge emits, so a single [setupError] observer
+     * provides complete information.
      */
     private val _setupError = MutableSharedFlow<CrossDeviceSetupError>(extraBufferCapacity = 1)
     val setupError: SharedFlow<CrossDeviceSetupError> = _setupError.asSharedFlow()
@@ -971,24 +987,24 @@ class RuntimeController(
      * Returns a legacy host-facing snapshot of the current attached session's reuse state
      * as a [Map], or `null` when no session is active (PR-17).
      *
-     * Compatibility note:
-     * this map accessor is retained for backward compatibility only. Canonical host-session
-     * truth flows through [hostSessionSnapshot] / [currentHostSessionSnapshot].
-     *
-     * The returned map is identical to [AttachedRuntimeSession.toMetadataMap] and always
-     * contains at minimum:
-     *  - [AttachedRuntimeSession.KEY_SESSION_ID]
-     *  - [AttachedRuntimeSession.KEY_DEVICE_ID]
-     *  - [AttachedRuntimeSession.KEY_STATE]
-     *  - [AttachedRuntimeSession.KEY_DELEGATED_EXECUTION_COUNT]
-     *  - [AttachedRuntimeSession.KEY_IS_REUSE_VALID]
-     *  - [AttachedRuntimeSession.KEY_DETACH_CAUSE] (when applicable)
+     * @deprecated Consumers must migrate to [hostSessionSnapshot] (reactive
+     * [StateFlow]) or [currentHostSessionSnapshot] (point-in-time typed query).
+     * This untyped map projection is a HIGH_RISK_ACTIVE compatibility surface retained
+     * for backward compatibility only — see [CompatibilitySurfaceRetirementRegistry]
+     * entry `"runtime_host_session_legacy_map_bridge"`.
      *
      * Prefer [hostSessionSnapshot] for reactive canonical truth and
      * [currentHostSessionSnapshot] for point-in-time typed reads.
      *
      * @return An immutable [Map] with all host-facing session fields; `null` if no session exists.
      */
+    @Deprecated(
+        message = "Migrate to hostSessionSnapshot (StateFlow<AttachedRuntimeHostSessionSnapshot?>) " +
+            "for reactive truth, or currentHostSessionSnapshot() for point-in-time typed reads. " +
+            "This untyped map bridge is a HIGH_RISK_ACTIVE compatibility surface — see " +
+            "CompatibilitySurfaceRetirementRegistry.",
+        replaceWith = ReplaceWith("currentHostSessionSnapshot()")
+    )
     fun currentSessionSnapshot(): Map<String, Any>? =
         _attachedSession.value?.toMetadataMap()
 

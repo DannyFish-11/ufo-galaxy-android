@@ -37,7 +37,7 @@ import org.junit.Test
  * ## Test matrix
  *
  * ### CompatibilitySurfaceRetirementRegistry — inventory completeness
- *  - registrationError runtime bridge is registered and HIGH_RISK_ACTIVE
+ *  - registrationError runtime bridge is registered and RETIRE_AFTER_MIGRATION (migrated in PR-36)
  *  - currentSessionSnapshot legacy map bridge is registered and HIGH_RISK_ACTIVE
  *  - session identifier carrier protocol surface is registered and HIGH_RISK_ACTIVE
  *  - staged mesh execution status protocol surface is registered and HIGH_RISK_ACTIVE
@@ -50,7 +50,7 @@ import org.junit.Test
  *  - REPLY dispatch adapter is registered and RETIRE_AFTER_COORDINATION
  *  - RAG_QUERY dispatch adapter is registered and RETIRE_AFTER_COORDINATION
  *  - CODE_EXECUTE dispatch adapter is registered and RETIRE_AFTER_COORDINATION
- *  - PEER_ANNOUNCE dispatch adapter is registered and RETIRE_AFTER_COORDINATION
+ *  - PEER_ANNOUNCE dispatch adapter is registered and DECOMMISSION_CANDIDATE (promoted in PR-36)
  *  - WAKE_EVENT dispatch adapter is registered and RETIRE_AFTER_COORDINATION
  *  - SESSION_MIGRATE dispatch adapter is registered and RETIRE_AFTER_COORDINATION
  *  - BROADCAST dispatch adapter is registered and RETIRE_AFTER_COORDINATION
@@ -59,10 +59,10 @@ import org.junit.Test
  *  - forId returns null for an unregistered surface ID
  *
  * ### CompatibilitySurfaceRetirementRegistry — tier and kind counts
- *  - HIGH_RISK_ACTIVE count is 4
- *  - RETIRE_AFTER_MIGRATION count is 2
- *  - RETIRE_AFTER_COORDINATION count is 11
- *  - DECOMMISSION_CANDIDATE count is 2
+ *  - HIGH_RISK_ACTIVE count is 3 (registrationError bridge moved to RETIRE_AFTER_MIGRATION in PR-36)
+ *  - RETIRE_AFTER_MIGRATION count is 3 (registrationError bridge added in PR-36)
+ *  - RETIRE_AFTER_COORDINATION count is 10 (PEER_ANNOUNCE promoted to DECOMMISSION_CANDIDATE in PR-36)
+ *  - DECOMMISSION_CANDIDATE count is 3 (PEER_ANNOUNCE added in PR-36)
  *  - total entry count is 19
  *  - RUNTIME_BRIDGE kind count is 2
  *  - PROTOCOL_ALIAS kind count is 2
@@ -77,8 +77,8 @@ import org.junit.Test
  *  - all entries have non-blank retirementGate
  *  - all surfaceIds are unique (no duplicates)
  *  - coordinationGatedCount equals RETIRE_AFTER_COORDINATION count
- *  - highRiskSurfaceIds contains exactly the 4 HIGH_RISK_ACTIVE surface IDs
- *  - decommissionCandidateIds contains exactly the 2 DECOMMISSION_CANDIDATE surface IDs
+ *  - highRiskSurfaceIds contains exactly the 3 remaining HIGH_RISK_ACTIVE surface IDs
+ *  - decommissionCandidateIds contains exactly the 3 DECOMMISSION_CANDIDATE surface IDs
  *
  * ### CompatibilitySurfaceRetirementRegistry — governance contract
  *  - no RUNTIME_BRIDGE entry is DECOMMISSION_CANDIDATE (bridges need migration, not deletion)
@@ -99,12 +99,16 @@ class Pr10CompatibilitySurfaceRetirementTest {
     // ══════════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `registrationError runtime bridge is registered and HIGH_RISK_ACTIVE`() {
+    fun `registrationError runtime bridge is registered and RETIRE_AFTER_MIGRATION`() {
         val entry = CompatibilitySurfaceRetirementRegistry.forId(
             "runtime_registration_error_string_bridge"
         )
         assertNotNull("registrationError bridge must be registered", entry)
-        assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.HIGH_RISK_ACTIVE, entry!!.retirementTier)
+        assertEquals(
+            "registrationError bridge must be RETIRE_AFTER_MIGRATION after PR-36 consumer migration",
+            CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_MIGRATION,
+            entry!!.retirementTier
+        )
         assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.RUNTIME_BRIDGE, entry.surfaceKind)
     }
 
@@ -219,10 +223,14 @@ class Pr10CompatibilitySurfaceRetirementTest {
     }
 
     @Test
-    fun `PEER_ANNOUNCE dispatch adapter is registered and RETIRE_AFTER_COORDINATION`() {
+    fun `PEER_ANNOUNCE dispatch adapter is registered and DECOMMISSION_CANDIDATE`() {
         val entry = CompatibilitySurfaceRetirementRegistry.forId("dispatch_adapter_peer_announce_transitional")
         assertNotNull(entry)
-        assertEquals(CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION, entry!!.retirementTier)
+        assertEquals(
+            "PEER_ANNOUNCE adapter must be DECOMMISSION_CANDIDATE after PR-36 stateful handler promotion",
+            CompatibilitySurfaceRetirementRegistry.RetirementTier.DECOMMISSION_CANDIDATE,
+            entry!!.retirementTier
+        )
         assertEquals(CompatibilitySurfaceRetirementRegistry.SurfaceKind.DISPATCH_ADAPTER, entry.surfaceKind)
     }
 
@@ -276,10 +284,10 @@ class Pr10CompatibilitySurfaceRetirementTest {
     // ══════════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `HIGH_RISK_ACTIVE count is 4`() {
+    fun `HIGH_RISK_ACTIVE count is 3 after PR-36 registrationError bridge migration`() {
         assertEquals(
-            "exactly 4 HIGH_RISK_ACTIVE entries expected",
-            4,
+            "exactly 3 HIGH_RISK_ACTIVE entries expected after PR-36 moves registrationError to RETIRE_AFTER_MIGRATION",
+            3,
             CompatibilitySurfaceRetirementRegistry.byTier(
                 CompatibilitySurfaceRetirementRegistry.RetirementTier.HIGH_RISK_ACTIVE
             ).size
@@ -287,10 +295,10 @@ class Pr10CompatibilitySurfaceRetirementTest {
     }
 
     @Test
-    fun `RETIRE_AFTER_MIGRATION count is 2`() {
+    fun `RETIRE_AFTER_MIGRATION count is 3 after PR-36 registrationError migration`() {
         assertEquals(
-            "exactly 2 RETIRE_AFTER_MIGRATION entries expected",
-            2,
+            "exactly 3 RETIRE_AFTER_MIGRATION entries expected after PR-36 adds registrationError bridge",
+            3,
             CompatibilitySurfaceRetirementRegistry.byTier(
                 CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_MIGRATION
             ).size
@@ -298,10 +306,10 @@ class Pr10CompatibilitySurfaceRetirementTest {
     }
 
     @Test
-    fun `RETIRE_AFTER_COORDINATION count is 11`() {
+    fun `RETIRE_AFTER_COORDINATION count is 10 after PR-36 PEER_ANNOUNCE promotion`() {
         assertEquals(
-            "exactly 11 RETIRE_AFTER_COORDINATION entries expected",
-            11,
+            "exactly 10 RETIRE_AFTER_COORDINATION entries expected after PR-36 moves PEER_ANNOUNCE to DECOMMISSION_CANDIDATE",
+            10,
             CompatibilitySurfaceRetirementRegistry.byTier(
                 CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION
             ).size
@@ -309,10 +317,10 @@ class Pr10CompatibilitySurfaceRetirementTest {
     }
 
     @Test
-    fun `DECOMMISSION_CANDIDATE count is 2`() {
+    fun `DECOMMISSION_CANDIDATE count is 3 after PR-36 PEER_ANNOUNCE promotion`() {
         assertEquals(
-            "exactly 2 DECOMMISSION_CANDIDATE entries expected",
-            2,
+            "exactly 3 DECOMMISSION_CANDIDATE entries expected after PR-36 adds PEER_ANNOUNCE",
+            3,
             CompatibilitySurfaceRetirementRegistry.byTier(
                 CompatibilitySurfaceRetirementRegistry.RetirementTier.DECOMMISSION_CANDIDATE
             ).size
@@ -433,21 +441,33 @@ class Pr10CompatibilitySurfaceRetirementTest {
     }
 
     @Test
-    fun `highRiskSurfaceIds contains exactly the 4 HIGH_RISK_ACTIVE surface IDs`() {
+    fun `highRiskSurfaceIds contains exactly the 3 remaining HIGH_RISK_ACTIVE surface IDs`() {
         val highRisk = CompatibilitySurfaceRetirementRegistry.highRiskSurfaceIds
-        assertEquals("highRiskSurfaceIds must contain exactly 4 entries", 4, highRisk.size)
-        assertTrue(highRisk.contains("runtime_registration_error_string_bridge"))
+        assertEquals(
+            "highRiskSurfaceIds must contain exactly 3 entries after PR-36 moves registrationError to RETIRE_AFTER_MIGRATION",
+            3,
+            highRisk.size
+        )
         assertTrue(highRisk.contains("runtime_host_session_legacy_map_bridge"))
         assertTrue(highRisk.contains("session_identifier_carrier_transitional_surface"))
         assertTrue(highRisk.contains("staged_mesh_execution_status_transitional_surface"))
+        assertFalse(
+            "runtime_registration_error_string_bridge must not be HIGH_RISK_ACTIVE after PR-36 deprecation+migration",
+            highRisk.contains("runtime_registration_error_string_bridge")
+        )
     }
 
     @Test
-    fun `decommissionCandidateIds contains exactly the 2 DECOMMISSION_CANDIDATE surface IDs`() {
+    fun `decommissionCandidateIds contains exactly the 3 DECOMMISSION_CANDIDATE surface IDs`() {
         val candidates = CompatibilitySurfaceRetirementRegistry.decommissionCandidateIds
-        assertEquals("decommissionCandidateIds must contain exactly 2 entries", 2, candidates.size)
+        assertEquals(
+            "decommissionCandidateIds must contain exactly 3 entries after PR-36 adds PEER_ANNOUNCE",
+            3,
+            candidates.size
+        )
         assertTrue(candidates.contains("dispatch_adapter_lock_transitional"))
         assertTrue(candidates.contains("dispatch_adapter_unlock_transitional"))
+        assertTrue(candidates.contains("dispatch_adapter_peer_announce_transitional"))
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -495,7 +515,7 @@ class Pr10CompatibilitySurfaceRetirementTest {
             "dispatch_adapter_reply_transitional",
             "dispatch_adapter_rag_query_transitional",
             "dispatch_adapter_code_execute_transitional",
-            "dispatch_adapter_peer_announce_transitional",
+            // PEER_ANNOUNCE removed: promoted to DECOMMISSION_CANDIDATE in PR-36
             "dispatch_adapter_wake_event_transitional",
             "dispatch_adapter_session_migrate_transitional",
             "dispatch_adapter_broadcast_transitional"

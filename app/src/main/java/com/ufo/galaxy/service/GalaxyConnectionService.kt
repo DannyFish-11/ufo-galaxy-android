@@ -42,6 +42,7 @@ import com.ufo.galaxy.protocol.MeshTopologyPayload
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.PeerExchangePayload
+import com.ufo.galaxy.protocol.PeerAnnouncePayload
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.model.ModelDownloader
@@ -237,6 +238,18 @@ class GalaxyConnectionService : Service() {
     @Volatile
     private var coordSyncTickCount: Int = 0
 
+    /**
+     * Per-peer presence record from the most recent PEER_ANNOUNCE message received from
+     * each peer device in this session.  Keyed by `peer_device_id`; value is the
+     * [PeerAnnouncePayload] carrying role and session context for that peer.
+     *
+     * Retained so that higher-level components can inspect which peers have announced
+     * themselves without re-parsing raw messages.  Written only on the IO dispatcher
+     * inside [handlePeerAnnounce].
+     */
+    @Volatile
+    private var lastPeerAnnouncements: Map<String, PeerAnnouncePayload> = emptyMap()
+
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
     
     inner class LocalBinder : Binder() {
@@ -347,6 +360,9 @@ class GalaxyConnectionService : Service() {
              * - [MsgType.MESH_TOPOLOGY]  → [handleMeshTopology] (topology snapshot + ack)
              * - [MsgType.COORD_SYNC]     → [handleCoordSync] (sequence-aware CoordSyncAckPayload)
              *
+             * ## PR-36 routing
+             * - [MsgType.PEER_ANNOUNCE]  → [handlePeerAnnounce] (per-session peer presence record + ack)
+             *
              * ## Generic minimal-compat path (transitional)
              * All other types in [MsgType.ADVANCED_TYPES] continue to use the minimal-compat
              * path: a generic [AckPayload] is sent for [MsgType.ACK_ON_RECEIPT_TYPES], and all
@@ -377,6 +393,11 @@ class GalaxyConnectionService : Service() {
                     }
                     MsgType.COORD_SYNC -> {
                         serviceScope.launch { handleCoordSync(messageId, rawJson) }
+                        return
+                    }
+                    // ── PR-36: Route promoted PEER_ANNOUNCE to stateful handler ─────────
+                    MsgType.PEER_ANNOUNCE -> {
+                        serviceScope.launch { handlePeerAnnounce(messageId, rawJson) }
                         return
                     }
                     else -> Unit
@@ -1312,6 +1333,61 @@ class GalaxyConnectionService : Service() {
             )
         )
         Log.i(TAG, "[PEER_EXCHANGE] source=${payload.source_device_id} capabilities=${payload.capabilities.size} known_peers=${lastPeerCapabilities.size}")
+    }
+
+    /**
+     * Dedicated handler for inbound [MsgType.PEER_ANNOUNCE] messages (PR-36 promoted).
+     *
+     * Replaces the minimal-compat (log-only) path with structured peer presence tracking:
+     * 1. Parses the inbound message into a [PeerAnnouncePayload].
+     * 2. Updates [lastPeerAnnouncements] with the latest announce record for this peer,
+     *    retaining the entry with the highest [PeerAnnouncePayload.announce_seq] so that
+     *    out-of-order delivery does not overwrite a newer record.
+     * 3. Sends a delivery [AckPayload] back to the gateway.
+     * 4. Emits a structured [GalaxyLogger.TAG_PEER_ANNOUNCE] log entry.
+     *
+     * @param messageId Optional message_id from the inbound AIP v3 envelope.
+     * @param rawJson   Raw JSON string of the inbound peer_announce message.
+     */
+    private fun handlePeerAnnounce(messageId: String?, rawJson: String) {
+        val payload = try {
+            val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
+            val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
+            PeerAnnouncePayload(
+                peer_device_id = p?.get("peer_device_id")?.asString ?: "",
+                peer_role = p?.get("peer_role")?.asString,
+                session_id = p?.get("session_id")?.asString,
+                announce_seq = p?.get("announce_seq")?.asInt ?: 0
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "[PEER_ANNOUNCE] failed to parse payload: ${e.message}")
+            PeerAnnouncePayload(peer_device_id = "")
+        }
+
+        // Update the per-peer presence record when we have a valid peer device id,
+        // but only when the incoming announce_seq is not stale.
+        if (payload.peer_device_id.isNotBlank()) {
+            val existing = lastPeerAnnouncements[payload.peer_device_id]
+            if (existing == null || payload.announce_seq >= existing.announce_seq) {
+                lastPeerAnnouncements = lastPeerAnnouncements + (payload.peer_device_id to payload)
+            }
+        }
+
+        // Send delivery ack.
+        sendAdvancedAck(MsgType.PEER_ANNOUNCE, messageId)
+
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_PEER_ANNOUNCE, mapOf(
+                "event" to "peer_announce_received",
+                "peer_device_id" to payload.peer_device_id,
+                "peer_role" to (payload.peer_role ?: ""),
+                "session_id" to (payload.session_id ?: ""),
+                "announce_seq" to payload.announce_seq,
+                "message_id" to (messageId ?: ""),
+                "known_peer_count" to lastPeerAnnouncements.size
+            )
+        )
+        Log.i(TAG, "[PEER_ANNOUNCE] peer=${payload.peer_device_id} role=${payload.peer_role} seq=${payload.announce_seq} known_peers=${lastPeerAnnouncements.size}")
     }
 
     /**

@@ -53,6 +53,7 @@ import kotlin.concurrent.withLock
  * | `GALAXY:SESSION:AXIS`      | Session-axis boundary event for cross-repo reconciliation (PR-3) |
  * | `GALAXY:LONG_TAIL:COMPAT` | Long-tail compatibility path exercised (PR-35)              |
  * | `GALAXY:PEER:EXCHANGE`    | PEER_EXCHANGE received and processed (PR-35)                |
+ * | `GALAXY:PEER:ANNOUNCE`    | PEER_ANNOUNCE received and processed (PR-36)                |
  * | `GALAXY:MESH:TOPOLOGY`    | MESH_TOPOLOGY received and processed (PR-35)                |
  * | `GALAXY:COORD:SYNC`       | COORD_SYNC ack sent with sequence-aware payload (PR-35)     |
  * | `GALAXY:INTERACTION:ACCEPTANCE` | Product-grade interaction acceptance checkpoint (PR-34) |
@@ -309,6 +310,20 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_PEER_EXCHANGE = "GALAXY:PEER:EXCHANGE"
+
+    /**
+     * Emitted by the dedicated PEER_ANNOUNCE handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `peer_device_id`, `announce_seq`.
+     * Optional fields: `peer_role`, `session_id`, `known_peer_count`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:PEER:ANNOUNCE","fields":{"event":"peer_announce_received","peer_device_id":"Pixel_7","announce_seq":1,"known_peer_count":2}}
+     * ```
+     */
+    const val TAG_PEER_ANNOUNCE = "GALAXY:PEER:ANNOUNCE"
 
     /**
      * Emitted by the dedicated MESH_TOPOLOGY handler in

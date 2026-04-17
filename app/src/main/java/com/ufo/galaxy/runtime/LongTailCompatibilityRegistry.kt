@@ -3,7 +3,7 @@ package com.ufo.galaxy.runtime
 import com.ufo.galaxy.protocol.MsgType
 
 /**
- * PR-35 — Long-tail compatibility surface registry.
+ * PR-35 / PR-36 — Long-tail compatibility surface registry.
  *
  * Explicitly inventories every AIP v3 message type that currently operates (or previously
  * operated) in minimal-compat / generic-forward mode, and classifies it by its intended
@@ -27,10 +27,10 @@ import com.ufo.galaxy.protocol.MsgType
  * | [CompatTier]                  | Meaning                                                              |
  * |-------------------------------|----------------------------------------------------------------------|
  * | [CompatTier.CANONICAL]        | Fully implemented in the main dispatch chain; not a long-tail path.  |
- * | [CompatTier.PROMOTED]         | Promoted in PR-35 to dedicated stateful handling / lifecycle semantics. |
+ * | [CompatTier.PROMOTED]         | Promoted to dedicated stateful handling / lifecycle semantics.       |
  * | [CompatTier.TRANSITIONAL]     | Minimal-compat placeholder; explicitly not intended for extension.   |
  *
- * ## Highest-value promoted flows (PR-35)
+ * ## Promoted flows (PR-35)
  *
  * The three highest-value long-tail flows are promoted from minimal-compat to dedicated
  * stateful handling in PR-35:
@@ -46,6 +46,12 @@ import com.ufo.galaxy.protocol.MsgType
  * 3. **[MsgType.COORD_SYNC]** — Coordination sync tick: promoted from generic ACK to
  *    sequence-aware [com.ufo.galaxy.protocol.CoordSyncAckPayload] response with session
  *    tick counter.
+ *
+ * ## Promoted flows (PR-36)
+ *
+ * 4. **[MsgType.PEER_ANNOUNCE]** — Peer presence announcement: parsed into
+ *    [com.ufo.galaxy.protocol.PeerAnnouncePayload]; per-session peer presence record retained
+ *    per peer device id; structured ACK sent.
  *
  * ## Transitional surfaces
  *
@@ -188,10 +194,11 @@ object LongTailCompatibilityRegistry {
         ),
         LongTailEntry(
             type = MsgType.PEER_ANNOUNCE,
-            tier = CompatTier.TRANSITIONAL,
-            description = "Gateway announces a new peer device joining the session.",
-            transitionalNote = "Logged only; no peer-state tracking implemented. " +
-                "Transitional — must not be extended as canonical architecture."
+            tier = CompatTier.PROMOTED,
+            description = "Gateway announces a new peer device joining the session. " +
+                "PR-36: parsed into PeerAnnouncePayload; per-session peer presence record retained " +
+                "per peer device id (newest announce_seq wins); structured ACK sent. " +
+                "Previous status: logged only (minimal-compat)."
         ),
         LongTailEntry(
             type = MsgType.WAKE_EVENT,

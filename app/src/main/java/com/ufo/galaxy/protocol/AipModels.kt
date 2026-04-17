@@ -78,7 +78,8 @@ enum class MsgType(val value: String) {
     CODE_RESULT("code_result"),
 
     /** Downlink: gateway announces a new peer device joining the session.
-     *  @status minimal-compat — logged; no peer-state tracking yet. */
+     *  @status pr36-promoted — [PeerAnnouncePayload] parsed; per-session joined-peer record
+     *  retained; structured ACK sent. Promoted from minimal-compat (logged only) in PR-36. */
     PEER_ANNOUNCE("peer_announce"),
     /** Downlink/Uplink: peer capability exchange between devices.
      *  @status pr35-promoted — [PeerExchangePayload] parsed; capability record retained per peer;
@@ -865,4 +866,31 @@ data class CoordSyncAckPayload(
     val sync_seq: Int = 0,
     val tick_count: Int,
     val phase: String = "active"
+)
+
+// ── PR-36: Promoted long-tail payload model ───────────────────────────────────────────────
+// PeerAnnouncePayload promotes PEER_ANNOUNCE from logged-only minimal-compat to a stateful
+// peer-presence tracker that retains a per-session joined-peer record.
+
+/**
+ * Inbound payload for [MsgType.PEER_ANNOUNCE].
+ *
+ * Carries the announcement of a new peer device joining the current session, pushed by the
+ * gateway when a peer connects or re-connects.  Promoted from minimal-compat (logged only)
+ * to dedicated stateful handling in PR-36.
+ *
+ * @param peer_device_id    Device identifier of the joining peer.
+ * @param peer_role         Optional role the peer is assuming in this session
+ *                          (e.g. `"participant"`, `"observer"`).  `null` when the gateway
+ *                          does not specify a role.
+ * @param session_id        Optional session identifier this announcement belongs to.
+ * @param announce_seq      Monotonic sequence number for peer announcements within a session.
+ *                          Consumers should ignore duplicates with the same [peer_device_id]
+ *                          and a lower [announce_seq] than the last retained value.
+ */
+data class PeerAnnouncePayload(
+    val peer_device_id: String,
+    val peer_role: String? = null,
+    val session_id: String? = null,
+    val announce_seq: Int = 0
 )
