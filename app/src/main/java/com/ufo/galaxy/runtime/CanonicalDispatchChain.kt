@@ -279,6 +279,51 @@ object CanonicalDispatchChain {
     /** Returns all paths governed by [gate], or all paths when [gate] is `null`. */
     fun pathsForGate(gate: RolloutGate?): List<DispatchPathDescriptor> =
         if (gate == null) paths else paths.filter { it.rolloutGate == gate }
+
+    /**
+     * PR-37 — Returns the subset of dispatch paths that are currently eligible given
+     * the supplied runtime/session/rollout state.
+     *
+     * Uses [RuntimeDispatchReadinessCoordinator.resolve] to evaluate cross-device
+     * eligibility, then filters [paths] to those whose [DispatchPathDescriptor.rolloutGate]
+     * is satisfied:
+     *
+     * - [DispatchPathMode.CANONICAL], [DispatchPathMode.STAGED_MESH], and
+     *   [DispatchPathMode.DELEGATED] are eligible only when cross-device readiness is
+     *   confirmed (runtime Active, session ATTACHED, rollout flag on).
+     * - [DispatchPathMode.FALLBACK] is eligible when [RolloutControlSnapshot.fallbackToLocalAllowed]
+     *   is `true`, regardless of runtime or session state.
+     * - [DispatchPathMode.COMPATIBILITY] is always eligible (no rollout gate).
+     * - [DispatchPathMode.LOCAL] is always eligible.
+     *
+     * @param runtimeState    Current [RuntimeController.RuntimeState].
+     * @param attachedSession Current [AttachedRuntimeSession], or `null` if none.
+     * @param rollout         Current [RolloutControlSnapshot].
+     * @return                The [DispatchPathDescriptor] entries that are eligible for
+     *                        dispatch under the supplied state.
+     */
+    fun resolveEligiblePathsForState(
+        runtimeState: RuntimeController.RuntimeState,
+        attachedSession: AttachedRuntimeSession?,
+        rollout: RolloutControlSnapshot
+    ): List<DispatchPathDescriptor> {
+        val readiness = RuntimeDispatchReadinessCoordinator.resolve(
+            runtimeState    = runtimeState,
+            attachedSession = attachedSession,
+            rollout         = rollout
+        )
+        return paths.filter { descriptor ->
+            when (descriptor.rolloutGate) {
+                RolloutGate.NONE                      -> true
+                RolloutGate.CROSS_DEVICE_ALLOWED      -> readiness.isEligible
+                RolloutGate.FALLBACK_TO_LOCAL_ALLOWED -> rollout.fallbackToLocalAllowed
+                RolloutGate.DELEGATED_EXECUTION_ALLOWED ->
+                    readiness.isEligible && rollout.delegatedExecutionAllowed
+                RolloutGate.GOAL_EXECUTION_ALLOWED    ->
+                    readiness.isEligible && rollout.goalExecutionAllowed
+            }
+        }
+    }
 }
 
 // ── Data types ────────────────────────────────────────────────────────────────
