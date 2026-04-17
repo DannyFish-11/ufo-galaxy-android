@@ -20,6 +20,7 @@ The Android codebase contains multiple overlapping session-related concepts:
 - Delegation / transfer session
 - Conversation / history session
 - Mesh session
+- **Durable runtime session** (PR-1)
 
 These concepts are meaningful but their cross-layer and cross-repository relationships were not
 previously explicit. This document formalizes the **canonical session axis** — a single,
@@ -30,6 +31,8 @@ authoritative model of session families and identifier roles — so that:
 - Transfer and delegation semantics can be unambiguously scoped.
 - Projection and runtime-truth assembly can identify the correct session carrier.
 - Cross-repository consumers can map Android session structures to canonical terms.
+- **Durable session continuity** (PR-1) lets the center-side system correlate multiple successive
+  `attached_runtime_session_id` values (from the same activation era) as a single durable participant.
 
 The canonical session axis is **additive and compatibility-safe**: it does not change any runtime
 behavior, wire contracts, or existing identifier values.
@@ -48,6 +51,7 @@ behavior, wire contracts, or existing identifier values.
 | **Delegation/transfer session** | `transfer_session_context` | (none) | Transfer-scoped (ACK→PROGRESS→RESULT) |
 | **Conversation session** | `conversation_session_id` | (none) | Conversation-scoped (local loop timeline) |
 | **Mesh session** | `mesh_session_id` | `mesh_id` | Mesh-scoped (MeshJoin→MeshLeave/Result) |
+| **Durable runtime session** | `durable_session_id` | (none) | Durable across activation era (PR-1) |
 
 ### 2.2 Family boundaries
 
@@ -91,6 +95,17 @@ behavior, wire contracts, or existing identifier values.
 - Carried on: `MeshJoinPayload.mesh_id`, `MeshLeavePayload.mesh_id`, `MeshResultPayload.mesh_id`, `StagedMeshParticipationResult.meshId`.
 - Transitional: Android wire name is `mesh_id`; canonical term is `mesh_session_id`. Naming convergence is follow-up work.
 - Does not survive: WS reconnect, transfer, or invalidation.
+
+**Durable runtime session** (`durable_session_id`) — PR-1
+- Owned by `RuntimeController`; created once per activation era, spans multiple attached-session lifetimes.
+- Carried on: `DurableSessionContinuityRecord.durableSessionId`,
+  `AttachedRuntimeHostSessionSnapshot.durableSessionId`.
+- Canonical match: Android field name `durable_session_id` is the canonical term; no wire alias.
+- The `sessionContinuityEpoch` counter increments monotonically with each transparent reconnect
+  (epoch 0 = initial attach, epoch N = Nth reconnect), allowing the center to distinguish
+  "same era, reconnected" from "new era."
+- Survives: WS reconnects (epoch increments; `durable_session_id` stays constant).
+  Does not survive: `stop()`, `invalidateSession()`.
 
 ---
 
@@ -141,6 +156,7 @@ All carriers for `ATTACHED_RUNTIME_SESSION` and `RUNTIME_SESSION` are canonical 
 | DELEGATION_TRANSFER_SESSION | TRANSFER_SCOPED | ✗ | ✓ | ✗ |
 | CONVERSATION_SESSION | CONVERSATION_SCOPED | ✓ | ✗ | ✓ |
 | MESH_SESSION | MESH_SCOPED | ✗ | ✗ | ✗ |
+| DURABLE_RUNTIME_SESSION | DURABLE_ACROSS_ACTIVATION | ✓ | ✓ | ✗ |
 
 ### 4.2 Reconnect and recovery semantics
 
@@ -151,9 +167,13 @@ During a short WS disconnect / reconnect cycle:
 2. `ATTACHED_RUNTIME_SESSION`: `RuntimeController`'s permanent WS listener reopens the attached
    session (`AttachedRuntimeSession`) on reconnect.  The `sessionId` remains stable; only
    `runtimeSessionId` in the snapshot changes.
-3. `CONTROL_SESSION`: echoed from center-supplied inbound envelopes; not affected by WS reconnect.
-4. `CONVERSATION_SESSION`: local; not affected by WS state.
-5. `DELEGATION_TRANSFER_SESSION` / `MESH_SESSION`: not recoverable across WS disconnects.
+3. `DURABLE_RUNTIME_SESSION` (PR-1): `RuntimeController._durableSessionContinuityRecord` is
+   preserved across reconnects; only `sessionContinuityEpoch` increments.  The host can use the
+   stable `durable_session_id` to correlate multiple `attached_runtime_session_id` values from the
+   same activation era, and the epoch to count reconnect events within that era.
+4. `CONTROL_SESSION`: echoed from center-supplied inbound envelopes; not affected by WS reconnect.
+5. `CONVERSATION_SESSION`: local; not affected by WS state.
+6. `DELEGATION_TRANSFER_SESSION` / `MESH_SESSION`: not recoverable across WS disconnects.
 
 The observable reconnect lifecycle is tracked by `ReconnectRecoveryState` (PR-33):
 `IDLE → RECOVERING → RECOVERED | FAILED`.
@@ -181,11 +201,13 @@ failure; it remains ATTACHED and can accept subsequent delegated tasks.
 | `AttachedRuntimeSession` | `sessionId` | `attached_runtime_session_id` | CANONICAL_MATCH |
 | `AttachedRuntimeHostSessionSnapshot` | `sessionId` | `attached_runtime_session_id` | CANONICAL_MATCH |
 | `AttachedRuntimeHostSessionSnapshot` | `runtimeSessionId` | `runtime_session_id` | CANONICAL_MATCH |
+| `AttachedRuntimeHostSessionSnapshot` | `durableSessionId` | `durable_session_id` | CANONICAL_MATCH (PR-1) |
 | `DelegatedExecutionSignal` | `attachedSessionId` | `transfer_session_context` / `attached_runtime_session_id` | CANONICAL_MATCH |
 | `AipMessage` | `session_id` | `control_session_id` | TRANSITIONAL_ALIAS |
 | `AipMessage` | `runtime_session_id` | `runtime_session_id` | CANONICAL_MATCH |
 | `LocalLoopTrace` | `sessionId` | `conversation_session_id` | CANONICAL_MATCH |
 | `MeshJoinPayload` | `mesh_id` | `mesh_session_id` | TRANSITIONAL_ALIAS |
+| `DurableSessionContinuityRecord` | `durableSessionId` | `durable_session_id` | CANONICAL_MATCH (PR-1) |
 
 ### 5.2 Session identity alias properties
 
@@ -199,6 +221,9 @@ layer explicit without changing the underlying field values:
 | `LocalLoopTrace` | `conversationSessionId` | `sessionId` | CONVERSATION_SESSION |
 | `SessionHistorySummary` | `conversationSessionId` | `sessionId` | CONVERSATION_SESSION |
 
+The `DurableSessionContinuityRecord` does not use an alias property — its `durableSessionId`
+field directly realizes the `durable_session_id` canonical term.
+
 ---
 
 ## 6. Session truth authority boundaries
@@ -210,6 +235,7 @@ Session truth authority on the Android side follows the same authority model def
 |-------|--------------------------|--------------------------|
 | Attached session truth | `RuntimeController.attachedSession` + `hostSessionSnapshot` | Android-authoritative (non-truth-owning toward center) |
 | Runtime session truth | `RuntimeController._currentRuntimeSessionId` | Android-authoritative (refreshed per connection) |
+| **Durable session truth** (PR-1) | `RuntimeController.durableSessionContinuityRecord` | Android-authoritative (stable within activation era) |
 | Reconnect recovery truth | `RuntimeController.reconnectRecoveryState` | Android-authoritative |
 | Delegated execution truth | `DelegatedExecutionTracker` + `DelegatedExecutionSignal` | Android-authoritative for signal emission |
 | Control session truth | Center-governed; echoed by Android | Center-authoritative |
@@ -245,6 +271,7 @@ Required fields: `event`, `session_family` (canonical term value).
 | Three-layer session split | `AndroidSessionLayerContracts` |
 | Attached session runtime truth | `AttachedRuntimeSession` + `AttachedRuntimeHostSessionSnapshot` |
 | Reconnect recovery model | `ReconnectRecoveryState` |
+| **Durable session continuity** (PR-1) | `DurableSessionContinuityRecord` + `RuntimeController.durableSessionContinuityRecord` |
 | Transfer signal model | `DelegatedExecutionSignal` |
 | Observability tag | `GalaxyLogger.TAG_SESSION_AXIS` |
 

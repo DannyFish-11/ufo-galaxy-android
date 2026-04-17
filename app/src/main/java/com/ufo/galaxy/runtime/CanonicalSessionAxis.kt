@@ -30,7 +30,7 @@ package com.ufo.galaxy.runtime
  *
  * ## Session families
  *
- * Six canonical session families are recognized on the Android side.  Each family has:
+ * Seven canonical session families are recognized on the Android side.  Each family has:
  * - A [CanonicalSessionFamily] enum value with the canonical cross-repo term and wire alias.
  * - A [SessionIdentifierRole] classification for each carrier.
  * - A [SessionContinuityBehavior] that specifies how the session identity behaves
@@ -69,7 +69,7 @@ package com.ufo.galaxy.runtime
  *
  * - [AndroidSessionLayerContracts] — defines the three-layer Android session split
  *   (ConversationSession / RuntimeAttachmentSession / DelegationTransferSession).
- *   [CanonicalSessionAxis] extends this model to all six families and adds
+ *   [CanonicalSessionAxis] extends this model to all seven families and adds
  *   identifier-role and continuity-model dimensions.
  * - [RuntimeIdentityContracts] — defines participant/node identity composition.
  *   [CanonicalSessionAxis] references [RuntimeIdentityContracts] for cross-layer
@@ -273,6 +273,29 @@ object CanonicalSessionAxis {
             continuityLayer = SessionContinuityLayer.MESH,
             crossRepoTerm = "mesh_session_id",
             note = "Typed Android field; carries mesh_id as a mesh-session scope identifier."
+        ),
+
+        // ── Durable runtime session (PR-1) ────────────────────────────────────
+        // DurableSessionContinuityRecord.durableSessionId is the durable-era anchor
+        // that survives multiple attached-session lifetimes and WS reconnect cycles.
+
+        AndroidSessionAxisEntry(
+            carrier = "DurableSessionContinuityRecord.durableSessionId",
+            sessionFamily = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            identifierRole = SessionIdentifierRole.CANONICAL,
+            continuityLayer = SessionContinuityLayer.DURABLE,
+            crossRepoTerm = "durable_session_id",
+            note = "Activation-era durable identity managed by RuntimeController. " +
+                "Constant across reconnects; reset only by stop() or invalidateSession()."
+        ),
+        AndroidSessionAxisEntry(
+            carrier = "AttachedRuntimeHostSessionSnapshot.durableSessionId",
+            sessionFamily = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            identifierRole = SessionIdentifierRole.CANONICAL,
+            continuityLayer = SessionContinuityLayer.DURABLE,
+            crossRepoTerm = "durable_session_id",
+            note = "Projection of DurableSessionContinuityRecord.durableSessionId into the " +
+                "host-facing snapshot; absent when no durable era is active."
         )
     )
 
@@ -411,6 +434,20 @@ object CanonicalSessionAxis {
             continuityNote = "Mesh session is scoped to one MeshJoin→MeshLeave/MeshResult " +
                 "coordination cycle. A WS disconnect terminates the mesh session. " +
                 "A new mesh_id is required for each new mesh coordination cycle."
+        ),
+
+        SessionFamilyContinuityModel(
+            family = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            continuityBehavior = SessionContinuityBehavior.DURABLE_ACROSS_ACTIVATION,
+            surviveReconnect = true,
+            surviveTransfer = true,
+            surviveInvalidation = false,
+            continuityNote = "Durable session (PR-1): DurableSessionContinuityRecord.durableSessionId " +
+                "persists across WS reconnects and across multiple AttachedRuntimeSession lifetimes " +
+                "within a single activation era. The sessionContinuityEpoch counter increments on " +
+                "each transparent reconnect (RECONNECT_RECOVERY) so the center can distinguish " +
+                "'same era, reconnected' from 'new era.' Terminated only by explicit stop() or " +
+                "invalidateSession(); does not survive session invalidation."
         )
     )
 
@@ -443,7 +480,7 @@ object CanonicalSessionAxis {
 // ── Data model ────────────────────────────────────────────────────────────────
 
 /**
- * Six canonical session families recognized on the Android side.
+ * Seven canonical session families recognized on the Android side.
  *
  * @property canonicalTerm  Cross-repository canonical vocabulary term.
  * @property wireAlias      Android wire-level alias, or `null` when the Android
@@ -514,6 +551,20 @@ enum class CanonicalSessionFamily(
     MESH_SESSION(
         canonicalTerm = "mesh_session_id",
         wireAlias = "mesh_id"
+    ),
+
+    /**
+     * Durable runtime session family: activation-era durable identity (PR-1).
+     *
+     * Spans multiple [ATTACHED_RUNTIME_SESSION] lifetimes and [RUNTIME_SESSION]
+     * connection cycles within a single activation era.  Resets only on explicit
+     * [RuntimeController.stop] or [RuntimeController.invalidateSession].
+     *
+     * No wire alias: Android field name `durable_session_id` is the canonical term.
+     */
+    DURABLE_RUNTIME_SESSION(
+        canonicalTerm = "durable_session_id",
+        wireAlias = null
     );
 
     /**
@@ -565,7 +616,16 @@ enum class SessionContinuityLayer {
     /** Local conversation/history timeline (independent of cross-device). */
     CONVERSATION,
     /** Staged-mesh coordination scope (one MeshJoin→MeshLeave cycle). */
-    MESH
+    MESH,
+
+    /**
+     * Durable activation-era scope (PR-1).
+     *
+     * Spans multiple [ATTACHMENT] sessions and [RUNTIME] connection cycles within
+     * one activation era.  Resets only on [RuntimeController.stop] or
+     * [RuntimeController.invalidateSession].
+     */
+    DURABLE
 }
 
 /**
@@ -612,7 +672,22 @@ enum class SessionContinuityBehavior {
      *
      * Families: [CanonicalSessionFamily.MESH_SESSION].
      */
-    MESH_SCOPED
+    MESH_SCOPED,
+
+    /**
+     * Session identity is durable across WS reconnects **and** across successive
+     * [AttachedRuntimeSession] lifetimes within a single activation era (PR-1).
+     *
+     * Unlike [STABLE_ACROSS_RECONNECT], this identity also survives the close-and-reopen
+     * of an attached session during a transparent reconnect: the same
+     * [DurableSessionContinuityRecord.durableSessionId] is preserved while
+     * [DurableSessionContinuityRecord.sessionContinuityEpoch] increments.
+     *
+     * Resets only on [RuntimeController.stop] or [RuntimeController.invalidateSession].
+     *
+     * Families: [CanonicalSessionFamily.DURABLE_RUNTIME_SESSION].
+     */
+    DURABLE_ACROSS_ACTIVATION
 }
 
 /**

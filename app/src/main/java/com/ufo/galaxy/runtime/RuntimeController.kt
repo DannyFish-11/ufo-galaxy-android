@@ -368,6 +368,43 @@ class RuntimeController(
         _reconnectRecoveryState.asStateFlow()
 
     /**
+     * PR-1 — Observable durable session continuity record for this Android runtime.
+     *
+     * Tracks the **durable session identity** that persists across WS reconnects within a
+     * single activation era.  Unlike [_currentRuntimeSessionId] (per-connection) and the
+     * [attachedSession]'s [AttachedRuntimeSession.sessionId] (per-attached-session),
+     * [durableSessionContinuityRecord] holds a stable [DurableSessionContinuityRecord.durableSessionId]
+     * that remains constant until an explicit [stop] or [invalidateSession] call.
+     *
+     * Lifecycle:
+     *  - Created (epoch=0) when [openAttachedSession] is called with [SessionOpenSource.USER_ACTIVATION]
+     *    or [SessionOpenSource.BACKGROUND_RESTORE] and no existing record is present.
+     *  - Epoch incremented when [openAttachedSession] is called with [SessionOpenSource.RECONNECT_RECOVERY],
+     *    preserving the same [DurableSessionContinuityRecord.durableSessionId].
+     *  - Reset to `null` by [stop] and [invalidateSession], terminating the durable era.
+     *
+     * `null` before the first [openAttachedSession] call and after [stop] / [invalidateSession].
+     *
+     * The durable session record is projected into [hostSessionSnapshot] via
+     * [AttachedRuntimeHostSessionSnapshot.durableSessionId] and
+     * [AttachedRuntimeHostSessionSnapshot.sessionContinuityEpoch] so host-facing consumers
+     * can observe the durable session continuity without additional queries.
+     */
+    private val _durableSessionContinuityRecord =
+        MutableStateFlow<DurableSessionContinuityRecord?>(null)
+
+    /**
+     * Observable durable session continuity record (PR-1).
+     *
+     * Non-`null` while the runtime is within an activation era.  Resets to `null` on
+     * [stop] and [invalidateSession].  Observers can use
+     * [DurableSessionContinuityRecord.durableSessionId] as the most-stable Android-side
+     * session anchor across multiple reconnects.
+     */
+    val durableSessionContinuityRecord: StateFlow<DurableSessionContinuityRecord?> =
+        _durableSessionContinuityRecord.asStateFlow()
+
+    /**
      * PR-29 — Deduplication guard for [notifyTakeoverFailed].
      *
      * Stores the set of `takeoverId` values for which a [TakeoverFallbackEvent] has already
@@ -674,6 +711,9 @@ class RuntimeController(
         // clean baseline.  Any ongoing "Recovering…" or "Failed" banner should disappear
         // when the user deliberately turns off cross-device or triggers a full reconnect.
         _reconnectRecoveryState.value = ReconnectRecoveryState.IDLE
+        // PR-1: Terminate the durable session era on explicit stop.  The next activation
+        // will start a fresh era with a new durableSessionId.
+        _durableSessionContinuityRecord.value = null
         _state.value = RuntimeState.LocalOnly
         // PR-31: Refresh the rollout snapshot after stopping.
         refreshRolloutControlSnapshot()
@@ -976,11 +1016,18 @@ class RuntimeController(
      * mismatch) makes the current session no longer trustworthy.  The runtime state is
      * **not** changed; only the session is closed.  A new session will be opened if the
      * runtime reconnects with cross-device still enabled.
+     *
+     * PR-1: Also terminates the durable session era, since session invalidation means the
+     * current session identity can no longer be trusted as a durable anchor.  The next
+     * [openAttachedSession] call will start a fresh durable era.
      */
     fun invalidateSession() {
         Log.i(TAG, "[RUNTIME] Invalidating attached runtime session")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_invalidated"))
         closeAttachedSession(AttachedRuntimeSession.DetachCause.INVALIDATION)
+        // PR-1: Terminate the durable era — the invalidated identity is no longer a
+        // trustworthy durable anchor for the center-side durable mesh/session registry.
+        _durableSessionContinuityRecord.value = null
     }
 
     /**
@@ -1028,9 +1075,11 @@ class RuntimeController(
      *    [AttachedRuntimeHostSessionSnapshot.posture]`=control_only`,
      *    [AttachedRuntimeHostSessionSnapshot.invalidationReason]`=null`.
      *  - **reconnect** — new [AttachedRuntimeHostSessionSnapshot.runtimeSessionId],
-     *    [AttachedRuntimeHostSessionSnapshot.attachmentState]`=attached`.
+     *    [AttachedRuntimeHostSessionSnapshot.attachmentState]`=attached`,
+     *    same [AttachedRuntimeHostSessionSnapshot.durableSessionId] with incremented epoch.
      *  - **invalidate** — [AttachedRuntimeHostSessionSnapshot.attachmentState]`=detached`,
-     *    [AttachedRuntimeHostSessionSnapshot.invalidationReason]`="invalidation"`.
+     *    [AttachedRuntimeHostSessionSnapshot.invalidationReason]`="invalidation"`,
+     *    [AttachedRuntimeHostSessionSnapshot.durableSessionId]`=null`.
      *
      * @return A fully populated [AttachedRuntimeHostSessionSnapshot]; `null` before the
      *         first [openAttachedSession] call.
@@ -1043,7 +1092,8 @@ class RuntimeController(
         return AttachedRuntimeHostSessionSnapshot.from(
             session = session,
             runtimeSessionId = runtimeSessionId,
-            hostRole = hostRole
+            hostRole = hostRole,
+            durableRecord = _durableSessionContinuityRecord.value
         )
     }
 
@@ -1189,12 +1239,31 @@ class RuntimeController(
         // Generate a fresh per-connection runtime session ID for the snapshot projection (PR-19).
         _currentRuntimeSessionId = UUID.randomUUID().toString()
         _attachedSession.value = session
+
+        // PR-1: Manage durable session continuity record.
+        //  - USER_ACTIVATION / BACKGROUND_RESTORE / TEST_ONLY with no existing record:
+        //    create a new durable era (epoch=0).
+        //  - RECONNECT_RECOVERY with existing record: increment epoch (same durableSessionId).
+        //  - USER_ACTIVATION / BACKGROUND_RESTORE with an existing record: preserve it.
+        //    (Defensive: in practice stop() clears the record before a new activation starts.)
+        val currentDurable = _durableSessionContinuityRecord.value
+        _durableSessionContinuityRecord.value = when {
+            source == SessionOpenSource.RECONNECT_RECOVERY && currentDurable != null ->
+                currentDurable.withEpochIncremented()
+            currentDurable == null ->
+                DurableSessionContinuityRecord.create(source.wireValue)
+            else ->
+                currentDurable
+        }
+
         updateHostSessionSnapshot()
         Log.i(
             TAG,
             "[RUNTIME] Attached runtime session opened: source=${source.wireValue} " +
                 "session_id=${session.sessionId} host_id=${session.hostId} " +
-                "runtime_session_id=${_currentRuntimeSessionId}"
+                "runtime_session_id=${_currentRuntimeSessionId} " +
+                "durable_session_id=${_durableSessionContinuityRecord.value?.durableSessionId} " +
+                "epoch=${_durableSessionContinuityRecord.value?.sessionContinuityEpoch}"
         )
         val attachLog = mutableMapOf<String, Any>(
             "event" to "runtime_session_attached",
@@ -1202,6 +1271,10 @@ class RuntimeController(
         )
         replacingDetachedSessionId?.let {
             attachLog["replaces_detached_session_id"] = it
+        }
+        _durableSessionContinuityRecord.value?.let {
+            attachLog[DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID] = it.durableSessionId
+            attachLog[DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH] = it.sessionContinuityEpoch
         }
         GalaxyLogger.log(TAG, attachLog + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
