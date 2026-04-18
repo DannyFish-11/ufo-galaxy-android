@@ -520,6 +520,20 @@ class RuntimeController(
      */
     private val _emittedFailureTakeoverIds = mutableSetOf<String>()
 
+    /**
+     * PR-43 — Tracks the most recently reported [ParticipantHealthState] for this device.
+     *
+     * Maintained by [notifyParticipantHealthChanged] and used to populate the `previousHealth`
+     * field of [V2MultiDeviceLifecycleEvent.DeviceHealthChanged] events so V2 receives a
+     * meaningful before/after health transition rather than a hardcoded UNKNOWN baseline.
+     *
+     * Initialised to [ParticipantHealthState.UNKNOWN] (no health assessment yet).
+     * Reset to [ParticipantHealthState.UNKNOWN] by [stop] and [invalidateSession] to match
+     * the durable-session lifecycle (health context is scoped to an activation era).
+     */
+    @Volatile
+    private var _lastKnownHealthState: ParticipantHealthState = ParticipantHealthState.UNKNOWN
+
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -846,6 +860,8 @@ class RuntimeController(
         // PR-1: Terminate the durable session era on explicit stop.  The next activation
         // will start a fresh era with a new durableSessionId.
         _durableSessionContinuityRecord.value = null
+        // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
+        _lastKnownHealthState = ParticipantHealthState.UNKNOWN
         // PR-37: Use transitionState() so the transition event is observable and any
         // unexpected prior state is surfaced as a diagnostic event.
         transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "stop")
@@ -1162,6 +1178,8 @@ class RuntimeController(
         // PR-1: Terminate the durable era — the invalidated identity is no longer a
         // trustworthy durable anchor for the center-side durable mesh/session registry.
         _durableSessionContinuityRecord.value = null
+        // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
+        _lastKnownHealthState = ParticipantHealthState.UNKNOWN
     }
 
     /**
@@ -1824,11 +1842,13 @@ class RuntimeController(
         // transitions — even for HEALTHY reports that require no rebalance.
         // DeviceDegraded is additionally emitted for compromised states so the V2
         // harness can distinguish a simple health signal from an active degradation.
+        val previousHealth = _lastKnownHealthState
+        _lastKnownHealthState = newHealthState
         emitV2LifecycleEvent(
             V2MultiDeviceLifecycleEvent.DeviceHealthChanged(
                 deviceId = descriptor.deviceId,
                 sessionId = _attachedSession.value?.sessionId,
-                previousHealth = ParticipantHealthState.UNKNOWN.wireValue,
+                previousHealth = previousHealth.wireValue,
                 currentHealth = newHealthState.wireValue,
                 requiresRebalance = decision.requiresRebalance,
                 continuationMode = decision.continuationMode.wireValue,

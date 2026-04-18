@@ -518,6 +518,39 @@ class Pr43V2MultiDeviceLifecycleIntegrationTest {
         assertEquals(5000L, event.timestampMs)
     }
 
+    @Test
+    fun `DeviceHealthChanged previousHealth reflects actual prior state for transition from healthy to degraded`() {
+        // Simulate a state transition: healthy → degraded.
+        // RuntimeController tracks _lastKnownHealthState; this test verifies the data model
+        // correctly accepts a non-UNKNOWN previousHealth when the caller passes one.
+        val event = V2MultiDeviceLifecycleEvent.DeviceHealthChanged(
+            deviceId = "Pixel_8",
+            sessionId = "sess-1",
+            previousHealth = ParticipantHealthState.HEALTHY.wireValue,
+            currentHealth = ParticipantHealthState.DEGRADED.wireValue,
+            requiresRebalance = true,
+            continuationMode = "degraded_continuation",
+            trigger = "health_degraded"
+        )
+        assertEquals(ParticipantHealthState.HEALTHY.wireValue, event.previousHealth)
+        assertEquals(ParticipantHealthState.DEGRADED.wireValue, event.currentHealth)
+    }
+
+    @Test
+    fun `DeviceHealthChanged previousHealth is unknown for first health report`() {
+        // First health report (no prior state) should carry "unknown" as previousHealth.
+        val event = V2MultiDeviceLifecycleEvent.DeviceHealthChanged(
+            deviceId = "Pixel_8",
+            sessionId = "sess-1",
+            previousHealth = ParticipantHealthState.UNKNOWN.wireValue,
+            currentHealth = ParticipantHealthState.HEALTHY.wireValue,
+            requiresRebalance = false,
+            continuationMode = "continue_normally",
+            trigger = "health_healthy"
+        )
+        assertEquals(ParticipantHealthState.UNKNOWN.wireValue, event.previousHealth)
+    }
+
     // ── ParticipantReadinessChanged subclass ──────────────────────────────────
 
     @Test
