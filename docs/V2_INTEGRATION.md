@@ -112,6 +112,107 @@ preserved across `DeviceReconnected` events and increments `sessionContinuityEpo
 
 ---
 
+## Mesh Session Lifecycle Mapping (PR-44)
+
+`DeviceConnected`, `DeviceReconnected`, and `DeviceDisconnected` carry an explicit
+`meshLifecycleHint` computed property of type `MeshSessionLifecycleHint` that tells V2
+exactly which Mesh session lifecycle transition to invoke. This removes the need for V2
+to infer the transition from raw Android fields (`openSource`, `detachCause`).
+
+### `MeshSessionLifecycleHint` wire values
+
+| Enum value        | Wire value               | V2 mesh call           | Triggered by                                                      |
+|-------------------|--------------------------|------------------------|-------------------------------------------------------------------|
+| `CREATE_ACTIVATE` | `mesh_create_activate`   | `create()` + `activate()` | `DeviceConnected` with `openSource = "user_activation"`        |
+| `RESTORE_ACTIVATE`| `mesh_restore_activate`  | `restore()`            | `DeviceConnected` with `openSource = "background_restore"`, or `DeviceReconnected` |
+| `SUSPEND`         | `mesh_suspend`           | `suspend()`            | `DeviceDisconnected` with `detachCause = "disconnect"`           |
+| `TERMINATE`       | `mesh_terminate`         | `terminate()`          | `DeviceDisconnected` with `detachCause` in `["disable", "explicit_detach", "invalidation"]` |
+
+### Session continuity on disconnect
+
+`DeviceDisconnected` additionally carries `isResumable: Boolean`:
+- `true`  when `detachCause = "disconnect"` — transient WS drop; `DeviceReconnected` will follow
+  on successful reconnect; V2 should call `suspend()` and await `RESTORE_ACTIVATE`.
+- `false` when `detachCause` is `"disable"`, `"explicit_detach"`, or `"invalidation"` — permanent
+  termination; V2 should call `terminate()`.
+
+### V2 consumption pattern (health + mesh session lifecycle)
+
+```kotlin
+runtimeController.v2LifecycleEvents
+    .onEach { event ->
+        when (event) {
+            is V2MultiDeviceLifecycleEvent.DeviceConnected -> {
+                harness.on_device_health_changed(event.deviceId, V2HealthState.ONLINE)
+                when (event.meshLifecycleHint) {
+                    MeshSessionLifecycleHint.CREATE_ACTIVATE ->
+                        meshCoordinator.createAndActivate(event.durableSessionId)
+                    MeshSessionLifecycleHint.RESTORE_ACTIVATE ->
+                        meshCoordinator.restore(event.durableSessionId)
+                    else -> { /* not reached for DeviceConnected */ }
+                }
+            }
+
+            is V2MultiDeviceLifecycleEvent.DeviceReconnected -> {
+                harness.on_device_health_changed(event.deviceId, V2HealthState.ONLINE)
+                // meshLifecycleHint is always RESTORE_ACTIVATE for reconnects
+                meshCoordinator.restore(event.durableSessionId)
+            }
+
+            is V2MultiDeviceLifecycleEvent.DeviceDisconnected -> {
+                harness.on_device_health_changed(event.deviceId, V2HealthState.OFFLINE)
+                if (event.isResumable) meshCoordinator.suspend()
+                else meshCoordinator.terminate()
+            }
+
+            is V2MultiDeviceLifecycleEvent.DeviceDegraded ->
+                harness.on_device_health_changed(event.deviceId, V2HealthState.DEGRADED)
+
+            is V2MultiDeviceLifecycleEvent.DeviceHealthChanged ->
+                harness.on_device_health_changed(event.deviceId, event.currentHealth)
+
+            is V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged ->
+                harness.on_participant_readiness_changed(event.deviceId, event.currentReadiness)
+        }
+    }
+    .launchIn(v2HarnessScope)
+```
+
+### Session continuity assumptions (explicit, not implicit)
+
+The following session continuity invariants are enforced by the Android runtime and can be
+relied on by V2:
+
+1. **`durableSessionId` stability** — `durableSessionId` does not change across
+   `DeviceReconnected` events within the same activation era. It is reset only by `stop()`
+   or `invalidateSession()`, both of which emit a `DeviceDisconnected` with
+   `isResumable = false`.
+
+2. **Reconnect sequence** — a `DeviceDisconnected` with `isResumable = true` is always
+   followed by exactly one of: `DeviceReconnected` (successful reconnect) or a second
+   `DeviceDisconnected` with `isResumable = false` (recovery failed). V2 must not assume
+   indefinite suspension; `ReconnectRecoveryState.FAILED` terminates the recovery.
+
+3. **New era after terminate** — after a `DeviceDisconnected` with `isResumable = false`,
+   the next attach event is always `DeviceConnected` (never `DeviceReconnected`), and a
+   fresh `durableSessionId` is generated.
+
+4. **`sessionContinuityEpoch` monotonicity** — `sessionContinuityEpoch` is monotone
+   within a durable era: `0` on first attach, incremented on each `DeviceReconnected`.
+   It is not a reliable count of total reconnects across eras.
+
+5. **`background_restore` is a restore, not a create** — when the Android process restarts
+   while cross-device was previously enabled, `DeviceConnected` is emitted with
+   `openSource = "background_restore"` and `meshLifecycleHint = RESTORE_ACTIVATE`. This
+   hint is fixed regardless of whether `durableSessionId` is present. If `durableSessionId`
+   is present, V2 should attempt to locate and restore the prior mesh session. If
+   `durableSessionId` is null (e.g. the process was killed before a durable era was
+   established), V2 should treat the restore attempt as a miss and create a new session as
+   a graceful fallback — the `RESTORE_ACTIVATE` hint signals intent, not a guarantee that
+   a prior session exists.
+
+---
+
 ## Consuming `v2LifecycleEvents` from V2
 
 ```kotlin
