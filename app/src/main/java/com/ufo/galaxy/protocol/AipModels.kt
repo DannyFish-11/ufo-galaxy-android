@@ -368,6 +368,26 @@ data class TaskSubmitPayload(
  *                            the originating task_submit. Valid values: `"control_only"` or
  *                            `"join_runtime"`. Defaults to `null`; treat `null` as
  *                            `"control_only"` for backwards compatibility.
+ *
+ * ## V2 source dispatch metadata (PR-D compatibility)
+ * The following fields carry richer source-dispatch orchestration metadata introduced
+ * by V2 source dispatch wiring. All fields are optional so that pre-V2 senders remain
+ * compatible. Android handlers MUST treat `null` / absent values as equivalent to the
+ * legacy contract and MUST NOT rely on these fields for core execution decisions.
+ *
+ * @param dispatch_intent     Optional dispatch intent label from the V2 orchestrator
+ *                            (e.g. `"task_execute"`, `"staged_handoff"`). `null` for
+ *                            legacy senders.
+ * @param dispatch_origin     Optional identifier of the originating orchestrator or
+ *                            device that initiated this dispatch. `null` for legacy
+ *                            senders.
+ * @param orchestration_stage Optional label for the current orchestration stage when
+ *                            the task is part of a multi-stage dispatch sequence.
+ *                            `null` for single-stage / legacy dispatches.
+ * @param execution_context   Optional key-value execution context forwarded from the
+ *                            V2 orchestrator (e.g. locale, priority hints). Empty map
+ *                            for legacy senders; Android handlers MUST safely ignore
+ *                            unknown keys.
  */
 data class TaskAssignPayload(
     val task_id: String,
@@ -375,7 +395,12 @@ data class TaskAssignPayload(
     val constraints: List<String> = emptyList(),
     val max_steps: Int,
     val require_local_agent: Boolean,
-    val source_runtime_posture: String? = null
+    val source_runtime_posture: String? = null,
+    // ── PR-D: V2 source dispatch metadata (optional; null-safe for legacy senders) ──
+    val dispatch_intent: String? = null,
+    val dispatch_origin: String? = null,
+    val orchestration_stage: String? = null,
+    val execution_context: Map<String, String> = emptyMap()
 )
 
 /**
@@ -467,6 +492,19 @@ data class CommandResultPayload(
  *                      the originating request. Valid values: `"control_only"` or
  *                      `"join_runtime"`. Defaults to `null`; treat `null` as `"control_only"`
  *                      for backwards compatibility.
+ *
+ * ## V2 staged dispatch metadata (PR-D compatibility)
+ * The following fields carry staged-dispatch orchestration metadata introduced by V2.
+ * All fields are optional so that pre-V2 / non-staged senders remain compatible.
+ * Android handlers MUST safely ignore these fields when `null` / absent.
+ *
+ * @param staged_mesh_id   Optional mesh session identifier when this payload is part of
+ *                         a V2 staged-mesh dispatch. `null` for non-staged dispatches.
+ * @param staged_subtask_id Optional subtask identifier when this payload is a staged
+ *                         subtask within a mesh session. `null` for non-staged dispatches.
+ * @param execution_context Optional key-value execution context forwarded from the V2
+ *                         orchestrator. Empty map for legacy senders; Android handlers
+ *                         MUST safely ignore unknown keys.
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -476,7 +514,11 @@ data class GoalExecutionPayload(
     val group_id: String? = null,
     val subtask_index: Int? = null,
     val timeout_ms: Long = 0L,
-    val source_runtime_posture: String? = null
+    val source_runtime_posture: String? = null,
+    // ── PR-D: V2 staged dispatch metadata (optional; null-safe for legacy senders) ──
+    val staged_mesh_id: String? = null,
+    val staged_subtask_id: String? = null,
+    val execution_context: Map<String, String> = emptyMap()
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */

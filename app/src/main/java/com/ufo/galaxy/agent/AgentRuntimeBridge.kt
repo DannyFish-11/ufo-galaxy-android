@@ -87,6 +87,21 @@ class AgentRuntimeBridge(
      *                   and Agent Runtime treat `null` as `"control_only"` for backwards
      *                   compatibility. Propagated unchanged into [HandoffEnvelopeV2] and the
      *                   `bridge_handoff` JSON payload.
+     *
+     * ## V2 source dispatch metadata (PR-D compatibility)
+     * The following fields carry richer source-dispatch orchestration metadata forwarded
+     * from the inbound [com.ufo.galaxy.protocol.TaskAssignPayload]. All fields are
+     * optional so that pre-V2 callers remain compatible. `null` / empty values are
+     * omitted from the outbound bridge JSON.
+     *
+     * @param dispatchIntent    Optional dispatch intent label forwarded from the V2
+     *                          orchestrator (e.g. `"task_execute"`, `"staged_handoff"`).
+     * @param dispatchOrigin    Optional identifier of the originating orchestrator or
+     *                          device that initiated this dispatch.
+     * @param orchestrationStage Optional orchestration stage label for multi-stage
+     *                          dispatch sequences.
+     * @param executionContext  Optional key-value execution context forwarded from the
+     *                          V2 orchestrator. Merged into the bridge JSON `context` map.
      */
     data class HandoffRequest(
         val traceId: String,
@@ -105,7 +120,12 @@ class AgentRuntimeBridge(
          * outer span (e.g. a task execution span).
          */
         val spanId: String = "",
-        val sourceRuntimePosture: String? = null
+        val sourceRuntimePosture: String? = null,
+        // ── PR-D: V2 source dispatch metadata (optional; null/empty-safe) ────────────
+        val dispatchIntent: String? = null,
+        val dispatchOrigin: String? = null,
+        val orchestrationStage: String? = null,
+        val executionContext: Map<String, String> = emptyMap()
     )
 
     /**
@@ -364,6 +384,10 @@ class AgentRuntimeBridge(
      * bridge endpoint receives the full server-contract structure, including
      * [HandoffEnvelopeV2.runtime_session_id] and [HandoffEnvelopeV2.idempotency_key].
      * All required fields are always present; optional fields are omitted when null/blank/empty.
+     *
+     * PR-D dispatch metadata fields ([dispatch_intent], [dispatch_origin],
+     * [orchestration_stage], [execution_context]) are included when present so that V2
+     * source dispatch metadata is forwarded to the gateway bridge endpoint.
      */
     internal fun buildBridgeJson(request: HandoffRequest): String {
         val env = request.toEnvelopeV2()
@@ -385,6 +409,11 @@ class AgentRuntimeBridge(
                 env.constraints.forEach { arr.put(it) }
                 put("constraints", arr)
             }
+            // ── PR-D: V2 source dispatch metadata (omitted when null/empty) ──────────
+            if (!env.dispatch_intent.isNullOrBlank()) put("dispatch_intent", env.dispatch_intent)
+            if (!env.dispatch_origin.isNullOrBlank()) put("dispatch_origin", env.dispatch_origin)
+            if (!env.orchestration_stage.isNullOrBlank()) put("orchestration_stage", env.orchestration_stage)
+            if (env.execution_context.isNotEmpty()) put("execution_context", JSONObject(env.execution_context as Map<*, *>))
         }.toString()
     }
 

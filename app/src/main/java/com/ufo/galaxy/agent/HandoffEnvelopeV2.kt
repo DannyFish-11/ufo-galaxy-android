@@ -24,6 +24,14 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * | [idempotency_key]        | Per-send deduplication key (task_id + timestamp)                        |
  * | [source_runtime_posture] | Canonical source-device participation posture (PR #533 contract):       |
  * |                          | `"control_only"` or `"join_runtime"`. Null = backwards-compat default.  |
+ * | [dispatch_intent]        | (PR-D) Optional dispatch intent label from V2 orchestrator. Null for    |
+ * |                          | legacy senders; absent from bridge JSON when null.                      |
+ * | [dispatch_origin]        | (PR-D) Optional originating orchestrator / device identifier. Null for  |
+ * |                          | legacy senders.                                                         |
+ * | [orchestration_stage]    | (PR-D) Optional orchestration stage label for multi-stage dispatches.   |
+ * |                          | Null for single-stage / legacy dispatches.                              |
+ * | [execution_context]      | (PR-D) Optional key-value execution context from V2 orchestrator.       |
+ * |                          | Empty map for legacy senders.                                           |
  *
  * ## Backward compatibility
  * The existing [AgentRuntimeBridge.HandoffRequest] / [AgentRuntimeBridge.buildBridgeJson]
@@ -44,6 +52,10 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * @param idempotency_key        Per-send unique deduplication key.
  * @param source_runtime_posture Canonical source-device participation posture; see
  *                               [com.ufo.galaxy.runtime.SourceRuntimePosture].
+ * @param dispatch_intent        (PR-D) Optional dispatch intent from V2 orchestrator.
+ * @param dispatch_origin        (PR-D) Optional originating orchestrator / device ID.
+ * @param orchestration_stage    (PR-D) Optional orchestration stage label.
+ * @param execution_context      (PR-D) Optional key-value execution context from V2.
  */
 data class HandoffEnvelopeV2(
     val trace_id: String,
@@ -57,7 +69,12 @@ data class HandoffEnvelopeV2(
     val constraints: List<String> = emptyList(),
     val runtime_session_id: String? = null,
     val idempotency_key: String? = null,
-    val source_runtime_posture: String? = null
+    val source_runtime_posture: String? = null,
+    // ── PR-D: V2 source dispatch metadata (optional; null-safe for legacy callers) ──
+    val dispatch_intent: String? = null,
+    val dispatch_origin: String? = null,
+    val orchestration_stage: String? = null,
+    val execution_context: Map<String, String> = emptyMap()
 )
 
 /**
@@ -69,6 +86,9 @@ data class HandoffEnvelopeV2(
  *   to produce a per-send unique key suitable for gateway-side deduplication.
  * - [HandoffEnvelopeV2.source_runtime_posture] is mapped directly from
  *   [AgentRuntimeBridge.HandoffRequest.sourceRuntimePosture].
+ * - PR-D fields ([dispatch_intent], [dispatch_origin], [orchestration_stage],
+ *   [execution_context]) are mapped 1:1 from the request so that V2 source dispatch
+ *   metadata is propagated to the gateway bridge endpoint unchanged.
  *
  * All other fields are mapped 1:1 from the source request.
  */
@@ -84,5 +104,9 @@ fun AgentRuntimeBridge.HandoffRequest.toEnvelopeV2(): HandoffEnvelopeV2 = Handof
     constraints = constraints,
     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
     idempotency_key = java.util.UUID.randomUUID().toString(),
-    source_runtime_posture = sourceRuntimePosture
+    source_runtime_posture = sourceRuntimePosture,
+    dispatch_intent = dispatchIntent,
+    dispatch_origin = dispatchOrigin,
+    orchestration_stage = orchestrationStage,
+    execution_context = executionContext
 )

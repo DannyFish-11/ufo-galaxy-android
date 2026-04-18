@@ -566,7 +566,12 @@ class GalaxyConnectionService : Service() {
                 routeMode = routeMode,
                 capability = "task_execution",
                 constraints = payload.constraints,
-                sourceRuntimePosture = SourceRuntimePosture.fromValue(payload.source_runtime_posture)
+                sourceRuntimePosture = SourceRuntimePosture.fromValue(payload.source_runtime_posture),
+                // ── PR-D: propagate V2 source dispatch metadata into handoff ──────────
+                dispatchIntent = payload.dispatch_intent,
+                dispatchOrigin = payload.dispatch_origin,
+                orchestrationStage = payload.orchestration_stage,
+                executionContext = payload.execution_context
             )
             val handoffResult = UFOGalaxyApplication.agentRuntimeBridge.handoff(handoffRequest)
 
@@ -659,7 +664,9 @@ class GalaxyConnectionService : Service() {
                 max_steps = payload.max_steps,
                 timeout_ms = 0L,
                 constraints = payload.constraints,
-                source_runtime_posture = payload.source_runtime_posture
+                source_runtime_posture = payload.source_runtime_posture,
+                // ── PR-D: propagate V2 source dispatch metadata into goal execution ──
+                execution_context = payload.execution_context
             )
             val rawResult = UFOGalaxyApplication.localGoalExecutor.executeGoal(goalPayload)
             goalResult = rawResult.copy(
