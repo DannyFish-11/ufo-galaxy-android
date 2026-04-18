@@ -739,6 +739,151 @@ object CanonicalSessionAxis {
             .map { it.family }
             .toSet()
 
+    // ── PR-41: Contract finalization bindings ────────────────────────────────
+
+    /**
+     * PR-41 — Classifies each session family by its Android contract finalization status,
+     * drift risk relative to the V2 center model, and the canonical surface that governs
+     * the boundary.
+     *
+     * These bindings complement [truthBindings] (PR-39) and [transportContinuityBindings]
+     * (PR-40) with the contract-finalization perspective, making the residual Android/V2
+     * drift risk per session family machine-readable.
+     *
+     * @param family            The [CanonicalSessionFamily] this binding describes.
+     * @param clarityLevel      [AndroidContractFinalizer.ResponsibilityClarity] for this family's
+     *                          contract boundary.
+     * @param v2DriftRisk       [AndroidContractFinalizer.DriftRisk] — risk that this family's
+     *                          semantics will diverge from center-side V2 expectations.
+     * @param canonicalSurface  The primary Android surface governing this family's contract
+     *                          boundary.
+     * @param finalizationNote  One-sentence note on the PR-41 finalization status for this family.
+     */
+    data class ContractFinalizationBinding(
+        val family: CanonicalSessionFamily,
+        val clarityLevel: AndroidContractFinalizer.ResponsibilityClarity,
+        val v2DriftRisk: AndroidContractFinalizer.DriftRisk,
+        val canonicalSurface: String,
+        val finalizationNote: String
+    )
+
+    /**
+     * Registry of contract finalization bindings for all seven session families.
+     *
+     * These bindings make the PR-41 contract finalization status for each session family
+     * machine-readable.  Consumers can query them to understand which families are fully
+     * finalized and which still carry residual V2 drift risk.
+     */
+    val contractFinalizationBindings: List<ContractFinalizationBinding> = listOf(
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.CONTROL_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.TRANSITIONAL,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.MEDIUM,
+            canonicalSurface = "CanonicalSessionAxis (wireAlias: session_id→control_session_id)",
+            finalizationNote = "Control session wire alias (session_id) is documented by CanonicalSessionAxis " +
+                "but not yet resolved to the canonical term; naming convergence requires center-Android coordination."
+        ),
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.RUNTIME_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.LOW,
+            canonicalSurface = "RuntimeController._currentRuntimeSessionId + " +
+                "AttachedRuntimeHostSessionSnapshot.runtimeSessionId",
+            finalizationNote = "Runtime session identity is explicitly governed: per-WS UUID generated " +
+                "in openAttachedSession(), projected into the canonical host-session snapshot."
+        ),
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.LOW,
+            canonicalSurface = "AttachedRuntimeSession + AttachedRuntimeHostSessionSnapshot.sessionId",
+            finalizationNote = "Attached session lifecycle is fully governed by RuntimeController; " +
+                "canonical typed projection (hostSessionSnapshot) is stable and authoritative."
+        ),
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.LOW,
+            canonicalSurface = "DelegatedExecutionSignal.attachedSessionId + EmittedSignalLedger",
+            finalizationNote = "Transfer session scope is explicitly bounded to ACK→PROGRESS→RESULT; " +
+                "no snapshot carrier; governed by DelegatedExecutionSignal and EmittedSignalLedger."
+        ),
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.CONVERSATION_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.LOW,
+            canonicalSurface = "LocalLoopTrace.sessionId + SessionHistorySummary.sessionId",
+            finalizationNote = "Conversation session is local-only and independent of cross-device " +
+                "transport; no V2 drift risk because center does not govern this family's identity."
+        ),
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.MESH_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.TRANSITIONAL,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.MEDIUM,
+            canonicalSurface = "CanonicalSessionAxis (wireAlias: mesh_id→mesh_session_id)",
+            finalizationNote = "Mesh session wire alias (mesh_id) is documented by CanonicalSessionAxis " +
+                "but not yet resolved to the canonical term; requires center-Android coordination."
+        ),
+
+        ContractFinalizationBinding(
+            family = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            clarityLevel = AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT,
+            v2DriftRisk = AndroidContractFinalizer.DriftRisk.LOW,
+            canonicalSurface = "DurableSessionContinuityRecord + AttachedRuntimeHostSessionSnapshot.durableSessionId",
+            finalizationNote = "Durable session era is explicitly governed by RuntimeController; " +
+                "durableSessionId and sessionContinuityEpoch are projected into the canonical snapshot."
+        )
+    )
+
+    private val contractFinalizationBindingIndex: Map<CanonicalSessionFamily, ContractFinalizationBinding> =
+        contractFinalizationBindings.associateBy { it.family }
+
+    /**
+     * PR-41 — Returns the [ContractFinalizationBinding] for [family], documenting the
+     * PR-41 contract finalization status and V2 drift risk for this session family.
+     *
+     * Returns `null` if [family] has no registered binding (defensive; all seven
+     * current families have a binding).
+     */
+    fun contractFinalizationBindingFor(family: CanonicalSessionFamily): ContractFinalizationBinding? =
+        contractFinalizationBindingIndex[family]
+
+    /**
+     * PR-41 — Returns the set of session families whose contract boundary is
+     * [AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT] with
+     * [AndroidContractFinalizer.DriftRisk.LOW].
+     *
+     * These families' contract boundaries are fully finalized and safe to build on.
+     */
+    val finalizedContractFamilies: Set<CanonicalSessionFamily> =
+        contractFinalizationBindings
+            .filter {
+                it.clarityLevel == AndroidContractFinalizer.ResponsibilityClarity.EXPLICIT &&
+                    it.v2DriftRisk == AndroidContractFinalizer.DriftRisk.LOW
+            }
+            .map { it.family }
+            .toSet()
+
+    /**
+     * PR-41 — Returns the set of session families whose contract boundary is still
+     * [AndroidContractFinalizer.ResponsibilityClarity.TRANSITIONAL], meaning their
+     * wire-alias or vocabulary convergence with the center side is incomplete.
+     *
+     * These families require cross-repo coordination before their boundaries can be
+     * declared fully explicit.
+     */
+    val transitionalContractFamilies: Set<CanonicalSessionFamily> =
+        contractFinalizationBindings
+            .filter { it.clarityLevel == AndroidContractFinalizer.ResponsibilityClarity.TRANSITIONAL }
+            .map { it.family }
+            .toSet()
+
     // ── PR-37: Session/dispatch alignment helpers ─────────────────────────────
 
     /**

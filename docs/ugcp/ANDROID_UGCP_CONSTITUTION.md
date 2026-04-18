@@ -497,3 +497,101 @@ This is intentionally rollout-safe:
 - normalize/warn/canonical-preferred/reject-ready distinctions are explicit and reviewable;
 - reject-ready remains evidence/coordination gated;
 - no abrupt canonical-only runtime rejection is introduced in this phase.
+
+## 17) PR-41 Android contract finalization and compatibility retirement
+
+PR-41 performs the highest-value Android-side contract closure work after the lifecycle,
+protocol, projection, and transport convergence passes in PR-37 through PR-40.
+
+### 17.1 AndroidContractFinalizer — explicit boundary registry
+
+`AndroidContractFinalizer` declares every major Android runtime participation area as an
+explicit contract responsibility boundary with three orthogonal classifications:
+
+- **Responsibility clarity**: `EXPLICIT` / `TRANSITIONAL` / `AMBIGUOUS`
+  - Explicit: canonical surface governs the boundary; no residual ambiguity.
+  - Transitional: canonical replacement exists but convergence is incomplete.
+  - Ambiguous: competing interpretations require cross-repo coordination.
+
+- **Drift risk**: `LOW` / `MEDIUM` / `HIGH`
+  - Low: canonical surface prevents divergence; minimal ongoing risk.
+  - Medium: transitional surfaces remain; drift is bounded but possible.
+  - High: ambiguity or competing surfaces create significant divergence risk.
+
+- **Boundary ownership**: `ANDROID_OWNED` / `CENTER_OWNED` / `SHARED`
+
+Boundaries registered in PR-41 (all areas that were touched by prior convergence PRs):
+
+| Boundary area | Clarity | Drift risk | Ownership |
+|---|---|---|---|
+| Readiness declaration | EXPLICIT | LOW | ANDROID_OWNED |
+| Session participation | EXPLICIT | LOW | ANDROID_OWNED |
+| Transport continuity | EXPLICIT | LOW | ANDROID_OWNED |
+| Host-facing state | EXPLICIT | MEDIUM | ANDROID_OWNED |
+| Snapshot/projection derivation | EXPLICIT | LOW | ANDROID_OWNED |
+| Dispatch eligibility | EXPLICIT | LOW | ANDROID_OWNED |
+| Session identifier vocabulary | TRANSITIONAL | MEDIUM | SHARED |
+| Protocol compatibility retirement | TRANSITIONAL | MEDIUM | SHARED |
+| Long-tail dispatch compatibility | EXPLICIT | LOW | SHARED |
+| Runtime lifecycle authority | EXPLICIT | LOW | ANDROID_OWNED |
+
+`finalizedBoundaryIds` exposes the set of boundaries that are EXPLICIT with LOW drift risk
+for direct assertion in tests and governance checks.
+
+### 17.2 CompatibilityRetirementFence — explicit retirement decisions
+
+`CompatibilityRetirementFence` records the explicit PR-41 decision for every compatibility
+surface in `CompatibilitySurfaceRetirementRegistry`:
+
+- **FENCED**: blocked from new consumers; canonical replacement ready.
+  - `runtime_registration_error_string_bridge`: @Deprecated since PR-36; consumers migrated.
+
+- **DECOMMISSION_SCHEDULED**: no remaining active utility; remove in next cleanup pass.
+  - `galaxy_api_client_register_device_deprecated`: replaced by WS capability_report.
+  - `galaxy_api_client_send_heartbeat_deprecated`: replaced by WS automatic heartbeat.
+  - `dispatch_adapter_peer_announce_transitional`: promoted to dedicated handler in PR-36.
+  - `dispatch_adapter_lock_transitional` / `dispatch_adapter_unlock_transitional`: low frequency.
+
+- **PENDING_COORDINATION**: retirement blocked on center-Android coordination gate.
+  - All `RETIRE_AFTER_COORDINATION` surfaces remain guarded; no new extension work permitted.
+  - `runtime_host_session_legacy_map_bridge`: fenced against new consumers; canonical replacement ready.
+
+`COVERAGE_INVARIANT` declares that every `CompatibilitySurfaceRetirementRegistry` entry must
+have exactly one `FenceEntry` — ensuring complete audit-trail coverage.
+
+### 17.3 CanonicalSessionAxis — contract finalization bindings per family
+
+`CanonicalSessionAxis.contractFinalizationBindings` adds a `ContractFinalizationBinding` per
+session family recording the PR-41 clarity, V2 drift risk, and governing canonical surface.
+
+- Five families are EXPLICIT/LOW: `RUNTIME_SESSION`, `ATTACHED_RUNTIME_SESSION`,
+  `DELEGATION_TRANSFER_SESSION`, `CONVERSATION_SESSION`, `DURABLE_RUNTIME_SESSION`.
+- Two families are TRANSITIONAL/MEDIUM: `CONTROL_SESSION` and `MESH_SESSION` (wire aliases
+  `session_id` and `mesh_id` pending center-Android vocabulary convergence).
+
+`finalizedContractFamilies` and `transitionalContractFamilies` expose these sets
+for machine-readable governance checks.
+
+### 17.4 CanonicalDispatchChain — contract-finalized path resolver
+
+`CanonicalDispatchChain.resolveContractFinalizedPaths()` extends `resolveTransportAdaptedPaths()`
+with a contract-finalization filter: the `COMPATIBILITY` path is excluded by default, since
+it is the only dispatch path that routes through compatibility surfaces catalogued in
+`CompatibilitySurfaceRetirementRegistry`.
+
+Callers building new dispatch logic on finalized contract boundaries should use this
+resolver to get a compatibility-surface-free dispatch path set.
+
+### 17.5 Residual ambiguity after PR-41
+
+After PR-41, the following residual ambiguity points remain:
+
+- Wire alias convergence (`session_id → control_session_id`, `mesh_id → mesh_session_id`)
+  requires center-coordinated vocabulary rollout.
+- Legacy map bridge (`currentSessionSnapshot`) retirement requires all host-facing consumers
+  to migrate to the canonical typed snapshot.
+- Multiple `RETIRE_AFTER_COORDINATION` protocol compatibility surfaces remain active until
+  center confirms the relevant gateway schema rollout decisions.
+
+These are explicitly recorded in `AndroidContractFinalizer.boundariesWithResidualAmbiguity`
+and `CompatibilityRetirementFence.pendingCoordinationSurfaceIds` for cross-repo tracking.
