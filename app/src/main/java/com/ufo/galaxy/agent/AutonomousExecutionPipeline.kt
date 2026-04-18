@@ -6,6 +6,7 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.runtime.ContinuityRecoveryContext
 import com.ufo.galaxy.runtime.ExecutorTargetType
+import com.ufo.galaxy.runtime.RuntimeObservabilityMetadata
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
@@ -94,10 +95,14 @@ class AutonomousExecutionPipeline(
      *    [GoalExecutionPayload.is_resumable], and [GoalExecutionPayload.interruption_reason] when
      *    present for observability.  These fields are accepted without failure; `null` / absent
      *    values are treated as the legacy contract.
+     * 6. **Observability metadata** (PR-G): logs [GoalExecutionPayload.dispatch_trace_id] and
+     *    [GoalExecutionPayload.lifecycle_event_id] when present for cross-system tracing;
+     *    tolerates `null` / absent values (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
      * the result with [device_role], the echoed [GoalExecutionPayload.executor_target_type],
-     * and the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable]
+     * the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable],
+     * and the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability.
      * so V2 can correlate the result with its originating durable continuity context.
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
@@ -129,13 +134,16 @@ class AutonomousExecutionPipeline(
         }
         // PR-F: log continuity/recovery context for observability; accept without failure.
         logContinuityContext("goal_execution", payload)
+        // PR-G: log observability tracing metadata; accept without failure.
+        logObservabilityContext("goal_execution", payload)
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
         return goalExecutor.executeGoal(payload)
             .copy(
                 device_role = deviceRole,
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
-                is_resumable = payload.is_resumable
+                is_resumable = payload.is_resumable,
+                dispatch_trace_id = payload.dispatch_trace_id
             )
     }
 
@@ -157,11 +165,13 @@ class AutonomousExecutionPipeline(
      *    to preserve backward compatibility.
      * 5. **Continuity/recovery check** (PR-F): logs continuity/recovery context for observability.
      *    Fields are accepted without failure; null / absent values are treated as legacy contract.
+     * 6. **Observability metadata** (PR-G): logs [GoalExecutionPayload.dispatch_trace_id] and
+     *    [GoalExecutionPayload.lifecycle_event_id] when present for cross-system tracing.
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
      * and enriches the result with [device_role], the echoed
-     * [GoalExecutionPayload.executor_target_type], and the echoed continuity/recovery fields
-     * so V2 can correlate the result with its originating durable continuity context.
+     * [GoalExecutionPayload.executor_target_type], the echoed continuity/recovery fields,
+     * and the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability.
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -191,13 +201,16 @@ class AutonomousExecutionPipeline(
         }
         // PR-F: log continuity/recovery context for observability; accept without failure.
         logContinuityContext("parallel_subtask", payload)
+        // PR-G: log observability tracing metadata; accept without failure.
+        logObservabilityContext("parallel_subtask", payload)
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
         return collaborationAgent.handleParallelSubtask(payload)
             .copy(
                 device_role = deviceRole,
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
-                is_resumable = payload.is_resumable
+                is_resumable = payload.is_resumable,
+                dispatch_trace_id = payload.dispatch_trace_id
             )
     }
 
@@ -227,6 +240,25 @@ class AutonomousExecutionPipeline(
         )
     }
 
+    /**
+     * Logs PR-G observability/tracing metadata fields.
+     *
+     * A no-op when all observability fields are null/blank, so it imposes no overhead
+     * on legacy (pre-PR-G) senders.
+     */
+    private fun logObservabilityContext(msgType: String, payload: GoalExecutionPayload) {
+        val hasObservability = RuntimeObservabilityMetadata.hasDispatchTraceId(payload.dispatch_trace_id)
+            || RuntimeObservabilityMetadata.hasLifecycleEventId(payload.lifecycle_event_id)
+        if (!hasObservability) return
+
+        Log.i(
+            TAG,
+            "$msgType dispatch_trace_id=${payload.dispatch_trace_id} " +
+                "lifecycle_event_id=${payload.lifecycle_event_id} " +
+                "task_id=${payload.task_id}"
+        )
+    }
+
     private fun buildDisabledResult(
         payload: GoalExecutionPayload,
         reason: String
@@ -243,6 +275,8 @@ class AutonomousExecutionPipeline(
         executor_target_type = payload.executor_target_type,
         // PR-F: echo continuity/recovery fields in disabled results so V2 can correlate
         continuity_token = payload.continuity_token,
-        is_resumable = payload.is_resumable
+        is_resumable = payload.is_resumable,
+        // PR-G: echo dispatch_trace_id in disabled results for full-chain observability
+        dispatch_trace_id = payload.dispatch_trace_id
     )
 }

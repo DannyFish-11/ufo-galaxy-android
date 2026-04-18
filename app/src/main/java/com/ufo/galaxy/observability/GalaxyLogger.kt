@@ -64,6 +64,9 @@ import kotlin.concurrent.withLock
  * | `GALAXY:RUNTIME:LIFECYCLE` | Runtime lifecycle state transition event (PR-37)          |
  * | `GALAXY:PROTOCOL:CONVERGENCE` | Protocol convergence boundary enforcement event (PR-38) |
  * | `GALAXY:V2:LIFECYCLE`        | V2 multi-device runtime lifecycle event (PR-43)         |
+ * | `GALAXY:DISPATCH:DECISION`   | Android dispatch decision with observability context (PR-G) |
+ * | `GALAXY:LIFECYCLE:OBSERVE`   | Device lifecycle event forwarded to V2 observability model (PR-G) |
+ * | `GALAXY:RECOVERY:OBSERVE`    | Recovery execution event with cross-system tracing context (PR-G) |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -523,6 +526,76 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_V2_LIFECYCLE = "GALAXY:V2:LIFECYCLE"
+
+    // ── PR-G: Production-grade runtime observability tags ─────────────────────
+
+    /**
+     * PR-G (PR-47) — Fired when an Android-side dispatch decision is recorded with
+     * full observability/tracing context for cross-system V2 correlation.
+     *
+     * Emitted when the Android runtime selects an execution route and target for
+     * an inbound command, capturing the dispatch chain identifiers so they can
+     * be correlated in V2 observability pipelines.
+     *
+     * Required fields: `event` (one of
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.EVENT_DISPATCH_DECISION_RECORDED]),
+     * `task_id`, `route` (execution route wire value).
+     *
+     * Optional fields: `dispatch_trace_id`, `executor_target_type`, `session_id`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:DISPATCH:DECISION","fields":{"event":"dispatch_decision_recorded","task_id":"t-1","route":"local","dispatch_trace_id":"dt-abc","executor_target_type":"android_device"}}
+     * ```
+     */
+    const val TAG_DISPATCH_DECISION = "GALAXY:DISPATCH:DECISION"
+
+    /**
+     * PR-G (PR-47) — Fired when a device lifecycle observability event is emitted into
+     * the V2 observability model.
+     *
+     * Emitted when a [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent] is forwarded
+     * to V2 with richer observability context (session correlation, lifecycle event IDs).
+     * Provides a dedicated tag so operators can filter lifecycle-specific observability
+     * events separately from raw V2 lifecycle events.
+     *
+     * Required fields: `event` (one of
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.EVENT_LIFECYCLE_OBSERVE_EMITTED]),
+     * `lifecycle_kind` (wire value from
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.LifecycleObservabilityKind]),
+     * `device_id`.
+     *
+     * Optional fields: `session_id`, `lifecycle_event_id`, `session_correlation_id`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:LIFECYCLE:OBSERVE","fields":{"event":"lifecycle_observe_emitted","lifecycle_kind":"device_attach","device_id":"Pixel_8","session_id":"s-1"}}
+     * ```
+     */
+    const val TAG_LIFECYCLE_OBSERVE = "GALAXY:LIFECYCLE:OBSERVE"
+
+    /**
+     * PR-G (PR-47) — Fired when a recovery-related execution event is recorded with
+     * full cross-system tracing context for V2 observability correlation.
+     *
+     * Emitted when an execution that carries recovery/continuity metadata
+     * (from [com.ufo.galaxy.runtime.ContinuityRecoveryContext]) completes or is
+     * interrupted, capturing dispatch trace and continuity identifiers so recovery
+     * events can be traced end-to-end across the V2 system.
+     *
+     * Required fields: `event` (one of
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.EVENT_RECOVERY_OBSERVE_RECORDED]),
+     * `task_id`.
+     *
+     * Optional fields: `dispatch_trace_id`, `continuity_token`, `interruption_reason`,
+     * `is_resumable`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RECOVERY:OBSERVE","fields":{"event":"recovery_observe_recorded","task_id":"t-1","dispatch_trace_id":"dt-abc","continuity_token":"ct-xyz","is_resumable":true}}
+     * ```
+     */
+    const val TAG_RECOVERY_OBSERVE = "GALAXY:RECOVERY:OBSERVE"
 
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"

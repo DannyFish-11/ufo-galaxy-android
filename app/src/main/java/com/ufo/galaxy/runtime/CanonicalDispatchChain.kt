@@ -218,7 +218,14 @@ object CanonicalDispatchChain {
                 "(continuity_token, recovery_context, is_resumable, interruption_reason). " +
                 "Android handlers accept these fields without failure and echo continuity_token " +
                 "and is_resumable back in results for full-chain V2 correlation. Android MUST NOT " +
-                "collapse is_resumable=true executions into terminal failure.",
+                "collapse is_resumable=true executions into terminal failure. " +
+                "PR-G: task_assign and goal_execution payloads now accept optional V2 " +
+                "observability/tracing metadata (dispatch_trace_id, lifecycle_event_id). " +
+                "Android handlers accept these fields without failure; dispatch_trace_id is " +
+                "echoed back in result payloads for full-chain V2 observability correlation. " +
+                "AipMessage envelope also accepts dispatch_trace_id and session_correlation_id " +
+                "for envelope-level cross-system tracing. All observability fields default to " +
+                "null for legacy-sender backward compatibility.",
             authority    = PhaseAuthority.ANDROID_GOVERNED,
             androidLayer = "GalaxyConnectionService (service/)"
         ),

@@ -95,12 +95,12 @@ import org.junit.Test
  *  - protocol-surface-transitional-compatibility has non-null retirementGate
  *
  * ### StabilizationBaseline — tier and guidance counts
- *  - CANONICAL_STABLE count is 19
+ *  - CANONICAL_STABLE count is 59
  *  - CANONICAL_FROZEN count is 1
- *  - TRANSITIONAL count is 3
- *  - RETIREMENT_GATED count is 2
- *  - total entry count is 25
- *  - EXTEND guidance count is 19
+ *  - TRANSITIONAL count is 2
+ *  - RETIREMENT_GATED count is 3
+ *  - total entry count is 65
+ *  - EXTEND guidance count is 59
  *  - CONVERGE guidance count is 3
  *  - WRAP_ONLY guidance count is 1
  *  - NO_NEW_WORK guidance count is 2
@@ -442,28 +442,28 @@ class Pr11StabilizationBaselineTest {
     // 12. Tier and guidance counts
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `CANONICAL_STABLE count is 19`() {
-        assertEquals(19, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
+    @Test fun `CANONICAL_STABLE count is 59`() {
+        assertEquals(59, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test fun `CANONICAL_FROZEN count is 1`() {
         assertEquals(1, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_FROZEN).size)
     }
 
-    @Test fun `TRANSITIONAL count is 3`() {
-        assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.TRANSITIONAL).size)
+    @Test fun `TRANSITIONAL count is 2`() {
+        assertEquals(2, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.TRANSITIONAL).size)
     }
 
-    @Test fun `RETIREMENT_GATED count is 2`() {
-        assertEquals(2, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
+    @Test fun `RETIREMENT_GATED count is 3`() {
+        assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 25`() {
-        assertEquals(25, StabilizationBaseline.entries.size)
+    @Test fun `total entry count is 65`() {
+        assertEquals(65, StabilizationBaseline.entries.size)
     }
 
-    @Test fun `EXTEND guidance count is 19`() {
-        assertEquals(19, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
+    @Test fun `EXTEND guidance count is 59`() {
+        assertEquals(59, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
     }
 
     @Test fun `CONVERGE guidance count is 3`() {
