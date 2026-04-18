@@ -125,7 +125,9 @@ class AgentRuntimeBridge(
         val dispatchIntent: String? = null,
         val dispatchOrigin: String? = null,
         val orchestrationStage: String? = null,
-        val executionContext: Map<String, String> = emptyMap()
+        val executionContext: Map<String, String> = emptyMap(),
+        // ── PR-E: V2 explicit executor target typing (optional; null-safe) ───────────
+        val executorTargetType: String? = null
     )
 
     /**
@@ -414,6 +416,8 @@ class AgentRuntimeBridge(
             if (!env.dispatch_origin.isNullOrBlank()) put("dispatch_origin", env.dispatch_origin)
             if (!env.orchestration_stage.isNullOrBlank()) put("orchestration_stage", env.orchestration_stage)
             if (env.execution_context.isNotEmpty()) put("execution_context", JSONObject(env.execution_context as Map<*, *>))
+            // ── PR-E: V2 explicit executor target typing (omitted when null) ──────────
+            if (!env.executor_target_type.isNullOrBlank()) put("executor_target_type", env.executor_target_type)
         }.toString()
     }
 

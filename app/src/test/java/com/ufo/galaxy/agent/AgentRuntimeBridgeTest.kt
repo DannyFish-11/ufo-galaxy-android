@@ -507,4 +507,56 @@ class AgentRuntimeBridgeTest {
         val sentJson = org.json.JSONObject(client.sentMessages[0])
         assertEquals("task_execute", sentJson.getString("dispatch_intent"))
     }
+
+    // ── buildBridgeJson: PR-E executor target typing ──────────────────────────
+
+    @Test
+    fun `buildBridgeJson includes executor_target_type when present`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-ett",
+            taskId = "task-ett",
+            goal = "test",
+            executorTargetType = "android_device"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertTrue("executor_target_type must be present when set", obj.has("executor_target_type"))
+        assertEquals("android_device", obj.getString("executor_target_type"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits executor_target_type when null`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-no-ett",
+            taskId = "task-no-ett",
+            goal = "legacy task"
+            // executorTargetType defaults to null
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("executor_target_type must be absent when null", obj.has("executor_target_type"))
+    }
+
+    @Test
+    fun `buildBridgeJson includes executor_target_type alongside V2 dispatch metadata`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-combo",
+            taskId = "task-combo",
+            goal = "combined v2 fields test",
+            dispatchIntent = "staged_handoff",
+            dispatchOrigin = "orch-xyz",
+            executorTargetType = "android_device"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertEquals("staged_handoff", obj.getString("dispatch_intent"))
+        assertEquals("orch-xyz", obj.getString("dispatch_origin"))
+        assertEquals("android_device", obj.getString("executor_target_type"))
+    }
 }

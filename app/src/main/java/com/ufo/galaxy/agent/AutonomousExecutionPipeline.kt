@@ -4,6 +4,7 @@ import android.util.Log
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.runtime.ExecutorTargetType
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
@@ -75,7 +76,7 @@ class AutonomousExecutionPipeline(
     /**
      * Handles a [goal_execution] message.
      *
-     * Three gates are evaluated in order:
+     * Four gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [goal_execution] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -85,9 +86,12 @@ class AutonomousExecutionPipeline(
      *    is [SourceRuntimePosture.CONTROL_ONLY].  A `control_only` source has declared that it
      *    is not joining local runtime execution; Android must honour this contract and refuse
      *    to act as an executor for the task.
+     * 4. **Target type check** (PR-E): logs the [GoalExecutionPayload.executor_target_type] when
+     *    present for observability; tolerates `null` (legacy) and unknown values without rejection
+     *    to preserve backward compatibility.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
-     * the result with [device_role].
+     * the result with [device_role] and the echoed [GoalExecutionPayload.executor_target_type].
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -105,14 +109,26 @@ class AutonomousExecutionPipeline(
             )
             return buildDisabledResult(payload, REASON_POSTURE_CONTROL_ONLY)
         }
+        // PR-E: log explicit executor_target_type for observability; tolerate null / unknown values
+        // to preserve backward compatibility with pre-V2 senders.
+        val targetType = ExecutorTargetType.fromValue(payload.executor_target_type)
+        if (payload.executor_target_type != null) {
+            Log.i(
+                TAG,
+                "goal_execution executor_target_type=${payload.executor_target_type} " +
+                    "canonical=$targetType eligible=${ExecutorTargetType.isAndroidEligible(targetType)} " +
+                    "task_id=${payload.task_id}"
+            )
+        }
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
-        return goalExecutor.executeGoal(payload).copy(device_role = deviceRole)
+        return goalExecutor.executeGoal(payload)
+            .copy(device_role = deviceRole, executor_target_type = payload.executor_target_type)
     }
 
     /**
      * Handles a [parallel_subtask] message.
      *
-     * Three gates are evaluated in order:
+     * Four gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [parallel_subtask] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -122,9 +138,13 @@ class AutonomousExecutionPipeline(
      *    is [SourceRuntimePosture.CONTROL_ONLY].  Parallel subtasks are only valid for
      *    `join_runtime` participants; a `control_only` source must not contribute subtask
      *    results to the runtime execution pool.
+     * 4. **Target type check** (PR-E): logs the [GoalExecutionPayload.executor_target_type] when
+     *    present for observability; tolerates `null` (legacy) and unknown values without rejection
+     *    to preserve backward compatibility.
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
-     * and enriches the result with [device_role].
+     * and enriches the result with [device_role] and the echoed
+     * [GoalExecutionPayload.executor_target_type].
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -142,8 +162,19 @@ class AutonomousExecutionPipeline(
             )
             return buildDisabledResult(payload, REASON_POSTURE_CONTROL_ONLY)
         }
+        // PR-E: log explicit executor_target_type for observability; tolerate null / unknown values.
+        val targetType = ExecutorTargetType.fromValue(payload.executor_target_type)
+        if (payload.executor_target_type != null) {
+            Log.i(
+                TAG,
+                "parallel_subtask executor_target_type=${payload.executor_target_type} " +
+                    "canonical=$targetType eligible=${ExecutorTargetType.isAndroidEligible(targetType)} " +
+                    "task_id=${payload.task_id}"
+            )
+        }
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
-        return collaborationAgent.handleParallelSubtask(payload).copy(device_role = deviceRole)
+        return collaborationAgent.handleParallelSubtask(payload)
+            .copy(device_role = deviceRole, executor_target_type = payload.executor_target_type)
     }
 
     private fun buildDisabledResult(
@@ -158,6 +189,7 @@ class AutonomousExecutionPipeline(
         subtask_index = payload.subtask_index,
         latency_ms = 0L,
         device_id = deviceId,
-        device_role = deviceRole
+        device_role = deviceRole,
+        executor_target_type = payload.executor_target_type
     )
 }
