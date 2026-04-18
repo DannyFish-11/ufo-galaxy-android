@@ -43,13 +43,22 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * |                          | wire values the delegated task requires the receiver to have.            |
  * | [continuation_token]     | (PR-9) Opaque, stable machine-readable continuation state token           |
  * |                          | produced by the originating executor; more structured than [checkpoint]. |
+ * | [continuity_token]       | (PR-F) Opaque stable token identifying the durable execution continuity  |
+ * |                          | context across reconnects or handoffs; `null` for legacy senders.        |
+ * | [recovery_context]       | (PR-F) Key-value map carrying recovery hints forwarded by V2;            |
+ * |                          | empty for legacy senders; unknown keys MUST be ignored.                  |
+ * | [is_resumable]           | (PR-F) `true` when V2 considers this a resumable execution; `false`     |
+ * |                          | when terminal; `null` for legacy senders.                                |
+ * | [interruption_reason]    | (PR-F) Reason for the interruption that triggered this resume/recovery   |
+ * |                          | dispatch; `null` for non-recovery dispatches.                            |
  *
  * ## Backward compatibility
  * All fields except [takeover_id], [task_id], [trace_id], and [goal] are optional
  * so that the envelope can accept messages from main-runtime versions that pre-date
  * this contract.  [source_runtime_posture] defaults to `null`; consumers must use
  * [SourceRuntimePosture.fromValue] to resolve it to a safe default. All PR-9 fields
- * default to `null` / empty so that pre-PR-9 senders remain compatible.
+ * default to `null` / empty so that pre-PR-9 senders remain compatible.  All PR-F
+ * fields default to `null` / empty so that pre-PR-F senders remain compatible.
  *
  * @param takeover_id                  Unique identifier for this takeover request.
  * @param task_id                      Task identifier being handed over.
@@ -74,6 +83,15 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  *                                     task requires; empty from legacy senders.
  * @param continuation_token           (PR-9) Opaque machine-readable continuation state token;
  *                                     null when not provided by the originating executor.
+ * @param continuity_token             (PR-F) Opaque stable token identifying the durable
+ *                                     execution continuity context across reconnects or
+ *                                     handoffs; null for legacy senders.
+ * @param recovery_context             (PR-F) Key-value map carrying recovery hints from V2;
+ *                                     empty from legacy senders; unknown keys MUST be ignored.
+ * @param is_resumable                 (PR-F) `true` when V2 considers this a resumable
+ *                                     execution; `false` when terminal; null for legacy senders.
+ * @param interruption_reason          (PR-F) Reason for the interruption that triggered this
+ *                                     resume/recovery dispatch; null for non-recovery dispatches.
  */
 data class TakeoverRequestEnvelope(
     val takeover_id: String,
@@ -94,7 +112,12 @@ data class TakeoverRequestEnvelope(
     val originating_host_id: String? = null,
     val originating_formation_role: String? = null,
     val required_capability_dimensions: List<String> = emptyList(),
-    val continuation_token: String? = null
+    val continuation_token: String? = null,
+    // ── PR-F: Durable continuity and recovery context (optional; null-safe for legacy senders) ──
+    val continuity_token: String? = null,
+    val recovery_context: Map<String, String> = emptyMap(),
+    val is_resumable: Boolean? = null,
+    val interruption_reason: String? = null
 ) {
     /**
      * Returns the resolved [source_runtime_posture] using [SourceRuntimePosture.fromValue].

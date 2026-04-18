@@ -212,7 +212,13 @@ object CanonicalDispatchChain {
                 "PR-D: task_assign and goal_execution payloads now accept optional V2 source " +
                 "dispatch metadata (dispatch_intent, dispatch_origin, orchestration_stage, " +
                 "execution_context, staged_mesh_id, staged_subtask_id). All fields default to " +
-                "null/empty for legacy-sender backward compatibility.",
+                "null/empty for legacy-sender backward compatibility. " +
+                "PR-F: task_assign, goal_execution, and takeover_request payloads now accept " +
+                "optional V2 durable continuity and recovery context metadata " +
+                "(continuity_token, recovery_context, is_resumable, interruption_reason). " +
+                "Android handlers accept these fields without failure and echo continuity_token " +
+                "and is_resumable back in results for full-chain V2 correlation. Android MUST NOT " +
+                "collapse is_resumable=true executions into terminal failure.",
             authority    = PhaseAuthority.ANDROID_GOVERNED,
             androidLayer = "GalaxyConnectionService (service/)"
         ),
