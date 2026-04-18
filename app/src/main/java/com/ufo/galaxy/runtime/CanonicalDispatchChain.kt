@@ -459,6 +459,104 @@ object CanonicalDispatchChain {
      * dispatch adapters for long-tail message types).
      */
     val COMPATIBILITY_PATH_MODE: DispatchPathMode = DispatchPathMode.COMPATIBILITY
+
+    // ── PR-42: Invariant-protected path resolution ────────────────────────────
+
+    /**
+     * PR-42 — Returns the subset of dispatch paths that are eligible given the supplied
+     * runtime/session/rollout/transport state **and** pass all relevant
+     * [RuntimeInvariantEnforcer] invariant checks.
+     *
+     * This resolver extends [resolveContractFinalizedPaths] with a runtime invariant
+     * validation layer:
+     *
+     * - If any SESSION or DISPATCH invariant is **violated** (not merely unverifiable),
+     *   the result is an empty list.  A violated SESSION or DISPATCH invariant indicates
+     *   a semantic drift condition that makes dispatch path resolution unreliable.
+     * - If any TRANSPORT invariant is **violated**, the cross-device path modes
+     *   ([CROSS_DEVICE_PATH_MODES]) are additionally suppressed even if the transport
+     *   condition filter in [resolveTransportAdaptedPaths] did not already remove them.
+     * - WARNING-severity invariant violations do not suppress paths; they are surfaced
+     *   in the returned [InvariantProtectedPathResult.violations] list for callers to act on.
+     * - All other paths returned by [resolveContractFinalizedPaths] are included unchanged.
+     *
+     * ## When to use
+     *
+     * Use this resolver when building new dispatch logic that must guarantee the runtime
+     * is in a semantically consistent state before committing to a dispatch path.  Do not
+     * use for legacy or compatibility-aware routing that may operate under relaxed
+     * invariant conditions.
+     *
+     * @param runtimeState           Current [RuntimeController.RuntimeState].
+     * @param attachedSession        Current [AttachedRuntimeSession], or `null` if none.
+     * @param rollout                Current [RolloutControlSnapshot].
+     * @param transportCondition     Current [MediaTransportLifecycleBridge.TransportCondition].
+     * @param hostSessionSnapshot    Current [AttachedRuntimeHostSessionSnapshot], or `null`.
+     * @param durableRecord          Current [DurableSessionContinuityRecord], or `null`.
+     * @param recoveryState          Current [ReconnectRecoveryState] (default IDLE).
+     * @return [InvariantProtectedPathResult] containing the eligible paths and any invariant
+     *         violations detected under the supplied state.
+     */
+    fun resolveInvariantProtectedPaths(
+        runtimeState: RuntimeController.RuntimeState,
+        attachedSession: AttachedRuntimeSession?,
+        rollout: RolloutControlSnapshot,
+        transportCondition: MediaTransportLifecycleBridge.TransportCondition,
+        hostSessionSnapshot: AttachedRuntimeHostSessionSnapshot? = null,
+        durableRecord: DurableSessionContinuityRecord? = null,
+        recoveryState: ReconnectRecoveryState = ReconnectRecoveryState.IDLE
+    ): InvariantProtectedPathResult {
+        val allResults = RuntimeInvariantEnforcer.checkAll(
+            runtimeState = runtimeState,
+            attachedSession = attachedSession,
+            rollout = rollout,
+            transportCondition = transportCondition,
+            hostSessionSnapshot = hostSessionSnapshot,
+            durableRecord = durableRecord,
+            recoveryState = recoveryState
+        )
+        val violations = allResults.filter { it.isViolation }
+
+        // If any CRITICAL SESSION or DISPATCH invariant is violated, dispatch is unreliable.
+        val blockingViolations = violations.filter { result ->
+            val invariant = RuntimeInvariantEnforcer.invariantFor(result.invariantId)
+            invariant != null &&
+                invariant.severity == RuntimeInvariantEnforcer.InvariantSeverity.CRITICAL &&
+                (invariant.scope == RuntimeInvariantEnforcer.InvariantScope.SESSION ||
+                    invariant.scope == RuntimeInvariantEnforcer.InvariantScope.DISPATCH)
+        }
+        if (blockingViolations.isNotEmpty()) {
+            return InvariantProtectedPathResult(
+                paths = emptyList(),
+                violations = violations,
+                blockedByInvariant = true
+            )
+        }
+
+        var basePaths = resolveContractFinalizedPaths(
+            runtimeState = runtimeState,
+            attachedSession = attachedSession,
+            rollout = rollout,
+            transportCondition = transportCondition
+        )
+
+        // If any CRITICAL TRANSPORT invariant is violated, additionally suppress cross-device paths.
+        val transportViolations = violations.filter { result ->
+            val invariant = RuntimeInvariantEnforcer.invariantFor(result.invariantId)
+            invariant != null &&
+                invariant.severity == RuntimeInvariantEnforcer.InvariantSeverity.CRITICAL &&
+                invariant.scope == RuntimeInvariantEnforcer.InvariantScope.TRANSPORT
+        }
+        if (transportViolations.isNotEmpty()) {
+            basePaths = basePaths.filter { it.pathMode !in CROSS_DEVICE_PATH_MODES }
+        }
+
+        return InvariantProtectedPathResult(
+            paths = basePaths,
+            violations = violations,
+            blockedByInvariant = false
+        )
+    }
 }
 
 // ── Data types ────────────────────────────────────────────────────────────────
@@ -569,3 +667,33 @@ data class DispatchPhaseDescriptor(
     val authority: PhaseAuthority,
     val androidLayer: String?
 )
+
+/**
+ * PR-42 — Result of [CanonicalDispatchChain.resolveInvariantProtectedPaths].
+ *
+ * Carries both the eligible dispatch paths (after invariant filtering) and the full
+ * list of invariant check results from [RuntimeInvariantEnforcer.checkAll], so callers
+ * can inspect which invariants were satisfied, violated, or unverifiable for the
+ * supplied runtime snapshot.
+ *
+ * @param paths               The eligible [DispatchPathDescriptor] entries after invariant
+ *                            filtering.  Empty when [blockedByInvariant] is `true`.
+ * @param violations          All [RuntimeInvariantEnforcer.InvariantCheckResult] entries
+ *                            where the outcome is [RuntimeInvariantEnforcer.InvariantOutcome.VIOLATED].
+ *                            May be empty when all invariants are satisfied.
+ * @param blockedByInvariant  `true` when a CRITICAL SESSION or DISPATCH invariant violation
+ *                            caused [paths] to be suppressed entirely.  `false` when paths
+ *                            were resolved normally (violations, if any, were WARNING or TRANSPORT).
+ */
+data class InvariantProtectedPathResult(
+    val paths: List<DispatchPathDescriptor>,
+    val violations: List<RuntimeInvariantEnforcer.InvariantCheckResult>,
+    val blockedByInvariant: Boolean
+) {
+    /** `true` when no invariant violations were detected. */
+    val allInvariantsSatisfied: Boolean get() = violations.isEmpty()
+
+    /** Set of violated [RuntimeInvariantEnforcer.InvariantId] values. */
+    val violatedIds: Set<RuntimeInvariantEnforcer.InvariantId>
+        get() = violations.map { it.invariantId }.toSet()
+}

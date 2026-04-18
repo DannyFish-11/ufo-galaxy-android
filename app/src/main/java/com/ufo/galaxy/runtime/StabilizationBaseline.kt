@@ -700,6 +700,59 @@ object StabilizationBaseline {
                 "filter so callers building on finalized contract boundaries can obtain a " +
                 "compatibility-surface-free dispatch path set.",
             introducedPr = 41
+        ),
+
+        // ── PR-42: Android runtime invariant enforcement surfaces ─────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-invariant-enforcer",
+            displayName = "RuntimeInvariantEnforcer",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeInvariantEnforcer",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-42 canonical Android runtime invariant enforcer — defines nine " +
+                "high-value invariants across SESSION, TRANSPORT, READINESS, DISPATCH, and " +
+                "SNAPSHOT scopes; provides pure-function checkAll() and violatedInvariantIds() " +
+                "helpers that make runtime drift conditions locally detectable without " +
+                "framework state.",
+            introducedPr = 42
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-dispatch-chain-invariant-protected-paths",
+            displayName = "CanonicalDispatchChain.resolveInvariantProtectedPaths()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalDispatchChain",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-42 addition: invariant-enforcement–aware dispatch path resolver — " +
+                "extends resolveContractFinalizedPaths() with a RuntimeInvariantEnforcer check " +
+                "layer; CRITICAL SESSION/DISPATCH violations suppress all paths; CRITICAL " +
+                "TRANSPORT violations additionally suppress cross-device paths; returns " +
+                "InvariantProtectedPathResult for caller inspection of violations.",
+            introducedPr = 42
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-session-axis-invariant-bindings",
+            displayName = "CanonicalSessionAxis.invariantBindings / invariantBindingFor()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalSessionAxis",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-42 addition: SessionInvariantBinding entries make the guarding " +
+                "RuntimeInvariantEnforcer invariants per session family machine-readable; " +
+                "familiesWithActiveInvariant exposes which families have active local invariant " +
+                "protection.",
+            introducedPr = 42
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "invariant-protected-path-result",
+            displayName = "InvariantProtectedPathResult",
+            packagePath = "com.ufo.galaxy.runtime.InvariantProtectedPathResult",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-42 result type for resolveInvariantProtectedPaths() — carries " +
+                "resolved dispatch paths, all invariant violations, and a blockedByInvariant " +
+                "flag; provides allInvariantsSatisfied and violatedIds for caller-side " +
+                "violation inspection.",
+            introducedPr = 42
         )
     )
 
