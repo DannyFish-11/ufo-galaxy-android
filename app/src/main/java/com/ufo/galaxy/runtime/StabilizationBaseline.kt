@@ -599,6 +599,56 @@ object StabilizationBaseline {
                 "familiesWithSnapshotCarrier / familiesWithoutSnapshotCarrier expose the " +
                 "projection coverage boundary.",
             introducedPr = 39
+        ),
+
+        // ── PR-40: Android media transport and task-lifecycle convergence surfaces ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "media-transport-lifecycle-bridge",
+            displayName = "MediaTransportLifecycleBridge",
+            packagePath = "com.ufo.galaxy.runtime.MediaTransportLifecycleBridge",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical integration model between Android media/session transport " +
+                "conditions (STABLE / DEGRADED / INTERRUPTED / SUSPENDED) and task/runtime " +
+                "lifecycle adaptations — makes transport→lifecycle mappings explicit and " +
+                "machine-readable; reduces ambiguous transport-driven side paths.",
+            introducedPr = 40
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "transport-continuity-anchor",
+            displayName = "TransportContinuityAnchor",
+            packagePath = "com.ufo.galaxy.runtime.TransportContinuityAnchor",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical transport continuity anchor governing session continuity policy " +
+                "across ATTACH, DETACH, RECONNECT, DEGRADATION, and RECOVERY events — declares " +
+                "ownership boundaries and recovery sequences so transport-driven behavior cannot " +
+                "diverge from canonical runtime lifecycle semantics.",
+            introducedPr = 40
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-dispatch-chain-transport-adapted-paths",
+            displayName = "CanonicalDispatchChain.resolveTransportAdaptedPaths()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalDispatchChain",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-40 addition: transport-condition–aware dispatch path resolver — " +
+                "extends resolveEligiblePathsForState() with a TransportCondition filter that " +
+                "suppresses cross-device paths during INTERRUPTED and SUSPENDED conditions.",
+            introducedPr = 40
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-session-axis-transport-continuity-bindings",
+            displayName = "CanonicalSessionAxis.transportContinuityBindings / transportContinuityBindingFor()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalSessionAxis",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-40 addition: TransportContinuityBinding entries make the interaction " +
+                "between TransportContinuityAnchor events and session families machine-readable; " +
+                "familiesAffectedByInterruption and familiesSurvivingReconnect expose the " +
+                "transport-continuity coverage boundary.",
+            introducedPr = 40
         )
     )
 
