@@ -432,6 +432,44 @@ class RuntimeController(
         _formationRebalanceEvent.asSharedFlow()
 
     /**
+     * PR-43 — Observable V2 multi-device runtime lifecycle event stream.
+     *
+     * Emits a [V2MultiDeviceLifecycleEvent] for every Android device lifecycle transition
+     * that is directly relevant to the V2 multi-device runtime harness hook integration:
+     *
+     *  - [V2MultiDeviceLifecycleEvent.DeviceConnected]           — device attached.
+     *  - [V2MultiDeviceLifecycleEvent.DeviceReconnected]         — device reconnected after WS drop.
+     *  - [V2MultiDeviceLifecycleEvent.DeviceDisconnected]        — device detached.
+     *  - [V2MultiDeviceLifecycleEvent.DeviceDegraded]            — device entered degraded state.
+     *  - [V2MultiDeviceLifecycleEvent.DeviceHealthChanged]       — execution environment health changed.
+     *  - [V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged] — readiness/participation changed.
+     *
+     * V2 consumers should collect this flow and dispatch each event to the corresponding
+     * V2 harness hook (`on_device_health_changed`, `on_participant_readiness_changed`) as
+     * documented in [V2MultiDeviceLifecycleEvent].
+     *
+     * Heartbeat-miss events are **not** emitted; V2 should treat
+     * [V2MultiDeviceLifecycleEvent.DeviceDisconnected] with `detachCause="disconnect"` as
+     * the Android equivalent of a heartbeat-miss condition.
+     *
+     * Backed by a buffer of [V2_LIFECYCLE_EVENT_BUFFER_CAPACITY] entries.
+     * Observers should drain promptly to avoid event loss.
+     */
+    private val _v2LifecycleEvents =
+        MutableSharedFlow<V2MultiDeviceLifecycleEvent>(
+            extraBufferCapacity = V2_LIFECYCLE_EVENT_BUFFER_CAPACITY
+        )
+
+    /**
+     * Observable stream of [V2MultiDeviceLifecycleEvent] instances (PR-43).
+     *
+     * Collect from a coroutine scope scoped to the V2 harness lifetime to receive all
+     * Android-side lifecycle events as V2-consumable typed events.
+     */
+    val v2LifecycleEvents: SharedFlow<V2MultiDeviceLifecycleEvent> =
+        _v2LifecycleEvents.asSharedFlow()
+
+    /**
      * PR-1 — Observable durable session continuity record for this Android runtime.
      *
      * Tracks the **durable session identity** that persists across WS reconnects within a
@@ -481,6 +519,20 @@ class RuntimeController(
      * with a clean deduplication state.
      */
     private val _emittedFailureTakeoverIds = mutableSetOf<String>()
+
+    /**
+     * PR-43 — Tracks the most recently reported [ParticipantHealthState] for this device.
+     *
+     * Maintained by [notifyParticipantHealthChanged] and used to populate the `previousHealth`
+     * field of [V2MultiDeviceLifecycleEvent.DeviceHealthChanged] events so V2 receives a
+     * meaningful before/after health transition rather than a hardcoded UNKNOWN baseline.
+     *
+     * Initialised to [ParticipantHealthState.UNKNOWN] (no health assessment yet).
+     * Reset to [ParticipantHealthState.UNKNOWN] by [stop] and [invalidateSession] to match
+     * the durable-session lifecycle (health context is scoped to an activation era).
+     */
+    @Volatile
+    private var _lastKnownHealthState: ParticipantHealthState = ParticipantHealthState.UNKNOWN
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -808,6 +860,8 @@ class RuntimeController(
         // PR-1: Terminate the durable session era on explicit stop.  The next activation
         // will start a fresh era with a new durableSessionId.
         _durableSessionContinuityRecord.value = null
+        // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
+        _lastKnownHealthState = ParticipantHealthState.UNKNOWN
         // PR-37: Use transitionState() so the transition event is observable and any
         // unexpected prior state is surfaced as a diagnostic event.
         transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "stop")
@@ -1124,6 +1178,8 @@ class RuntimeController(
         // PR-1: Terminate the durable era — the invalidated identity is no longer a
         // trustworthy durable anchor for the center-side durable mesh/session registry.
         _durableSessionContinuityRecord.value = null
+        // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
+        _lastKnownHealthState = ParticipantHealthState.UNKNOWN
     }
 
     /**
@@ -1377,6 +1433,33 @@ class RuntimeController(
         syncHostDescriptorParticipationState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
         // PR-37: Verify session/state alignment after opening.
         checkSessionStateAlignment()
+        // PR-43: Emit V2 lifecycle event for V2 multi-device hook integration.
+        // TEST_ONLY source is excluded — synthetic test activations must not appear on
+        // the production V2 event stream.
+        if (source != SessionOpenSource.TEST_ONLY) {
+            val runtimeSessionId = _currentRuntimeSessionId ?: ""
+            val durableSessionId = _durableSessionContinuityRecord.value?.durableSessionId
+            val epoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch ?: 0
+            val v2Event: V2MultiDeviceLifecycleEvent = if (source == SessionOpenSource.RECONNECT_RECOVERY) {
+                V2MultiDeviceLifecycleEvent.DeviceReconnected(
+                    deviceId = session.deviceId,
+                    sessionId = session.sessionId,
+                    runtimeSessionId = runtimeSessionId,
+                    durableSessionId = durableSessionId,
+                    sessionContinuityEpoch = epoch
+                )
+            } else {
+                V2MultiDeviceLifecycleEvent.DeviceConnected(
+                    deviceId = session.deviceId,
+                    sessionId = session.sessionId,
+                    runtimeSessionId = runtimeSessionId,
+                    durableSessionId = durableSessionId,
+                    sessionContinuityEpoch = epoch,
+                    openSource = source.wireValue
+                )
+            }
+            emitV2LifecycleEvent(v2Event)
+        }
     }
 
     /**
@@ -1407,6 +1490,16 @@ class RuntimeController(
         // PR-37: Verify session/state alignment after closing.  A closed session while
         // Active is expected during transient WS disconnect (recovery in progress).
         checkSessionStateAlignment()
+        // PR-43: Emit V2 lifecycle event for V2 multi-device hook integration.
+        val sessionDurationMs = detached.durationMs
+        emitV2LifecycleEvent(
+            V2MultiDeviceLifecycleEvent.DeviceDisconnected(
+                deviceId = detached.deviceId,
+                sessionId = detached.sessionId,
+                detachCause = cause.wireValue,
+                sessionDurationMs = sessionDurationMs
+            )
+        )
     }
 
     // ── Snapshot projection sync ──────────────────────────────────────────────
@@ -1427,6 +1520,63 @@ class RuntimeController(
         _targetReadinessProjection.value = snapshot?.let {
             DelegatedTargetReadinessProjection.from(it)
         }
+    }
+
+    // ── PR-43: V2 lifecycle event emission helper ─────────────────────────────
+
+    /**
+     * PR-43 — Emits a [V2MultiDeviceLifecycleEvent] on [_v2LifecycleEvents] and logs a
+     * structured entry under [GalaxyLogger.TAG_V2_LIFECYCLE].
+     *
+     * This is the **single write path** for [_v2LifecycleEvents].  All V2 lifecycle event
+     * emissions must go through this method so the structured log entry is always emitted
+     * alongside the flow event.
+     *
+     * @param event The [V2MultiDeviceLifecycleEvent] to emit.
+     */
+    private fun emitV2LifecycleEvent(event: V2MultiDeviceLifecycleEvent) {
+        val fields = buildMap<String, Any> {
+            put("event", event.wireValue)
+            put("device_id", event.deviceId)
+            event.sessionId?.let { put("session_id", it) }
+            when (event) {
+                is V2MultiDeviceLifecycleEvent.DeviceConnected -> {
+                    put("runtime_session_id", event.runtimeSessionId)
+                    event.durableSessionId?.let { put("durable_session_id", it) }
+                    put("session_continuity_epoch", event.sessionContinuityEpoch)
+                    put("open_source", event.openSource)
+                }
+                is V2MultiDeviceLifecycleEvent.DeviceReconnected -> {
+                    put("runtime_session_id", event.runtimeSessionId)
+                    event.durableSessionId?.let { put("durable_session_id", it) }
+                    put("session_continuity_epoch", event.sessionContinuityEpoch)
+                }
+                is V2MultiDeviceLifecycleEvent.DeviceDisconnected -> {
+                    put("detach_cause", event.detachCause)
+                    put("session_duration_ms", event.sessionDurationMs)
+                }
+                is V2MultiDeviceLifecycleEvent.DeviceDegraded -> {
+                    put("degradation_kind", event.degradationKind)
+                    put("continuation_mode", event.continuationMode)
+                }
+                is V2MultiDeviceLifecycleEvent.DeviceHealthChanged -> {
+                    put("previous_health", event.previousHealth)
+                    put("current_health", event.currentHealth)
+                    put("requires_rebalance", event.requiresRebalance)
+                    put("continuation_mode", event.continuationMode)
+                    put("trigger", event.trigger)
+                }
+                is V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged -> {
+                    put("previous_readiness", event.previousReadiness)
+                    put("current_readiness", event.currentReadiness)
+                    put("previous_participation", event.previousParticipation)
+                    put("current_participation", event.currentParticipation)
+                    put("trigger", event.trigger)
+                }
+            }
+        }
+        GalaxyLogger.log(GalaxyLogger.TAG_V2_LIFECYCLE, fields)
+        _v2LifecycleEvents.tryEmit(event)
     }
 
     // ── Setup error helpers (PR-27) ───────────────────────────────────────────
@@ -1671,6 +1821,55 @@ class RuntimeController(
                 )
             )
             _formationRebalanceEvent.tryEmit(event)
+            // PR-43: Also emit ParticipantReadinessChanged on the V2 stream when the
+            // rebalance event carries a readiness state transition.
+            if (event is FormationRebalanceEvent.ReadinessChanged) {
+                emitV2LifecycleEvent(
+                    V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged(
+                        deviceId = descriptor.deviceId,
+                        sessionId = _attachedSession.value?.sessionId,
+                        previousReadiness = event.previousReadiness.wireValue,
+                        currentReadiness = event.currentReadiness.wireValue,
+                        previousParticipation = event.previousParticipation.wireValue,
+                        currentParticipation = event.currentParticipation.wireValue,
+                        trigger = event.trigger
+                    )
+                )
+            }
+        }
+        // PR-43: Emit V2 health-changed event regardless of whether a rebalance is
+        // required, so V2 always has visibility into execution-environment health
+        // transitions — even for HEALTHY reports that require no rebalance.
+        // DeviceDegraded is additionally emitted for compromised states so the V2
+        // harness can distinguish a simple health signal from an active degradation.
+        val previousHealth = _lastKnownHealthState
+        _lastKnownHealthState = newHealthState
+        emitV2LifecycleEvent(
+            V2MultiDeviceLifecycleEvent.DeviceHealthChanged(
+                deviceId = descriptor.deviceId,
+                sessionId = _attachedSession.value?.sessionId,
+                previousHealth = previousHealth.wireValue,
+                currentHealth = newHealthState.wireValue,
+                requiresRebalance = decision.requiresRebalance,
+                continuationMode = decision.continuationMode.wireValue,
+                trigger = "health_${newHealthState.wireValue}"
+            )
+        )
+        if (ParticipantHealthState.isCompromised(newHealthState)) {
+            val degradationKind = when (newHealthState) {
+                ParticipantHealthState.DEGRADED   -> "health_degraded"
+                ParticipantHealthState.RECOVERING -> "health_recovering"
+                ParticipantHealthState.FAILED     -> "health_failed"
+                else                              -> "health_${newHealthState.wireValue}"
+            }
+            emitV2LifecycleEvent(
+                V2MultiDeviceLifecycleEvent.DeviceDegraded(
+                    deviceId = descriptor.deviceId,
+                    sessionId = _attachedSession.value?.sessionId,
+                    degradationKind = degradationKind,
+                    continuationMode = decision.continuationMode.wireValue
+                )
+            )
         }
     }
 
@@ -1829,6 +2028,60 @@ class RuntimeController(
             )
         )
         _formationRebalanceEvent.tryEmit(event)
+        // PR-43: Also emit corresponding V2 lifecycle events for WS recovery transitions.
+        // RECOVERED is handled by openAttachedSession (which emits DeviceReconnected);
+        // RECOVERING and FAILED need explicit V2 degradation events here.
+        when (newRecoveryState) {
+            ReconnectRecoveryState.RECOVERING -> {
+                emitV2LifecycleEvent(
+                    V2MultiDeviceLifecycleEvent.DeviceDegraded(
+                        deviceId = descriptor.deviceId,
+                        sessionId = _attachedSession.value?.sessionId,
+                        degradationKind = "ws_recovering",
+                        continuationMode = FormationParticipationRebalancer.ContinuationMode.DEGRADED_CONTINUATION.wireValue
+                    )
+                )
+                // Also emit ParticipantReadinessChanged since the ReadinessChanged
+                // FormationRebalanceEvent carries readiness state fields.
+                if (event is FormationRebalanceEvent.ReadinessChanged) {
+                    emitV2LifecycleEvent(
+                        V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged(
+                            deviceId = descriptor.deviceId,
+                            sessionId = _attachedSession.value?.sessionId,
+                            previousReadiness = event.previousReadiness.wireValue,
+                            currentReadiness = event.currentReadiness.wireValue,
+                            previousParticipation = event.previousParticipation.wireValue,
+                            currentParticipation = event.currentParticipation.wireValue,
+                            trigger = event.trigger
+                        )
+                    )
+                }
+            }
+            ReconnectRecoveryState.FAILED -> {
+                emitV2LifecycleEvent(
+                    V2MultiDeviceLifecycleEvent.DeviceDegraded(
+                        deviceId = descriptor.deviceId,
+                        sessionId = _attachedSession.value?.sessionId,
+                        degradationKind = "ws_recovery_failed",
+                        continuationMode = FormationParticipationRebalancer.ContinuationMode.WITHDRAW_PARTICIPATION.wireValue
+                    )
+                )
+                if (event is FormationRebalanceEvent.ReadinessChanged) {
+                    emitV2LifecycleEvent(
+                        V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged(
+                            deviceId = descriptor.deviceId,
+                            sessionId = _attachedSession.value?.sessionId,
+                            previousReadiness = event.previousReadiness.wireValue,
+                            currentReadiness = event.currentReadiness.wireValue,
+                            previousParticipation = event.previousParticipation.wireValue,
+                            currentParticipation = event.currentParticipation.wireValue,
+                            trigger = event.trigger
+                        )
+                    )
+                }
+            }
+            else -> { /* RECOVERED is handled by openAttachedSession; IDLE returns early */ }
+        }
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
@@ -1856,5 +2109,14 @@ class RuntimeController(
          * briefly slow to drain.
          */
         private const val LIFECYCLE_TRANSITION_EVENT_BUFFER_CAPACITY = 32
+
+        /**
+         * PR-43 — Buffer capacity for [_v2LifecycleEvents].
+         *
+         * Sized to accommodate a burst of lifecycle events (connect → health-change →
+         * readiness-change) without dropping events when the V2 harness consumer is
+         * briefly slow to drain.
+         */
+        private const val V2_LIFECYCLE_EVENT_BUFFER_CAPACITY = 16
     }
 }

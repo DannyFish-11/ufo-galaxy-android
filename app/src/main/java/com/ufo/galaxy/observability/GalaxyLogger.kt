@@ -63,6 +63,7 @@ import kotlin.concurrent.withLock
  * | `GALAXY:FORMATION:HEALTH`| Participant health state change processed (PR-2)            |
  * | `GALAXY:RUNTIME:LIFECYCLE` | Runtime lifecycle state transition event (PR-37)          |
  * | `GALAXY:PROTOCOL:CONVERGENCE` | Protocol convergence boundary enforcement event (PR-38) |
+ * | `GALAXY:V2:LIFECYCLE`        | V2 multi-device runtime lifecycle event (PR-43)         |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -493,6 +494,35 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_PROTOCOL_CONVERGENCE = "GALAXY:PROTOCOL:CONVERGENCE"
+
+    // ── PR-43: V2 multi-device lifecycle observability tag ────────────────────
+
+    /**
+     * PR-43 — Fired for every [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent] emitted
+     * on [com.ufo.galaxy.runtime.RuntimeController.v2LifecycleEvents].
+     *
+     * Provides a V2-consumable structured log entry for all Android device lifecycle
+     * transitions relevant to the V2 multi-device runtime harness hook integration.
+     *
+     * Event vocabulary (matches [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent] wire values):
+     * - `v2_device_connected`              — device attached / activated.
+     * - `v2_device_reconnected`            — device reconnected after a transparent WS drop.
+     * - `v2_device_disconnected`           — device detached (disconnect, disable, or invalidation).
+     * - `v2_device_degraded`               — device entered a degraded/unavailable state.
+     * - `v2_device_health_changed`         — explicit execution-environment health state change.
+     * - `v2_participant_readiness_changed` — participant readiness/participation state changed.
+     *
+     * Required fields: `event` (wire value from
+     * [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent]), `device_id`.
+     *
+     * Conditional fields vary by event type; always include at least `session_id` when available.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:V2:LIFECYCLE","fields":{"event":"v2_device_connected","device_id":"Pixel_8","session_id":"s-1","runtime_session_id":"r-abc","open_source":"user_activation"}}
+     * ```
+     */
+    const val TAG_V2_LIFECYCLE = "GALAXY:V2:LIFECYCLE"
 
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
