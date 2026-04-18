@@ -4,6 +4,7 @@ import android.util.Log
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.runtime.ContinuityRecoveryContext
 import com.ufo.galaxy.runtime.ExecutorTargetType
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 
@@ -76,7 +77,7 @@ class AutonomousExecutionPipeline(
     /**
      * Handles a [goal_execution] message.
      *
-     * Four gates are evaluated in order:
+     * Five gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [goal_execution] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -89,9 +90,15 @@ class AutonomousExecutionPipeline(
      * 4. **Target type check** (PR-E): logs the [GoalExecutionPayload.executor_target_type] when
      *    present for observability; tolerates `null` (legacy) and unknown values without rejection
      *    to preserve backward compatibility.
+     * 5. **Continuity/recovery check** (PR-F): logs [GoalExecutionPayload.continuity_token],
+     *    [GoalExecutionPayload.is_resumable], and [GoalExecutionPayload.interruption_reason] when
+     *    present for observability.  These fields are accepted without failure; `null` / absent
+     *    values are treated as the legacy contract.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
-     * the result with [device_role] and the echoed [GoalExecutionPayload.executor_target_type].
+     * the result with [device_role], the echoed [GoalExecutionPayload.executor_target_type],
+     * and the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable]
+     * so V2 can correlate the result with its originating durable continuity context.
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -120,15 +127,22 @@ class AutonomousExecutionPipeline(
                     "task_id=${payload.task_id}"
             )
         }
+        // PR-F: log continuity/recovery context for observability; accept without failure.
+        logContinuityContext("goal_execution", payload)
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
         return goalExecutor.executeGoal(payload)
-            .copy(device_role = deviceRole, executor_target_type = payload.executor_target_type)
+            .copy(
+                device_role = deviceRole,
+                executor_target_type = payload.executor_target_type,
+                continuity_token = payload.continuity_token,
+                is_resumable = payload.is_resumable
+            )
     }
 
     /**
      * Handles a [parallel_subtask] message.
      *
-     * Four gates are evaluated in order:
+     * Five gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [parallel_subtask] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -141,10 +155,13 @@ class AutonomousExecutionPipeline(
      * 4. **Target type check** (PR-E): logs the [GoalExecutionPayload.executor_target_type] when
      *    present for observability; tolerates `null` (legacy) and unknown values without rejection
      *    to preserve backward compatibility.
+     * 5. **Continuity/recovery check** (PR-F): logs continuity/recovery context for observability.
+     *    Fields are accepted without failure; null / absent values are treated as legacy contract.
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
-     * and enriches the result with [device_role] and the echoed
-     * [GoalExecutionPayload.executor_target_type].
+     * and enriches the result with [device_role], the echoed
+     * [GoalExecutionPayload.executor_target_type], and the echoed continuity/recovery fields
+     * so V2 can correlate the result with its originating durable continuity context.
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -172,9 +189,42 @@ class AutonomousExecutionPipeline(
                     "task_id=${payload.task_id}"
             )
         }
+        // PR-F: log continuity/recovery context for observability; accept without failure.
+        logContinuityContext("parallel_subtask", payload)
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
         return collaborationAgent.handleParallelSubtask(payload)
-            .copy(device_role = deviceRole, executor_target_type = payload.executor_target_type)
+            .copy(
+                device_role = deviceRole,
+                executor_target_type = payload.executor_target_type,
+                continuity_token = payload.continuity_token,
+                is_resumable = payload.is_resumable
+            )
+    }
+
+    /**
+     * Logs PR-F durable continuity and recovery context fields for observability.
+     *
+     * This method is a no-op when all continuity fields are null / empty, so it
+     * imposes no overhead on legacy (pre-PR-F) senders.
+     */
+    private fun logContinuityContext(msgType: String, payload: GoalExecutionPayload) {
+        val hasContinuity = payload.continuity_token != null
+            || payload.is_resumable != null
+            || payload.interruption_reason != null
+            || payload.recovery_context.isNotEmpty()
+        if (!hasContinuity) return
+
+        val knownReason = ContinuityRecoveryContext.isKnownInterruptionReason(payload.interruption_reason)
+        val isTransport = ContinuityRecoveryContext.isTransportInterruption(payload.interruption_reason)
+        Log.i(
+            TAG,
+            "$msgType continuity_token=${payload.continuity_token} " +
+                "is_resumable=${payload.is_resumable} " +
+                "interruption_reason=${payload.interruption_reason} " +
+                "known_reason=$knownReason transport_interruption=$isTransport " +
+                "recovery_context_keys=${payload.recovery_context.keys} " +
+                "task_id=${payload.task_id}"
+        )
     }
 
     private fun buildDisabledResult(
@@ -190,6 +240,9 @@ class AutonomousExecutionPipeline(
         latency_ms = 0L,
         device_id = deviceId,
         device_role = deviceRole,
-        executor_target_type = payload.executor_target_type
+        executor_target_type = payload.executor_target_type,
+        // PR-F: echo continuity/recovery fields in disabled results so V2 can correlate
+        continuity_token = payload.continuity_token,
+        is_resumable = payload.is_resumable
     )
 }

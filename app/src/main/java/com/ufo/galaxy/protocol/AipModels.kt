@@ -395,6 +395,30 @@ data class TaskSubmitPayload(
  *                            `"worker"`, `"local"`. `null` for legacy/pre-V2 senders;
  *                            Android handlers MUST treat `null` as backward-compatible
  *                            "unspecified". Unknown values MUST be tolerated without rejection.
+ *
+ * ## V2 durable continuity and recovery context (PR-F compatibility)
+ * The following fields carry durable continuity and recovery metadata introduced by V2
+ * to preserve execution and session association across reconnects, handoffs, and
+ * recoverable interruptions.  All fields are optional so that pre-PR-F senders remain
+ * compatible.  Android handlers MUST safely accept these fields and MUST NOT fail when
+ * they are absent.
+ *
+ * @param continuity_token    Opaque stable token identifying the durable execution
+ *                            continuity context across reconnects or handoffs; `null`
+ *                            for legacy / non-continuity dispatches.
+ * @param recovery_context    Optional key-value map carrying recovery hints forwarded
+ *                            by V2 (e.g. last known checkpoint, recovery policy hints).
+ *                            Empty map for legacy senders; unknown keys MUST be ignored.
+ * @param is_resumable        `true` when V2 considers this a resumable execution that
+ *                            should survive a recoverable interruption; `false` when the
+ *                            dispatch is explicitly terminal; `null` for legacy senders
+ *                            (Android applies default behaviour).
+ * @param interruption_reason Reason for the interruption that triggered this
+ *                            resume/recovery dispatch.  Recognised values are declared
+ *                            in [com.ufo.galaxy.runtime.ContinuityRecoveryContext]:
+ *                            `"reconnect"`, `"handoff"`, `"device_pause"`,
+ *                            `"transport_degraded"`.  Unknown values MUST be tolerated.
+ *                            `null` for non-recovery dispatches.
  */
 data class TaskAssignPayload(
     val task_id: String,
@@ -409,7 +433,12 @@ data class TaskAssignPayload(
     val orchestration_stage: String? = null,
     val execution_context: Map<String, String> = emptyMap(),
     // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy senders) ──
-    val executor_target_type: String? = null
+    val executor_target_type: String? = null,
+    // ── PR-F: V2 durable continuity and recovery context (optional; null-safe for legacy senders) ──
+    val continuity_token: String? = null,
+    val recovery_context: Map<String, String> = emptyMap(),
+    val is_resumable: Boolean? = null,
+    val interruption_reason: String? = null
 )
 
 /**
@@ -523,6 +552,31 @@ data class CommandResultPayload(
  *                         `null` for legacy/pre-V2 senders; Android handlers MUST treat
  *                         `null` as backward-compatible "unspecified" and continue executing.
  *                         Unknown values MUST also be tolerated without rejection.
+ *
+ * ## V2 durable continuity and recovery context (PR-F compatibility)
+ * The following fields carry durable continuity and recovery metadata introduced by V2
+ * to preserve execution and session association across reconnects, handoffs, and
+ * recoverable interruptions.  All fields are optional so that pre-PR-F senders remain
+ * compatible.  Android handlers MUST safely accept these fields and MUST NOT fail when
+ * they are absent.
+ *
+ * @param continuity_token    Opaque stable token identifying the durable execution
+ *                            continuity context across reconnects or handoffs; `null`
+ *                            for legacy / non-continuity dispatches.
+ * @param recovery_context    Optional key-value map carrying recovery hints forwarded
+ *                            by V2 (e.g. last known checkpoint, recovery policy hints).
+ *                            Empty map for legacy senders; unknown keys MUST be ignored.
+ * @param is_resumable        `true` when V2 considers this a resumable execution that
+ *                            should survive a recoverable interruption; `false` when the
+ *                            dispatch is explicitly terminal; `null` for legacy senders
+ *                            (Android applies default behaviour).  Android MUST NOT
+ *                            collapse a resumable execution into a terminal failure.
+ * @param interruption_reason Reason for the interruption that triggered this
+ *                            resume/recovery dispatch.  Recognised values are declared
+ *                            in [com.ufo.galaxy.runtime.ContinuityRecoveryContext]:
+ *                            `"reconnect"`, `"handoff"`, `"device_pause"`,
+ *                            `"transport_degraded"`.  Unknown values MUST be tolerated.
+ *                            `null` for non-recovery dispatches.
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -538,7 +592,12 @@ data class GoalExecutionPayload(
     val staged_subtask_id: String? = null,
     val execution_context: Map<String, String> = emptyMap(),
     // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy senders) ──
-    val executor_target_type: String? = null
+    val executor_target_type: String? = null,
+    // ── PR-F: V2 durable continuity and recovery context (optional; null-safe for legacy senders) ──
+    val continuity_token: String? = null,
+    val recovery_context: Map<String, String> = emptyMap(),
+    val is_resumable: Boolean? = null,
+    val interruption_reason: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -579,6 +638,12 @@ data class GoalExecutionPayload(
  * @param executor_target_type  Echoed from [GoalExecutionPayload.executor_target_type] so the
  *                       gateway can correlate the result with the explicit target type used in
  *                       the originating command. `null` for pre-V2 / unspecified dispatches.
+ * @param continuity_token  Echoed from [GoalExecutionPayload.continuity_token] so V2 can
+ *                       correlate the result with the originating durable continuity context.
+ *                       `null` for legacy / non-continuity dispatches.
+ * @param is_resumable   Echoed from [GoalExecutionPayload.is_resumable] so V2 can determine
+ *                       whether Android treated this execution as resumable or terminal.
+ *                       `null` for legacy senders.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -596,7 +661,10 @@ data class GoalResultPayload(
     val error: String? = null,
     val source_runtime_posture: String? = null,
     // ── PR-E: V2 explicit executor target typing (optional; echoed for full-chain correlation) ──
-    val executor_target_type: String? = null
+    val executor_target_type: String? = null,
+    // ── PR-F: V2 durable continuity and recovery context (optional; echoed for full-chain correlation) ──
+    val continuity_token: String? = null,
+    val is_resumable: Boolean? = null
 )
 
 /**

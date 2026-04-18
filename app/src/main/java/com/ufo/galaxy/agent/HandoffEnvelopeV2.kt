@@ -35,6 +35,14 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * | [executor_target_type]   | (PR-E) Optional explicit executor target type from V2's target-typing   |
  * |                          | model. `"android_device"`, `"node_service"`, `"worker"`, `"local"`.     |
  * |                          | Null for legacy/pre-V2 senders.                                         |
+ * | [continuity_token]       | (PR-F) Opaque stable token identifying the durable execution continuity  |
+ * |                          | context across reconnects or handoffs. Null for legacy senders.          |
+ * | [recovery_context]       | (PR-F) Key-value map carrying recovery hints from V2. Empty for legacy   |
+ * |                          | senders; unknown keys MUST be ignored.                                   |
+ * | [is_resumable]           | (PR-F) `true` when V2 considers this a resumable execution; `false`     |
+ * |                          | when terminal; null for legacy senders.                                  |
+ * | [interruption_reason]    | (PR-F) Reason for the interruption that triggered this resume/recovery   |
+ * |                          | dispatch. Null for non-recovery dispatches.                              |
  *
  * ## Backward compatibility
  * The existing [AgentRuntimeBridge.HandoffRequest] / [AgentRuntimeBridge.buildBridgeJson]
@@ -61,6 +69,10 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * @param execution_context      (PR-D) Optional key-value execution context from V2.
  * @param executor_target_type   (PR-E) Optional explicit executor target type from V2's
  *                               target-typing model. `null` for legacy/pre-V2 senders.
+ * @param continuity_token       (PR-F) Opaque stable continuity token; null for legacy senders.
+ * @param recovery_context       (PR-F) Optional key-value recovery hints from V2.
+ * @param is_resumable           (PR-F) Resumability flag from V2; null for legacy senders.
+ * @param interruption_reason    (PR-F) Interruption reason for recovery dispatches; null otherwise.
  */
 data class HandoffEnvelopeV2(
     val trace_id: String,
@@ -81,7 +93,12 @@ data class HandoffEnvelopeV2(
     val orchestration_stage: String? = null,
     val execution_context: Map<String, String> = emptyMap(),
     // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy callers) ──
-    val executor_target_type: String? = null
+    val executor_target_type: String? = null,
+    // ── PR-F: V2 durable continuity and recovery context (optional; null-safe for legacy callers) ──
+    val continuity_token: String? = null,
+    val recovery_context: Map<String, String> = emptyMap(),
+    val is_resumable: Boolean? = null,
+    val interruption_reason: String? = null
 )
 
 /**
@@ -98,6 +115,9 @@ data class HandoffEnvelopeV2(
  *   metadata is propagated to the gateway bridge endpoint unchanged.
  * - PR-E field ([executor_target_type]) is mapped 1:1 from the request so that V2
  *   explicit executor target typing metadata is propagated to the gateway bridge endpoint.
+ * - PR-F fields ([continuity_token], [recovery_context], [is_resumable],
+ *   [interruption_reason]) are mapped 1:1 from the request so that durable continuity
+ *   and recovery context is propagated to the gateway bridge endpoint unchanged.
  *
  * All other fields are mapped 1:1 from the source request.
  */
@@ -118,5 +138,9 @@ fun AgentRuntimeBridge.HandoffRequest.toEnvelopeV2(): HandoffEnvelopeV2 = Handof
     dispatch_origin = dispatchOrigin,
     orchestration_stage = orchestrationStage,
     execution_context = executionContext,
-    executor_target_type = executorTargetType
+    executor_target_type = executorTargetType,
+    continuity_token = continuityToken,
+    recovery_context = recoveryContext,
+    is_resumable = isResumable,
+    interruption_reason = interruptionReason
 )

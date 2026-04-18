@@ -102,6 +102,21 @@ class AgentRuntimeBridge(
      *                          dispatch sequences.
      * @param executionContext  Optional key-value execution context forwarded from the
      *                          V2 orchestrator. Merged into the bridge JSON `context` map.
+     *
+     * ## V2 durable continuity and recovery context (PR-F compatibility)
+     * The following fields carry durable continuity and recovery metadata so that
+     * reconnect/resume flows can be correlated end-to-end. All fields are optional
+     * so that pre-PR-F callers remain compatible. `null` / empty values are omitted
+     * from the outbound bridge JSON.
+     *
+     * @param continuityToken   Opaque stable token identifying the durable execution
+     *                          continuity context; null for legacy callers.
+     * @param recoveryContext   Optional key-value recovery hints from V2; empty for
+     *                          legacy callers.
+     * @param isResumable       `true` when V2 considers this a resumable execution;
+     *                          `false` when terminal; null for legacy callers.
+     * @param interruptionReason Reason for the interruption that triggered this
+     *                          resume/recovery dispatch; null for non-recovery dispatches.
      */
     data class HandoffRequest(
         val traceId: String,
@@ -127,7 +142,12 @@ class AgentRuntimeBridge(
         val orchestrationStage: String? = null,
         val executionContext: Map<String, String> = emptyMap(),
         // ── PR-E: V2 explicit executor target typing (optional; null-safe) ───────────
-        val executorTargetType: String? = null
+        val executorTargetType: String? = null,
+        // ── PR-F: V2 durable continuity and recovery context (optional; null-safe) ────
+        val continuityToken: String? = null,
+        val recoveryContext: Map<String, String> = emptyMap(),
+        val isResumable: Boolean? = null,
+        val interruptionReason: String? = null
     )
 
     /**
@@ -390,6 +410,10 @@ class AgentRuntimeBridge(
      * PR-D dispatch metadata fields ([dispatch_intent], [dispatch_origin],
      * [orchestration_stage], [execution_context]) are included when present so that V2
      * source dispatch metadata is forwarded to the gateway bridge endpoint.
+     *
+     * PR-F continuity/recovery fields ([continuity_token], [recovery_context],
+     * [is_resumable], [interruption_reason]) are included when present so that durable
+     * continuity and recovery context is forwarded to the gateway bridge endpoint.
      */
     internal fun buildBridgeJson(request: HandoffRequest): String {
         val env = request.toEnvelopeV2()
@@ -418,6 +442,11 @@ class AgentRuntimeBridge(
             if (env.execution_context.isNotEmpty()) put("execution_context", JSONObject(env.execution_context as Map<*, *>))
             // ── PR-E: V2 explicit executor target typing (omitted when null) ──────────
             if (!env.executor_target_type.isNullOrBlank()) put("executor_target_type", env.executor_target_type)
+            // ── PR-F: V2 durable continuity and recovery context (omitted when null/empty) ──
+            if (!env.continuity_token.isNullOrBlank()) put("continuity_token", env.continuity_token)
+            if (env.recovery_context.isNotEmpty()) put("recovery_context", JSONObject(env.recovery_context as Map<*, *>))
+            if (env.is_resumable != null) put("is_resumable", env.is_resumable)
+            if (!env.interruption_reason.isNullOrBlank()) put("interruption_reason", env.interruption_reason)
         }.toString()
     }
 
