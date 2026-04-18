@@ -724,7 +724,7 @@ class Pr43V2MultiDeviceLifecycleIntegrationTest {
     // ── GalaxyLogger.TAG_V2_LIFECYCLE ─────────────────────────────────────────
 
     @Test
-    fun `TAG_V2_LIFECYCLE value is GALAXY_V2_LIFECYCLE`() {
+    fun `TAG_V2_LIFECYCLE value is GALAXY_colon_V2_colon_LIFECYCLE`() {
         assertEquals(
             "GALAXY:V2:LIFECYCLE",
             com.ufo.galaxy.observability.GalaxyLogger.TAG_V2_LIFECYCLE
