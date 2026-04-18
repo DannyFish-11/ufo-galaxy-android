@@ -378,4 +378,133 @@ class AgentRuntimeBridgeTest {
         assertEquals(1, snap.getInt("handoff_failures"))
         assertEquals(1, snap.getInt("handoff_fallbacks"))
     }
+
+    // ── PR-D: dispatch metadata fields ────────────────────────────────────────
+
+    @Test
+    fun `HandoffRequest dispatch metadata defaults to null and empty for backward compat`() {
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-001",
+            taskId = "task-001",
+            goal = "open WeChat"
+        )
+
+        assertNull("dispatchIntent must default to null", request.dispatchIntent)
+        assertNull("dispatchOrigin must default to null", request.dispatchOrigin)
+        assertNull("orchestrationStage must default to null", request.orchestrationStage)
+        assertTrue("executionContext must default to empty", request.executionContext.isEmpty())
+    }
+
+    @Test
+    fun `HandoffRequest accepts V2 source dispatch metadata`() {
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-v2",
+            taskId = "task-v2",
+            goal = "send message",
+            dispatchIntent = "task_execute",
+            dispatchOrigin = "orchestrator-001",
+            orchestrationStage = "stage_1",
+            executionContext = mapOf("priority" to "high")
+        )
+
+        assertEquals("task_execute", request.dispatchIntent)
+        assertEquals("orchestrator-001", request.dispatchOrigin)
+        assertEquals("stage_1", request.orchestrationStage)
+        assertEquals("high", request.executionContext["priority"])
+    }
+
+    @Test
+    fun `buildBridgeJson includes dispatch_intent when present`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-di",
+            taskId = "task-di",
+            goal = "test",
+            dispatchIntent = "task_execute"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertTrue("dispatch_intent must be present when set", obj.has("dispatch_intent"))
+        assertEquals("task_execute", obj.getString("dispatch_intent"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits dispatch_intent when null`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-no-di",
+            taskId = "task-no-di",
+            goal = "test"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("dispatch_intent must be absent when null", obj.has("dispatch_intent"))
+    }
+
+    @Test
+    fun `buildBridgeJson includes all V2 dispatch metadata fields when present`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-full",
+            taskId = "task-full",
+            goal = "full metadata test",
+            dispatchIntent = "staged_handoff",
+            dispatchOrigin = "orch-abc",
+            orchestrationStage = "stage_2",
+            executionContext = mapOf("locale" to "zh-CN", "priority" to "normal")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertEquals("staged_handoff", obj.getString("dispatch_intent"))
+        assertEquals("orch-abc", obj.getString("dispatch_origin"))
+        assertEquals("stage_2", obj.getString("orchestration_stage"))
+        assertTrue("execution_context must be present when non-empty", obj.has("execution_context"))
+        val ctx = obj.getJSONObject("execution_context")
+        assertEquals("zh-CN", ctx.getString("locale"))
+        assertEquals("normal", ctx.getString("priority"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits V2 dispatch metadata when all are null or empty`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-none",
+            taskId = "task-none",
+            goal = "legacy task"
+            // dispatchIntent, dispatchOrigin, orchestrationStage, executionContext all default
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("dispatch_intent must be absent when null", obj.has("dispatch_intent"))
+        assertFalse("dispatch_origin must be absent when null", obj.has("dispatch_origin"))
+        assertFalse("orchestration_stage must be absent when null", obj.has("orchestration_stage"))
+        assertFalse("execution_context must be absent when empty", obj.has("execution_context"))
+    }
+
+    @Test
+    fun `handoff succeeds end-to-end with V2 dispatch metadata populated`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = true)
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-e2e-v2",
+            taskId = "task-e2e-v2",
+            goal = "open settings",
+            dispatchIntent = "task_execute",
+            dispatchOrigin = "v2-orchestrator",
+            orchestrationStage = "primary",
+            executionContext = mapOf("env" to "production")
+        )
+
+        val result = bridge.handoff(request)
+
+        assertTrue("Handoff must succeed with V2 metadata populated", result.isHandoff)
+        assertEquals(AgentRuntimeBridge.STATUS_HANDOFF_SENT, result.status)
+        assertEquals(1, client.sentMessages.size)
+        val sentJson = org.json.JSONObject(client.sentMessages[0])
+        assertEquals("task_execute", sentJson.getString("dispatch_intent"))
+    }
 }

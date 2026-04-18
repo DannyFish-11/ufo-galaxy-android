@@ -208,7 +208,11 @@ object CanonicalDispatchChain {
                 "routed by GalaxyConnectionService. Message type determines which execution " +
                 "handler is invoked: task_assign → handleTaskAssign(); " +
                 "goal_execution / parallel_subtask → LocalGoalExecutor; " +
-                "task_cancel → TaskCancelRegistry; takeover_request → DelegatedRuntimeReceiver.",
+                "task_cancel → TaskCancelRegistry; takeover_request → DelegatedRuntimeReceiver. " +
+                "PR-D: task_assign and goal_execution payloads now accept optional V2 source " +
+                "dispatch metadata (dispatch_intent, dispatch_origin, orchestration_stage, " +
+                "execution_context, staged_mesh_id, staged_subtask_id). All fields default to " +
+                "null/empty for legacy-sender backward compatibility.",
             authority    = PhaseAuthority.ANDROID_GOVERNED,
             androidLayer = "GalaxyConnectionService (service/)"
         ),

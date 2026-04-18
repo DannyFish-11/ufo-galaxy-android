@@ -192,15 +192,46 @@
 }
 ```
 
+**带 V2 源调度元数据的扩展示例**（PR-D 兼容，所有新字段均为可选）：
+
+```json
+{
+  "protocol":    "AIP/1.0",
+  "version":     "3.0",
+  "type":        "task_assign",
+  "source_node": "Galaxy",
+  "target_node": "android_pixel8_01",
+  "timestamp":   1710000060,
+  "message_id":  "d4e5f6a7",
+  "payload": {
+    "task_id":              "task-uuid-001",
+    "goal":                 "打开微信并发送「你好」",
+    "constraints":          ["不得访问联系人列表"],
+    "max_steps":            10,
+    "require_local_agent":  false,
+    "source_runtime_posture": "control_only",
+    "dispatch_intent":      "task_execute",
+    "dispatch_origin":      "orchestrator-v2-001",
+    "orchestration_stage":  "primary",
+    "execution_context":    { "priority": "high", "locale": "zh-CN" }
+  }
+}
+```
+
 **payload 说明**（对应 `TaskAssignPayload`）
 
-| 字段                  | 必填 | 说明                                      |
-|-----------------------|------|-------------------------------------------|
-| `task_id`             | 是   | 任务唯一标识；在 `task_result` 中回传     |
-| `goal`                | 是   | 自然语言目标描述                          |
-| `constraints`         | 否   | 自然语言约束列表                          |
-| `max_steps`           | 是   | 最大执行步数                              |
-| `require_local_agent` | 是   | `true` 表示必须在本设备执行               |
+| 字段                    | 必填 | 说明                                                              |
+|-------------------------|------|-------------------------------------------------------------------|
+| `task_id`               | 是   | 任务唯一标识；在 `task_result` 中回传                             |
+| `goal`                  | 是   | 自然语言目标描述                                                  |
+| `constraints`           | 否   | 自然语言约束列表                                                  |
+| `max_steps`             | 是   | 最大执行步数                                                      |
+| `require_local_agent`   | 是   | `true` 表示必须在本设备执行                                       |
+| `source_runtime_posture`| 否   | V2 源设备参与姿态（`"control_only"` / `"join_runtime"`）         |
+| `dispatch_intent`       | 否   | PR-D: V2 调度意图标签（如 `"task_execute"`）；旧发送方可省略     |
+| `dispatch_origin`       | 否   | PR-D: 发起调度的编排器/设备标识；旧发送方可省略                   |
+| `orchestration_stage`   | 否   | PR-D: 多阶段调度中的当前阶段标签；旧发送方可省略                  |
+| `execution_context`     | 否   | PR-D: V2 编排器传递的键值执行上下文；旧发送方可省略（默认空 map） |
 
 ---
 

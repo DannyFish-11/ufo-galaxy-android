@@ -765,4 +765,105 @@ class AipModelsTest {
         assertEquals("", payload.device_id)
         assertNull(payload.correlation_id)
     }
+
+    // ── PR-D: TaskAssignPayload source dispatch metadata ──────────────────────
+
+    @Test
+    fun `TaskAssignPayload source dispatch metadata defaults to null and empty for backward compat`() {
+        val payload = TaskAssignPayload(
+            task_id = "task-legacy",
+            goal = "open WeChat",
+            max_steps = 5,
+            require_local_agent = true
+        )
+
+        assertNull("dispatch_intent must default to null", payload.dispatch_intent)
+        assertNull("dispatch_origin must default to null", payload.dispatch_origin)
+        assertNull("orchestration_stage must default to null", payload.orchestration_stage)
+        assertTrue("execution_context must default to empty", payload.execution_context.isEmpty())
+    }
+
+    @Test
+    fun `TaskAssignPayload accepts richer V2 source dispatch metadata`() {
+        val payload = TaskAssignPayload(
+            task_id = "task-v2",
+            goal = "send message",
+            max_steps = 10,
+            require_local_agent = false,
+            source_runtime_posture = "control_only",
+            dispatch_intent = "task_execute",
+            dispatch_origin = "orchestrator-001",
+            orchestration_stage = "stage_1",
+            execution_context = mapOf("priority" to "high", "locale" to "zh-CN")
+        )
+
+        assertEquals("task_execute", payload.dispatch_intent)
+        assertEquals("orchestrator-001", payload.dispatch_origin)
+        assertEquals("stage_1", payload.orchestration_stage)
+        assertEquals(2, payload.execution_context.size)
+        assertEquals("high", payload.execution_context["priority"])
+        assertEquals("zh-CN", payload.execution_context["locale"])
+    }
+
+    @Test
+    fun `TaskAssignPayload with only dispatch_intent set leaves other dispatch fields null`() {
+        val payload = TaskAssignPayload(
+            task_id = "task-partial",
+            goal = "do something",
+            max_steps = 5,
+            require_local_agent = true,
+            dispatch_intent = "staged_handoff"
+        )
+
+        assertEquals("staged_handoff", payload.dispatch_intent)
+        assertNull(payload.dispatch_origin)
+        assertNull(payload.orchestration_stage)
+        assertTrue(payload.execution_context.isEmpty())
+    }
+
+    // ── PR-D: GoalExecutionPayload staged dispatch metadata ───────────────────
+
+    @Test
+    fun `GoalExecutionPayload staged dispatch metadata defaults to null and empty for backward compat`() {
+        val payload = GoalExecutionPayload(
+            task_id = "goal-legacy",
+            goal = "open settings"
+        )
+
+        assertNull("staged_mesh_id must default to null", payload.staged_mesh_id)
+        assertNull("staged_subtask_id must default to null", payload.staged_subtask_id)
+        assertTrue("execution_context must default to empty", payload.execution_context.isEmpty())
+    }
+
+    @Test
+    fun `GoalExecutionPayload accepts V2 staged execution metadata`() {
+        val payload = GoalExecutionPayload(
+            task_id = "subtask-001",
+            goal = "take screenshot and report",
+            max_steps = 5,
+            group_id = "staged-group-abc",
+            subtask_index = 0,
+            staged_mesh_id = "mesh-xyz-001",
+            staged_subtask_id = "subtask-001",
+            execution_context = mapOf("stage" to "verify", "timeout_hint" to "30s")
+        )
+
+        assertEquals("mesh-xyz-001", payload.staged_mesh_id)
+        assertEquals("subtask-001", payload.staged_subtask_id)
+        assertEquals(2, payload.execution_context.size)
+        assertEquals("verify", payload.execution_context["stage"])
+    }
+
+    @Test
+    fun `GoalExecutionPayload effectiveTimeoutMs is unaffected by staged dispatch metadata`() {
+        val payload = GoalExecutionPayload(
+            task_id = "goal-timeout-test",
+            goal = "test",
+            timeout_ms = 60_000L,
+            staged_mesh_id = "mesh-001",
+            execution_context = mapOf("key" to "val")
+        )
+
+        assertEquals(60_000L, payload.effectiveTimeoutMs)
+    }
 }
