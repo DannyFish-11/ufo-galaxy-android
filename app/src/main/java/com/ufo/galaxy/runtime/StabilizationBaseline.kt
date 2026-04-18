@@ -649,6 +649,57 @@ object StabilizationBaseline {
                 "familiesAffectedByInterruption and familiesSurvivingReconnect expose the " +
                 "transport-continuity coverage boundary.",
             introducedPr = 40
+        ),
+
+        // ── PR-41: Android contract finalization surfaces ─────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-contract-finalizer",
+            displayName = "AndroidContractFinalizer",
+            packagePath = "com.ufo.galaxy.runtime.AndroidContractFinalizer",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical Android-side contract responsibility boundary registry — " +
+                "declares clarity, drift risk, and ownership per major runtime participation area " +
+                "(readiness, session, transport continuity, host-facing state, dispatch eligibility). " +
+                "Makes finalized Android/V2 contract boundaries machine-readable.",
+            introducedPr = 41
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "compatibility-retirement-fence",
+            displayName = "CompatibilityRetirementFence",
+            packagePath = "com.ufo.galaxy.runtime.CompatibilityRetirementFence",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-41 compatibility retirement fence registry — records explicit " +
+                "fence/retire/demotion decisions for every compatibility surface in " +
+                "CompatibilitySurfaceRetirementRegistry; provides a machine-readable audit " +
+                "trail of the PR-41 finalization pass.",
+            introducedPr = 41
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-session-axis-contract-finalization-bindings",
+            displayName = "CanonicalSessionAxis.contractFinalizationBindings / contractFinalizationBindingFor()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalSessionAxis",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-41 addition: ContractFinalizationBinding entries make the PR-41 " +
+                "finalization status and V2 drift risk per session family machine-readable; " +
+                "finalizedContractFamilies and transitionalContractFamilies expose the " +
+                "contract-clarity boundary per family.",
+            introducedPr = 41
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-dispatch-chain-contract-finalized-paths",
+            displayName = "CanonicalDispatchChain.resolveContractFinalizedPaths()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalDispatchChain",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-41 addition: contract-finalization–aware dispatch path resolver — " +
+                "extends resolveTransportAdaptedPaths() with a compatibility-path exclusion " +
+                "filter so callers building on finalized contract boundaries can obtain a " +
+                "compatibility-surface-free dispatch path set.",
+            introducedPr = 41
         )
     )
 

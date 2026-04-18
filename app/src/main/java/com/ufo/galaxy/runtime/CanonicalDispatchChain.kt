@@ -389,6 +389,76 @@ object CanonicalDispatchChain {
         DispatchPathMode.STAGED_MESH,
         DispatchPathMode.DELEGATED
     )
+
+    // ── PR-41: Contract-finalized path resolution ─────────────────────────────
+
+    /**
+     * PR-41 — Returns the subset of dispatch paths that route exclusively through
+     * finalized Android contract boundaries, filtering out the
+     * [DispatchPathMode.COMPATIBILITY] path that may still carry residual compatibility
+     * surfaces.
+     *
+     * This resolver extends [resolveTransportAdaptedPaths] with a contract-finalization
+     * filter:
+     *
+     * - [DispatchPathMode.COMPATIBILITY] is suppressed when [excludeCompatibilityPath] is
+     *   `true` (default).  The compatibility path routes through legacy alias normalization
+     *   and minimal-compat dispatch adapters that are still classified as
+     *   [CompatibilitySurfaceRetirementRegistry.RetirementTier.RETIRE_AFTER_COORDINATION]
+     *   in [CompatibilitySurfaceRetirementRegistry].  Callers that need a contract-clean
+     *   dispatch path (no transitional surfaces in the critical execution route) should
+     *   use this resolver instead of [resolveTransportAdaptedPaths] or
+     *   [resolveEligiblePathsForState].
+     * - All other paths returned by [resolveTransportAdaptedPaths] are included unchanged.
+     *
+     * ## When to use
+     *
+     * Use this resolver when building new dispatch logic that must participate only
+     * through finalized contract boundaries.  Do not use for compatibility-aware
+     * routing that still needs to handle legacy message types — use
+     * [resolveTransportAdaptedPaths] for those cases.
+     *
+     * @param runtimeState           Current [RuntimeController.RuntimeState].
+     * @param attachedSession        Current [AttachedRuntimeSession], or `null` if none.
+     * @param rollout                Current [RolloutControlSnapshot].
+     * @param transportCondition     Current [MediaTransportLifecycleBridge.TransportCondition].
+     * @param excludeCompatibilityPath If `true` (default), the [DispatchPathMode.COMPATIBILITY]
+     *                               path is excluded from the result so that callers get only
+     *                               paths that do not route through any residual compatibility surfaces.
+     * @return The [DispatchPathDescriptor] entries eligible under all supplied conditions,
+     *         with the compatibility path suppressed when [excludeCompatibilityPath] is `true`.
+     */
+    fun resolveContractFinalizedPaths(
+        runtimeState: RuntimeController.RuntimeState,
+        attachedSession: AttachedRuntimeSession?,
+        rollout: RolloutControlSnapshot,
+        transportCondition: MediaTransportLifecycleBridge.TransportCondition,
+        excludeCompatibilityPath: Boolean = true
+    ): List<DispatchPathDescriptor> {
+        val transportAdapted = resolveTransportAdaptedPaths(
+            runtimeState      = runtimeState,
+            attachedSession   = attachedSession,
+            rollout           = rollout,
+            transportCondition = transportCondition
+        )
+        return if (excludeCompatibilityPath) {
+            transportAdapted.filter { it.pathMode != DispatchPathMode.COMPATIBILITY }
+        } else {
+            transportAdapted
+        }
+    }
+
+    /**
+     * PR-41 — The [DispatchPathMode] that routes through residual compatibility surfaces
+     * and is excluded by [resolveContractFinalizedPaths] when [excludeCompatibilityPath]
+     * is `true`.
+     *
+     * The compatibility path is the only dispatch path that may exercise surfaces
+     * catalogued in [CompatibilitySurfaceRetirementRegistry] as part of normal dispatch
+     * routing (specifically [legacy_msgtype_alias_normalization] and the minimal-compat
+     * dispatch adapters for long-tail message types).
+     */
+    val COMPATIBILITY_PATH_MODE: DispatchPathMode = DispatchPathMode.COMPATIBILITY
 }
 
 // ── Data types ────────────────────────────────────────────────────────────────
