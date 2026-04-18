@@ -562,6 +562,43 @@ object StabilizationBaseline {
             extensionGuidance = ExtensionGuidance.EXTEND,
             rationale = "Stable structured log tag for all protocol convergence boundary enforcement events.",
             introducedPr = 38
+        ),
+
+        // ── PR-39: Android truth / snapshot / projection convergence surfaces ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-truth-precedence-rules",
+            displayName = "RuntimeTruthPrecedenceRules",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeTruthPrecedenceRules",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Canonical three-tier truth model (AUTHORITATIVE → SNAPSHOT → PROJECTION) " +
+                "declaring the precedence chain, derivation paths, and single-gate update invariants " +
+                "for all Android runtime/session truth surfaces.",
+            introducedPr = 39
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "host-facing-projection-contract",
+            displayName = "HostFacingProjectionContract",
+            packagePath = "com.ufo.galaxy.runtime.HostFacingProjectionContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Explicit host-facing projection contract governing all outward runtime/session " +
+                "surfaces — CANONICAL / TRANSITIONAL / DEPRECATED classification with co-derivation " +
+                "invariants for snapshot and readiness surfaces.",
+            introducedPr = 39
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "canonical-session-axis-truth-bindings",
+            displayName = "CanonicalSessionAxis.truthBindings / truthBindingFor()",
+            packagePath = "com.ufo.galaxy.runtime.CanonicalSessionAxis",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-39 addition: SessionTruthBinding entries make the derivation path " +
+                "from authoritative truth to snapshot carrier explicit per session family; " +
+                "familiesWithSnapshotCarrier / familiesWithoutSnapshotCarrier expose the " +
+                "projection coverage boundary.",
+            introducedPr = 39
         )
     )
 
