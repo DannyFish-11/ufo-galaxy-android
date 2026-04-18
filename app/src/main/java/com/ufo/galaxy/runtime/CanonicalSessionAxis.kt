@@ -936,7 +936,143 @@ object CanonicalSessionAxis {
             }
         }
     }
+
+    // ── PR-42: Invariant bindings ─────────────────────────────────────────────
+
+    /**
+     * PR-42 — Classifies each session family by the Android runtime invariants that
+     * protect its participation semantics.
+     *
+     * These bindings complement [contractFinalizationBindings] (PR-41) and
+     * [transportContinuityBindings] (PR-40) with the invariant-enforcement perspective,
+     * making which [RuntimeInvariantEnforcer.InvariantId] values guard each family's
+     * correct participation machine-readable.
+     *
+     * @param family              The [CanonicalSessionFamily] this binding describes.
+     * @param guardingInvariants  The set of [RuntimeInvariantEnforcer.InvariantId] values
+     *                            from [RuntimeInvariantEnforcer.invariants] that protect
+     *                            this family's correct runtime participation.
+     * @param enforcementNote     One-sentence note on how the listed invariants protect
+     *                            this family's canonical participation semantics.
+     */
+    data class SessionInvariantBinding(
+        val family: CanonicalSessionFamily,
+        val guardingInvariants: Set<RuntimeInvariantEnforcer.InvariantId>,
+        val enforcementNote: String
+    )
+
+    /**
+     * Registry of invariant bindings for all seven session families.
+     *
+     * These bindings make the PR-42 invariant coverage per session family machine-readable.
+     * Consumers can query them to understand which runtime invariants guard a specific
+     * session family's correctness.
+     */
+    val invariantBindings: List<SessionInvariantBinding> = listOf(
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.CONTROL_SESSION,
+            guardingInvariants = setOf(
+                RuntimeInvariantEnforcer.InvariantId.DISPATCH_ELIGIBILITY_CONSISTENT_WITH_READINESS
+            ),
+            enforcementNote = "Control session is center-governed; dispatch eligibility " +
+                "consistency invariant protects against Android-side eligibility drift."
+        ),
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.RUNTIME_SESSION,
+            guardingInvariants = setOf(
+                RuntimeInvariantEnforcer.InvariantId.SESSION_ACTIVE_REQUIRES_ATTACHED,
+                RuntimeInvariantEnforcer.InvariantId.ATTACHED_REQUIRES_ACTIVE_OR_RECOVERY,
+                RuntimeInvariantEnforcer.InvariantId.DURABLE_SESSION_PRESENT_WHEN_ACTIVE,
+                RuntimeInvariantEnforcer.InvariantId.SNAPSHOT_REQUIRES_SESSION
+            ),
+            enforcementNote = "Runtime session identity is per-WS-connection; session/active " +
+                "coherence and snapshot derivation invariants protect against orphaned runtime IDs."
+        ),
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION,
+            guardingInvariants = setOf(
+                RuntimeInvariantEnforcer.InvariantId.SESSION_ACTIVE_REQUIRES_ATTACHED,
+                RuntimeInvariantEnforcer.InvariantId.ATTACHED_REQUIRES_ACTIVE_OR_RECOVERY,
+                RuntimeInvariantEnforcer.InvariantId.SNAPSHOT_REQUIRES_SESSION,
+                RuntimeInvariantEnforcer.InvariantId.KILL_SWITCH_CLEARS_CROSS_DEVICE,
+                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_CONSISTENT_WITH_RUNTIME
+            ),
+            enforcementNote = "Attached session is the primary runtime participation anchor; " +
+                "its lifecycle is guarded by all session-coherence and kill-switch invariants."
+        ),
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION,
+            guardingInvariants = setOf(
+                RuntimeInvariantEnforcer.InvariantId.ROLLOUT_GATE_DELEGATED_REQUIRES_CROSS_DEVICE,
+                RuntimeInvariantEnforcer.InvariantId.TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE,
+                RuntimeInvariantEnforcer.InvariantId.DISPATCH_ELIGIBILITY_CONSISTENT_WITH_READINESS
+            ),
+            enforcementNote = "Transfer session scope is bounded to one ACK→PROGRESS→RESULT " +
+                "lifecycle; rollout gate and transport invariants prevent transfer sessions " +
+                "from starting in ineligible conditions."
+        ),
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.CONVERSATION_SESSION,
+            guardingInvariants = emptySet(),
+            enforcementNote = "Conversation session is local-only and independent of cross-device " +
+                "transport; no runtime invariants from RuntimeInvariantEnforcer apply."
+        ),
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.MESH_SESSION,
+            guardingInvariants = setOf(
+                RuntimeInvariantEnforcer.InvariantId.TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE,
+                RuntimeInvariantEnforcer.InvariantId.DISPATCH_ELIGIBILITY_CONSISTENT_WITH_READINESS
+            ),
+            enforcementNote = "Mesh session is center-governed; transport interruption and " +
+                "dispatch eligibility invariants prevent mesh participation during transport failures."
+        ),
+
+        SessionInvariantBinding(
+            family = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            guardingInvariants = setOf(
+                RuntimeInvariantEnforcer.InvariantId.DURABLE_SESSION_PRESENT_WHEN_ACTIVE,
+                RuntimeInvariantEnforcer.InvariantId.SESSION_ACTIVE_REQUIRES_ATTACHED,
+                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_CONSISTENT_WITH_RUNTIME
+            ),
+            enforcementNote = "Durable session spans multiple reconnects; presence-when-active " +
+                "and recovery state invariants protect the era continuity guarantee."
+        )
+    )
+
+    private val invariantBindingIndex: Map<CanonicalSessionFamily, SessionInvariantBinding> =
+        invariantBindings.associateBy { it.family }
+
+    /**
+     * PR-42 — Returns the [SessionInvariantBinding] for [family], documenting which
+     * [RuntimeInvariantEnforcer.InvariantId] values guard this family's runtime participation.
+     *
+     * Returns `null` if [family] has no registered binding (defensive; all seven
+     * current families have a binding).
+     */
+    fun invariantBindingFor(family: CanonicalSessionFamily): SessionInvariantBinding? =
+        invariantBindingIndex[family]
+
+    /**
+     * PR-42 — Returns the set of session families that have at least one guarding invariant
+     * registered in [invariantBindings].
+     *
+     * Families with an empty [SessionInvariantBinding.guardingInvariants] set are excluded.
+     * These families have no Android-local invariants because their lifecycle is governed
+     * externally (center-side) or is purely local.
+     */
+    val familiesWithActiveInvariant: Set<CanonicalSessionFamily> =
+        invariantBindings
+            .filter { it.guardingInvariants.isNotEmpty() }
+            .map { it.family }
+            .toSet()
 }
+
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
