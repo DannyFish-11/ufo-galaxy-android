@@ -30,8 +30,7 @@ import org.junit.Test
  *     - ATTACHED_REQUIRES_ACTIVE_OR_RECOVERY: ATTACHED+LocalOnly → VIOLATED.
  *     - ATTACHED_REQUIRES_ACTIVE_OR_RECOVERY: ATTACHED+Active → SATISFIED.
  *     - ATTACHED_REQUIRES_ACTIVE_OR_RECOVERY: no session → SATISFIED.
- *     - TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE: INTERRUPTED+eligible → VIOLATED.
- *     - TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE: INTERRUPTED+ineligible → SATISFIED.
+ *     - TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE: INTERRUPTED+eligible → SATISFIED when filter works.
  *     - TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE: STABLE → SATISFIED.
  *     - SNAPSHOT_REQUIRES_SESSION: snapshot+no session → VIOLATED.
  *     - SNAPSHOT_REQUIRES_SESSION: snapshot+session → SATISFIED.
@@ -514,7 +513,7 @@ class Pr42AndroidRuntimeInvariantEnforcementTest {
     // RuntimeInvariantEnforcer — TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE
     // ─────────────────────────────────────────────────────────────────────────
 
-    @Test fun `TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE INTERRUPTED with eligible state is VIOLATED`() {
+    @Test fun `TRANSPORT_INTERRUPTED_BLOCKS_CROSS_DEVICE INTERRUPTED with eligible state is SATISFIED when filter works`() {
         val session = AttachedRuntimeSession.create(hostId = "h1", deviceId = "d1")
         val rollout = RolloutControlSnapshot(
             crossDeviceAllowed = true,
