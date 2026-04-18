@@ -754,6 +754,47 @@ object StabilizationBaseline {
                 "violation inspection.",
             introducedPr = 42
         )
+    ) + listOf(
+
+        // ── PR-43: V2 multi-device lifecycle integration surfaces ──────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "v2-multi-device-lifecycle-event",
+            displayName = "V2MultiDeviceLifecycleEvent",
+            packagePath = "com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-43 canonical V2-consumable device lifecycle event sealed class — " +
+                "provides stable, typed events (DeviceConnected, DeviceReconnected, " +
+                "DeviceDisconnected, DeviceDegraded, DeviceHealthChanged, " +
+                "ParticipantReadinessChanged) for V2 multi-device runtime hook integration " +
+                "without exposing Android-internal state machines to the V2 layer. " +
+                "Heartbeat-miss semantics are explicitly declared as unsupported.",
+            introducedPr = 43
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-v2-lifecycle-events",
+            displayName = "RuntimeController.v2LifecycleEvents",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-43 observable SharedFlow of V2MultiDeviceLifecycleEvent — the " +
+                "single consumption point for V2 harness hook integration. Emits events for " +
+                "all connect/disconnect/reconnect/health/readiness lifecycle transitions in " +
+                "the production Android runtime path; TEST_ONLY sources are excluded.",
+            introducedPr = 43
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-v2-lifecycle",
+            displayName = "GalaxyLogger.TAG_V2_LIFECYCLE",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-43 stable structured log tag for all V2 multi-device lifecycle " +
+                "events emitted via RuntimeController.v2LifecycleEvents — provides an " +
+                "operator-facing observability stream for V2 integration diagnostics.",
+            introducedPr = 43
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
