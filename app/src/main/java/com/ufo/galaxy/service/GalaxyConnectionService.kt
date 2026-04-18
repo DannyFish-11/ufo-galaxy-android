@@ -1095,8 +1095,8 @@ class GalaxyConnectionService : Service() {
     /**
      * Builds a standardised timeout [GoalResultPayload].
      * All required aggregation fields (correlation_id, device_id, group_id,
-     * subtask_index, source_runtime_posture) are populated so the gateway can
-     * still converge results and correlate them with the originating request.
+     * subtask_index, source_runtime_posture, executor_target_type) are populated so the
+     * gateway can still converge results and correlate them with the originating request.
      */
     private fun buildTimeoutGoalResult(
         taskId: String,
@@ -1111,7 +1111,8 @@ class GalaxyConnectionService : Service() {
         subtask_index = payload.subtask_index,
         latency_ms = timeoutMs,
         device_id = localDeviceId,
-        source_runtime_posture = payload.source_runtime_posture
+        source_runtime_posture = payload.source_runtime_posture,
+        executor_target_type = payload.executor_target_type
     )
 
     private fun buildIdempotencyKey(taskId: String, type: MsgType, traceId: String? = null): String {

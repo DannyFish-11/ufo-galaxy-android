@@ -388,6 +388,13 @@ data class TaskSubmitPayload(
  *                            V2 orchestrator (e.g. locale, priority hints). Empty map
  *                            for legacy senders; Android handlers MUST safely ignore
  *                            unknown keys.
+ *
+ * ## V2 explicit executor target typing (PR-E compatibility)
+ * @param executor_target_type Optional explicit executor target type from V2's target-typing
+ *                            model. Valid values: `"android_device"`, `"node_service"`,
+ *                            `"worker"`, `"local"`. `null` for legacy/pre-V2 senders;
+ *                            Android handlers MUST treat `null` as backward-compatible
+ *                            "unspecified". Unknown values MUST be tolerated without rejection.
  */
 data class TaskAssignPayload(
     val task_id: String,
@@ -400,7 +407,9 @@ data class TaskAssignPayload(
     val dispatch_intent: String? = null,
     val dispatch_origin: String? = null,
     val orchestration_stage: String? = null,
-    val execution_context: Map<String, String> = emptyMap()
+    val execution_context: Map<String, String> = emptyMap(),
+    // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy senders) ──
+    val executor_target_type: String? = null
 )
 
 /**
@@ -505,6 +514,15 @@ data class CommandResultPayload(
  * @param execution_context Optional key-value execution context forwarded from the V2
  *                         orchestrator. Empty map for legacy senders; Android handlers
  *                         MUST safely ignore unknown keys.
+ *
+ * ## V2 explicit executor target typing (PR-E compatibility)
+ * @param executor_target_type Optional explicit executor target type introduced by V2's
+ *                         target-typing model. Valid values defined in
+ *                         [com.ufo.galaxy.runtime.ExecutorTargetType]:
+ *                         `"android_device"`, `"node_service"`, `"worker"`, `"local"`.
+ *                         `null` for legacy/pre-V2 senders; Android handlers MUST treat
+ *                         `null` as backward-compatible "unspecified" and continue executing.
+ *                         Unknown values MUST also be tolerated without rejection.
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -518,7 +536,9 @@ data class GoalExecutionPayload(
     // ── PR-D: V2 staged dispatch metadata (optional; null-safe for legacy senders) ──
     val staged_mesh_id: String? = null,
     val staged_subtask_id: String? = null,
-    val execution_context: Map<String, String> = emptyMap()
+    val execution_context: Map<String, String> = emptyMap(),
+    // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy senders) ──
+    val executor_target_type: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -556,6 +576,9 @@ data class GoalExecutionPayload(
  * @param source_runtime_posture  Echoed from [GoalExecutionPayload.source_runtime_posture] so
  *                       the gateway can associate the result with the originating posture context.
  *                       Defaults to `null` for backwards compatibility.
+ * @param executor_target_type  Echoed from [GoalExecutionPayload.executor_target_type] so the
+ *                       gateway can correlate the result with the explicit target type used in
+ *                       the originating command. `null` for pre-V2 / unspecified dispatches.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -571,7 +594,9 @@ data class GoalResultPayload(
     val steps: List<StepResult> = emptyList(),
     val outputs: List<String> = emptyList(),
     val error: String? = null,
-    val source_runtime_posture: String? = null
+    val source_runtime_posture: String? = null,
+    // ── PR-E: V2 explicit executor target typing (optional; echoed for full-chain correlation) ──
+    val executor_target_type: String? = null
 )
 
 /**

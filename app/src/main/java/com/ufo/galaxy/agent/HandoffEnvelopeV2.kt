@@ -32,6 +32,9 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * |                          | Null for single-stage / legacy dispatches.                              |
  * | [execution_context]      | (PR-D) Optional key-value execution context from V2 orchestrator.       |
  * |                          | Empty map for legacy senders.                                           |
+ * | [executor_target_type]   | (PR-E) Optional explicit executor target type from V2's target-typing   |
+ * |                          | model. `"android_device"`, `"node_service"`, `"worker"`, `"local"`.     |
+ * |                          | Null for legacy/pre-V2 senders.                                         |
  *
  * ## Backward compatibility
  * The existing [AgentRuntimeBridge.HandoffRequest] / [AgentRuntimeBridge.buildBridgeJson]
@@ -56,6 +59,8 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * @param dispatch_origin        (PR-D) Optional originating orchestrator / device ID.
  * @param orchestration_stage    (PR-D) Optional orchestration stage label.
  * @param execution_context      (PR-D) Optional key-value execution context from V2.
+ * @param executor_target_type   (PR-E) Optional explicit executor target type from V2's
+ *                               target-typing model. `null` for legacy/pre-V2 senders.
  */
 data class HandoffEnvelopeV2(
     val trace_id: String,
@@ -74,7 +79,9 @@ data class HandoffEnvelopeV2(
     val dispatch_intent: String? = null,
     val dispatch_origin: String? = null,
     val orchestration_stage: String? = null,
-    val execution_context: Map<String, String> = emptyMap()
+    val execution_context: Map<String, String> = emptyMap(),
+    // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy callers) ──
+    val executor_target_type: String? = null
 )
 
 /**
@@ -89,6 +96,8 @@ data class HandoffEnvelopeV2(
  * - PR-D fields ([dispatch_intent], [dispatch_origin], [orchestration_stage],
  *   [execution_context]) are mapped 1:1 from the request so that V2 source dispatch
  *   metadata is propagated to the gateway bridge endpoint unchanged.
+ * - PR-E field ([executor_target_type]) is mapped 1:1 from the request so that V2
+ *   explicit executor target typing metadata is propagated to the gateway bridge endpoint.
  *
  * All other fields are mapped 1:1 from the source request.
  */
@@ -108,5 +117,6 @@ fun AgentRuntimeBridge.HandoffRequest.toEnvelopeV2(): HandoffEnvelopeV2 = Handof
     dispatch_intent = dispatchIntent,
     dispatch_origin = dispatchOrigin,
     orchestration_stage = orchestrationStage,
-    execution_context = executionContext
+    execution_context = executionContext,
+    executor_target_type = executorTargetType
 )
