@@ -1,7 +1,7 @@
 package com.ufo.galaxy.runtime
 
 /**
- * PR-43 — V2 multi-device runtime lifecycle event.
+ * PR-43 / PR-44 — V2 multi-device runtime lifecycle event.
  *
  * A structured, V2-consumable event emitted by [RuntimeController] for every device
  * lifecycle transition relevant to the V2 multi-device runtime harness.  Each subclass
@@ -18,6 +18,24 @@ package com.ufo.galaxy.runtime
  * | [DeviceDegraded]            | `on_device_health_changed(deviceId, DEGRADED)`          |
  * | [DeviceHealthChanged]       | `on_device_health_changed(deviceId, …)`                 |
  * | [ParticipantReadinessChanged] | `on_participant_readiness_changed(deviceId, …)`       |
+ *
+ * ## PR-44 — V2 mesh session lifecycle mapping
+ *
+ * [DeviceConnected], [DeviceReconnected], and [DeviceDisconnected] carry an explicit
+ * [MeshSessionLifecycleHint] that tells V2 which Mesh session lifecycle transition to
+ * invoke, without requiring V2 to re-parse raw Android fields:
+ *
+ * | Event + condition                                              | [MeshSessionLifecycleHint]    | V2 mesh call          |
+ * |----------------------------------------------------------------|-------------------------------|-----------------------|
+ * | [DeviceConnected] with `openSource = "user_activation"`        | [MeshSessionLifecycleHint.CREATE_ACTIVATE]   | `create()` + `activate()` |
+ * | [DeviceConnected] with `openSource = "background_restore"`     | [MeshSessionLifecycleHint.RESTORE_ACTIVATE]  | `restore()`               |
+ * | [DeviceReconnected] (always)                                   | [MeshSessionLifecycleHint.RESTORE_ACTIVATE]  | `restore()`               |
+ * | [DeviceDisconnected] with `detachCause = "disconnect"`         | [MeshSessionLifecycleHint.SUSPEND]           | `suspend()`               |
+ * | [DeviceDisconnected] with any other `detachCause`              | [MeshSessionLifecycleHint.TERMINATE]         | `terminate()`             |
+ *
+ * [DeviceDisconnected] additionally carries [DeviceDisconnected.isResumable] (`true` when
+ * `detachCause = "disconnect"`) so V2 can gate reconnect-recovery logic without separately
+ * inspecting [DeviceDisconnected.detachCause].
  *
  * ## Heartbeat semantics
  *
@@ -45,15 +63,26 @@ package com.ufo.galaxy.runtime
  * expression or `is`-checks to dispatch to the appropriate V2 hook.
  *
  * ```kotlin
- * // Example V2-side consumer:
+ * // Example V2-side consumer (health + mesh session lifecycle):
  * runtimeController.v2LifecycleEvents.collect { event ->
  *     when (event) {
- *         is V2MultiDeviceLifecycleEvent.DeviceConnected ->
+ *         is V2MultiDeviceLifecycleEvent.DeviceConnected -> {
  *             harness.on_device_health_changed(event.deviceId, V2HealthState.ONLINE)
- *         is V2MultiDeviceLifecycleEvent.DeviceReconnected ->
+ *             when (event.meshLifecycleHint) {
+ *                 MeshSessionLifecycleHint.CREATE_ACTIVATE -> meshCoordinator.createAndActivate(event.durableSessionId)
+ *                 MeshSessionLifecycleHint.RESTORE_ACTIVATE -> meshCoordinator.restore(event.durableSessionId)
+ *                 else -> { /* not reached for DeviceConnected */ }
+ *             }
+ *         }
+ *         is V2MultiDeviceLifecycleEvent.DeviceReconnected -> {
  *             harness.on_device_health_changed(event.deviceId, V2HealthState.ONLINE)
- *         is V2MultiDeviceLifecycleEvent.DeviceDisconnected ->
+ *             meshCoordinator.restore(event.durableSessionId)  // always RESTORE_ACTIVATE
+ *         }
+ *         is V2MultiDeviceLifecycleEvent.DeviceDisconnected -> {
  *             harness.on_device_health_changed(event.deviceId, V2HealthState.OFFLINE)
+ *             if (event.isResumable) meshCoordinator.suspend()
+ *             else meshCoordinator.terminate()
+ *         }
  *         is V2MultiDeviceLifecycleEvent.DeviceDegraded ->
  *             harness.on_device_health_changed(event.deviceId, V2HealthState.DEGRADED)
  *         is V2MultiDeviceLifecycleEvent.DeviceHealthChanged ->
@@ -86,6 +115,90 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      */
     abstract val sessionId: String?
 
+    // ── Mesh session lifecycle hint ────────────────────────────────────────────
+
+    /**
+     * PR-44 — Explicit V2 mesh-session lifecycle transition hint.
+     *
+     * Carried by [DeviceConnected], [DeviceReconnected], and [DeviceDisconnected] to tell
+     * V2 exactly which Mesh session lifecycle transition the Android event corresponds to.
+     * This eliminates the need for V2 to infer the transition from raw Android fields such
+     * as [DeviceConnected.openSource] or [DeviceDisconnected.detachCause].
+     *
+     * ## Mapping to V2 mesh lifecycle calls
+     *
+     * | [MeshSessionLifecycleHint]    | V2 mesh call target                       | Android source condition                                                              |
+     * |-------------------------------|-------------------------------------------|---------------------------------------------------------------------------------------|
+     * | [CREATE_ACTIVATE]             | `create()` + `activate()`                 | [DeviceConnected] with `openSource = "user_activation"`                               |
+     * | [RESTORE_ACTIVATE]            | `restore()` (+ `activate()` if needed)    | [DeviceConnected] with `openSource = "background_restore"`, or [DeviceReconnected]    |
+     * | [SUSPEND]                     | `suspend()`                               | [DeviceDisconnected] with `detachCause = "disconnect"` (reconnect expected)           |
+     * | [TERMINATE]                   | `terminate()`                             | [DeviceDisconnected] with `detachCause` in `["disable", "explicit_detach", "invalidation"]` |
+     *
+     * @property wireValue Stable lowercase string used in JSON payloads and V2 schema bindings.
+     */
+    enum class MeshSessionLifecycleHint(val wireValue: String) {
+
+        /**
+         * A new mesh session should be created and activated.
+         *
+         * Corresponds to [DeviceConnected] events with `openSource = "user_activation"`.
+         * V2 target: `MeshSessionLifecycleCoordinator.create()` followed by `activate()`.
+         * This is the first-time activation path — no prior durable session exists.
+         */
+        CREATE_ACTIVATE("mesh_create_activate"),
+
+        /**
+         * An existing durable mesh session should be restored (and reactivated if needed).
+         *
+         * Corresponds to [DeviceConnected] events with `openSource = "background_restore"`,
+         * and to all [DeviceReconnected] events (transparent WS reconnect preserves the
+         * durable session era).
+         * V2 target: `MeshSessionLifecycleCoordinator.restore()`.
+         * The [DeviceReconnected.durableSessionId] / [DeviceConnected.durableSessionId]
+         * field carries the stable era identifier for V2 to locate the prior session.
+         */
+        RESTORE_ACTIVATE("mesh_restore_activate"),
+
+        /**
+         * The mesh session should be suspended — a reconnect is expected to follow.
+         *
+         * Corresponds to [DeviceDisconnected] events with `detachCause = "disconnect"`.
+         * V2 target: `MeshSessionLifecycleCoordinator.suspend()`.
+         * The durable session era is preserved; [DeviceReconnected] will follow if the
+         * WS client successfully reconnects.  V2 must not terminate the mesh session on
+         * a SUSPEND hint; it should await the subsequent RESTORE_ACTIVATE.
+         */
+        SUSPEND("mesh_suspend"),
+
+        /**
+         * The mesh session should be terminated — no reconnect is expected.
+         *
+         * Corresponds to [DeviceDisconnected] events with `detachCause` in
+         * `["disable", "explicit_detach", "invalidation"]`.
+         * V2 target: `MeshSessionLifecycleCoordinator.terminate()`.
+         * The durable session era ends; a new CREATE_ACTIVATE event will start a fresh era
+         * if the device re-enables cross-device participation.
+         */
+        TERMINATE("mesh_terminate");
+
+        companion object {
+            /**
+             * Parses [value] to a [MeshSessionLifecycleHint], returning `null` for unknown
+             * or null values.
+             */
+            fun fromValue(value: String?): MeshSessionLifecycleHint? =
+                entries.firstOrNull { it.wireValue == value }
+
+            /** All four wire values — useful for validation in tests and schema registries. */
+            val ALL_WIRE_VALUES: Set<String> = setOf(
+                CREATE_ACTIVATE.wireValue,
+                RESTORE_ACTIVATE.wireValue,
+                SUSPEND.wireValue,
+                TERMINATE.wireValue
+            )
+        }
+    }
+
     // ── Connect / attach ──────────────────────────────────────────────────────
 
     /**
@@ -96,6 +209,10 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      * **not** a transparent reconnect — that is [DeviceReconnected]).
      *
      * V2 hook target: `on_device_health_changed(deviceId, ONLINE/HEALTHY)`.
+     *
+     * V2 mesh session target: see [meshLifecycleHint] — either [MeshSessionLifecycleHint.CREATE_ACTIVATE]
+     * (for `"user_activation"`) or [MeshSessionLifecycleHint.RESTORE_ACTIVATE] (for
+     * `"background_restore"`).
      *
      * @property deviceId              Stable device identifier.
      * @property sessionId             Session ID of the newly opened attached session.
@@ -117,7 +234,26 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
         val sessionContinuityEpoch: Int,
         val openSource: String,
         override val timestampMs: Long = System.currentTimeMillis()
-    ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_CONNECTED)
+    ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_CONNECTED) {
+
+        /**
+         * PR-44 — Explicit mesh session lifecycle hint for this connect event.
+         *
+         * Derived from [openSource]:
+         * - `"background_restore"` → [MeshSessionLifecycleHint.RESTORE_ACTIVATE]: an existing
+         *   durable session era should be restored (process/service restarted after prior
+         *   activation).
+         * - any other value (including `"user_activation"`) → [MeshSessionLifecycleHint.CREATE_ACTIVATE]:
+         *   a new mesh session should be created and activated.
+         *
+         * V2 should branch on this hint rather than re-parsing [openSource] itself.
+         */
+        val meshLifecycleHint: MeshSessionLifecycleHint
+            get() = if (openSource == OPEN_SOURCE_BACKGROUND_RESTORE)
+                MeshSessionLifecycleHint.RESTORE_ACTIVATE
+            else
+                MeshSessionLifecycleHint.CREATE_ACTIVATE
+    }
 
     // ── Reconnect / re-attach ─────────────────────────────────────────────────
 
@@ -132,6 +268,9 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      * [runtimeSessionId] and [sessionContinuityEpoch] change.
      *
      * V2 hook target: `on_device_health_changed(deviceId, ONLINE/HEALTHY)`.
+     *
+     * V2 mesh session target: [MeshSessionLifecycleHint.RESTORE_ACTIVATE] — the durable session
+     * era is preserved and should be restored rather than re-created.
      *
      * @property deviceId              Stable device identifier.
      * @property sessionId             Session ID of the newly reopened attached session.
@@ -148,7 +287,19 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
         val durableSessionId: String?,
         val sessionContinuityEpoch: Int,
         override val timestampMs: Long = System.currentTimeMillis()
-    ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_RECONNECTED)
+    ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_RECONNECTED) {
+
+        /**
+         * PR-44 — Explicit mesh session lifecycle hint for this reconnect event.
+         *
+         * Always [MeshSessionLifecycleHint.RESTORE_ACTIVATE]: a transparent WS reconnect
+         * preserves the durable session era; V2 should restore the existing mesh session
+         * rather than creating a new one.  Use [durableSessionId] as the stable anchor to
+         * locate the prior session.
+         */
+        val meshLifecycleHint: MeshSessionLifecycleHint
+            get() = MeshSessionLifecycleHint.RESTORE_ACTIVATE
+    }
 
     // ── Disconnect / detach ───────────────────────────────────────────────────
 
@@ -159,19 +310,25 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      * [com.ufo.galaxy.runtime.AttachedRuntimeSession] is closed, regardless of the
      * cause.  The [detachCause] wire value distinguishes the cause:
      *
-     * | [detachCause]      | Description |
-     * |--------------------|-------------|
-     * | `"disconnect"`     | Transient WS drop; WS client will auto-reconnect ([DeviceReconnected] will follow). |
-     * | `"disable"`        | Explicit stop / kill-switch; no reconnect expected. |
-     * | `"invalidation"`   | Session invalidated due to trust or protocol mismatch. |
+     * | [detachCause]        | [meshLifecycleHint]                          | [isResumable] | Description |
+     * |----------------------|----------------------------------------------|---------------|-------------|
+     * | `"disconnect"`       | [MeshSessionLifecycleHint.SUSPEND]           | `true`        | Transient WS drop; WS client will auto-reconnect ([DeviceReconnected] will follow). |
+     * | `"disable"`          | [MeshSessionLifecycleHint.TERMINATE]         | `false`       | Explicit stop / kill-switch; no reconnect expected. |
+     * | `"explicit_detach"`  | [MeshSessionLifecycleHint.TERMINATE]         | `false`       | Operator or user explicitly detached this device. |
+     * | `"invalidation"`     | [MeshSessionLifecycleHint.TERMINATE]         | `false`       | Session invalidated due to trust or protocol mismatch. |
      *
      * V2 hook target: `on_device_health_changed(deviceId, OFFLINE)`.
+     *
+     * V2 mesh session target: see [meshLifecycleHint] — either
+     * [MeshSessionLifecycleHint.SUSPEND] (reconnect expected) or
+     * [MeshSessionLifecycleHint.TERMINATE] (no reconnect expected).
      *
      * @property deviceId          Stable device identifier.
      * @property sessionId         Session ID of the session that was closed.
      * @property detachCause       Wire value from
      *                             [com.ufo.galaxy.runtime.AttachedRuntimeSession.DetachCause]:
-     *                             `"disconnect"`, `"disable"`, or `"invalidation"`.
+     *                             `"disconnect"`, `"disable"`, `"explicit_detach"`, or
+     *                             `"invalidation"`.
      * @property sessionDurationMs Approximate duration of the session in milliseconds.
      * @property timestampMs       Wall-clock emission timestamp.
      */
@@ -181,7 +338,41 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
         val detachCause: String,
         val sessionDurationMs: Long,
         override val timestampMs: Long = System.currentTimeMillis()
-    ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_DISCONNECTED)
+    ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_DISCONNECTED) {
+
+        /**
+         * PR-44 — Explicit mesh session lifecycle hint for this disconnect event.
+         *
+         * Derived from [detachCause]:
+         * - `"disconnect"` → [MeshSessionLifecycleHint.SUSPEND]: transient WS drop; the durable
+         *   session era is preserved and a [DeviceReconnected] event will follow if the WS client
+         *   successfully reconnects.  V2 must **not** terminate the mesh session on SUSPEND; it
+         *   should call `suspend()` and await the subsequent RESTORE_ACTIVATE.
+         * - any other value → [MeshSessionLifecycleHint.TERMINATE]: permanent end; the durable
+         *   era is cleared and V2 should call `terminate()` on the mesh session.
+         *
+         * V2 should branch on this hint rather than re-parsing [detachCause] itself.
+         */
+        val meshLifecycleHint: MeshSessionLifecycleHint
+            get() = if (detachCause == DETACH_CAUSE_DISCONNECT)
+                MeshSessionLifecycleHint.SUSPEND
+            else
+                MeshSessionLifecycleHint.TERMINATE
+
+        /**
+         * PR-44 — Whether reconnect and session restoration are expected after this disconnect.
+         *
+         * `true`  when [detachCause] is `"disconnect"` — the WS client will automatically
+         *         attempt to reconnect; a [DeviceReconnected] event will follow on success.
+         *         V2 should preserve the durable mesh session in anticipation of restore.
+         *
+         * `false` when [detachCause] is `"disable"`, `"explicit_detach"`, or `"invalidation"`
+         *         — the durable session era has ended and no automatic reconnect is expected.
+         *         V2 should terminate the mesh session.
+         */
+        val isResumable: Boolean
+            get() = detachCause == DETACH_CAUSE_DISCONNECT
+    }
 
     // ── Degraded / unavailable ────────────────────────────────────────────────
 
@@ -322,6 +513,24 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
          */
         const val WIRE_HEARTBEAT_MISS_UNSUPPORTED = "v2_heartbeat_miss_unsupported"
 
+        /**
+         * PR-44 — Stable `openSource` wire value used by [DeviceConnected.meshLifecycleHint]
+         * to identify background-restore activations that map to
+         * [MeshSessionLifecycleHint.RESTORE_ACTIVATE].
+         *
+         * Matches [RuntimeController.SessionOpenSource.BACKGROUND_RESTORE.wireValue].
+         */
+        const val OPEN_SOURCE_BACKGROUND_RESTORE = "background_restore"
+
+        /**
+         * PR-44 — Stable `detachCause` wire value used by [DeviceDisconnected.meshLifecycleHint]
+         * and [DeviceDisconnected.isResumable] to identify transient WS disconnects that map to
+         * [MeshSessionLifecycleHint.SUSPEND] (reconnect expected).
+         *
+         * Matches [com.ufo.galaxy.runtime.AttachedRuntimeSession.DetachCause.DISCONNECT.wireValue].
+         */
+        const val DETACH_CAUSE_DISCONNECT = "disconnect"
+
         /** All stable wire values — useful for validation in tests and schema registries. */
         val ALL_WIRE_VALUES: Set<String> = setOf(
             WIRE_DEVICE_CONNECTED,
@@ -334,6 +543,9 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
 
         /** PR-43 identifier. */
         const val INTRODUCED_PR = 43
+
+        /** PR-44 identifier — mesh session lifecycle hint extension. */
+        const val INTRODUCED_PR_MESH_HINT = 44
 
         /** Human-readable description of this surface for documentation and baseline entries. */
         const val DESCRIPTION =

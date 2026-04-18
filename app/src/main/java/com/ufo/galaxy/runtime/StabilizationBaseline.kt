@@ -795,6 +795,35 @@ object StabilizationBaseline {
                 "operator-facing observability stream for V2 integration diagnostics.",
             introducedPr = 43
         )
+    ) + listOf(
+
+        // ── PR-44: Mesh session lifecycle hint extension ──────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "v2-mesh-session-lifecycle-hint",
+            displayName = "V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint",
+            packagePath = "com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-44 explicit mesh session lifecycle hint enum carried by " +
+                "DeviceConnected, DeviceReconnected, and DeviceDisconnected events — " +
+                "maps Android lifecycle events to V2 mesh session lifecycle transitions " +
+                "(CREATE_ACTIVATE, RESTORE_ACTIVATE, SUSPEND, TERMINATE) without requiring " +
+                "V2 to re-parse raw Android fields like openSource or detachCause.",
+            introducedPr = 44
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "v2-device-disconnected-is-resumable",
+            displayName = "V2MultiDeviceLifecycleEvent.DeviceDisconnected.isResumable",
+            packagePath = "com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-44 computed boolean on DeviceDisconnected — true when " +
+                "detachCause is 'disconnect' (transient WS drop; reconnect and session " +
+                "restore expected); false for permanent termination causes. Provides V2 " +
+                "an explicit resumability signal without requiring detachCause string parsing.",
+            introducedPr = 44
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
