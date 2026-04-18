@@ -605,6 +605,140 @@ object CanonicalSessionAxis {
     val familiesWithoutSnapshotCarrier: Set<CanonicalSessionFamily> =
         truthBindings.filter { it.snapshotCarrier == null }.map { it.family }.toSet()
 
+    // ── PR-40: Transport continuity bindings ─────────────────────────────────
+
+    /**
+     * PR-40 — Classifies each session family by how its continuity is affected
+     * by transport lifecycle events, linking [CanonicalSessionAxis] session family
+     * semantics to the [TransportContinuityAnchor] continuity policies.
+     *
+     * This binding is used by transport-lifecycle adaptation logic to confirm which
+     * session families must be reshapen, suspended, or terminated when a specific
+     * [TransportContinuityAnchor.TransportEvent] occurs.
+     *
+     * @param family                 The [CanonicalSessionFamily] this binding describes.
+     * @param affectedByInterruption `true` if a [TransportContinuityAnchor.TransportEvent.DEGRADATION]
+     *                               or [TransportContinuityAnchor.TransportEvent.RECONNECT] event
+     *                               changes this family's identity or viability.
+     * @param survivesReconnect      `true` if the family's identity survives a
+     *                               [TransportContinuityAnchor.TransportEvent.RECONNECT]
+     *                               (i.e. same identity after reconnect, possibly with a
+     *                               new carrier value such as a fresh runtime_session_id).
+     * @param transportNote          One-sentence note on how transport events affect this family.
+     */
+    data class TransportContinuityBinding(
+        val family: CanonicalSessionFamily,
+        val affectedByInterruption: Boolean,
+        val survivesReconnect: Boolean,
+        val transportNote: String
+    )
+
+    /**
+     * Registry of transport continuity bindings for all seven session families.
+     *
+     * These bindings complement [continuityModels] with the transport-event perspective,
+     * making the interaction between [TransportContinuityAnchor] events and individual
+     * session families machine-readable.
+     */
+    val transportContinuityBindings: List<TransportContinuityBinding> = listOf(
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.CONTROL_SESSION,
+            affectedByInterruption = false,
+            survivesReconnect = true,
+            transportNote = "Control session is maintained by the center and echoed by Android; " +
+                "transport interruptions on the Android side do not change the center-owned control-session scope."
+        ),
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.RUNTIME_SESSION,
+            affectedByInterruption = true,
+            survivesReconnect = false,
+            transportNote = "Runtime session ID is per-WS-connection; a RECONNECT event always " +
+                "produces a fresh runtime_session_id via RuntimeController.openAttachedSession()."
+        ),
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION,
+            affectedByInterruption = true,
+            survivesReconnect = false,
+            transportNote = "Attached session is closed on INTERRUPTED/SUSPENDED and a new session " +
+                "is opened on RECONNECT under the same durable era; sessionId is replaced but " +
+                "durableSessionId is retained."
+        ),
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION,
+            affectedByInterruption = true,
+            survivesReconnect = false,
+            transportNote = "Transfer session (ACK→PROGRESS→RESULT chain) is terminated by a " +
+                "DEGRADATION or INTERRUPTED event; in-flight delegated tasks receive a " +
+                "DISCONNECT cause signal and do not resume across reconnect."
+        ),
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.CONVERSATION_SESSION,
+            affectedByInterruption = false,
+            survivesReconnect = true,
+            transportNote = "Conversation session is local-only (LocalLoopTrace / SessionHistorySummary) " +
+                "and is independent of transport state; transport events have no effect on it."
+        ),
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.MESH_SESSION,
+            affectedByInterruption = true,
+            survivesReconnect = false,
+            transportNote = "Mesh session (MeshJoin/MeshLeave cycle) is terminated by a transport " +
+                "interruption; a new mesh_id is required for any subsequent mesh coordination."
+        ),
+
+        TransportContinuityBinding(
+            family = CanonicalSessionFamily.DURABLE_RUNTIME_SESSION,
+            affectedByInterruption = false,
+            survivesReconnect = true,
+            transportNote = "Durable session era survives transport interruption and reconnect; " +
+                "DurableSessionContinuityRecord.durableSessionId is stable; only the epoch " +
+                "increments on each RECONNECT event."
+        )
+    )
+
+    private val transportContinuityBindingIndex: Map<CanonicalSessionFamily, TransportContinuityBinding> =
+        transportContinuityBindings.associateBy { it.family }
+
+    /**
+     * PR-40 — Returns the [TransportContinuityBinding] for [family], documenting
+     * how transport lifecycle events affect this session family's continuity.
+     *
+     * Returns `null` if [family] has no registered binding (defensive; all seven
+     * current families have a binding).
+     */
+    fun transportContinuityBindingFor(family: CanonicalSessionFamily): TransportContinuityBinding? =
+        transportContinuityBindingIndex[family]
+
+    /**
+     * PR-40 — Returns the set of session families that are affected by a transport
+     * interruption ([TransportContinuityBinding.affectedByInterruption]`=true`).
+     *
+     * These families' identities or viability are disrupted by a
+     * [TransportContinuityAnchor.TransportEvent.DEGRADATION] or
+     * [TransportContinuityAnchor.TransportEvent.RECONNECT] event.
+     */
+    val familiesAffectedByInterruption: Set<CanonicalSessionFamily> =
+        transportContinuityBindings
+            .filter { it.affectedByInterruption }
+            .map { it.family }
+            .toSet()
+
+    /**
+     * PR-40 — Returns the set of session families whose identity survives a
+     * [TransportContinuityAnchor.TransportEvent.RECONNECT] event unchanged.
+     */
+    val familiesSurvivingReconnect: Set<CanonicalSessionFamily> =
+        transportContinuityBindings
+            .filter { it.survivesReconnect }
+            .map { it.family }
+            .toSet()
+
     // ── PR-37: Session/dispatch alignment helpers ─────────────────────────────
 
     /**

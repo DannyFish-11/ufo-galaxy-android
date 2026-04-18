@@ -324,6 +324,71 @@ object CanonicalDispatchChain {
             }
         }
     }
+
+    // ── PR-40: Transport-lifecycle integration ────────────────────────────────
+
+    /**
+     * PR-40 — Returns the subset of dispatch paths that remain eligible given the
+     * supplied runtime/session/rollout state **and** the current transport condition.
+     *
+     * Extends [resolveEligiblePathsForState] with a transport-condition filter:
+     * paths requiring cross-device or delegated participation are suppressed when
+     * the transport condition is [MediaTransportLifecycleBridge.TransportCondition.INTERRUPTED]
+     * or [MediaTransportLifecycleBridge.TransportCondition.SUSPENDED].
+     *
+     * - [MediaTransportLifecycleBridge.TransportCondition.STABLE] — no additional
+     *   restriction beyond normal runtime/session/rollout eligibility.
+     * - [MediaTransportLifecycleBridge.TransportCondition.DEGRADED] — cross-device paths
+     *   are marked advisory-only; LOCAL and FALLBACK remain fully eligible.
+     *   Note: this method still returns cross-device paths in the DEGRADED case because
+     *   the dispatch decision is advisory (caller may still choose to route);
+     *   callers should check [MediaTransportLifecycleBridge.LifecycleAdaptation.ADVISORY]
+     *   to apply their own admission policy.
+     * - [MediaTransportLifecycleBridge.TransportCondition.INTERRUPTED] — all cross-device
+     *   paths (CANONICAL, STAGED_MESH, DELEGATED) are suppressed; only LOCAL,
+     *   FALLBACK (if gated on), and COMPATIBILITY are returned.
+     * - [MediaTransportLifecycleBridge.TransportCondition.SUSPENDED] — same as INTERRUPTED;
+     *   cross-device paths are suppressed.
+     *
+     * @param runtimeState      Current [RuntimeController.RuntimeState].
+     * @param attachedSession   Current [AttachedRuntimeSession], or `null` if none.
+     * @param rollout           Current [RolloutControlSnapshot].
+     * @param transportCondition Current [MediaTransportLifecycleBridge.TransportCondition].
+     * @return The [DispatchPathDescriptor] entries eligible under all supplied conditions.
+     */
+    fun resolveTransportAdaptedPaths(
+        runtimeState: RuntimeController.RuntimeState,
+        attachedSession: AttachedRuntimeSession?,
+        rollout: RolloutControlSnapshot,
+        transportCondition: MediaTransportLifecycleBridge.TransportCondition
+    ): List<DispatchPathDescriptor> {
+        val basePaths = resolveEligiblePathsForState(
+            runtimeState    = runtimeState,
+            attachedSession = attachedSession,
+            rollout         = rollout
+        )
+        return when (transportCondition) {
+            MediaTransportLifecycleBridge.TransportCondition.STABLE,
+            MediaTransportLifecycleBridge.TransportCondition.DEGRADED -> basePaths
+            MediaTransportLifecycleBridge.TransportCondition.INTERRUPTED,
+            MediaTransportLifecycleBridge.TransportCondition.SUSPENDED ->
+                basePaths.filter { it.pathMode !in CROSS_DEVICE_PATH_MODES }
+        }
+    }
+
+    /**
+     * PR-40 — The set of [DispatchPathMode] values that require live cross-device
+     * transport to be eligible.
+     *
+     * These modes are suppressed by [resolveTransportAdaptedPaths] when the transport
+     * condition is [MediaTransportLifecycleBridge.TransportCondition.INTERRUPTED] or
+     * [MediaTransportLifecycleBridge.TransportCondition.SUSPENDED].
+     */
+    val CROSS_DEVICE_PATH_MODES: Set<DispatchPathMode> = setOf(
+        DispatchPathMode.CANONICAL,
+        DispatchPathMode.STAGED_MESH,
+        DispatchPathMode.DELEGATED
+    )
 }
 
 // ── Data types ────────────────────────────────────────────────────────────────

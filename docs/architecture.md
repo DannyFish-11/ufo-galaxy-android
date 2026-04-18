@@ -159,6 +159,67 @@ If you encounter code that calls these deprecated methods for anything other tha
 
 ---
 
+## Media transport and task-lifecycle convergence (PR-40)
+
+### Transport condition → lifecycle adaptation integration
+
+`MediaTransportLifecycleBridge` is the canonical model governing how Android-side
+media/session transport conditions map to task/runtime lifecycle adaptations.
+
+| Transport condition | Lifecycle adaptation | Dispatch impact | Recovery path |
+|---------------------|---------------------|-----------------|---------------|
+| `STABLE` | `NONE` | No restriction | No recovery needed |
+| `DEGRADED` | `ADVISORY` | Advisory telemetry; cross-device paths remain open | Transport layer monitors quality; re-enable on stabilisation |
+| `INTERRUPTED` | `TERMINATE_ACTIVE_TASKS` | Cross-device paths suppressed | WS reconnect → `openAttachedSession(RECONNECT_RECOVERY)` |
+| `SUSPENDED` | `TERMINATE_ACTIVE_TASKS` | Cross-device paths suppressed | Explicit re-enable via `RuntimeController.start()` |
+
+All adaptations are applied exclusively through `RuntimeController`.  No transport-layer
+component may independently modify runtime or session state in response to a transport
+condition change.
+
+### Transport continuity anchor
+
+`TransportContinuityAnchor` declares the canonical continuity policy for each transport
+lifecycle event, making session continuity behavior explicit and machine-readable.
+
+| Event | Continuity policy | Durable era | Post-event session state |
+|-------|-------------------|-------------|--------------------------|
+| `ATTACH` | `PERSIST` | Retained | `ATTACHED` |
+| `DETACH` | `TERMINATES` | Cleared | `DETACHED` |
+| `RECONNECT` | `RESHAPES` | Retained (epoch++) | `REATTACHED` |
+| `DEGRADATION` | `SUSPENDS` | Retained | `ATTACHED` |
+| `RECOVERY` | `PERSIST` | Retained | `ATTACHED` |
+
+**Key invariant**: `DurableSessionContinuityRecord` must be retained on `RECONNECT`;
+only `sessionContinuityEpoch` increments.  `RuntimeController` is the sole authority
+for applying all continuity policy transitions.
+
+### Transport-aware dispatch path resolution
+
+`CanonicalDispatchChain.resolveTransportAdaptedPaths()` extends
+`resolveEligiblePathsForState()` with a transport-condition filter:
+
+- `STABLE` / `DEGRADED` → same paths as `resolveEligiblePathsForState()`.
+- `INTERRUPTED` / `SUSPENDED` → cross-device path modes (`CANONICAL`, `STAGED_MESH`,
+  `DELEGATED`) are suppressed; `LOCAL`, `FALLBACK`, and `COMPATIBILITY` remain eligible.
+
+### Session family transport continuity bindings
+
+`CanonicalSessionAxis.transportContinuityBindings` classifies each session family by
+how transport lifecycle events affect its continuity:
+
+| Session family | Affected by interruption | Survives reconnect |
+|---|---|---|
+| `CONTROL_SESSION` | No | Yes |
+| `RUNTIME_SESSION` | Yes | No |
+| `ATTACHED_RUNTIME_SESSION` | Yes | No |
+| `DELEGATION_TRANSFER_SESSION` | Yes | No |
+| `CONVERSATION_SESSION` | No | Yes |
+| `MESH_SESSION` | Yes | No |
+| `DURABLE_RUNTIME_SESSION` | No | Yes |
+
+---
+
 ## Package map
 
 ```
