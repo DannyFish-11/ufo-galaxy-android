@@ -393,23 +393,35 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      *
      * V2 hook target: `on_device_health_changed(deviceId, DEGRADED)`.
      *
-     * @property deviceId          Stable device identifier.
-     * @property sessionId         Session ID at degradation time; may be `null` if the
-     *                             session was already closed when degradation was detected.
-     * @property degradationKind   Machine-readable degradation classification — one of
-     *                             `"ws_recovering"`, `"ws_recovery_failed"`,
-     *                             `"health_degraded"`, `"health_recovering"`,
-     *                             `"health_failed"`.
-     * @property continuationMode  Wire value from
-     *                             [com.ufo.galaxy.runtime.FormationParticipationRebalancer.ContinuationMode]
-     *                             describing how execution should continue.
-     * @property timestampMs       Wall-clock emission timestamp.
+     * @property deviceId               Stable device identifier.
+     * @property sessionId              Session ID at degradation time; may be `null` if the
+     *                                  session was already closed when degradation was detected.
+     * @property degradationKind        Machine-readable degradation classification — one of
+     *                                  `"ws_recovering"`, `"ws_recovery_failed"`,
+     *                                  `"health_degraded"`, `"health_recovering"`,
+     *                                  `"health_failed"`.
+     * @property continuationMode       Wire value from
+     *                                  [com.ufo.galaxy.runtime.FormationParticipationRebalancer.ContinuationMode]
+     *                                  describing how execution should continue.
+     * @property durableSessionId       Durable session era identifier at degradation time;
+     *                                  the same value present in the preceding
+     *                                  [DeviceConnected] or [DeviceReconnected] event.
+     *                                  `null` when no durable record is active (e.g. before
+     *                                  first activation). V2 should use this to correlate a
+     *                                  `ws_recovering` or `ws_recovery_failed` event with the
+     *                                  specific session era being recovered, without re-parsing
+     *                                  prior events.
+     * @property sessionContinuityEpoch Reconnect count within the durable era at degradation
+     *                                  time; `null` when no durable record is active.
+     * @property timestampMs            Wall-clock emission timestamp.
      */
     data class DeviceDegraded(
         override val deviceId: String,
         override val sessionId: String?,
         val degradationKind: String,
         val continuationMode: String,
+        val durableSessionId: String? = null,
+        val sessionContinuityEpoch: Int? = null,
         override val timestampMs: Long = System.currentTimeMillis()
     ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_DEGRADED)
 

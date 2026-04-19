@@ -1040,6 +1040,49 @@ object StabilizationBaseline {
                 "null for full backward compatibility with pre-PR-I result consumers.",
             introducedPr = 49
         )
+    ) + listOf(
+
+        // ── PR-50: Reconnect / lifecycle output semantics strengthening ───────
+
+        BaselineSurfaceEntry(
+            surfaceId = "v2-device-degraded-durable-session-id",
+            displayName = "V2MultiDeviceLifecycleEvent.DeviceDegraded.durableSessionId",
+            packagePath = "com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-50 identity-stability field on DeviceDegraded — carries the " +
+                "durable session era identifier (same value present in DeviceConnected / " +
+                "DeviceReconnected) so V2 can correlate ws_recovering and " +
+                "ws_recovery_failed events with the specific session era being recovered " +
+                "without re-parsing prior events. Nullable for backward compatibility.",
+            introducedPr = 50
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "v2-device-degraded-session-continuity-epoch",
+            displayName = "V2MultiDeviceLifecycleEvent.DeviceDegraded.sessionContinuityEpoch",
+            packagePath = "com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-50 identity-stability field on DeviceDegraded — carries the " +
+                "reconnect count within the durable era at degradation time so V2 can " +
+                "determine the exact reconnect cycle a degradation event belongs to. " +
+                "Nullable for backward compatibility when no durable record is active.",
+            introducedPr = 50
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-recovery-v2-unconditional",
+            displayName = "RuntimeController.emitFormationRebalanceForRecovery V2 unconditional emission",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-50 behavioral guarantee — DeviceDegraded V2 lifecycle events " +
+                "for RECOVERING and FAILED recovery states are emitted unconditionally " +
+                "(i.e. even when hostDescriptor is null), using session identity from " +
+                "the active attachedSession and durableSessionContinuityRecord. This " +
+                "ensures V2 always receives the complete recovery-cycle signal regardless " +
+                "of host descriptor availability.",
+            introducedPr = 50
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

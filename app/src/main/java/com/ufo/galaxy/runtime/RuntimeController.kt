@@ -1558,6 +1558,8 @@ class RuntimeController(
                 is V2MultiDeviceLifecycleEvent.DeviceDegraded -> {
                     put("degradation_kind", event.degradationKind)
                     put("continuation_mode", event.continuationMode)
+                    event.durableSessionId?.let { put("durable_session_id", it) }
+                    event.sessionContinuityEpoch?.let { put("session_continuity_epoch", it) }
                 }
                 is V2MultiDeviceLifecycleEvent.DeviceHealthChanged -> {
                     put("previous_health", event.previousHealth)
@@ -1867,7 +1869,9 @@ class RuntimeController(
                     deviceId = descriptor.deviceId,
                     sessionId = _attachedSession.value?.sessionId,
                     degradationKind = degradationKind,
-                    continuationMode = decision.continuationMode.wireValue
+                    continuationMode = decision.continuationMode.wireValue,
+                    durableSessionId = _durableSessionContinuityRecord.value?.durableSessionId,
+                    sessionContinuityEpoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch
                 )
             )
         }
@@ -1985,6 +1989,16 @@ class RuntimeController(
      * that formation observers receive typed events without needing to interpret raw
      * [reconnectRecoveryState] values.
      *
+     * V2 [V2MultiDeviceLifecycleEvent.DeviceDegraded] events for [ReconnectRecoveryState.RECOVERING]
+     * and [ReconnectRecoveryState.FAILED] are emitted **unconditionally** (i.e. even when
+     * [hostDescriptor] is `null`) using the session identity from [_attachedSession] and
+     * [_durableSessionContinuityRecord].  This ensures the V2 stream always reflects the
+     * full recovery cycle regardless of whether a host descriptor has been configured.
+     *
+     * [FormationRebalanceEvent] emission and [V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged]
+     * still require a non-null [hostDescriptor] (formation role and participation state
+     * fields are not available without a descriptor).
+     *
      * @param previousRecoveryState The recovery state before the transition.
      * @param newRecoveryState      The recovery state after the transition.
      */
@@ -1992,6 +2006,40 @@ class RuntimeController(
         previousRecoveryState: ReconnectRecoveryState,
         newRecoveryState: ReconnectRecoveryState
     ) {
+        // V2 DeviceDegraded events are emitted unconditionally for RECOVERING and FAILED so
+        // that the V2 stream reflects the complete recovery-state machine regardless of
+        // whether a hostDescriptor is configured.  Identity fields (durableSessionId,
+        // sessionContinuityEpoch) from the active durable record are included so V2 can
+        // correlate these degradation events with the specific session era being recovered.
+        val sessionDeviceId = _attachedSession.value?.deviceId ?: settings.deviceId.takeIf { it.isNotBlank() }
+        if (sessionDeviceId != null) {
+            when (newRecoveryState) {
+                ReconnectRecoveryState.RECOVERING -> emitV2LifecycleEvent(
+                    V2MultiDeviceLifecycleEvent.DeviceDegraded(
+                        deviceId = sessionDeviceId,
+                        sessionId = _attachedSession.value?.sessionId,
+                        degradationKind = "ws_recovering",
+                        continuationMode = FormationParticipationRebalancer.ContinuationMode.DEGRADED_CONTINUATION.wireValue,
+                        durableSessionId = _durableSessionContinuityRecord.value?.durableSessionId,
+                        sessionContinuityEpoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch
+                    )
+                )
+                ReconnectRecoveryState.FAILED -> emitV2LifecycleEvent(
+                    V2MultiDeviceLifecycleEvent.DeviceDegraded(
+                        deviceId = sessionDeviceId,
+                        sessionId = _attachedSession.value?.sessionId,
+                        degradationKind = "ws_recovery_failed",
+                        continuationMode = FormationParticipationRebalancer.ContinuationMode.WITHDRAW_PARTICIPATION.wireValue,
+                        durableSessionId = _durableSessionContinuityRecord.value?.durableSessionId,
+                        sessionContinuityEpoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch
+                    )
+                )
+                else -> { /* RECOVERED is handled by openAttachedSession; IDLE is a no-op */ }
+            }
+        }
+
+        // Formation rebalance events and ParticipantReadinessChanged require a hostDescriptor
+        // because they carry role and participation-state fields derived from it.
         val descriptor = hostDescriptor ?: return
         val event: FormationRebalanceEvent = when (newRecoveryState) {
             ReconnectRecoveryState.RECOVERING -> FormationRebalanceEvent.ReadinessChanged(
@@ -2028,21 +2076,11 @@ class RuntimeController(
             )
         )
         _formationRebalanceEvent.tryEmit(event)
-        // PR-43: Also emit corresponding V2 lifecycle events for WS recovery transitions.
-        // RECOVERED is handled by openAttachedSession (which emits DeviceReconnected);
-        // RECOVERING and FAILED need explicit V2 degradation events here.
+        // PR-43: Emit ParticipantReadinessChanged on the V2 stream for RECOVERING and FAILED
+        // transitions.  DeviceDegraded is already emitted unconditionally above; here we only
+        // add the readiness-state companion event that requires descriptor participation fields.
         when (newRecoveryState) {
             ReconnectRecoveryState.RECOVERING -> {
-                emitV2LifecycleEvent(
-                    V2MultiDeviceLifecycleEvent.DeviceDegraded(
-                        deviceId = descriptor.deviceId,
-                        sessionId = _attachedSession.value?.sessionId,
-                        degradationKind = "ws_recovering",
-                        continuationMode = FormationParticipationRebalancer.ContinuationMode.DEGRADED_CONTINUATION.wireValue
-                    )
-                )
-                // Also emit ParticipantReadinessChanged since the ReadinessChanged
-                // FormationRebalanceEvent carries readiness state fields.
                 if (event is FormationRebalanceEvent.ReadinessChanged) {
                     emitV2LifecycleEvent(
                         V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged(
@@ -2058,14 +2096,6 @@ class RuntimeController(
                 }
             }
             ReconnectRecoveryState.FAILED -> {
-                emitV2LifecycleEvent(
-                    V2MultiDeviceLifecycleEvent.DeviceDegraded(
-                        deviceId = descriptor.deviceId,
-                        sessionId = _attachedSession.value?.sessionId,
-                        degradationKind = "ws_recovery_failed",
-                        continuationMode = FormationParticipationRebalancer.ContinuationMode.WITHDRAW_PARTICIPATION.wireValue
-                    )
-                )
                 if (event is FormationRebalanceEvent.ReadinessChanged) {
                     emitV2LifecycleEvent(
                         V2MultiDeviceLifecycleEvent.ParticipantReadinessChanged(
@@ -2080,7 +2110,7 @@ class RuntimeController(
                     )
                 }
             }
-            else -> { /* RECOVERED is handled by openAttachedSession; IDLE returns early */ }
+            else -> { /* RECOVERED handled by openAttachedSession; IDLE returns early above */ }
         }
     }
 
