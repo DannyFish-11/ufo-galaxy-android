@@ -18,16 +18,32 @@ import java.util.UUID
  *    reconnect within the era, allowing host-side consumers to detect and correlate reconnect
  *    events without losing the overarching session identity.
  *
- * ## Relationship to other session identifiers
+ * ## Relationship to other session identifiers and continuity_token
  *
- *  | Identifier | Stability | Resets on |
- *  |-----------------------------------|-----------|-----------|
- *  | `runtime_session_id`              | Per WS connection | Every reconnect |
- *  | `attached_runtime_session_id`     | Per attached session | Reconnect (new session opened) |
- *  | [durableSessionId] (this record)  | Per activation era | `stop()` or `invalidateSession()` only |
+ *  | Identifier / token                | Stability                       | Resets on                              | Owner           |
+ *  |-----------------------------------|---------------------------------|----------------------------------------|-----------------|
+ *  | `runtime_session_id`              | Per WS connection               | Every reconnect                        | Android         |
+ *  | `attached_runtime_session_id`     | Per attached session            | Reconnect (new session opened)         | Android         |
+ *  | [durableSessionId] (this record)  | Per activation era              | `stop()` or `invalidateSession()` only | Android         |
+ *  | `continuity_token`                | Per durable dispatch context    | New dispatch (not reconnect)           | V2 coordinator  |
+ *  | `continuation_token`              | Per delegated handoff           | Every new handoff delegation           | Originating executor |
  *
- * [durableSessionId] is the **most stable** Android-side session identity, forming the top of
- * the continuity hierarchy.  It lets the center-side system treat multiple successive
+ * **Identity boundary rules:**
+ * - [durableSessionId] is the **most stable** Android-side session identity: constant
+ *   across all reconnects within a single activation era.  It forms the top of the
+ *   Android continuity hierarchy.
+ * - `continuity_token` is a **V2-managed** opaque token that spans the durable
+ *   execution context.  It may correlate multiple [durableSessionId] values across
+ *   different devices or hand-off sequences, but its lifecycle is controlled by V2,
+ *   not Android.  Android echoes it back but MUST NOT generate or modify it.
+ * - `continuation_token` is an **executor-managed** per-handoff state token; it is
+ *   absent for pure reconnect-recovery dispatches and must not be confused with
+ *   `continuity_token`.
+ * - `attached_runtime_session_id` is scoped to one attached session and is replaced
+ *   on each transparent reconnect.  V2 can correlate successive values using
+ *   [durableSessionId].
+ *
+ * [durableSessionId] lets the center-side system treat multiple successive
  * `attached_runtime_session_id` values (from the same activation era, across reconnects) as
  * belonging to the same durable runtime participation.
  *

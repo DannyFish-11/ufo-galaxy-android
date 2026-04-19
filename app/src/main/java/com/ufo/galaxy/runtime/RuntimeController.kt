@@ -348,12 +348,20 @@ class RuntimeController(
     /**
      * PR-33 — Observable product-grade reconnect recovery state.
      *
-     * Tracks the current phase of the WS reconnect lifecycle from the **user's perspective**.
-     * Transitions to [ReconnectRecoveryState.RECOVERING] when the WS drops while the
-     * runtime is [RuntimeState.Active] (transparent auto-reconnect in progress), to
-     * [ReconnectRecoveryState.RECOVERED] when the WS successfully re-establishes, and
+     * Tracks the current phase of the WS reconnect lifecycle from the **user's perspective**
+     * and from Android's role as a **recovery participant** (not coordinator).  Transitions
+     * to [ReconnectRecoveryState.RECOVERING] when the WS drops while the runtime is
+     * [RuntimeState.Active] (transparent auto-reconnect in progress), to
+     * [ReconnectRecoveryState.RECOVERED] when the WS successfully re-establishes
+     * (the durable continuity epoch is already updated before RECOVERED is set), and
      * to [ReconnectRecoveryState.FAILED] when reconnect attempts are exhausted or the WS
      * emits a terminal error.  Always reset to [ReconnectRecoveryState.IDLE] by [stop].
+     *
+     * **Continuity ordering guarantee**: [ReconnectRecoveryState.RECOVERED] is set only
+     * after [openAttachedSession] increments [DurableSessionContinuityRecord.sessionContinuityEpoch]
+     * and emits [V2MultiDeviceLifecycleEvent.DeviceReconnected].  Observers of this flow
+     * can read [durableSessionContinuityRecord] as soon as they see RECOVERED and be
+     * certain the epoch already reflects the completed reconnect cycle.
      *
      * Surface layers ([com.ufo.galaxy.ui.viewmodel.MainViewModel],
      * [com.ufo.galaxy.service.EnhancedFloatingService]) observe this flow to show a
@@ -563,6 +571,12 @@ class RuntimeController(
             if (_state.value == RuntimeState.Active && _attachedSession.value?.isAttached != true) {
                 Log.i(TAG, "[RUNTIME] WS reconnected while Active — reopening attached session")
                 GalaxyLogger.log(TAG, mapOf("event" to "runtime_ws_reconnected"))
+                // PR-33 / PR-04: openAttachedSession MUST be called before transitioning to
+                // RECOVERED so that the durable continuity epoch is incremented and
+                // DeviceReconnected is emitted on the V2 stream BEFORE any observer can
+                // read reconnectRecoveryState == RECOVERED.  This ordering guarantee means
+                // that whenever a consumer observes RECOVERED, durableSessionContinuityRecord
+                // already holds the new epoch for this reconnect cycle.
                 openAttachedSession(SessionOpenSource.RECONNECT_RECOVERY)
                 // PR-33: Mark recovery as successful if we were in the middle of recovery so
                 // the UI can transition from "Recovering…" to "Connected" / normal state.
