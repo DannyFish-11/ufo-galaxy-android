@@ -11,18 +11,19 @@ import org.junit.Test
  *
  * Validates the four key requirements introduced by the problem statement:
  *
- * 1. **Android明确为recovery participant** — [ContinuityRecoveryContext.ANDROID_RECOVERY_ROLE]
+ * 1. **Android is explicitly a recovery participant** — [ContinuityRecoveryContext.ANDROID_RECOVERY_ROLE]
  *    is defined, stable, and distinct from any coordinator role.
  *
- * 2. **reconnect状态与continuity输出一致** — [ReconnectRecoveryState.RECOVERED] wire value
- *    semantics imply the continuity epoch has already been updated; the ordering guarantee
- *    documented in [ReconnectRecoveryState] and [RuntimeController] is enforced.
+ * 2. **Reconnect state is consistent with continuity output** — Setting
+ *    [ReconnectRecoveryState.RECOVERED] guarantees that the continuity epoch has already
+ *    been updated; the ordering guarantee documented in [ReconnectRecoveryState] and
+ *    [RuntimeController] is enforced.
  *
- * 3. **区分continuity_token与continuation_token** — [ContinuityRecoveryContext.CONTINUITY_TOKEN_WIRE_FIELD]
+ * 3. **Distinguish continuity_token from continuation_token** — [ContinuityRecoveryContext.CONTINUITY_TOKEN_WIRE_FIELD]
  *    and [ContinuityRecoveryContext.CONTINUATION_TOKEN_WIRE_FIELD] are distinct, stable
  *    wire-field names with non-overlapping semantics.
  *
- * 4. **明确durable continuity与其他session identity的边界** — [DurableSessionContinuityRecord]
+ * 4. **Durable continuity boundary vs other session identity** — [DurableSessionContinuityRecord]
  *    boundary constants correctly describe the scope of each identifier tier.
  *
  * ## Test matrix
