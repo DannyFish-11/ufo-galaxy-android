@@ -1,5 +1,7 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.agent.HandoffEnvelopeV2
+import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 
 /**
@@ -25,6 +27,21 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
  * - Remain backward-compatible with legacy/narrow contracts that predate V2's evolution.
  * - Encode compatibility expectations explicitly rather than relying on informal tolerance.
  *
+ * ## Three dispatch entry paths
+ *
+ * The validator covers all three dispatch entry paths uniformly:
+ * - **goal_execution** — [GoalExecutionPayload]: carries `dispatch_plan_id`,
+ *   `source_dispatch_strategy`, `executor_target_type`, and all continuity/observability fields.
+ * - **handoff** — [HandoffEnvelopeV2]: carries PR-D dispatch metadata plus `executor_target_type`,
+ *   `dispatch_plan_id`, and `source_dispatch_strategy`.
+ * - **takeover** — [TakeoverRequestEnvelope]: carries `executor_target_type`, `dispatch_plan_id`,
+ *   and `source_dispatch_strategy` alongside continuity/recovery fields.
+ *
+ * All three paths use the same [CompatibilityCheckResult] structure for uniform interpretation.
+ * Observability/tracing fields ([RuntimeObservabilityMetadata]) are only present on
+ * [GoalExecutionPayload]; [HandoffEnvelopeV2] and [TakeoverRequestEnvelope] will always
+ * produce `hasObservabilityTracing = false` and `hasPolicyRouting = false`.
+ *
  * ## Compatibility contract
  *
  * All evolved fields are optional and default to `null` / empty.  A legacy payload
@@ -34,18 +51,18 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
  *
  * ## Richer dispatch metadata fields (PR-48)
  *
- * V2 now attaches dispatch plan metadata to Android-targeted execution envelopes,
- * allowing Android to correlate an inbound execution with the V2 orchestration plan
- * that triggered it.  The new fields are:
+ * V2 now attaches dispatch plan metadata to Android-targeted execution envelopes across
+ * all three entry paths, allowing Android to correlate an inbound execution with the V2
+ * orchestration plan that triggered it.  The fields are:
  *
- * | Field                    | Purpose                                                         |
- * |--------------------------|----------------------------------------------------------------|
- * | [GoalExecutionPayload.dispatch_plan_id]      | Stable identifier for the V2 source   |
- * |                          | dispatch plan that produced this command.  Echoed in results   |
- * |                          | for full-chain correlation.  `null` for legacy/pre-V2 senders. |
- * | [GoalExecutionPayload.source_dispatch_strategy] | Strategy hint from the V2 source   |
- * |                          | dispatch orchestrator.  Values defined in [DispatchStrategyHint].|
- * |                          | `null` for legacy/pre-V2 senders; unknown values are tolerated. |
+ * | Field                       | Purpose                                                      |
+ * |-----------------------------|--------------------------------------------------------------|
+ * | `dispatch_plan_id`          | Stable identifier for the V2 source dispatch plan that       |
+ * |                             | produced this command.  Echoed in results for full-chain     |
+ * |                             | correlation.  `null` for legacy/pre-V2 senders.             |
+ * | `source_dispatch_strategy`  | Strategy hint from the V2 source dispatch orchestrator.      |
+ * |                             | Values defined in [DispatchStrategyHint].                    |
+ * |                             | `null` for legacy/pre-V2 senders; unknown values tolerated.  |
  *
  * ## DispatchStrategyHint
  *
@@ -69,6 +86,8 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
  * @see ContinuityRecoveryContext
  * @see RuntimeObservabilityMetadata
  * @see GoalExecutionPayload
+ * @see HandoffEnvelopeV2
+ * @see TakeoverRequestEnvelope
  */
 object ExecutionContractCompatibilityValidator {
 
@@ -155,26 +174,27 @@ object ExecutionContractCompatibilityValidator {
     // ── CompatibilityArea ─────────────────────────────────────────────────────
 
     /**
-     * The four evolved contract areas that Android-side compatibility validation
-     * covers.
+     * The five evolved contract areas that Android-side compatibility validation covers,
+     * uniformly applied across all three dispatch entry paths (goal_execution, handoff,
+     * takeover).
      */
     enum class CompatibilityArea {
         /**
-         * Richer source dispatch metadata — [GoalExecutionPayload.dispatch_plan_id]
-         * and [GoalExecutionPayload.source_dispatch_strategy] (PR-48).
+         * Richer source dispatch metadata — `dispatch_plan_id` and
+         * `source_dispatch_strategy` (PR-48).  Present on all three paths.
          */
         DISPATCH_METADATA,
 
         /**
-         * Explicit executor target typing — [GoalExecutionPayload.executor_target_type]
-         * classified by [ExecutorTargetType] (PR-45 / PR-E).
+         * Explicit executor target typing — `executor_target_type`
+         * classified by [ExecutorTargetType] (PR-45 / PR-E).  Present on all three paths.
          */
         EXECUTOR_TARGET_TYPING,
 
         /**
-         * Continuity/recovery context — [GoalExecutionPayload.continuity_token],
-         * [GoalExecutionPayload.is_resumable], [GoalExecutionPayload.interruption_reason],
-         * [GoalExecutionPayload.recovery_context] (PR-46 / PR-F).
+         * Continuity/recovery context — `continuity_token`,
+         * `is_resumable`, `interruption_reason`, `recovery_context` (PR-46 / PR-F).
+         * Present on goal_execution and takeover paths; not on handoff.
          */
         CONTINUITY_RECOVERY,
 
@@ -316,12 +336,93 @@ object ExecutionContractCompatibilityValidator {
      * be used as a dispatch plan correlation identifier.
      *
      * A null or blank [dispatchPlanId] means the sender does not support dispatch plan
-     * tracking (legacy / pre-V2 sender).
+     * tracking (legacy / pre-V2 sender).  Applies uniformly to all three dispatch paths.
      *
-     * @param dispatchPlanId The [GoalExecutionPayload.dispatch_plan_id] value from
-     *                       an inbound command.
+     * @param dispatchPlanId The `dispatch_plan_id` value from any inbound command.
      */
     fun hasDispatchPlanId(dispatchPlanId: String?): Boolean = !dispatchPlanId.isNullOrBlank()
+
+    // ── checkPayloadCompatibility (HandoffEnvelopeV2) ─────────────────────────
+
+    /**
+     * Inspects [envelope] and returns a [CompatibilityCheckResult] describing which
+     * evolved contract areas are active on the **handoff** dispatch path.
+     *
+     * [HandoffEnvelopeV2] carries PR-D dispatch metadata, PR-E executor target typing,
+     * PR-48 richer dispatch metadata, and PR-F continuity/recovery context.
+     * Observability/tracing ([RuntimeObservabilityMetadata]) and policy routing fields
+     * are not present on the handoff path; those flags will always be `false`.
+     *
+     * This method always returns successfully; it never throws or modifies the envelope.
+     *
+     * @param envelope The [HandoffEnvelopeV2] to inspect.
+     * @return A [CompatibilityCheckResult] describing the active evolved contract areas.
+     */
+    fun checkPayloadCompatibility(envelope: HandoffEnvelopeV2): CompatibilityCheckResult {
+        val hasDispatch = !envelope.dispatch_plan_id.isNullOrBlank()
+            || !envelope.source_dispatch_strategy.isNullOrBlank()
+        val hasTargetTyping = envelope.executor_target_type != null
+        val hasContinuity = envelope.continuity_token != null
+            || envelope.is_resumable != null
+            || envelope.interruption_reason != null
+            || envelope.recovery_context.isNotEmpty()
+
+        val active = buildSet {
+            if (hasDispatch) add(CompatibilityArea.DISPATCH_METADATA)
+            if (hasTargetTyping) add(CompatibilityArea.EXECUTOR_TARGET_TYPING)
+            if (hasContinuity) add(CompatibilityArea.CONTINUITY_RECOVERY)
+        }
+
+        return CompatibilityCheckResult(
+            hasDispatchMetadata = hasDispatch,
+            hasExecutorTargetTyping = hasTargetTyping,
+            hasContinuityRecovery = hasContinuity,
+            hasObservabilityTracing = false,
+            hasPolicyRouting = false,
+            activeAreas = active
+        )
+    }
+
+    // ── checkPayloadCompatibility (TakeoverRequestEnvelope) ───────────────────
+
+    /**
+     * Inspects [envelope] and returns a [CompatibilityCheckResult] describing which
+     * evolved contract areas are active on the **takeover** dispatch path.
+     *
+     * [TakeoverRequestEnvelope] carries PR-E executor target typing, PR-48 richer dispatch
+     * metadata, and PR-F continuity/recovery context.  Observability/tracing
+     * ([RuntimeObservabilityMetadata]) and policy routing fields are not present on the
+     * takeover path; those flags will always be `false`.
+     *
+     * This method always returns successfully; it never throws or modifies the envelope.
+     *
+     * @param envelope The [TakeoverRequestEnvelope] to inspect.
+     * @return A [CompatibilityCheckResult] describing the active evolved contract areas.
+     */
+    fun checkPayloadCompatibility(envelope: TakeoverRequestEnvelope): CompatibilityCheckResult {
+        val hasDispatch = !envelope.dispatch_plan_id.isNullOrBlank()
+            || !envelope.source_dispatch_strategy.isNullOrBlank()
+        val hasTargetTyping = envelope.executor_target_type != null
+        val hasContinuity = envelope.continuity_token != null
+            || envelope.is_resumable != null
+            || envelope.interruption_reason != null
+            || envelope.recovery_context.isNotEmpty()
+
+        val active = buildSet {
+            if (hasDispatch) add(CompatibilityArea.DISPATCH_METADATA)
+            if (hasTargetTyping) add(CompatibilityArea.EXECUTOR_TARGET_TYPING)
+            if (hasContinuity) add(CompatibilityArea.CONTINUITY_RECOVERY)
+        }
+
+        return CompatibilityCheckResult(
+            hasDispatchMetadata = hasDispatch,
+            hasExecutorTargetTyping = hasTargetTyping,
+            hasContinuityRecovery = hasContinuity,
+            hasObservabilityTracing = false,
+            hasPolicyRouting = false,
+            activeAreas = active
+        )
+    }
 
     // ── PR number / introduction tracking ────────────────────────────────────
 

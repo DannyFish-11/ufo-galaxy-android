@@ -72,4 +72,28 @@ object ExecutorTargetType {
      * @param targetType Parsed executor target type string (or `null` for legacy payloads).
      */
     fun isAndroidEligible(targetType: String?): Boolean = targetType in ANDROID_ELIGIBLE_VALUES
+
+    /**
+     * Returns a compact, structured log string summarising [rawValue] for observability.
+     *
+     * Produces a consistent representation across all three dispatch entry paths
+     * (goal_execution, handoff, takeover) so that log searches and dashboards can rely
+     * on a single stable format.
+     *
+     * Format: `"executor_target_type=<raw> canonical=<canonical|null> eligible=<true|false>"`
+     *
+     * - `<raw>` is the literal wire value from the payload, or `"null"` for absent fields.
+     * - `<canonical>` is the result of [fromValue]: the canonical constant string, or
+     *   `"null"` for unknown / absent values (forward-compat: unknown = unspecified).
+     * - `<eligible>` indicates whether this Android device is the intended executor.
+     *
+     * This method never throws; all inputs are handled safely.
+     *
+     * @param rawValue Raw [executor_target_type] string from an inbound payload, or `null`.
+     */
+    fun logLabel(rawValue: String?): String {
+        val canonical = fromValue(rawValue)
+        val eligible = isAndroidEligible(canonical)
+        return "executor_target_type=$rawValue canonical=$canonical eligible=$eligible"
+    }
 }
