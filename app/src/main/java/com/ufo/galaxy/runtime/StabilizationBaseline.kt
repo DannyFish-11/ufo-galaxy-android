@@ -1137,6 +1137,68 @@ object StabilizationBaseline {
                 "of host descriptor availability.",
             introducedPr = 50
         )
+    ) + listOf(
+
+        // ── PR-5B: Policy routing outcome behavioral semantics ───────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "policy-outcome-hold-result",
+            displayName = "PolicyRoutingContext.RESULT_STATUS_HOLD / GoalResultPayload.hold_reason",
+            packagePath = "com.ufo.galaxy.runtime.PolicyRoutingContext",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-5B non-terminal hold semantics for TEMPORARILY_UNAVAILABLE — " +
+                "PolicyRoutingContext.RESULT_STATUS_HOLD (\"hold\") is the wire status returned " +
+                "when policy_routing_outcome=temporarily_unavailable; GoalResultPayload.hold_reason " +
+                "carries RESULT_HOLD_REASON_TEMPORARILY_UNAVAILABLE (\"policy_temporarily_unavailable\") " +
+                "so V2 can distinguish a non-terminal device hold from administrative disabled or " +
+                "terminal error, and retry dispatch when readiness is restored. " +
+                "Both fields default to null for backward compatibility with pre-PR-5B consumers.",
+            introducedPr = 5
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "policy-outcome-rejection-detail",
+            displayName = "GoalResultPayload.policy_rejection_detail",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-5B structured rejection detail for REJECTED outcomes — " +
+                "GoalResultPayload.policy_rejection_detail carries the echoed " +
+                "GoalExecutionPayload.policy_failure_reason when policy_routing_outcome=rejected, " +
+                "so V2 can distinguish the specific rejection reason rather than relying solely " +
+                "on the generic error string. Defaults to null for non-rejected outcomes and " +
+                "legacy paths; backward compatible with pre-PR-5B result consumers.",
+            introducedPr = 5
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "policy-outcome-continuation-marker",
+            displayName = "GoalResultPayload.is_continuation",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-5B continuation-aware execution marker for RESUMED outcomes — " +
+                "GoalResultPayload.is_continuation is set to true when Android executed a task " +
+                "with policy_routing_outcome=resumed, signalling that the execution was a " +
+                "continuation of a prior interrupted task (not a fresh dispatch). V2 can use " +
+                "this marker to distinguish resumed executions from fresh ones without parsing " +
+                "the policy_routing_outcome field on the result side. Defaults to null for " +
+                "non-resumed outcomes and legacy paths.",
+            introducedPr = 5
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "autonomous-execution-pipeline-hold-status",
+            displayName = "AutonomousExecutionPipeline.STATUS_HOLD / REASON_TEMPORARILY_UNAVAILABLE",
+            packagePath = "com.ufo.galaxy.agent.AutonomousExecutionPipeline",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-5B pipeline-level hold status constants — STATUS_HOLD and " +
+                "REASON_TEMPORARILY_UNAVAILABLE mirror PolicyRoutingContext.RESULT_STATUS_HOLD " +
+                "and RESULT_HOLD_REASON_TEMPORARILY_UNAVAILABLE for consistent consumption " +
+                "at the pipeline layer. AutonomousExecutionPipeline returns STATUS_HOLD (not " +
+                "STATUS_DISABLED, not error) for temporarily_unavailable payloads, ensuring " +
+                "V2 can stably distinguish hold from administrative disabled.",
+            introducedPr = 5
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

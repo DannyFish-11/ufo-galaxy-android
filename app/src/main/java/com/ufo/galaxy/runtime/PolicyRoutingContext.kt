@@ -311,4 +311,35 @@ object PolicyRoutingContext {
 
     /** The PR number that introduced this policy routing context vocabulary. */
     const val INTRODUCED_PR: Int = 49
+
+    // ── Structured result constants (PR-5B) ───────────────────────────────────
+
+    /**
+     * Wire status used in [GoalResultPayload.status] when a
+     * [RoutingOutcome.TEMPORARILY_UNAVAILABLE] payload is surfaced as a non-terminal hold.
+     *
+     * V2 MUST NOT treat this as a permanent failure — it should retry dispatch when device
+     * readiness is restored.
+     *
+     * Distinct from [AutonomousExecutionPipeline.STATUS_DISABLED] (administrative feature/runtime
+     * off) and from error status (task was attempted and failed).
+     */
+    const val RESULT_STATUS_HOLD = "hold"
+
+    /**
+     * Wire value for [GoalResultPayload.hold_reason] when the hold is triggered by
+     * [RoutingOutcome.TEMPORARILY_UNAVAILABLE].
+     *
+     * V2 consumers MUST treat this as a non-terminal signal; the device should be re-queried
+     * after a readiness-restoration event.
+     */
+    const val RESULT_HOLD_REASON_TEMPORARILY_UNAVAILABLE = "policy_temporarily_unavailable"
+
+    /**
+     * Returns `true` when [status] is [RESULT_STATUS_HOLD], indicating the result is a
+     * non-terminal hold that V2 should retry when readiness is restored.
+     *
+     * @param status Status string from a [GoalResultPayload].
+     */
+    fun isHoldStatus(status: String?): Boolean = status == RESULT_STATUS_HOLD
 }
