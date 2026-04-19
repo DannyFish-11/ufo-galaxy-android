@@ -949,6 +949,51 @@ object StabilizationBaseline {
                 "and is_resumable so recovery events can be traced end-to-end across the V2 " +
                 "observability pipeline.",
             introducedPr = 47
+        ),
+
+        // ── PR-48: Execution contract compatibility validation surfaces ──────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "execution-contract-compatibility-validator",
+            displayName = "ExecutionContractCompatibilityValidator",
+            packagePath = "com.ufo.galaxy.runtime.ExecutionContractCompatibilityValidator",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-48 unified Android-side compatibility validator for the evolved V2 " +
+                "runtime execution contract — declares DispatchStrategyHint wire values " +
+                "(LOCAL, REMOTE_HANDOFF, FALLBACK_LOCAL, STAGED_MESH), CompatibilityArea " +
+                "enum covering all four evolved contract areas, CompatibilityCheckResult " +
+                "data class for structured compatibility introspection, and helper methods " +
+                "(checkPayloadCompatibility, isAndroidEligibleStrategy, hasDispatchPlanId) " +
+                "that encode backward-compatibility expectations explicitly and testably.",
+            introducedPr = 48
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-execution-payload-dispatch-metadata-fields",
+            displayName = "GoalExecutionPayload.dispatch_plan_id / source_dispatch_strategy",
+            packagePath = "com.ufo.galaxy.protocol.GoalExecutionPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-48 richer dispatch metadata fields on GoalExecutionPayload — " +
+                "dispatch_plan_id enables correlation between inbound Android executions and " +
+                "the V2 source dispatch plan that generated them; source_dispatch_strategy " +
+                "carries the V2 orchestrator routing strategy hint (local, remote_handoff, " +
+                "fallback_local, staged_mesh). Both fields default to null for full backward " +
+                "compatibility with pre-PR-48 senders. dispatch_plan_id is echoed back in " +
+                "GoalResultPayload for end-to-end dispatch plan correlation.",
+            introducedPr = 48
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-result-payload-dispatch-plan-id-echo",
+            displayName = "GoalResultPayload.dispatch_plan_id",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-48 dispatch plan identifier echo field on GoalResultPayload — " +
+                "echoed from GoalExecutionPayload.dispatch_plan_id so V2 can correlate " +
+                "Android execution results with the originating dispatch plan. Defaults to " +
+                "null for full backward compatibility with pre-PR-48 result consumers.",
+            introducedPr = 48
         )
     )
 
