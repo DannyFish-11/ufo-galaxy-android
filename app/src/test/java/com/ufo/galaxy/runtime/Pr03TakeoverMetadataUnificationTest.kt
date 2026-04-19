@@ -592,24 +592,24 @@ class Pr03TakeoverMetadataUnificationTest {
     }
 
     @Test
-    fun `logLabel for unknown value produces canonical=null eligible=false`() {
-        val label = ExecutorTargetType.logLabel("future_target_type")
-        assertTrue("logLabel must include canonical=null for unknown values", label.contains("canonical=null"))
-        assertTrue("logLabel must include eligible=false for unknown target types", label.contains("eligible=false"))
+    fun `logLabel for unrecognized value produces canonical=null eligible=false`() {
+        val label = ExecutorTargetType.logLabel("unknown_value")
+        assertTrue("logLabel must include canonical=null for unrecognized values", label.contains("canonical=null"))
+        assertTrue("logLabel must include eligible=false for unrecognized target types", label.contains("eligible=false"))
     }
 
     @Test
     fun `logLabel never throws for any input`() {
         // Cover all known values plus boundary cases
-        val inputs = listOf(
+        val testValues = listOf(
             null, "", "  ", ExecutorTargetType.ANDROID_DEVICE, ExecutorTargetType.LOCAL,
             ExecutorTargetType.NODE_SERVICE, ExecutorTargetType.WORKER, "unknown_xyz",
             "ANDROID_DEVICE", "Android_Device"
         )
-        for (input in inputs) {
+        for (rawValue in testValues) {
             assertNotNull(
-                "logLabel must return non-null for input=$input",
-                ExecutorTargetType.logLabel(input)
+                "logLabel must return non-null for rawValue=$rawValue",
+                ExecutorTargetType.logLabel(rawValue)
             )
         }
     }
