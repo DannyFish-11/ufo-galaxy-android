@@ -979,7 +979,7 @@ object StabilizationBaseline {
                 "the V2 source dispatch plan that generated them; source_dispatch_strategy " +
                 "carries the V2 orchestrator routing strategy hint (local, remote_handoff, " +
                 "fallback_local, staged_mesh). Both fields default to null for full backward " +
-                "compatibility with pre-PR-H senders. dispatch_plan_id is echoed back in " +
+                "compatibility with pre-PR-48 senders. dispatch_plan_id is echoed back in " +
                 "GoalResultPayload for end-to-end dispatch plan correlation.",
             introducedPr = 48
         ),
@@ -992,7 +992,7 @@ object StabilizationBaseline {
             rationale = "PR-48 dispatch plan identifier echo field on GoalResultPayload — " +
                 "echoed from GoalExecutionPayload.dispatch_plan_id so V2 can correlate " +
                 "Android execution results with the originating dispatch plan. Defaults to " +
-                "null for full backward compatibility with pre-PR-H result consumers.",
+                "null for full backward compatibility with pre-PR-48 result consumers.",
             introducedPr = 48
         )
     )
