@@ -1137,6 +1137,59 @@ object StabilizationBaseline {
                 "of host descriptor availability.",
             introducedPr = 50
         )
+    ) + listOf(
+
+        // ── PR-51 (PR-5B): Structured behavioral result fields for policy routing outcomes ──
+
+        BaselineSurfaceEntry(
+            surfaceId = "goal-result-payload-policy-rejection-reason",
+            displayName = "GoalResultPayload.policy_rejection_reason",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 (PR-5B) structured REJECTED result field — echoed from " +
+                "GoalExecutionPayload.policy_failure_reason when outcome is REJECTED so V2 can " +
+                "re-route to a suitable target with a machine-readable rejection reason, without " +
+                "treating the outcome as a generic Android-side error. Null for non-rejected outcomes.",
+            introducedPr = 51
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-result-payload-is-hold-pending",
+            displayName = "GoalResultPayload.is_hold_pending",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 (PR-5B) TEMPORARILY_UNAVAILABLE hold/pending semantics — set to " +
+                "true when Android returns a STATUS_PENDING result for a temporarily-unavailable " +
+                "policy outcome so V2 can unambiguously distinguish a temporary hold from a " +
+                "terminal failure and retry dispatch when readiness is restored. Null otherwise.",
+            introducedPr = 51
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-result-payload-is-continuation",
+            displayName = "GoalResultPayload.is_continuation",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 (PR-5B) RESUMED continuation-aware behavior — set to true when " +
+                "Android treats execution as a resumed continuation (policy_routing_outcome=resumed) " +
+                "so V2 knows Android did not reset accumulated task state and must not treat the " +
+                "result as originating from a fresh dispatch. Null for non-resumed outcomes.",
+            introducedPr = 51
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "autonomous-execution-pipeline-status-pending",
+            displayName = "AutonomousExecutionPipeline.STATUS_PENDING / REASON_POLICY_HOLD",
+            packagePath = "com.ufo.galaxy.agent.AutonomousExecutionPipeline",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 (PR-5B) pending status and hold reason constants for " +
+                "TEMPORARILY_UNAVAILABLE outcomes — STATUS_PENDING (\"pending\") and " +
+                "REASON_POLICY_HOLD (\"policy_routing_hold\") allow V2 to distinguish a " +
+                "temporary hold from disabled/error states and retry dispatch when readiness " +
+                "is restored. Companion to the existing STATUS_DISABLED / REASON_POLICY_REJECTED pair.",
+            introducedPr = 51
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
