@@ -9,6 +9,41 @@ package com.ufo.galaxy.runtime
  * "Recovering…" indicator during short disconnects rather than simply toggling
  * `isConnected=false` and leaving the user uncertain whether the system is self-healing.
  *
+ * ## Android as recovery participant
+ *
+ * This enum reflects **Android's participant view** of the recovery lifecycle.
+ * Android is a recovery *participant*, not a recovery *coordinator*.  The V2
+ * center-side runtime (OpenClawd / Galaxy Gateway) is the recovery coordinator
+ * that decides whether a session is resumable, drives the recovery handshake, and
+ * manages the durable continuity context.
+ *
+ * Android's role in recovery is limited to:
+ *  - Observing the WS reconnect lifecycle and surfacing it to the UI.
+ *  - Reopening the attached session ([AttachedRuntimeSession]) after the WS
+ *    reconnects, incrementing the [DurableSessionContinuityRecord.sessionContinuityEpoch].
+ *  - Emitting [V2MultiDeviceLifecycleEvent.DeviceReconnected] so the V2 coordinator
+ *    can track the participant's re-entry into the session.
+ *
+ * Android MUST NOT attempt to unilaterally resume interrupted execution or generate
+ * continuity tokens.
+ *
+ * ## Continuity consistency guarantee
+ *
+ * The [RECOVERED] state is only set by [RuntimeController] **after** the call to
+ * `openAttachedSession(SessionOpenSource.RECONNECT_RECOVERY)` completes — which
+ * increments [DurableSessionContinuityRecord.sessionContinuityEpoch] and emits
+ * [V2MultiDeviceLifecycleEvent.DeviceReconnected] with the updated epoch.
+ *
+ * Observers of [RuntimeController.reconnectRecoveryState] can therefore rely on the
+ * following invariant when they see [RECOVERED]:
+ *  - [RuntimeController.durableSessionContinuityRecord] already carries the
+ *    incremented epoch for this reconnect cycle.
+ *  - [V2MultiDeviceLifecycleEvent.DeviceReconnected] has already been emitted on
+ *    [RuntimeController.v2LifecycleEvents] with that same epoch.
+ *
+ * This ordering guarantee keeps the reconnect state and the continuity output
+ * consistently observable without races.
+ *
  * ## Lifecycle
  *
  *  - [IDLE] — No recovery is in progress.  The runtime is either fully connected or
@@ -17,8 +52,9 @@ package com.ufo.galaxy.runtime
  *    [RuntimeController.RuntimeState.Active].  The WS client's automatic exponential-backoff
  *    reconnect is in progress.  Surface layers should show a "Recovering…" banner.
  *  - [RECOVERED] — The WS reconnect succeeded after a prior [RECOVERING] transition.
- *    The attached session has been reopened and execution truth is restored.  Surface
- *    layers may briefly show a "Connected" confirmation before returning to normal.
+ *    The attached session has been reopened and the durable continuity epoch has been
+ *    incremented.  Surface layers may briefly show a "Connected" confirmation before
+ *    returning to normal.
  *  - [FAILED] — All reconnect attempts were exhausted (or the WS emitted a terminal
  *    error) while in [RECOVERING].  User action is required to restore connectivity
  *    (e.g. check network, change gateway settings, or tap "Reconnect").
@@ -26,7 +62,7 @@ package com.ufo.galaxy.runtime
  * ## Transitions (driven by [RuntimeController])
  *
  *  - Active + WS disconnect                          → [RECOVERING]
- *  - [RECOVERING] + WS reconnect (success)           → [RECOVERED]
+ *  - [RECOVERING] + WS reconnect (success)           → [RECOVERED]  (epoch already updated)
  *  - [RECOVERING] + WS terminal error                → [FAILED]
  *  - [stop][RuntimeController.stop] / kill-switch    → [IDLE]   (always)
  *
@@ -45,7 +81,10 @@ enum class ReconnectRecoveryState(val wireValue: String) {
     /** WS disconnected while Active; automatic reconnect in progress. Show "Recovering…". */
     RECOVERING("recovering"),
 
-    /** Successfully reconnected after a short disconnect; attached session resumed. */
+    /**
+     * Successfully reconnected after a short disconnect; attached session resumed and
+     * [DurableSessionContinuityRecord.sessionContinuityEpoch] has been incremented.
+     */
     RECOVERED("recovered"),
 
     /** Reconnect attempts exhausted; user action required to restore connectivity. */
