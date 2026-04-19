@@ -35,13 +35,18 @@ package com.ufo.galaxy.runtime
  * |                                          | MUST NOT escalate this to terminal failure — execution should    |
  * |                                          | proceed in degraded mode where possible.                         |
  * | [RoutingOutcome.TEMPORARILY_UNAVAILABLE] | Policy could not route because this device is temporarily        |
- * |                                          | unavailable; Android should surface this as a hold, not a        |
- * |                                          | terminal error, so V2 can retry when readiness is restored.      |
+ * |                                          | unavailable; Android must surface this as a [STATUS_PENDING]     |
+ * |                                          | hold result with [GoalResultPayload.is_hold_pending] = `true`,   |
+ * |                                          | not a terminal error, so V2 can retry when readiness is restored.|
  * | [RoutingOutcome.RESUMED]                 | Execution is resuming a previously interrupted task under policy |
  * |                                          | control; Android MUST NOT reset task state and must treat the    |
- * |                                          | inbound envelope as a continuation, not a fresh dispatch.        |
+ * |                                          | inbound envelope as a continuation.  The result carries          |
+ * |                                          | [GoalResultPayload.is_continuation] = `true` so V2 knows this   |
+ * |                                          | was a continuation, not a fresh dispatch.                        |
  * | [RoutingOutcome.REJECTED]                | Policy rejected this device as a target; Android must not execute|
- * |                                          | the task and must return a structured disabled result.           |
+ * |                                          | the task and must return a structured disabled result carrying    |
+ * |                                          | [GoalResultPayload.policy_rejection_reason] from the payload's   |
+ * |                                          | [GoalExecutionPayload.policy_failure_reason].                    |
  *
  * ## Degradation and unavailability reason constants
  *

@@ -31,7 +31,13 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * [STATUS_DISABLED] result with the original [task_id], [group_id], and
  * [subtask_index] echoed so the gateway can still perform correct aggregation
  * without crashing.  Policy-rejected payloads ([GoalExecutionPayload.policy_routing_outcome]
- * == `"rejected"`) also return [STATUS_DISABLED] with reason [REASON_POLICY_REJECTED].
+ * == `"rejected"`) also return [STATUS_DISABLED] with reason [REASON_POLICY_REJECTED] and
+ * the structured [GoalResultPayload.policy_rejection_reason] field populated so V2 can
+ * re-route without treating the outcome as an Android-side error.
+ * Temporarily-unavailable payloads (`"temporarily_unavailable"`) return [STATUS_PENDING]
+ * with reason [REASON_POLICY_HOLD] and [GoalResultPayload.is_hold_pending] set to `true`
+ * so V2 can retry dispatch when readiness is restored without treating the outcome as a
+ * terminal failure.
  *
  * This class is pure Kotlin (no Android framework dependencies) so that it can
  * be fully exercised by JVM unit tests without robolectric or instrumentation.
@@ -85,14 +91,38 @@ class AutonomousExecutionPipeline(
          * A policy-rejected payload carries an explicit [GoalExecutionPayload.policy_routing_outcome]
          * of `"rejected"`; Android must not execute the task and must return a structured
          * disabled result so V2 can re-route without treating this as an Android-side error.
+         * The [GoalResultPayload.policy_rejection_reason] field is populated from the payload's
+         * [GoalExecutionPayload.policy_failure_reason] to provide V2 with the structured reason.
          */
         const val REASON_POLICY_REJECTED = "policy_routing_rejected"
+
+        /**
+         * Status value returned when [handleGoalExecution] or [handleParallelSubtask] is
+         * placed on hold due to a [PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE]
+         * policy outcome.
+         *
+         * V2 must not treat this as a terminal failure; it should retry dispatch when device
+         * readiness is restored.  The [GoalResultPayload.is_hold_pending] field is set to
+         * `true` to provide V2 with an unambiguous signal for this state.
+         */
+        const val STATUS_PENDING = "pending"
+
+        /**
+         * Error reason used when [handleGoalExecution] or [handleParallelSubtask] is placed
+         * on hold by a [PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE] policy
+         * decision on the inbound payload.
+         *
+         * This is a non-terminal hold: Android is temporarily unavailable for new tasks
+         * (e.g. transport is reconnecting, health is recovering, or session not yet attached).
+         * V2 should retry when readiness is restored.
+         */
+        const val REASON_POLICY_HOLD = "policy_routing_hold"
     }
 
     /**
      * Handles a [goal_execution] message.
      *
-     * Eight gates are evaluated in order:
+     * Nine gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [goal_execution] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -118,17 +148,23 @@ class AutonomousExecutionPipeline(
      * 8. **Policy routing context** (PR-49/PR-I): logs [GoalExecutionPayload.policy_routing_outcome],
      *    [GoalExecutionPayload.policy_failure_reason], and
      *    [GoalExecutionPayload.readiness_degradation_hint] when present; returns
-     *    [STATUS_DISABLED] with [REASON_POLICY_REJECTED] when the outcome is explicitly
+     *    [STATUS_DISABLED] with [REASON_POLICY_REJECTED] and structured
+     *    [GoalResultPayload.policy_rejection_reason] when the outcome is explicitly
      *    [PolicyRoutingContext.RoutingOutcome.REJECTED]; tolerates `null` / absent values
      *    (legacy senders) without failure.
+     * 9. **Temporary hold gate** (PR-51/PR-5B): returns [STATUS_PENDING] with
+     *    [REASON_POLICY_HOLD] and [GoalResultPayload.is_hold_pending] set to `true`
+     *    when the outcome is [PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE].
+     *    This is a non-terminal hold; V2 should retry dispatch when readiness is restored.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
      * the result with [device_role], the echoed [GoalExecutionPayload.executor_target_type],
      * the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable],
      * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
      * the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation,
-     * and the echoed [GoalExecutionPayload.policy_routing_outcome] for policy layer correlation.
-     * so V2 can correlate the result with its originating durable continuity context.
+     * the echoed [GoalExecutionPayload.policy_routing_outcome] for policy layer correlation,
+     * and [GoalResultPayload.is_continuation] set to `true` when the outcome is
+     * [PolicyRoutingContext.RoutingOutcome.RESUMED] (PR-51/PR-5B continuation-aware behavior).
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -172,9 +208,27 @@ class AutonomousExecutionPipeline(
                     "policy_failure_reason=${payload.policy_failure_reason} " +
                     "task_id=${payload.task_id}"
             )
-            return buildDisabledResult(payload, REASON_POLICY_REJECTED)
+            // PR-51/PR-5B: structured rejection result — policy_rejection_reason carries
+            // the machine-readable reason so V2 can re-route without treating this as an error.
+            return buildDisabledResult(
+                payload,
+                REASON_POLICY_REJECTED,
+                policyRejectionReason = payload.policy_failure_reason
+            )
+        }
+        // PR-51/PR-5B: hold/pending semantics — TEMPORARILY_UNAVAILABLE is a non-terminal hold.
+        if (PolicyRoutingContext.isTemporaryHold(payload.policy_routing_outcome)) {
+            Log.i(
+                TAG,
+                "goal_execution hold: policy_routing_outcome=temporarily_unavailable " +
+                    "policy_failure_reason=${payload.policy_failure_reason} " +
+                    "task_id=${payload.task_id}"
+            )
+            return buildHoldResult(payload, REASON_POLICY_HOLD)
         }
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
+        // PR-51/PR-5B: continuation-aware behavior — set is_continuation when RESUMED.
+        val isContinuation = PolicyRoutingContext.isResumedExecution(payload.policy_routing_outcome)
         return goalExecutor.executeGoal(payload)
             .copy(
                 device_role = deviceRole,
@@ -183,14 +237,16 @@ class AutonomousExecutionPipeline(
                 is_resumable = payload.is_resumable,
                 dispatch_trace_id = payload.dispatch_trace_id,
                 dispatch_plan_id = payload.dispatch_plan_id,
-                policy_routing_outcome = payload.policy_routing_outcome
+                policy_routing_outcome = payload.policy_routing_outcome,
+                // PR-51/PR-5B: signal continuation so V2 knows this is a resumed execution.
+                is_continuation = if (isContinuation) true else null
             )
     }
 
     /**
      * Handles a [parallel_subtask] message.
      *
-     * Eight gates are evaluated in order:
+     * Nine gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [parallel_subtask] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -211,16 +267,22 @@ class AutonomousExecutionPipeline(
      *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
      *    correlation; tolerates `null` / absent values (legacy senders) without failure.
      * 8. **Policy routing context** (PR-49/PR-I): logs policy routing outcome fields when
-     *    present; returns [STATUS_DISABLED] with [REASON_POLICY_REJECTED] when the outcome
-     *    is explicitly [PolicyRoutingContext.RoutingOutcome.REJECTED]; tolerates `null` /
+     *    present; returns [STATUS_DISABLED] with [REASON_POLICY_REJECTED] and structured
+     *    [GoalResultPayload.policy_rejection_reason] when the outcome is explicitly
+     *    [PolicyRoutingContext.RoutingOutcome.REJECTED]; tolerates `null` /
      *    absent values (legacy senders) without failure.
+     * 9. **Temporary hold gate** (PR-51/PR-5B): returns [STATUS_PENDING] with
+     *    [REASON_POLICY_HOLD] and [GoalResultPayload.is_hold_pending] set to `true`
+     *    when the outcome is [PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE].
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
      * and enriches the result with [device_role], the echoed
      * [GoalExecutionPayload.executor_target_type], the echoed continuity/recovery fields,
      * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
      * the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation,
-     * and the echoed [GoalExecutionPayload.policy_routing_outcome] for policy layer correlation.
+     * the echoed [GoalExecutionPayload.policy_routing_outcome] for policy layer correlation,
+     * and [GoalResultPayload.is_continuation] set to `true` when the outcome is
+     * [PolicyRoutingContext.RoutingOutcome.RESUMED] (PR-51/PR-5B continuation-aware behavior).
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -263,9 +325,26 @@ class AutonomousExecutionPipeline(
                     "policy_failure_reason=${payload.policy_failure_reason} " +
                     "task_id=${payload.task_id}"
             )
-            return buildDisabledResult(payload, REASON_POLICY_REJECTED)
+            // PR-51/PR-5B: structured rejection result.
+            return buildDisabledResult(
+                payload,
+                REASON_POLICY_REJECTED,
+                policyRejectionReason = payload.policy_failure_reason
+            )
+        }
+        // PR-51/PR-5B: hold/pending semantics — TEMPORARILY_UNAVAILABLE is a non-terminal hold.
+        if (PolicyRoutingContext.isTemporaryHold(payload.policy_routing_outcome)) {
+            Log.i(
+                TAG,
+                "parallel_subtask hold: policy_routing_outcome=temporarily_unavailable " +
+                    "policy_failure_reason=${payload.policy_failure_reason} " +
+                    "task_id=${payload.task_id}"
+            )
+            return buildHoldResult(payload, REASON_POLICY_HOLD)
         }
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
+        // PR-51/PR-5B: continuation-aware behavior — set is_continuation when RESUMED.
+        val isContinuation = PolicyRoutingContext.isResumedExecution(payload.policy_routing_outcome)
         return collaborationAgent.handleParallelSubtask(payload)
             .copy(
                 device_role = deviceRole,
@@ -274,7 +353,9 @@ class AutonomousExecutionPipeline(
                 is_resumable = payload.is_resumable,
                 dispatch_trace_id = payload.dispatch_trace_id,
                 dispatch_plan_id = payload.dispatch_plan_id,
-                policy_routing_outcome = payload.policy_routing_outcome
+                policy_routing_outcome = payload.policy_routing_outcome,
+                // PR-51/PR-5B: signal continuation so V2 knows this is a resumed execution.
+                is_continuation = if (isContinuation) true else null
             )
     }
 
@@ -376,7 +457,8 @@ class AutonomousExecutionPipeline(
 
     private fun buildDisabledResult(
         payload: GoalExecutionPayload,
-        reason: String
+        reason: String,
+        policyRejectionReason: String? = null
     ) = GoalResultPayload(
         task_id = payload.task_id,
         correlation_id = payload.task_id,
@@ -396,6 +478,41 @@ class AutonomousExecutionPipeline(
         // PR-48: echo dispatch_plan_id in disabled results for dispatch plan correlation
         dispatch_plan_id = payload.dispatch_plan_id,
         // PR-49/PR-I: echo policy_routing_outcome in disabled results for policy layer correlation
-        policy_routing_outcome = payload.policy_routing_outcome
+        policy_routing_outcome = payload.policy_routing_outcome,
+        // PR-51/PR-5B: structured rejection reason for REJECTED outcomes
+        policy_rejection_reason = policyRejectionReason
+    )
+
+    /**
+     * Builds a [STATUS_PENDING] hold result for [PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE].
+     *
+     * The result carries [GoalResultPayload.is_hold_pending] = `true` so V2 can unambiguously
+     * distinguish a temporary hold from a terminal failure and retry dispatch when readiness
+     * is restored.  All correlation fields (continuity_token, dispatch_trace_id, etc.) are
+     * echoed for full-chain observability.
+     */
+    private fun buildHoldResult(
+        payload: GoalExecutionPayload,
+        reason: String
+    ) = GoalResultPayload(
+        task_id = payload.task_id,
+        correlation_id = payload.task_id,
+        status = STATUS_PENDING,
+        error = reason,
+        group_id = payload.group_id,
+        subtask_index = payload.subtask_index,
+        latency_ms = 0L,
+        device_id = deviceId,
+        device_role = deviceRole,
+        executor_target_type = payload.executor_target_type,
+        // Echo continuity/recovery fields so V2 can associate hold with the correct context.
+        continuity_token = payload.continuity_token,
+        is_resumable = payload.is_resumable,
+        // Echo observability fields for full-chain tracing.
+        dispatch_trace_id = payload.dispatch_trace_id,
+        dispatch_plan_id = payload.dispatch_plan_id,
+        policy_routing_outcome = payload.policy_routing_outcome,
+        // PR-51/PR-5B: unambiguous hold signal for TEMPORARILY_UNAVAILABLE outcomes.
+        is_hold_pending = true
     )
 }

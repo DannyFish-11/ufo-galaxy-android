@@ -708,7 +708,9 @@ data class GoalExecutionPayload(
  *
  * @param task_id        Echoed from [GoalExecutionPayload].
  * @param correlation_id Set to [task_id] for reply routing.
- * @param status         Final status ("success" | "error" | "cancelled" | "disabled").
+ * @param status         Final status ("success" | "error" | "cancelled" | "disabled" | "pending").
+ *                       `"pending"` is used for [com.ufo.galaxy.runtime.PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE]
+ *                       hold results so V2 can retry dispatch when readiness is restored.
  * @param result         Human-readable success summary (gateway aggregation: summary).
  * @param details        Additional details or error description.
  * @param group_id       Echoed from [GoalExecutionPayload.group_id].
@@ -740,6 +742,22 @@ data class GoalExecutionPayload(
  * @param policy_routing_outcome  Echoed from [GoalExecutionPayload.policy_routing_outcome] so
  *                       V2 can correlate the result with the policy layer's routing decision.
  *                       `null` for legacy / pre-V2 senders that do not include policy routing.
+ * @param policy_rejection_reason  Structured machine-readable reason for a policy rejection
+ *                       ([com.ufo.galaxy.runtime.PolicyRoutingContext.RoutingOutcome.REJECTED]).
+ *                       Echoed from [GoalExecutionPayload.policy_failure_reason] so V2 can
+ *                       re-route to a suitable target without treating the outcome as an
+ *                       Android-side error.  `null` for non-rejected outcomes and legacy senders.
+ *                       (PR-51 / PR-5B structured result for REJECTED.)
+ * @param is_hold_pending  `true` when Android surfaced this result as a temporary hold due to
+ *                       [com.ufo.galaxy.runtime.PolicyRoutingContext.RoutingOutcome.TEMPORARILY_UNAVAILABLE].
+ *                       V2 must retry dispatch when device readiness is restored rather than
+ *                       treating this as a terminal failure.  `null` for non-hold results and
+ *                       legacy senders.  (PR-51 / PR-5B hold/pending semantics.)
+ * @param is_continuation  `true` when Android treated this execution as a resumption continuation
+ *                       of a prior interrupted task ([com.ufo.galaxy.runtime.PolicyRoutingContext.RoutingOutcome.RESUMED]).
+ *                       Android did NOT reset accumulated task state; V2 must not treat the
+ *                       result as if originating from a fresh dispatch.  `null` for non-resumed
+ *                       outcomes and legacy senders.  (PR-51 / PR-5B continuation-aware behavior.)
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -766,7 +784,11 @@ data class GoalResultPayload(
     // ── PR-48: V2 richer dispatch metadata (optional; echoed for full-chain correlation) ──
     val dispatch_plan_id: String? = null,
     // ── PR-49 (PR-I): V2 policy-driven routing outcome (optional; echoed for full-chain correlation) ──
-    val policy_routing_outcome: String? = null
+    val policy_routing_outcome: String? = null,
+    // ── PR-51 (PR-5B): Structured behavioral result fields for REJECTED / TEMPORARILY_UNAVAILABLE / RESUMED ──
+    val policy_rejection_reason: String? = null,
+    val is_hold_pending: Boolean? = null,
+    val is_continuation: Boolean? = null
 )
 
 /**
