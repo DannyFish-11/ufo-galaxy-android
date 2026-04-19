@@ -136,6 +136,18 @@ enum class ProtocolSurface(
     DURABLE_SESSION_CONTINUITY(
         description = "Durable session continuity wire key vocabulary and activation-source values (PR-1)",
         surfaceClass = ProtocolSurfaceClass.CANONICAL
+    ),
+
+    /**
+     * PR-4B — V2 cross-system observability trace field names (PR-G).
+     *
+     * Covers the wire field name constants used in V2 observability payloads and log entries
+     * to carry cross-system dispatch tracing identifiers.  Gated so that renaming a constant
+     * in [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata] is caught at CI time.
+     */
+    OBSERVABILITY_TRACE_FIELD_NAMES(
+        description = "V2 cross-system observability trace field name constants used in log entries and payloads (PR-G/PR-4B)",
+        surfaceClass = ProtocolSurfaceClass.CANONICAL
     )
 }
 
@@ -603,6 +615,36 @@ object UgcpProtocolConsistencyRules {
     )
 
     /**
+     * PR-4B — V2 cross-system observability trace field name vocabulary (PR-G).
+     *
+     * Covers the wire field name constants declared in
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata] that appear in structured log
+     * entries and in observability payload fields across the V2 dispatch chain.
+     *
+     * Canonical wire field names:
+     *  - `dispatch_trace_id`       — cross-system dispatch trace correlation identifier
+     *  - `lifecycle_event_id`      — V2 lifecycle event that triggered this dispatch
+     *  - `session_correlation_id`  — session-level correlation identifier spanning multiple dispatches
+     *
+     * These values are gated so that a constant rename in [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata]
+     * that diverges from the canonical cross-repo vocabulary is caught at CI time.
+     */
+    val observabilityTraceFieldNamesRule: ConsistencyRule = ConsistencyRule(
+        surface = ProtocolSurface.OBSERVABILITY_TRACE_FIELD_NAMES,
+        canonicalValues = setOf(
+            "dispatch_trace_id",
+            "lifecycle_event_id",
+            "session_correlation_id"
+        ),
+        transitionalAliases = emptyList(),
+        notes = "Wire field names introduced by V2 production-grade runtime observability (PR-G). " +
+            "These values must match RuntimeObservabilityMetadata.FIELD_DISPATCH_TRACE_ID, " +
+            "FIELD_LIFECYCLE_EVENT_ID, and FIELD_SESSION_CORRELATION_ID exactly. " +
+            "Do not rename without cross-repo coordination — these identifiers appear in V2 " +
+            "structured logs, payloads, and cross-system trace pipelines."
+    )
+
+    /**
      * All consistency rules, indexed by [ProtocolSurface].
      */
     val allRules: Map<ProtocolSurface, ConsistencyRule> = mapOf(
@@ -617,7 +659,8 @@ object UgcpProtocolConsistencyRules {
         ProtocolSurface.TRUTH_EVENT_PAYLOAD_IDENTIFIER to truthEventPayloadIdentifierRule,
         ProtocolSurface.TRANSFER_LIFECYCLE_VOCABULARY to transferLifecycleVocabularyRule,
         ProtocolSurface.STAGED_MESH_EXECUTION_STATUS to stagedMeshExecutionStatusRule,
-        ProtocolSurface.DURABLE_SESSION_CONTINUITY to durableSessionContinuityRule
+        ProtocolSurface.DURABLE_SESSION_CONTINUITY to durableSessionContinuityRule,
+        ProtocolSurface.OBSERVABILITY_TRACE_FIELD_NAMES to observabilityTraceFieldNamesRule
     )
 
     /**

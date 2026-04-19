@@ -44,8 +44,9 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object TraceContext {
 
-    private val _traceId = AtomicReference<String>(generateTraceId())
-    private val _spanId  = AtomicReference<String?>(null)
+    private val _traceId         = AtomicReference<String>(generateTraceId())
+    private val _spanId          = AtomicReference<String?>(null)
+    private val _dispatchTraceId = AtomicReference<String?>(null)
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -63,13 +64,15 @@ object TraceContext {
     /**
      * Resets the trace context for a new WS session.
      *
-     * Generates a new [currentTraceId] and clears any active [currentSpanId].
+     * Generates a new [currentTraceId], clears any active [currentSpanId], and clears
+     * any recorded [currentDispatchTraceId] from a previous dispatch chain.
      * Call this in [GalaxyWebSocketClient.onOpen] to ensure every session has a
      * fresh trace lineage.
      */
     fun reset() {
         _traceId.set(generateTraceId())
         _spanId.set(null)
+        _dispatchTraceId.set(null)
     }
 
     /**
@@ -110,6 +113,45 @@ object TraceContext {
     fun endSpan() {
         _spanId.set(null)
     }
+
+    // ── Dispatch trace ID tracking ─────────────────────────────────────────────
+
+    /**
+     * Records the dispatch trace identifier received from an inbound command payload.
+     *
+     * Call this when a [com.ufo.galaxy.protocol.GoalExecutionPayload] (or similar inbound
+     * command) carries a non-blank [dispatch_trace_id][com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.FIELD_DISPATCH_TRACE_ID]
+     * so the end-to-end round-trip can be verified before the result is sent.
+     *
+     * A blank or null [id] clears any previously recorded dispatch trace identifier.
+     *
+     * @param id The `dispatch_trace_id` value extracted from the inbound command.
+     */
+    fun setDispatchTraceId(id: String?) {
+        _dispatchTraceId.set(if (id.isNullOrBlank()) null else id)
+    }
+
+    /**
+     * Returns the dispatch trace identifier currently recorded for the active dispatch chain,
+     * or `null` when no dispatch trace ID has been set (legacy / pre-V2 dispatch).
+     */
+    fun currentDispatchTraceId(): String? = _dispatchTraceId.get()
+
+    /**
+     * Verifies that [echoedId] matches the dispatch trace identifier recorded via
+     * [setDispatchTraceId], confirming that the ID has survived the full inbound → execution →
+     * outbound round-trip without modification.
+     *
+     * Returns `true` when:
+     *  - [currentDispatchTraceId] is non-null, AND
+     *  - [echoedId] equals [currentDispatchTraceId] exactly.
+     *
+     * Returns `false` when either value is null or they do not match.
+     *
+     * @param echoedId The `dispatch_trace_id` value echoed in the outbound result payload.
+     */
+    fun verifyDispatchTraceIdEcho(echoedId: String?): Boolean =
+        echoedId != null && echoedId == _dispatchTraceId.get()
 
     // ── ID generation helpers ──────────────────────────────────────────────────
 
