@@ -405,7 +405,9 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      *                                  describing how execution should continue.
      * @property durableSessionId       Durable session era identifier at degradation time;
      *                                  the same value present in the preceding
-     *                                  [DeviceConnected] or [DeviceReconnected] event.
+     *                                  [DeviceConnected.durableSessionId] or
+     *                                  [DeviceReconnected.durableSessionId] event (both of
+     *                                  which carry this field).
      *                                  `null` when no durable record is active (e.g. before
      *                                  first activation). V2 should use this to correlate a
      *                                  `ws_recovering` or `ws_recovery_failed` event with the
