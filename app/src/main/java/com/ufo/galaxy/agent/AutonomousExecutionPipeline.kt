@@ -99,7 +99,7 @@ class AutonomousExecutionPipeline(
      * 6. **Observability metadata** (PR-G): logs [GoalExecutionPayload.dispatch_trace_id] and
      *    [GoalExecutionPayload.lifecycle_event_id] when present for cross-system tracing;
      *    tolerates `null` / absent values (legacy senders) without failure.
-     * 7. **Dispatch metadata** (PR-H): logs [GoalExecutionPayload.dispatch_plan_id] and
+     * 7. **Dispatch metadata** (PR-48): logs [GoalExecutionPayload.dispatch_plan_id] and
      *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
      *    correlation; tolerates `null` / absent values (legacy senders) without failure.
      *
@@ -141,7 +141,7 @@ class AutonomousExecutionPipeline(
         logContinuityContext("goal_execution", payload)
         // PR-G: log observability tracing metadata; accept without failure.
         logObservabilityContext("goal_execution", payload)
-        // PR-H: log richer dispatch metadata for observability; accept without failure.
+        // PR-48: log richer dispatch metadata for observability; accept without failure.
         logDispatchMetadataContext("goal_execution", payload)
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
         return goalExecutor.executeGoal(payload)
@@ -175,7 +175,7 @@ class AutonomousExecutionPipeline(
      *    Fields are accepted without failure; null / absent values are treated as legacy contract.
      * 6. **Observability metadata** (PR-G): logs [GoalExecutionPayload.dispatch_trace_id] and
      *    [GoalExecutionPayload.lifecycle_event_id] when present for cross-system tracing.
-     * 7. **Dispatch metadata** (PR-H): logs [GoalExecutionPayload.dispatch_plan_id] and
+     * 7. **Dispatch metadata** (PR-48): logs [GoalExecutionPayload.dispatch_plan_id] and
      *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
      *    correlation; tolerates `null` / absent values (legacy senders) without failure.
      *
@@ -215,7 +215,7 @@ class AutonomousExecutionPipeline(
         logContinuityContext("parallel_subtask", payload)
         // PR-G: log observability tracing metadata; accept without failure.
         logObservabilityContext("parallel_subtask", payload)
-        // PR-H: log richer dispatch metadata for observability; accept without failure.
+        // PR-48: log richer dispatch metadata for observability; accept without failure.
         logDispatchMetadataContext("parallel_subtask", payload)
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
         return collaborationAgent.handleParallelSubtask(payload)
@@ -275,10 +275,10 @@ class AutonomousExecutionPipeline(
     }
 
     /**
-     * Logs PR-H richer dispatch metadata fields for observability.
+     * Logs PR-48 richer dispatch metadata fields for observability.
      *
      * A no-op when both dispatch metadata fields are null/blank, so it imposes no
-     * overhead on legacy (pre-PR-H) senders.
+     * overhead on legacy (pre-PR-48) senders.
      */
     private fun logDispatchMetadataContext(msgType: String, payload: GoalExecutionPayload) {
         val hasDispatch = ExecutionContractCompatibilityValidator.hasDispatchPlanId(payload.dispatch_plan_id)
@@ -317,7 +317,7 @@ class AutonomousExecutionPipeline(
         is_resumable = payload.is_resumable,
         // PR-G: echo dispatch_trace_id in disabled results for full-chain observability
         dispatch_trace_id = payload.dispatch_trace_id,
-        // PR-H: echo dispatch_plan_id in disabled results for dispatch plan correlation
+        // PR-48: echo dispatch_plan_id in disabled results for dispatch plan correlation
         dispatch_plan_id = payload.dispatch_plan_id
     )
 }

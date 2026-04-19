@@ -635,10 +635,10 @@ data class CommandResultPayload(
  *                            only; does not affect execution semantics.  `null` for
  *                            non-lifecycle-triggered dispatches.
  *
- * ## V2 richer dispatch metadata (PR-H compatibility)
+ * ## V2 richer dispatch metadata (PR-48 compatibility)
  * The following fields carry richer source dispatch metadata introduced by V2 to allow
  * Android to correlate inbound execution commands with the V2 orchestration plan that
- * generated them.  All fields are optional so that pre-PR-H / legacy senders remain
+ * generated them.  All fields are optional so that pre-PR-48 / legacy senders remain
  * compatible.  Android handlers MUST accept these fields without failure and MUST NOT
  * rely on them for core execution decisions.
  *
@@ -678,7 +678,7 @@ data class GoalExecutionPayload(
     // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
     val dispatch_trace_id: String? = null,
     val lifecycle_event_id: String? = null,
-    // ── PR-H: V2 richer dispatch metadata (optional; null-safe for legacy senders) ──
+    // ── PR-48: V2 richer dispatch metadata (optional; null-safe for legacy senders) ──
     val dispatch_plan_id: String? = null,
     val source_dispatch_strategy: String? = null
 ) {
@@ -756,7 +756,7 @@ data class GoalResultPayload(
     val is_resumable: Boolean? = null,
     // ── PR-G: V2 observability/tracing metadata (optional; echoed for full-chain correlation) ──
     val dispatch_trace_id: String? = null,
-    // ── PR-H: V2 richer dispatch metadata (optional; echoed for full-chain correlation) ──
+    // ── PR-48: V2 richer dispatch metadata (optional; echoed for full-chain correlation) ──
     val dispatch_plan_id: String? = null
 )
 

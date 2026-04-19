@@ -9,7 +9,7 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
  * V2 has expanded the runtime execution contract across four areas:
  *
  * 1. **Richer source dispatch metadata** — dispatch plan identifiers and source dispatch
- *    strategy hints that describe how V2 orchestrated this execution (PR-D alignment + PR-H).
+ *    strategy hints that describe how V2 orchestrated this execution (PR-D alignment + PR-48).
  * 2. **Explicit executor target typing** — the [executor_target_type] field that
  *    unambiguously names the intended execution surface ([ExecutorTargetType], PR-45/PR-E).
  * 3. **Continuity/recovery context** — durable tokens, resumability flags, and
@@ -32,7 +32,7 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
  * (all four areas populated) MUST also be accepted without error.  The result of
  * [checkPayloadCompatibility] is always non-null and never throws.
  *
- * ## Richer dispatch metadata fields (PR-H)
+ * ## Richer dispatch metadata fields (PR-48)
  *
  * V2 now attaches dispatch plan metadata to Android-targeted execution envelopes,
  * allowing Android to correlate an inbound execution with the V2 orchestration plan
@@ -161,7 +161,7 @@ object ExecutionContractCompatibilityValidator {
     enum class CompatibilityArea {
         /**
          * Richer source dispatch metadata — [GoalExecutionPayload.dispatch_plan_id]
-         * and [GoalExecutionPayload.source_dispatch_strategy] (PR-H).
+         * and [GoalExecutionPayload.source_dispatch_strategy] (PR-48).
          */
         DISPATCH_METADATA,
 

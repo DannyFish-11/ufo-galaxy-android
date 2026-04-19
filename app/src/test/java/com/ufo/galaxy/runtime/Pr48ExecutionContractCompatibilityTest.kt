@@ -23,7 +23,7 @@ import org.junit.Test
  *
  * V2 has expanded the runtime execution contract across four areas.  This test suite
  * validates all Android-side compatibility and semantic clarity requirements defined
- * by PR-H, ensuring that Android can safely consume the evolved contract and that
+ * by PR-48, ensuring that Android can safely consume the evolved contract and that
  * backward compatibility with legacy/narrow contracts is explicit and testable.
  *
  * ## Sections
@@ -96,26 +96,26 @@ import org.junit.Test
  * ### ExecutionContractCompatibilityValidator — checkPayloadCompatibility never throws
  *  - checkPayloadCompatibility never throws for any field combination
  *
- * ### GoalExecutionPayload — PR-H richer dispatch metadata fields
+ * ### GoalExecutionPayload — PR-48 richer dispatch metadata fields
  *  - dispatch_plan_id defaults to null (backward compatibility)
  *  - source_dispatch_strategy defaults to null (backward compatibility)
- *  - all PR-H fields can be set simultaneously
- *  - effectiveTimeoutMs is unaffected by PR-H fields
+ *  - all PR-48 fields can be set simultaneously
+ *  - effectiveTimeoutMs is unaffected by PR-48 fields
  *
- * ### GoalResultPayload — PR-H dispatch_plan_id echo field
+ * ### GoalResultPayload — PR-48 dispatch_plan_id echo field
  *  - dispatch_plan_id defaults to null (backward compatibility)
  *  - dispatch_plan_id can be set on GoalResultPayload
  *
- * ### AutonomousExecutionPipeline — PR-H field acceptance (goal_execution)
+ * ### AutonomousExecutionPipeline — PR-48 field acceptance (goal_execution)
  *  - pipeline accepts payload with dispatch_plan_id set (no failure)
  *  - pipeline accepts payload with source_dispatch_strategy set (no failure)
- *  - pipeline accepts payload with all PR-H fields set (no failure)
- *  - pipeline accepts payload with no PR-H fields (legacy backward compat)
+ *  - pipeline accepts payload with all PR-48 fields set (no failure)
+ *  - pipeline accepts payload with no PR-48 fields (legacy backward compat)
  *  - success result echoes dispatch_plan_id from payload
  *  - disabled result echoes dispatch_plan_id from payload
  *  - success result echoes null dispatch_plan_id from legacy payload
  *
- * ### AutonomousExecutionPipeline — PR-H field acceptance (parallel_subtask)
+ * ### AutonomousExecutionPipeline — PR-48 field acceptance (parallel_subtask)
  *  - parallel pipeline accepts payload with dispatch_plan_id set (no failure)
  *  - parallel pipeline echoes dispatch_plan_id in success result
  *  - parallel pipeline echoes dispatch_plan_id in disabled result
@@ -124,7 +124,7 @@ import org.junit.Test
  *  - payload with all PR-E fields passes checkPayloadCompatibility
  *  - payload with all PR-F fields passes checkPayloadCompatibility
  *  - payload with all PR-G fields passes checkPayloadCompatibility
- *  - payload with all PR-H fields passes checkPayloadCompatibility
+ *  - payload with all PR-48 fields passes checkPayloadCompatibility
  *  - maximally evolved payload (all PR-E/F/G/H fields) is accepted without failure
  *  - maximally evolved payload produces isFullyEvolved = true
  *
@@ -739,13 +739,13 @@ class Pr48ExecutionContractCompatibilityTest {
         }
     }
 
-    // ── GoalExecutionPayload — PR-H richer dispatch metadata fields ───────────
+    // ── GoalExecutionPayload — PR-48 richer dispatch metadata fields ───────────
 
     @Test
     fun `GoalExecutionPayload dispatch_plan_id defaults to null`() {
         val payload = GoalExecutionPayload(task_id = "t-default-1", goal = "test")
         assertNull(
-            "dispatch_plan_id must default to null for backward compatibility with pre-PR-H senders",
+            "dispatch_plan_id must default to null for backward compatibility with pre-PR-48 senders",
             payload.dispatch_plan_id
         )
     }
@@ -754,13 +754,13 @@ class Pr48ExecutionContractCompatibilityTest {
     fun `GoalExecutionPayload source_dispatch_strategy defaults to null`() {
         val payload = GoalExecutionPayload(task_id = "t-default-2", goal = "test")
         assertNull(
-            "source_dispatch_strategy must default to null for backward compatibility with pre-PR-H senders",
+            "source_dispatch_strategy must default to null for backward compatibility with pre-PR-48 senders",
             payload.source_dispatch_strategy
         )
     }
 
     @Test
-    fun `GoalExecutionPayload accepts all PR-H fields simultaneously`() {
+    fun `GoalExecutionPayload accepts all PR-48 fields simultaneously`() {
         val payload = GoalExecutionPayload(
             task_id = "t-prh-all",
             goal = "test",
@@ -772,7 +772,7 @@ class Pr48ExecutionContractCompatibilityTest {
     }
 
     @Test
-    fun `GoalExecutionPayload effectiveTimeoutMs is unaffected by PR-H fields`() {
+    fun `GoalExecutionPayload effectiveTimeoutMs is unaffected by PR-48 fields`() {
         val legacyPayload = GoalExecutionPayload(task_id = "t-timeout-legacy", goal = "test")
         val prhPayload = GoalExecutionPayload(
             task_id = "t-timeout-prh",
@@ -781,13 +781,13 @@ class Pr48ExecutionContractCompatibilityTest {
             source_dispatch_strategy = "local"
         )
         assertEquals(
-            "PR-H fields must not affect effectiveTimeoutMs",
+            "PR-48 fields must not affect effectiveTimeoutMs",
             legacyPayload.effectiveTimeoutMs,
             prhPayload.effectiveTimeoutMs
         )
     }
 
-    // ── GoalResultPayload — PR-H dispatch_plan_id echo field ─────────────────
+    // ── GoalResultPayload — PR-48 dispatch_plan_id echo field ─────────────────
 
     @Test
     fun `GoalResultPayload dispatch_plan_id defaults to null`() {
@@ -812,7 +812,7 @@ class Pr48ExecutionContractCompatibilityTest {
         )
     }
 
-    // ── AutonomousExecutionPipeline — PR-H field acceptance (goal_execution) ──
+    // ── AutonomousExecutionPipeline — PR-48 field acceptance (goal_execution) ──
 
     @Test
     fun `pipeline accepts payload with dispatch_plan_id set (no failure)`() {
@@ -831,7 +831,7 @@ class Pr48ExecutionContractCompatibilityTest {
     }
 
     @Test
-    fun `pipeline accepts payload with all PR-H fields set (no failure)`() {
+    fun `pipeline accepts payload with all PR-48 fields set (no failure)`() {
         val pipeline = buildPipeline()
         val result = pipeline.handleGoalExecution(
             goalPayload(
@@ -839,14 +839,14 @@ class Pr48ExecutionContractCompatibilityTest {
                 sourceDispatchStrategy = ExecutionContractCompatibilityValidator.DispatchStrategyHint.STAGED_MESH.wireValue
             )
         )
-        assertNotNull("Result must not be null when all PR-H fields are present", result)
+        assertNotNull("Result must not be null when all PR-48 fields are present", result)
     }
 
     @Test
-    fun `pipeline accepts payload with no PR-H fields (legacy backward compat)`() {
+    fun `pipeline accepts payload with no PR-48 fields (legacy backward compat)`() {
         val pipeline = buildPipeline()
         val result = pipeline.handleGoalExecution(goalPayload())
-        assertNotNull("Pipeline must work correctly with legacy payloads (no PR-H fields)", result)
+        assertNotNull("Pipeline must work correctly with legacy payloads (no PR-48 fields)", result)
     }
 
     @Test
@@ -881,7 +881,7 @@ class Pr48ExecutionContractCompatibilityTest {
         )
     }
 
-    // ── AutonomousExecutionPipeline — PR-H field acceptance (parallel_subtask) ─
+    // ── AutonomousExecutionPipeline — PR-48 field acceptance (parallel_subtask) ─
 
     @Test
     fun `parallel pipeline accepts payload with dispatch_plan_id set (no failure)`() {
@@ -974,14 +974,14 @@ class Pr48ExecutionContractCompatibilityTest {
     }
 
     @Test
-    fun `payload with all PR-H fields passes checkPayloadCompatibility`() {
+    fun `payload with all PR-48 fields passes checkPayloadCompatibility`() {
         val payload = goalPayload(
             dispatchPlanId = "plan-prh",
             sourceDispatchStrategy = ExecutionContractCompatibilityValidator.DispatchStrategyHint.LOCAL.wireValue
         )
         val result = ExecutionContractCompatibilityValidator.checkPayloadCompatibility(payload)
         assertTrue(
-            "PR-H fields (dispatch metadata) must activate DISPATCH_METADATA",
+            "PR-48 fields (dispatch metadata) must activate DISPATCH_METADATA",
             result.hasDispatchMetadata
         )
     }
