@@ -680,7 +680,11 @@ data class GoalExecutionPayload(
     val lifecycle_event_id: String? = null,
     // ── PR-48: V2 richer dispatch metadata (optional; null-safe for legacy senders) ──
     val dispatch_plan_id: String? = null,
-    val source_dispatch_strategy: String? = null
+    val source_dispatch_strategy: String? = null,
+    // ── PR-49 (PR-I): V2 policy-driven routing outcome metadata (optional; null-safe for legacy senders) ──
+    val policy_routing_outcome: String? = null,
+    val policy_failure_reason: String? = null,
+    val readiness_degradation_hint: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -733,6 +737,9 @@ data class GoalExecutionPayload(
  * @param dispatch_plan_id  Echoed from [GoalExecutionPayload.dispatch_plan_id] so V2 can
  *                       correlate the result with the originating dispatch plan.  `null`
  *                       for legacy / pre-V2 senders that do not include dispatch plan tracking.
+ * @param policy_routing_outcome  Echoed from [GoalExecutionPayload.policy_routing_outcome] so
+ *                       V2 can correlate the result with the policy layer's routing decision.
+ *                       `null` for legacy / pre-V2 senders that do not include policy routing.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -757,7 +764,9 @@ data class GoalResultPayload(
     // ── PR-G: V2 observability/tracing metadata (optional; echoed for full-chain correlation) ──
     val dispatch_trace_id: String? = null,
     // ── PR-48: V2 richer dispatch metadata (optional; echoed for full-chain correlation) ──
-    val dispatch_plan_id: String? = null
+    val dispatch_plan_id: String? = null,
+    // ── PR-49 (PR-I): V2 policy-driven routing outcome (optional; echoed for full-chain correlation) ──
+    val policy_routing_outcome: String? = null
 )
 
 /**

@@ -994,6 +994,51 @@ object StabilizationBaseline {
                 "Android execution results with the originating dispatch plan. Defaults to " +
                 "null for full backward compatibility with pre-PR-48 result consumers.",
             introducedPr = 48
+        ),
+
+        // ── PR-49 (PR-I): Policy-driven routing outcome compatibility surfaces ──
+
+        BaselineSurfaceEntry(
+            surfaceId = "policy-routing-context",
+            displayName = "PolicyRoutingContext",
+            packagePath = "com.ufo.galaxy.runtime.PolicyRoutingContext",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-49 (PR-I) Android-side policy-driven routing outcome vocabulary — " +
+                "declares RoutingOutcome wire values (ACCEPTED, DEGRADED_READINESS, " +
+                "TEMPORARILY_UNAVAILABLE, RESUMED, REJECTED), degradation and unavailability " +
+                "reason constants, and semantic helpers (shouldProceed, isTemporaryHold, " +
+                "isPolicyRejection, isResumedExecution, isDegradedReadiness) so Android remains " +
+                "a predictable participant in policy-driven multi-device execution without " +
+                "becoming a policy decision-maker. Backward compatible: null/absent outcomes " +
+                "are treated as legacy (proceed).",
+            introducedPr = 49
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-execution-payload-policy-routing-fields",
+            displayName = "GoalExecutionPayload.policy_routing_outcome / policy_failure_reason / readiness_degradation_hint",
+            packagePath = "com.ufo.galaxy.protocol.GoalExecutionPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-49 (PR-I) policy routing outcome fields on GoalExecutionPayload — " +
+                "policy_routing_outcome carries V2 policy layer's routing decision for this device " +
+                "(accepted, degraded_readiness, temporarily_unavailable, resumed, rejected); " +
+                "policy_failure_reason carries machine-readable reason for non-accepted outcomes; " +
+                "readiness_degradation_hint carries degradation detail for degraded_readiness outcomes. " +
+                "All fields default to null for full backward compatibility with pre-PR-I senders.",
+            introducedPr = 49
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-result-payload-policy-routing-outcome-echo",
+            displayName = "GoalResultPayload.policy_routing_outcome",
+            packagePath = "com.ufo.galaxy.protocol.GoalResultPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-49 (PR-I) policy routing outcome echo field on GoalResultPayload — " +
+                "echoed from GoalExecutionPayload.policy_routing_outcome so V2 can correlate " +
+                "Android execution results with the policy layer's routing decision. Defaults to " +
+                "null for full backward compatibility with pre-PR-I result consumers.",
+            introducedPr = 49
         )
     )
 
