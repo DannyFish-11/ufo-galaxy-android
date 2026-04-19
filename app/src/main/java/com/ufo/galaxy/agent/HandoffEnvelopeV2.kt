@@ -35,6 +35,12 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * | [executor_target_type]   | (PR-E) Optional explicit executor target type from V2's target-typing   |
  * |                          | model. `"android_device"`, `"node_service"`, `"worker"`, `"local"`.     |
  * |                          | Null for legacy/pre-V2 senders.                                         |
+ * | [dispatch_plan_id]       | (PR-48) Stable identifier for the V2 source dispatch plan that produced  |
+ * |                          | this handoff command; `null` for legacy/pre-V2 senders.                 |
+ * | [source_dispatch_strategy] | (PR-48) Strategy hint from the V2 source dispatch orchestrator;        |
+ * |                          | recognised values: `"local"`, `"remote_handoff"`, `"fallback_local"`,   |
+ * |                          | `"staged_mesh"`. Unknown values MUST be tolerated. `null` for legacy     |
+ * |                          | senders.                                                                 |
  * | [continuity_token]       | (PR-F) Opaque stable token identifying the durable execution continuity  |
  * |                          | context across reconnects or handoffs. Null for legacy senders.          |
  * | [recovery_context]       | (PR-F) Key-value map carrying recovery hints from V2. Empty for legacy   |
@@ -69,6 +75,10 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * @param execution_context      (PR-D) Optional key-value execution context from V2.
  * @param executor_target_type   (PR-E) Optional explicit executor target type from V2's
  *                               target-typing model. `null` for legacy/pre-V2 senders.
+ * @param dispatch_plan_id       (PR-48) Stable V2 dispatch plan identifier; null for
+ *                               legacy senders.
+ * @param source_dispatch_strategy (PR-48) V2 source dispatch strategy hint; null for
+ *                               legacy senders; unknown values MUST be tolerated.
  * @param continuity_token       (PR-F) Opaque stable continuity token; null for legacy senders.
  * @param recovery_context       (PR-F) Optional key-value recovery hints from V2.
  * @param is_resumable           (PR-F) Resumability flag from V2; null for legacy senders.
@@ -94,6 +104,9 @@ data class HandoffEnvelopeV2(
     val execution_context: Map<String, String> = emptyMap(),
     // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy callers) ──
     val executor_target_type: String? = null,
+    // ── PR-48: V2 richer dispatch metadata (optional; null-safe for legacy callers) ──
+    val dispatch_plan_id: String? = null,
+    val source_dispatch_strategy: String? = null,
     // ── PR-F: V2 durable continuity and recovery context (optional; null-safe for legacy callers) ──
     val continuity_token: String? = null,
     val recovery_context: Map<String, String> = emptyMap(),
@@ -115,6 +128,9 @@ data class HandoffEnvelopeV2(
  *   metadata is propagated to the gateway bridge endpoint unchanged.
  * - PR-E field ([executor_target_type]) is mapped 1:1 from the request so that V2
  *   explicit executor target typing metadata is propagated to the gateway bridge endpoint.
+ * - PR-48 fields ([dispatch_plan_id], [source_dispatch_strategy]) default to `null` in
+ *   outbound handoffs originating on Android; these fields are populated by V2 when it
+ *   generates or echoes the envelope on the server side.
  * - PR-F fields ([continuity_token], [recovery_context], [is_resumable],
  *   [interruption_reason]) are mapped 1:1 from the request so that durable continuity
  *   and recovery context is propagated to the gateway bridge endpoint unchanged.

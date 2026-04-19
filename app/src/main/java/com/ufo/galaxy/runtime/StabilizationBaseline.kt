@@ -996,6 +996,60 @@ object StabilizationBaseline {
             introducedPr = 48
         ),
 
+        // ── PR-03: Takeover metadata unification & three-path dispatch symmetry ──
+
+        BaselineSurfaceEntry(
+            surfaceId = "takeover-request-envelope-dispatch-metadata-fields",
+            displayName = "TakeoverRequestEnvelope.dispatch_plan_id / source_dispatch_strategy / executor_target_type",
+            packagePath = "com.ufo.galaxy.agent.TakeoverRequestEnvelope",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-03 takeover path dispatch metadata alignment — adds dispatch_plan_id " +
+                "and source_dispatch_strategy (PR-48 parity) plus executor_target_type (PR-E parity) " +
+                "to TakeoverRequestEnvelope so all three Android dispatch entry paths (goal_execution, " +
+                "handoff, takeover) carry symmetric richer dispatch metadata. All fields default to " +
+                "null for full backward compatibility with pre-PR-03 / legacy senders.",
+            introducedPr = 3
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "handoff-envelope-v2-dispatch-metadata-fields",
+            displayName = "HandoffEnvelopeV2.dispatch_plan_id / source_dispatch_strategy",
+            packagePath = "com.ufo.galaxy.agent.HandoffEnvelopeV2",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-03 handoff path dispatch metadata alignment — adds dispatch_plan_id " +
+                "and source_dispatch_strategy (PR-48 parity) to HandoffEnvelopeV2 so the handoff " +
+                "path carries the same richer dispatch metadata as goal_execution and takeover. " +
+                "Both fields default to null for full backward compatibility with legacy callers.",
+            introducedPr = 3
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "execution-contract-validator-three-path-overloads",
+            displayName = "ExecutionContractCompatibilityValidator.checkPayloadCompatibility(HandoffEnvelopeV2/TakeoverRequestEnvelope)",
+            packagePath = "com.ufo.galaxy.runtime.ExecutionContractCompatibilityValidator",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-03 unified validator overloads — extends checkPayloadCompatibility " +
+                "with HandoffEnvelopeV2 and TakeoverRequestEnvelope overloads so all three dispatch " +
+                "entry paths produce uniform CompatibilityCheckResult interpretation. Observability/" +
+                "tracing and policy routing flags are always false for handoff/takeover paths as those " +
+                "fields are not present on those paths. Never throws; legacy payloads produce all-false results.",
+            introducedPr = 3
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "executor-target-type-log-label",
+            displayName = "ExecutorTargetType.logLabel",
+            packagePath = "com.ufo.galaxy.runtime.ExecutorTargetType",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-03 unified executor target type log expression — adds logLabel(rawValue) " +
+                "helper to ExecutorTargetType that produces a stable structured log string " +
+                "(executor_target_type=<raw> canonical=<canonical> eligible=<bool>) for consistent " +
+                "observability across all three dispatch paths. Replaces ad-hoc inline log " +
+                "construction in AutonomousExecutionPipeline. Never throws.",
+            introducedPr = 3
+        ),
+
         // ── PR-49 (PR-I): Policy-driven routing outcome compatibility surfaces ──
 
         BaselineSurfaceEntry(

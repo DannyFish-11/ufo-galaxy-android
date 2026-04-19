@@ -43,6 +43,15 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * |                          | wire values the delegated task requires the receiver to have.            |
  * | [continuation_token]     | (PR-9) Opaque, stable machine-readable continuation state token           |
  * |                          | produced by the originating executor; more structured than [checkpoint]. |
+ * | [executor_target_type]   | (PR-E) Optional explicit executor target type from V2's target-typing   |
+ * |                          | model. `"android_device"`, `"node_service"`, `"worker"`, `"local"`.     |
+ * |                          | Null for legacy/pre-V2 senders.                                         |
+ * | [dispatch_plan_id]       | (PR-48) Stable identifier for the V2 source dispatch plan that produced  |
+ * |                          | this takeover command; `null` for legacy/pre-V2 senders.                |
+ * | [source_dispatch_strategy] | (PR-48) Strategy hint from the V2 source dispatch orchestrator;        |
+ * |                          | recognised values: `"local"`, `"remote_handoff"`, `"fallback_local"`,   |
+ * |                          | `"staged_mesh"`. Unknown values MUST be tolerated. `null` for legacy     |
+ * |                          | senders.                                                                 |
  * | [continuity_token]       | (PR-F) Opaque stable token identifying the durable execution continuity  |
  * |                          | context across reconnects or handoffs; `null` for legacy senders.        |
  * | [recovery_context]       | (PR-F) Key-value map carrying recovery hints forwarded by V2;            |
@@ -58,7 +67,8 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * this contract.  [source_runtime_posture] defaults to `null`; consumers must use
  * [SourceRuntimePosture.fromValue] to resolve it to a safe default. All PR-9 fields
  * default to `null` / empty so that pre-PR-9 senders remain compatible.  All PR-F
- * fields default to `null` / empty so that pre-PR-F senders remain compatible.
+ * fields default to `null` / empty so that pre-PR-F senders remain compatible.  All
+ * PR-E and PR-48 fields default to `null` so that pre-V2 senders remain compatible.
  *
  * @param takeover_id                  Unique identifier for this takeover request.
  * @param task_id                      Task identifier being handed over.
@@ -83,6 +93,12 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  *                                     task requires; empty from legacy senders.
  * @param continuation_token           (PR-9) Opaque machine-readable continuation state token;
  *                                     null when not provided by the originating executor.
+ * @param executor_target_type         (PR-E) Optional explicit executor target type from V2's
+ *                                     target-typing model; null for legacy/pre-V2 senders.
+ * @param dispatch_plan_id             (PR-48) Stable V2 dispatch plan identifier; null for
+ *                                     legacy senders.
+ * @param source_dispatch_strategy     (PR-48) V2 source dispatch strategy hint; null for
+ *                                     legacy senders; unknown values MUST be tolerated.
  * @param continuity_token             (PR-F) Opaque stable token identifying the durable
  *                                     execution continuity context across reconnects or
  *                                     handoffs; null for legacy senders.
@@ -113,6 +129,11 @@ data class TakeoverRequestEnvelope(
     val originating_formation_role: String? = null,
     val required_capability_dimensions: List<String> = emptyList(),
     val continuation_token: String? = null,
+    // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy senders) ──
+    val executor_target_type: String? = null,
+    // ── PR-48: V2 richer dispatch metadata (optional; null-safe for legacy senders) ──
+    val dispatch_plan_id: String? = null,
+    val source_dispatch_strategy: String? = null,
     // ── PR-F: Durable continuity and recovery context (optional; null-safe for legacy senders) ──
     val continuity_token: String? = null,
     val recovery_context: Map<String, String> = emptyMap(),
