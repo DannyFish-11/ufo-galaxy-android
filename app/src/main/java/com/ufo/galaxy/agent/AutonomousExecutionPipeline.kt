@@ -7,6 +7,7 @@ import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.runtime.ContinuityRecoveryContext
 import com.ufo.galaxy.runtime.ExecutorTargetType
 import com.ufo.galaxy.runtime.RuntimeObservabilityMetadata
+import com.ufo.galaxy.runtime.ExecutionContractCompatibilityValidator
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
@@ -98,11 +99,15 @@ class AutonomousExecutionPipeline(
      * 6. **Observability metadata** (PR-G): logs [GoalExecutionPayload.dispatch_trace_id] and
      *    [GoalExecutionPayload.lifecycle_event_id] when present for cross-system tracing;
      *    tolerates `null` / absent values (legacy senders) without failure.
+     * 7. **Dispatch metadata** (PR-H): logs [GoalExecutionPayload.dispatch_plan_id] and
+     *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
+     *    correlation; tolerates `null` / absent values (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
      * the result with [device_role], the echoed [GoalExecutionPayload.executor_target_type],
      * the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable],
-     * and the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability.
+     * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
+     * and the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation.
      * so V2 can correlate the result with its originating durable continuity context.
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
@@ -136,6 +141,8 @@ class AutonomousExecutionPipeline(
         logContinuityContext("goal_execution", payload)
         // PR-G: log observability tracing metadata; accept without failure.
         logObservabilityContext("goal_execution", payload)
+        // PR-H: log richer dispatch metadata for observability; accept without failure.
+        logDispatchMetadataContext("goal_execution", payload)
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
         return goalExecutor.executeGoal(payload)
             .copy(
@@ -143,7 +150,8 @@ class AutonomousExecutionPipeline(
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
                 is_resumable = payload.is_resumable,
-                dispatch_trace_id = payload.dispatch_trace_id
+                dispatch_trace_id = payload.dispatch_trace_id,
+                dispatch_plan_id = payload.dispatch_plan_id
             )
     }
 
@@ -167,11 +175,15 @@ class AutonomousExecutionPipeline(
      *    Fields are accepted without failure; null / absent values are treated as legacy contract.
      * 6. **Observability metadata** (PR-G): logs [GoalExecutionPayload.dispatch_trace_id] and
      *    [GoalExecutionPayload.lifecycle_event_id] when present for cross-system tracing.
+     * 7. **Dispatch metadata** (PR-H): logs [GoalExecutionPayload.dispatch_plan_id] and
+     *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
+     *    correlation; tolerates `null` / absent values (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
      * and enriches the result with [device_role], the echoed
      * [GoalExecutionPayload.executor_target_type], the echoed continuity/recovery fields,
-     * and the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability.
+     * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
+     * and the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation.
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -203,6 +215,8 @@ class AutonomousExecutionPipeline(
         logContinuityContext("parallel_subtask", payload)
         // PR-G: log observability tracing metadata; accept without failure.
         logObservabilityContext("parallel_subtask", payload)
+        // PR-H: log richer dispatch metadata for observability; accept without failure.
+        logDispatchMetadataContext("parallel_subtask", payload)
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
         return collaborationAgent.handleParallelSubtask(payload)
             .copy(
@@ -210,7 +224,8 @@ class AutonomousExecutionPipeline(
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
                 is_resumable = payload.is_resumable,
-                dispatch_trace_id = payload.dispatch_trace_id
+                dispatch_trace_id = payload.dispatch_trace_id,
+                dispatch_plan_id = payload.dispatch_plan_id
             )
     }
 
@@ -259,6 +274,30 @@ class AutonomousExecutionPipeline(
         )
     }
 
+    /**
+     * Logs PR-H richer dispatch metadata fields for observability.
+     *
+     * A no-op when both dispatch metadata fields are null/blank, so it imposes no
+     * overhead on legacy (pre-PR-H) senders.
+     */
+    private fun logDispatchMetadataContext(msgType: String, payload: GoalExecutionPayload) {
+        val hasDispatch = ExecutionContractCompatibilityValidator.hasDispatchPlanId(payload.dispatch_plan_id)
+            || !payload.source_dispatch_strategy.isNullOrBlank()
+        if (!hasDispatch) return
+
+        val strategyHint = ExecutionContractCompatibilityValidator.DispatchStrategyHint
+            .fromValue(payload.source_dispatch_strategy)
+        val androidEligible = ExecutionContractCompatibilityValidator
+            .isAndroidEligibleStrategy(payload.source_dispatch_strategy)
+        Log.i(
+            TAG,
+            "$msgType dispatch_plan_id=${payload.dispatch_plan_id} " +
+                "source_dispatch_strategy=${payload.source_dispatch_strategy} " +
+                "canonical_strategy=$strategyHint android_eligible=$androidEligible " +
+                "task_id=${payload.task_id}"
+        )
+    }
+
     private fun buildDisabledResult(
         payload: GoalExecutionPayload,
         reason: String
@@ -277,6 +316,8 @@ class AutonomousExecutionPipeline(
         continuity_token = payload.continuity_token,
         is_resumable = payload.is_resumable,
         // PR-G: echo dispatch_trace_id in disabled results for full-chain observability
-        dispatch_trace_id = payload.dispatch_trace_id
+        dispatch_trace_id = payload.dispatch_trace_id,
+        // PR-H: echo dispatch_plan_id in disabled results for dispatch plan correlation
+        dispatch_plan_id = payload.dispatch_plan_id
     )
 }

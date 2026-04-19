@@ -634,6 +634,26 @@ data class CommandResultPayload(
  *                            this dispatch.  Used for cross-system observability correlation
  *                            only; does not affect execution semantics.  `null` for
  *                            non-lifecycle-triggered dispatches.
+ *
+ * ## V2 richer dispatch metadata (PR-H compatibility)
+ * The following fields carry richer source dispatch metadata introduced by V2 to allow
+ * Android to correlate inbound execution commands with the V2 orchestration plan that
+ * generated them.  All fields are optional so that pre-PR-H / legacy senders remain
+ * compatible.  Android handlers MUST accept these fields without failure and MUST NOT
+ * rely on them for core execution decisions.
+ *
+ * @param dispatch_plan_id    Optional stable identifier for the V2 source dispatch plan
+ *                            that produced this command.  Allows full correlation between
+ *                            the inbound execution and the originating V2 orchestration
+ *                            decision.  Echoed in result payloads for end-to-end
+ *                            correlation.  `null` for legacy / pre-V2 senders.
+ * @param source_dispatch_strategy  Optional hint describing the routing strategy used by
+ *                            the V2 source dispatch orchestrator when selecting this device
+ *                            as the execution target.  Recognised values are defined in
+ *                            [com.ufo.galaxy.runtime.ExecutionContractCompatibilityValidator.DispatchStrategyHint]:
+ *                            `"local"`, `"remote_handoff"`, `"fallback_local"`,
+ *                            `"staged_mesh"`.  Unknown values MUST be tolerated.  `null`
+ *                            for legacy / pre-V2 senders.
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -657,7 +677,10 @@ data class GoalExecutionPayload(
     val interruption_reason: String? = null,
     // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
     val dispatch_trace_id: String? = null,
-    val lifecycle_event_id: String? = null
+    val lifecycle_event_id: String? = null,
+    // ── PR-H: V2 richer dispatch metadata (optional; null-safe for legacy senders) ──
+    val dispatch_plan_id: String? = null,
+    val source_dispatch_strategy: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -707,6 +730,9 @@ data class GoalExecutionPayload(
  * @param dispatch_trace_id  Echoed from [GoalExecutionPayload.dispatch_trace_id] so V2 can
  *                       correlate the result with the originating dispatch chain.  `null`
  *                       for legacy / pre-V2 senders that do not include dispatch tracing.
+ * @param dispatch_plan_id  Echoed from [GoalExecutionPayload.dispatch_plan_id] so V2 can
+ *                       correlate the result with the originating dispatch plan.  `null`
+ *                       for legacy / pre-V2 senders that do not include dispatch plan tracking.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -729,7 +755,9 @@ data class GoalResultPayload(
     val continuity_token: String? = null,
     val is_resumable: Boolean? = null,
     // ── PR-G: V2 observability/tracing metadata (optional; echoed for full-chain correlation) ──
-    val dispatch_trace_id: String? = null
+    val dispatch_trace_id: String? = null,
+    // ── PR-H: V2 richer dispatch metadata (optional; echoed for full-chain correlation) ──
+    val dispatch_plan_id: String? = null
 )
 
 /**
