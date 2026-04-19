@@ -3,6 +3,7 @@ package com.ufo.galaxy.protocol
 import com.ufo.galaxy.runtime.AttachedRuntimeSession
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
+import com.ufo.galaxy.runtime.RuntimeObservabilityMetadata
 import com.ufo.galaxy.runtime.StagedMeshParticipationResult
 import com.ufo.galaxy.runtime.CanonicalSessionFamily
 
@@ -492,6 +493,31 @@ object CrossRepoConsistencyGate {
         return GateSurfaceResult(reportingSurface, outcome, violations, summary)
     }
 
+    /**
+     * Gate: the [ProtocolSurface.OBSERVABILITY_TRACE_FIELD_NAMES] canonical values must exactly
+     * match the runtime values of the [RuntimeObservabilityMetadata] field name constants.
+     *
+     * This gate verifies **wire behavior** rather than enum constant alignment: it compares the
+     * actual string values of [RuntimeObservabilityMetadata.FIELD_DISPATCH_TRACE_ID],
+     * [RuntimeObservabilityMetadata.FIELD_LIFECYCLE_EVENT_ID], and
+     * [RuntimeObservabilityMetadata.FIELD_SESSION_CORRELATION_ID] against the canonical set in
+     * [UgcpProtocolConsistencyRules.observabilityTraceFieldNamesRule].
+     *
+     * A failure here indicates that a field name constant in [RuntimeObservabilityMetadata] was
+     * renamed without updating the cross-repo vocabulary rule — the primary vector for silent
+     * observability field drift.
+     */
+    fun checkObservabilityTraceFieldNames(): GateSurfaceResult =
+        runBidirectionalGate(
+            surface = ProtocolSurface.OBSERVABILITY_TRACE_FIELD_NAMES,
+            liveWireValues = setOf(
+                RuntimeObservabilityMetadata.FIELD_DISPATCH_TRACE_ID,
+                RuntimeObservabilityMetadata.FIELD_LIFECYCLE_EVENT_ID,
+                RuntimeObservabilityMetadata.FIELD_SESSION_CORRELATION_ID
+            ),
+            liveDescription = "RuntimeObservabilityMetadata field name constants"
+        )
+
     // ── Full gate run ─────────────────────────────────────────────────────────
 
     /**
@@ -517,7 +543,8 @@ object CrossRepoConsistencyGate {
             checkCapabilityReadinessDescriptors(),
             checkTerminalStateVocabulary(),
             checkTransferLifecycleVocabulary(),
-            checkStagedMeshExecutionStatus()
+            checkStagedMeshExecutionStatus(),
+            checkObservabilityTraceFieldNames()
         )
         val failingCount = results.count { it.outcome == GateOutcome.FAIL }
         val passingCount = results.count { it.outcome == GateOutcome.PASS }
