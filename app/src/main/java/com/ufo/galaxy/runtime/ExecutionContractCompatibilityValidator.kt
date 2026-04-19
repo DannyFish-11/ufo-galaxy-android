@@ -182,7 +182,14 @@ object ExecutionContractCompatibilityValidator {
          * Observability/tracing identifiers — [GoalExecutionPayload.dispatch_trace_id]
          * and [GoalExecutionPayload.lifecycle_event_id] (PR-47 / PR-G).
          */
-        OBSERVABILITY_TRACING
+        OBSERVABILITY_TRACING,
+
+        /**
+         * Policy-driven routing outcome metadata — [GoalExecutionPayload.policy_routing_outcome],
+         * [GoalExecutionPayload.policy_failure_reason], and
+         * [GoalExecutionPayload.readiness_degradation_hint] (PR-49 / PR-I).
+         */
+        POLICY_ROUTING
     }
 
     // ── CompatibilityCheckResult ──────────────────────────────────────────────
@@ -211,6 +218,9 @@ object ExecutionContractCompatibilityValidator {
      * @param hasObservabilityTracing   True when any observability tracing field is
      *                                  non-null/non-blank ([dispatch_trace_id] or
      *                                  [lifecycle_event_id]).
+     * @param hasPolicyRouting          True when any policy routing field is non-null/non-blank
+     *                                  ([policy_routing_outcome], [policy_failure_reason], or
+     *                                  [readiness_degradation_hint]).
      * @param activeAreas               Set of [CompatibilityArea] values corresponding
      *                                  to active evolved contract areas in the payload.
      */
@@ -219,20 +229,22 @@ object ExecutionContractCompatibilityValidator {
         val hasExecutorTargetTyping: Boolean,
         val hasContinuityRecovery: Boolean,
         val hasObservabilityTracing: Boolean,
+        val hasPolicyRouting: Boolean,
         val activeAreas: Set<CompatibilityArea>
     ) {
         /**
-         * True when all four evolved contract areas are active in the payload.
+         * True when all five evolved contract areas are active in the payload.
          *
          * A maximally evolved payload carries richer dispatch metadata, explicit
-         * executor target typing, continuity/recovery context, and observability
-         * tracing identifiers simultaneously.
+         * executor target typing, continuity/recovery context, observability
+         * tracing identifiers, and policy routing outcome metadata simultaneously.
          */
         val isFullyEvolved: Boolean
             get() = hasDispatchMetadata
                 && hasExecutorTargetTyping
                 && hasContinuityRecovery
                 && hasObservabilityTracing
+                && hasPolicyRouting
     }
 
     // ── checkPayloadCompatibility ─────────────────────────────────────────────
@@ -258,12 +270,16 @@ object ExecutionContractCompatibilityValidator {
             || payload.recovery_context.isNotEmpty()
         val hasObservability = RuntimeObservabilityMetadata.hasDispatchTraceId(payload.dispatch_trace_id)
             || RuntimeObservabilityMetadata.hasLifecycleEventId(payload.lifecycle_event_id)
+        val hasPolicyRouting = !payload.policy_routing_outcome.isNullOrBlank()
+            || !payload.policy_failure_reason.isNullOrBlank()
+            || !payload.readiness_degradation_hint.isNullOrBlank()
 
         val active = buildSet {
             if (hasDispatch) add(CompatibilityArea.DISPATCH_METADATA)
             if (hasTargetTyping) add(CompatibilityArea.EXECUTOR_TARGET_TYPING)
             if (hasContinuity) add(CompatibilityArea.CONTINUITY_RECOVERY)
             if (hasObservability) add(CompatibilityArea.OBSERVABILITY_TRACING)
+            if (hasPolicyRouting) add(CompatibilityArea.POLICY_ROUTING)
         }
 
         return CompatibilityCheckResult(
@@ -271,6 +287,7 @@ object ExecutionContractCompatibilityValidator {
             hasExecutorTargetTyping = hasTargetTyping,
             hasContinuityRecovery = hasContinuity,
             hasObservabilityTracing = hasObservability,
+            hasPolicyRouting = hasPolicyRouting,
             activeAreas = active
         )
     }

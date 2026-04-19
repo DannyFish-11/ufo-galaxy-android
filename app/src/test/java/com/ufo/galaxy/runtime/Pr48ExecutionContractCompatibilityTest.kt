@@ -492,6 +492,7 @@ class Pr48ExecutionContractCompatibilityTest {
         assertFalse("Legacy payload must not signal hasExecutorTargetTyping", result.hasExecutorTargetTyping)
         assertFalse("Legacy payload must not signal hasContinuityRecovery", result.hasContinuityRecovery)
         assertFalse("Legacy payload must not signal hasObservabilityTracing", result.hasObservabilityTracing)
+        assertFalse("Legacy payload must not signal hasPolicyRouting", result.hasPolicyRouting)
     }
 
     @Test
@@ -644,11 +645,7 @@ class Pr48ExecutionContractCompatibilityTest {
                 dispatch_trace_id = "dt-abc"
             )
         )
-        assertEquals(
-            "Maximally evolved payload must have all four CompatibilityArea values active",
-            4,
-            result.activeAreas.size
-        )
+        // Four original evolved areas must all be active (PR-49 POLICY_ROUTING is not set here)
         assertTrue(result.activeAreas.contains(ExecutionContractCompatibilityValidator.CompatibilityArea.DISPATCH_METADATA))
         assertTrue(result.activeAreas.contains(ExecutionContractCompatibilityValidator.CompatibilityArea.EXECUTOR_TARGET_TYPING))
         assertTrue(result.activeAreas.contains(ExecutionContractCompatibilityValidator.CompatibilityArea.CONTINUITY_RECOVERY))
@@ -670,6 +667,9 @@ class Pr48ExecutionContractCompatibilityTest {
 
     @Test
     fun `isFullyEvolved is true when all four areas are active`() {
+        // Note: PR-49 added a fifth evolved area (POLICY_ROUTING). isFullyEvolved now requires
+        // all five areas. This test verifies that a PR-48-era payload (four areas) without
+        // policy routing does NOT produce isFullyEvolved = true.
         val result = ExecutionContractCompatibilityValidator.checkPayloadCompatibility(
             GoalExecutionPayload(
                 task_id = "t-full-ev",
@@ -680,8 +680,15 @@ class Pr48ExecutionContractCompatibilityTest {
                 dispatch_trace_id = "dt-full"
             )
         )
-        assertTrue(
-            "Payload with all four evolved contract areas must produce isFullyEvolved = true",
+        // Four areas are all active
+        assertTrue(result.hasDispatchMetadata)
+        assertTrue(result.hasExecutorTargetTyping)
+        assertTrue(result.hasContinuityRecovery)
+        assertTrue(result.hasObservabilityTracing)
+        // But isFullyEvolved requires all five areas (including POLICY_ROUTING from PR-49)
+        assertFalse(
+            "Payload with only four evolved contract areas must not produce isFullyEvolved = true " +
+                "(five areas required after PR-49 added POLICY_ROUTING)",
             result.isFullyEvolved
         )
     }
@@ -1010,16 +1017,23 @@ class Pr48ExecutionContractCompatibilityTest {
 
     @Test
     fun `maximally evolved payload produces isFullyEvolved = true`() {
-        val payload = goalPayload(
-            dispatchPlanId = "plan-fully-ev",
-            sourceDispatchStrategy = ExecutionContractCompatibilityValidator.DispatchStrategyHint.LOCAL.wireValue,
-            executorTargetType = ExecutorTargetType.ANDROID_DEVICE,
-            continuityToken = "ct-fully-ev",
-            dispatchTraceId = "dt-fully-ev"
+        // PR-49 added POLICY_ROUTING as a fifth evolved area; a fully evolved payload must include
+        // all five areas. Construct directly to include the PR-49 policy_routing_outcome field.
+        val payload = GoalExecutionPayload(
+            task_id = "t-pri-fully-ev",
+            goal = "open WeChat",
+            max_steps = 5,
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME,
+            dispatch_plan_id = "plan-fully-ev",
+            source_dispatch_strategy = ExecutionContractCompatibilityValidator.DispatchStrategyHint.LOCAL.wireValue,
+            executor_target_type = ExecutorTargetType.ANDROID_DEVICE,
+            continuity_token = "ct-fully-ev",
+            dispatch_trace_id = "dt-fully-ev",
+            policy_routing_outcome = "accepted"
         )
         val compatResult = ExecutionContractCompatibilityValidator.checkPayloadCompatibility(payload)
         assertTrue(
-            "Payload with all four evolved contract areas must produce isFullyEvolved = true",
+            "Payload with all five evolved contract areas must produce isFullyEvolved = true",
             compatResult.isFullyEvolved
         )
     }

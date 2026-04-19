@@ -8,6 +8,7 @@ import com.ufo.galaxy.runtime.ContinuityRecoveryContext
 import com.ufo.galaxy.runtime.ExecutorTargetType
 import com.ufo.galaxy.runtime.RuntimeObservabilityMetadata
 import com.ufo.galaxy.runtime.ExecutionContractCompatibilityValidator
+import com.ufo.galaxy.runtime.PolicyRoutingContext
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
@@ -29,7 +30,8 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  * When any gate is not satisfied the pipeline immediately returns a structured
  * [STATUS_DISABLED] result with the original [task_id], [group_id], and
  * [subtask_index] echoed so the gateway can still perform correct aggregation
- * without crashing.
+ * without crashing.  Policy-rejected payloads ([GoalExecutionPayload.policy_routing_outcome]
+ * == `"rejected"`) also return [STATUS_DISABLED] with reason [REASON_POLICY_REJECTED].
  *
  * This class is pure Kotlin (no Android framework dependencies) so that it can
  * be fully exercised by JVM unit tests without robolectric or instrumentation.
@@ -74,12 +76,23 @@ class AutonomousExecutionPipeline(
          * that Android execution is reserved for `join_runtime`-eligible tasks.
          */
         const val REASON_POSTURE_CONTROL_ONLY = "posture_control_only"
+
+        /**
+         * Error reason used when [handleGoalExecution] or [handleParallelSubtask] is
+         * blocked by a [PolicyRoutingContext.RoutingOutcome.REJECTED] policy decision
+         * on the inbound payload.
+         *
+         * A policy-rejected payload carries an explicit [GoalExecutionPayload.policy_routing_outcome]
+         * of `"rejected"`; Android must not execute the task and must return a structured
+         * disabled result so V2 can re-route without treating this as an Android-side error.
+         */
+        const val REASON_POLICY_REJECTED = "policy_routing_rejected"
     }
 
     /**
      * Handles a [goal_execution] message.
      *
-     * Five gates are evaluated in order:
+     * Eight gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [goal_execution] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -102,12 +115,19 @@ class AutonomousExecutionPipeline(
      * 7. **Dispatch metadata** (PR-48): logs [GoalExecutionPayload.dispatch_plan_id] and
      *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
      *    correlation; tolerates `null` / absent values (legacy senders) without failure.
+     * 8. **Policy routing context** (PR-49/PR-I): logs [GoalExecutionPayload.policy_routing_outcome],
+     *    [GoalExecutionPayload.policy_failure_reason], and
+     *    [GoalExecutionPayload.readiness_degradation_hint] when present; returns
+     *    [STATUS_DISABLED] with [REASON_POLICY_REJECTED] when the outcome is explicitly
+     *    [PolicyRoutingContext.RoutingOutcome.REJECTED]; tolerates `null` / absent values
+     *    (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
      * the result with [device_role], the echoed [GoalExecutionPayload.executor_target_type],
      * the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable],
      * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
-     * and the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation.
+     * the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation,
+     * and the echoed [GoalExecutionPayload.policy_routing_outcome] for policy layer correlation.
      * so V2 can correlate the result with its originating durable continuity context.
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
@@ -143,6 +163,17 @@ class AutonomousExecutionPipeline(
         logObservabilityContext("goal_execution", payload)
         // PR-48: log richer dispatch metadata for observability; accept without failure.
         logDispatchMetadataContext("goal_execution", payload)
+        // PR-49/PR-I: log and gate on policy routing outcome; reject only when explicitly rejected.
+        logPolicyRoutingContext("goal_execution", payload)
+        if (PolicyRoutingContext.isPolicyRejection(payload.policy_routing_outcome)) {
+            Log.i(
+                TAG,
+                "goal_execution blocked: policy_routing_outcome=rejected " +
+                    "policy_failure_reason=${payload.policy_failure_reason} " +
+                    "task_id=${payload.task_id}"
+            )
+            return buildDisabledResult(payload, REASON_POLICY_REJECTED)
+        }
         Log.i(TAG, "goal_execution executing locally; task_id=${payload.task_id}")
         return goalExecutor.executeGoal(payload)
             .copy(
@@ -151,14 +182,15 @@ class AutonomousExecutionPipeline(
                 continuity_token = payload.continuity_token,
                 is_resumable = payload.is_resumable,
                 dispatch_trace_id = payload.dispatch_trace_id,
-                dispatch_plan_id = payload.dispatch_plan_id
+                dispatch_plan_id = payload.dispatch_plan_id,
+                policy_routing_outcome = payload.policy_routing_outcome
             )
     }
 
     /**
      * Handles a [parallel_subtask] message.
      *
-     * Five gates are evaluated in order:
+     * Eight gates are evaluated in order:
      * 1. **Runtime gate**: returns [STATUS_DISABLED] when [AppSettings.crossDeviceEnabled]
      *    is `false`.  [parallel_subtask] is a cross-device-only message type and must not
      *    execute outside the canonical runtime pipeline.
@@ -178,12 +210,17 @@ class AutonomousExecutionPipeline(
      * 7. **Dispatch metadata** (PR-48): logs [GoalExecutionPayload.dispatch_plan_id] and
      *    [GoalExecutionPayload.source_dispatch_strategy] when present for dispatch plan
      *    correlation; tolerates `null` / absent values (legacy senders) without failure.
+     * 8. **Policy routing context** (PR-49/PR-I): logs policy routing outcome fields when
+     *    present; returns [STATUS_DISABLED] with [REASON_POLICY_REJECTED] when the outcome
+     *    is explicitly [PolicyRoutingContext.RoutingOutcome.REJECTED]; tolerates `null` /
+     *    absent values (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
      * and enriches the result with [device_role], the echoed
      * [GoalExecutionPayload.executor_target_type], the echoed continuity/recovery fields,
      * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
-     * and the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation.
+     * the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation,
+     * and the echoed [GoalExecutionPayload.policy_routing_outcome] for policy layer correlation.
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
         if (!settings.crossDeviceEnabled) {
@@ -217,6 +254,17 @@ class AutonomousExecutionPipeline(
         logObservabilityContext("parallel_subtask", payload)
         // PR-48: log richer dispatch metadata for observability; accept without failure.
         logDispatchMetadataContext("parallel_subtask", payload)
+        // PR-49/PR-I: log and gate on policy routing outcome; reject only when explicitly rejected.
+        logPolicyRoutingContext("parallel_subtask", payload)
+        if (PolicyRoutingContext.isPolicyRejection(payload.policy_routing_outcome)) {
+            Log.i(
+                TAG,
+                "parallel_subtask blocked: policy_routing_outcome=rejected " +
+                    "policy_failure_reason=${payload.policy_failure_reason} " +
+                    "task_id=${payload.task_id}"
+            )
+            return buildDisabledResult(payload, REASON_POLICY_REJECTED)
+        }
         Log.i(TAG, "parallel_subtask executing locally; task_id=${payload.task_id}")
         return collaborationAgent.handleParallelSubtask(payload)
             .copy(
@@ -225,7 +273,8 @@ class AutonomousExecutionPipeline(
                 continuity_token = payload.continuity_token,
                 is_resumable = payload.is_resumable,
                 dispatch_trace_id = payload.dispatch_trace_id,
-                dispatch_plan_id = payload.dispatch_plan_id
+                dispatch_plan_id = payload.dispatch_plan_id,
+                policy_routing_outcome = payload.policy_routing_outcome
             )
     }
 
@@ -298,6 +347,33 @@ class AutonomousExecutionPipeline(
         )
     }
 
+    /**
+     * Logs PR-49/PR-I policy routing context fields for observability.
+     *
+     * A no-op when all policy routing fields are null/blank, so it imposes no
+     * overhead on legacy (pre-PR-I) senders.
+     */
+    private fun logPolicyRoutingContext(msgType: String, payload: GoalExecutionPayload) {
+        val hasPolicyRouting = !payload.policy_routing_outcome.isNullOrBlank()
+            || !payload.policy_failure_reason.isNullOrBlank()
+            || !payload.readiness_degradation_hint.isNullOrBlank()
+        if (!hasPolicyRouting) return
+
+        val outcome = PolicyRoutingContext.RoutingOutcome.fromValue(payload.policy_routing_outcome)
+        val knownFailureReason = PolicyRoutingContext.isKnownFailureReason(payload.policy_failure_reason)
+        val knownDegradationReason = PolicyRoutingContext.isKnownDegradationReason(payload.readiness_degradation_hint)
+        Log.i(
+            TAG,
+            "$msgType policy_routing_outcome=${payload.policy_routing_outcome} " +
+                "canonical_outcome=$outcome " +
+                "policy_failure_reason=${payload.policy_failure_reason} " +
+                "known_failure_reason=$knownFailureReason " +
+                "readiness_degradation_hint=${payload.readiness_degradation_hint} " +
+                "known_degradation_reason=$knownDegradationReason " +
+                "task_id=${payload.task_id}"
+        )
+    }
+
     private fun buildDisabledResult(
         payload: GoalExecutionPayload,
         reason: String
@@ -318,6 +394,8 @@ class AutonomousExecutionPipeline(
         // PR-G: echo dispatch_trace_id in disabled results for full-chain observability
         dispatch_trace_id = payload.dispatch_trace_id,
         // PR-48: echo dispatch_plan_id in disabled results for dispatch plan correlation
-        dispatch_plan_id = payload.dispatch_plan_id
+        dispatch_plan_id = payload.dispatch_plan_id,
+        // PR-49/PR-I: echo policy_routing_outcome in disabled results for policy layer correlation
+        policy_routing_outcome = payload.policy_routing_outcome
     )
 }
