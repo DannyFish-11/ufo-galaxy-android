@@ -82,6 +82,14 @@ All structured log entries are identified by one of the following stable tag con
 | `GALAXY:DISPATCHER:SELECT` | `GalaxyLogger.TAG_DISPATCHER_SELECT` | Dispatcher selected for a task (route_mode + exec_mode resolved) |
 | `GALAXY:BRIDGE:HANDOFF` | `GalaxyLogger.TAG_BRIDGE_HANDOFF` | Bridge handoff to Agent Runtime initiated |
 
+### V2 observability / cross-system tracing (PR-G)
+
+| Tag | Constant | When emitted |
+|-----|----------|--------------|
+| `GALAXY:DISPATCH:DECISION` | `GalaxyLogger.TAG_DISPATCH_DECISION` | Android dispatch decision recorded with full observability context (`dispatch_trace_id`, `executor_target_type`, route) |
+| `GALAXY:LIFECYCLE:OBSERVE` | `GalaxyLogger.TAG_LIFECYCLE_OBSERVE` | Device lifecycle event forwarded to V2 observability model (`device_attach`, `device_reconnect`, `device_detach`, etc.) |
+| `GALAXY:RECOVERY:OBSERVE` | `GalaxyLogger.TAG_RECOVERY_OBSERVE` | Recovery execution event recorded with cross-system tracing context (`dispatch_trace_id`, `continuity_token`, `is_resumable`) |
+
 ### Errors
 
 | Tag | Constant | When emitted |

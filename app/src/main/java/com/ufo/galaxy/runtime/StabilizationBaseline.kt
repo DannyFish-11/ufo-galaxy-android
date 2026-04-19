@@ -824,6 +824,132 @@ object StabilizationBaseline {
                 "an explicit resumability signal without requiring detachCause string parsing.",
             introducedPr = 44
         )
+    ) + listOf(
+
+        // ── PR-45: Explicit executor target typing surfaces ───────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "executor-target-type",
+            displayName = "ExecutorTargetType",
+            packagePath = "com.ufo.galaxy.runtime.ExecutorTargetType",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-45 canonical Android-side executor target type vocabulary — " +
+                "provides stable wire-value constants (ANDROID_DEVICE, NODE_SERVICE, WORKER, " +
+                "LOCAL) for explicit executor target typing introduced by V2; supplies " +
+                "isAndroidEligible() helper for safe dispatch gating without string comparison.",
+            introducedPr = 45
+        ),
+
+        // ── PR-46: Durable continuity and recovery context surfaces ───────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "continuity-recovery-context",
+            displayName = "ContinuityRecoveryContext",
+            packagePath = "com.ufo.galaxy.runtime.ContinuityRecoveryContext",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-46 Android-side continuity and recovery context vocabulary — " +
+                "declares interruption_reason wire values (REASON_RECONNECT, REASON_HANDOFF, " +
+                "REASON_DEVICE_PAUSE, REASON_TRANSPORT_DEGRADED) and provides helpers " +
+                "(isResumableExecution, isTerminalExecution, isKnownInterruptionReason, " +
+                "isTransportInterruption) for safe recovery classification without string parsing.",
+            introducedPr = 46
+        ),
+
+        // ── PR-47: Runtime observability compatibility surfaces ───────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-observability-metadata",
+            displayName = "RuntimeObservabilityMetadata",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeObservabilityMetadata",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 Android-side observability compatibility vocabulary — declares " +
+                "cross-system tracing field names (FIELD_DISPATCH_TRACE_ID, " +
+                "FIELD_LIFECYCLE_EVENT_ID, FIELD_SESSION_CORRELATION_ID), event kind constants " +
+                "for structured log entries, LifecycleObservabilityKind enum mapping Android " +
+                "lifecycle events to V2 observability classifications, and helpers " +
+                "(hasDispatchTraceId, hasLifecycleEventId, hasSessionCorrelationId, " +
+                "resolveTraceId) for safe null-tolerant tracing ID resolution.",
+            introducedPr = 47
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "goal-execution-payload-observability-fields",
+            displayName = "GoalExecutionPayload.dispatch_trace_id / lifecycle_event_id",
+            packagePath = "com.ufo.galaxy.protocol.GoalExecutionPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 optional observability/tracing metadata fields on " +
+                "GoalExecutionPayload — dispatch_trace_id enables cross-system dispatch chain " +
+                "correlation; lifecycle_event_id links the dispatch to the triggering V2 " +
+                "lifecycle event. Both fields default to null for legacy-sender backward " +
+                "compatibility. dispatch_trace_id is echoed back in GoalResultPayload for " +
+                "full-chain V2 observability correlation.",
+            introducedPr = 47
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "task-assign-payload-observability-fields",
+            displayName = "TaskAssignPayload.dispatch_trace_id / lifecycle_event_id",
+            packagePath = "com.ufo.galaxy.protocol.TaskAssignPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 optional observability/tracing metadata fields on " +
+                "TaskAssignPayload — mirrors the GoalExecutionPayload additions for the " +
+                "task_assign path; allows V2 to attach dispatch trace and lifecycle event " +
+                "correlation identifiers to task_assign commands without requiring Android " +
+                "callers to change any existing logic.",
+            introducedPr = 47
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "aip-message-observability-fields",
+            displayName = "AipMessage.dispatch_trace_id / session_correlation_id",
+            packagePath = "com.ufo.galaxy.protocol.AipMessage",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 optional observability/tracing fields on the AipMessage envelope — " +
+                "dispatch_trace_id for cross-system dispatch chain correlation at the envelope " +
+                "level; session_correlation_id for session-level cross-system tracing across " +
+                "session transitions and handoffs. Both fields default to null for full " +
+                "backward compatibility with pre-PR-47 senders.",
+            introducedPr = 47
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-dispatch-decision",
+            displayName = "GalaxyLogger.TAG_DISPATCH_DECISION",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 stable structured log tag for Android dispatch decision events — " +
+                "records the execution route and target with full observability context " +
+                "(dispatch_trace_id, executor_target_type) so dispatch decisions can be " +
+                "correlated across the V2 observability pipeline.",
+            introducedPr = 47
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-lifecycle-observe",
+            displayName = "GalaxyLogger.TAG_LIFECYCLE_OBSERVE",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 stable structured log tag for device lifecycle observability events " +
+                "forwarded to the V2 observability model — provides a dedicated observability " +
+                "stream for lifecycle-triggered events (attach, reconnect, detach, degraded) " +
+                "with session correlation and lifecycle event identifiers.",
+            introducedPr = 47
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-recovery-observe",
+            displayName = "GalaxyLogger.TAG_RECOVERY_OBSERVE",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-47 stable structured log tag for recovery execution observability events — " +
+                "records recovery-related executions with dispatch_trace_id, continuity_token, " +
+                "and is_resumable so recovery events can be traced end-to-end across the V2 " +
+                "observability pipeline.",
+            introducedPr = 47
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

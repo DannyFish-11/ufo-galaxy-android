@@ -260,6 +260,26 @@ enum class MsgType(val value: String) {
  *                            `"join_runtime"` (source also participates as a runtime executor).
  *                            Defaults to `null` for backwards compatibility; consumers must
  *                            treat `null` as equivalent to `"control_only"`.
+ *
+ * ## PR-G: V2 observability/tracing metadata (PR-47 compatibility)
+ * The following fields carry richer observability and cross-system tracing metadata
+ * introduced by V2 production-grade observability.  All fields are optional so that
+ * pre-V2 / pre-PR-47 senders remain compatible.  Receivers MUST accept these fields
+ * without failure and MUST NOT rely on them for core routing or execution decisions.
+ *
+ * @param dispatch_trace_id   Optional cross-system dispatch trace correlation identifier.
+ *                            When present, this value allows the full dispatch chain from
+ *                            the V2 orchestrator through gateway to Android to be traced
+ *                            with a single stable ID across structured log entries.
+ *                            Android echoes this value in uplink result messages for
+ *                            full-chain V2 observability correlation.  `null` for legacy
+ *                            / pre-V2 senders; a blank value is treated as `null`.
+ * @param session_correlation_id  Optional session-level correlation identifier propagated
+ *                            across session transitions, handoffs, and recovery events
+ *                            within the same logical session context.  Unlike [dispatch_trace_id]
+ *                            (dispatch-chain scoped), this spans multiple dispatches.
+ *                            Android MUST accept this field without failure.  `null` for
+ *                            legacy senders.
  */
 data class AipMessage(
     val type: MsgType,
@@ -274,7 +294,10 @@ data class AipMessage(
     val route_mode: String? = null,
     val runtime_session_id: String? = null,
     val idempotency_key: String? = null,
-    val source_runtime_posture: String? = null
+    val source_runtime_posture: String? = null,
+    // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
+    val dispatch_trace_id: String? = null,
+    val session_correlation_id: String? = null
 )
 
 /**
@@ -419,6 +442,22 @@ data class TaskSubmitPayload(
  *                            `"reconnect"`, `"handoff"`, `"device_pause"`,
  *                            `"transport_degraded"`.  Unknown values MUST be tolerated.
  *                            `null` for non-recovery dispatches.
+ *
+ * ## V2 observability/tracing metadata (PR-G compatibility)
+ * The following fields carry cross-system observability and tracing metadata introduced
+ * by V2 production-grade runtime observability.  All fields are optional so that
+ * pre-PR-G senders remain compatible.  Android handlers MUST accept these fields
+ * without failure and MUST NOT rely on them for core execution decisions.
+ *
+ * @param dispatch_trace_id   Optional cross-system dispatch trace correlation identifier.
+ *                            When present, allows the full dispatch chain from the V2
+ *                            orchestrator through gateway to Android to be traced with a
+ *                            single stable ID.  `null` for legacy / pre-V2 senders.
+ * @param lifecycle_event_id  Optional identifier of the V2 lifecycle event that triggered
+ *                            this dispatch (e.g. reconnect, session restore).  Used for
+ *                            cross-system observability correlation only; does not affect
+ *                            execution semantics.  `null` for non-lifecycle-triggered
+ *                            dispatches.
  */
 data class TaskAssignPayload(
     val task_id: String,
@@ -438,7 +477,10 @@ data class TaskAssignPayload(
     val continuity_token: String? = null,
     val recovery_context: Map<String, String> = emptyMap(),
     val is_resumable: Boolean? = null,
-    val interruption_reason: String? = null
+    val interruption_reason: String? = null,
+    // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
+    val dispatch_trace_id: String? = null,
+    val lifecycle_event_id: String? = null
 )
 
 /**
@@ -577,6 +619,21 @@ data class CommandResultPayload(
  *                            `"reconnect"`, `"handoff"`, `"device_pause"`,
  *                            `"transport_degraded"`.  Unknown values MUST be tolerated.
  *                            `null` for non-recovery dispatches.
+ *
+ * ## V2 observability/tracing metadata (PR-G compatibility)
+ * The following fields carry cross-system observability and tracing metadata introduced
+ * by V2 production-grade runtime observability.  All fields are optional so that
+ * pre-PR-G senders remain compatible.  Android handlers MUST accept these fields
+ * without failure and MUST NOT rely on them for core execution decisions.
+ *
+ * @param dispatch_trace_id   Optional cross-system dispatch trace correlation identifier.
+ *                            When present, allows the full dispatch chain from the V2
+ *                            orchestrator through gateway to Android to be traced with a
+ *                            single stable ID.  `null` for legacy / pre-V2 senders.
+ * @param lifecycle_event_id  Optional identifier of the V2 lifecycle event that triggered
+ *                            this dispatch.  Used for cross-system observability correlation
+ *                            only; does not affect execution semantics.  `null` for
+ *                            non-lifecycle-triggered dispatches.
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -597,7 +654,10 @@ data class GoalExecutionPayload(
     val continuity_token: String? = null,
     val recovery_context: Map<String, String> = emptyMap(),
     val is_resumable: Boolean? = null,
-    val interruption_reason: String? = null
+    val interruption_reason: String? = null,
+    // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
+    val dispatch_trace_id: String? = null,
+    val lifecycle_event_id: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -644,6 +704,9 @@ data class GoalExecutionPayload(
  * @param is_resumable   Echoed from [GoalExecutionPayload.is_resumable] so V2 can determine
  *                       whether Android treated this execution as resumable or terminal.
  *                       `null` for legacy senders.
+ * @param dispatch_trace_id  Echoed from [GoalExecutionPayload.dispatch_trace_id] so V2 can
+ *                       correlate the result with the originating dispatch chain.  `null`
+ *                       for legacy / pre-V2 senders that do not include dispatch tracing.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -664,7 +727,9 @@ data class GoalResultPayload(
     val executor_target_type: String? = null,
     // ── PR-F: V2 durable continuity and recovery context (optional; echoed for full-chain correlation) ──
     val continuity_token: String? = null,
-    val is_resumable: Boolean? = null
+    val is_resumable: Boolean? = null,
+    // ── PR-G: V2 observability/tracing metadata (optional; echoed for full-chain correlation) ──
+    val dispatch_trace_id: String? = null
 )
 
 /**
