@@ -92,6 +92,46 @@ class GalaxyWebSocketClient(
     private var runtimeSessionId: String? = null,
     private var configuredDeviceId: String = ""
 ) : GatewayClient {
+    // ── Runtime attachment session identity fields (PR-G) ─────────────────────
+
+    /**
+     * The stable `runtime_attachment_session_id` for the current attached session era.
+     *
+     * Set by [RuntimeController] via [updateRuntimeConnectionConfig] each time a new
+     * [com.ufo.galaxy.runtime.AttachedRuntimeSession] is created or preserved on reconnect.
+     *
+     * - On first connect / user activation: set to a freshly generated UUID v4.
+     * - On transparent reconnect (RECONNECT_RECOVERY): **same value as before**, enabling
+     *   the V2 continuity consumer to recognise the returning device as restoring the same
+     *   attachment rather than starting a brand-new one.
+     * - On explicit stop or invalidation: cleared to `null`; the next activation generates
+     *   a fresh ID.
+     *
+     * Included in both `device_register` and `capability_report` handshake messages as the
+     * `runtime_attachment_session_id` wire field.
+     */
+    @Volatile private var runtimeAttachmentSessionId: String? = null
+
+    /**
+     * The durable session ID for the current activation era (PR-1 / PR-G).
+     *
+     * Sourced from [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.durableSessionId].
+     * Stable across all reconnects within the same activation era; cleared on stop/invalidate.
+     *
+     * Included in handshake messages as `durable_session_id` when non-null.
+     */
+    @Volatile private var durableSessionId: String? = null
+
+    /**
+     * The session continuity epoch for the current activation era (PR-1 / PR-G).
+     *
+     * Sourced from [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.sessionContinuityEpoch].
+     * `0` at first attach; increments on each transparent reconnect.
+     *
+     * Included in handshake messages as `session_continuity_epoch` when [durableSessionId]
+     * is non-null.
+     */
+    @Volatile private var sessionContinuityEpoch: Int? = null
     companion object {
         private const val TAG = "GalaxyWebSocket"
         private const val HEARTBEAT_INTERVAL_MS = 30000L
@@ -306,13 +346,24 @@ class GalaxyWebSocketClient(
     /**
      * Applies live runtime connection settings used by future (or immediate) WS connections.
      *
+     * Also accepts the runtime attachment session identity fields added in PR-G:
+     * [runtimeAttachmentSessionId], [durableSessionId], and [sessionContinuityEpoch].
+     * These are included in subsequent [sendHandshake] invocations so both the initial
+     * registration and every reconnect registration carry the stable attachment identity
+     * the V2 continuity consumer needs.
+     *
+     * Pass `null` for any field that should remain unchanged.
+     *
      * @return true when either URL or token changed.
      */
     fun updateRuntimeConnectionConfig(
         serverUrl: String? = null,
         gatewayToken: String? = null,
         runtimeSessionId: String? = null,
-        deviceId: String? = null
+        deviceId: String? = null,
+        runtimeAttachmentSessionId: String? = null,
+        durableSessionId: String? = null,
+        sessionContinuityEpoch: Int? = null
     ): Boolean {
         var changed = false
         if (serverUrl != null && serverUrl != this.serverUrl) {
@@ -329,8 +380,38 @@ class GalaxyWebSocketClient(
         if (deviceId != null && deviceId != this.configuredDeviceId) {
             this.configuredDeviceId = deviceId
         }
+        if (runtimeAttachmentSessionId != null) {
+            this.runtimeAttachmentSessionId = runtimeAttachmentSessionId
+        }
+        if (durableSessionId != null) {
+            this.durableSessionId = durableSessionId
+        }
+        if (sessionContinuityEpoch != null) {
+            this.sessionContinuityEpoch = sessionContinuityEpoch
+        }
         return changed
     }
+
+    /**
+     * Clears the runtime attachment session identity fields (PR-G).
+     *
+     * Called by [RuntimeController] on explicit stop or session invalidation to ensure
+     * the next activation generates a fresh identity and does not accidentally carry a
+     * stale session ID from a previous era into the new connection handshake.
+     */
+    fun clearRuntimeAttachmentSessionIdentity() {
+        runtimeAttachmentSessionId = null
+        durableSessionId = null
+        sessionContinuityEpoch = null
+    }
+
+    /**
+     * Returns the current [runtimeAttachmentSessionId] held by this client (PR-G).
+     *
+     * Exposed for testing so assertions can verify that [RuntimeController] pushed the
+     * correct identity before the WS handshake was sent.
+     */
+    internal fun getRuntimeAttachmentSessionId(): String? = runtimeAttachmentSessionId
 
     /**
      * Additional action capabilities reported when models are loaded.
@@ -722,6 +803,10 @@ class GalaxyWebSocketClient(
         val deviceId = getDeviceId()
         val hostDescriptor = runtimeHostDescriptor
         val hostMeta: Map<String, Any> = hostDescriptor?.toMetadataMap() ?: emptyMap()
+        // Snapshot PR-G identity fields atomically so both messages carry the same values.
+        val attachmentSessionId = runtimeAttachmentSessionId
+        val durableId = durableSessionId
+        val continuityEpoch = sessionContinuityEpoch
 
         // Step 1: device_register — server expects this before capability_report (H2)
         val register = JsonObject().apply {
@@ -733,6 +818,15 @@ class GalaxyWebSocketClient(
             addProperty("trace_id", sessionTraceId)
             addProperty("timestamp", System.currentTimeMillis())
             if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            // PR-G: stable attachment identity for V2 continuity consumer.
+            if (!attachmentSessionId.isNullOrBlank()) {
+                addProperty("runtime_attachment_session_id", attachmentSessionId)
+            }
+            // PR-G: durable continuity fields — present when a durable era is active.
+            if (!durableId.isNullOrBlank()) {
+                addProperty("durable_session_id", durableId)
+                addProperty("session_continuity_epoch", continuityEpoch ?: 0)
+            }
             addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = MsgType.DEVICE_REGISTER.value))
             // PR-5: include runtime-host identity in device_register so the gateway
             // can immediately classify this device as a formal runtime host rather than
@@ -745,6 +839,8 @@ class GalaxyWebSocketClient(
         }
         sendJson(gson.toJson(register))
         Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId" +
+                (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
+                (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
                 if (hostDescriptor != null) " host_id=${hostDescriptor.hostId} " +
                     "formation_role=${hostDescriptor.formationRole.wireValue} " +
                     "participation_state=${hostDescriptor.participationState.wireValue}" else "")
@@ -789,6 +885,15 @@ class GalaxyWebSocketClient(
             addProperty("trace_id", sessionTraceId)
             addProperty("route_mode", currentRouteMode())
             if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            // PR-G: stable attachment identity for V2 continuity consumer.
+            if (!attachmentSessionId.isNullOrBlank()) {
+                addProperty("runtime_attachment_session_id", attachmentSessionId)
+            }
+            // PR-G: durable continuity fields — present when a durable era is active.
+            if (!durableId.isNullOrBlank()) {
+                addProperty("durable_session_id", durableId)
+                addProperty("session_continuity_epoch", continuityEpoch ?: 0)
+            }
             addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
             add("capabilities", gson.toJsonTree(report.capabilities))
@@ -808,6 +913,8 @@ class GalaxyWebSocketClient(
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
                 " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
+                (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
+                (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
                 if (hostDescriptor != null) " host_id=${hostDescriptor.hostId}" else "")
     }
 
