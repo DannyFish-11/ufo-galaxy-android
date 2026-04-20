@@ -18,6 +18,7 @@ import com.ufo.galaxy.agent.DelegatedTakeoverExecutor
 import com.ufo.galaxy.agent.GoalExecutionPipeline
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.HandoffContractValidator
+import com.ufo.galaxy.agent.HandoffEnvelopeV2
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
@@ -45,6 +46,7 @@ import com.ufo.galaxy.protocol.PeerExchangePayload
 import com.ufo.galaxy.protocol.PeerAnnouncePayload
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
+import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
@@ -347,6 +349,22 @@ class GalaxyConnectionService : Service() {
                 Log.i(TAG, "收到 task_cancel: task_id=$taskId")
                 serviceScope.launch {
                     handleTaskCancel(taskId, cancelPayloadJson)
+                }
+            }
+
+            // ── PR-H: HandoffEnvelopeV2 native consumption dispatch ───────────────────
+            override fun onHandoffEnvelopeV2(taskId: String, envelopePayloadJson: String, traceId: String?) {
+                Log.i(TAG, "[PR-H] 收到 handoff_envelope_v2: task_id=$taskId trace_id=$traceId")
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_TASK_RECV, mapOf(
+                        "task_id" to taskId,
+                        "type" to "handoff_envelope_v2",
+                        "trace_id" to (traceId ?: ""),
+                        "event" to "handoff_envelope_v2_dispatch"
+                    )
+                )
+                serviceScope.launch {
+                    handleHandoffEnvelopeV2(taskId, envelopePayloadJson, traceId)
                 }
             }
 
@@ -1030,7 +1048,296 @@ class GalaxyConnectionService : Service() {
         webSocketClient.sendJson(gson.toJson(envelope))
     }
 
-    /** Sends a [GoalResultPayload] wrapped in an AIP v3 envelope. */
+    // ── PR-H: HandoffEnvelopeV2 native consumption handler ───────────────────────────────
+
+    /**
+     * Handles an inbound [MsgType.HANDOFF_ENVELOPE_V2] message by executing the enclosed
+     * goal via the canonical Android execution chain and sending back a
+     * [MsgType.HANDOFF_ENVELOPE_V2_RESULT] uplink with the ACK / outcome / failure state.
+     *
+     * ## Execution path
+     * 1. Send an immediate ACK log entry so V2 knows the envelope was received.
+     * 2. Parse the raw JSON into [HandoffEnvelopeV2] — reject with "bad_payload" on failure.
+     * 3. Pause the local [com.ufo.galaxy.loop.LoopController] session via
+     *    [RuntimeController.onRemoteTaskStarted].
+     * 4. Map the envelope to a [GoalExecutionPayload] and delegate to
+     *    [com.ufo.galaxy.agent.LocalGoalExecutor.executeGoal] (same path as task_assign /
+     *    goal_execution for consistency).
+     * 5. Send [MsgType.HANDOFF_ENVELOPE_V2_RESULT] with status, result_summary, and all
+     *    echoed identity fields for V2 end-to-end correlation.
+     * 6. Unblock the local loop via [RuntimeController.onRemoteTaskFinished].
+     *
+     * ## Error / exception handling
+     * - Parse failure: immediate result with status="error" and reason="bad_payload".
+     * - Execution failure: result with status="error" and the exception message.
+     * - Timeout: result with status="timeout".
+     * All non-success outcomes are also routed through [emitRuntimeDiagnostics] so the
+     * gateway can classify failure types.
+     *
+     * ## Contract alignment with V2
+     * All fields forwarded in the inbound envelope are echoed in the result payload:
+     * [dispatch_plan_id], [continuity_token], [dispatch_intent], [execution_context],
+     * [executor_target_type], and [source_runtime_posture].  This ensures V2 can perform
+     * full-chain correlation without re-querying Android for metadata.
+     *
+     * @param taskId          task_id extracted from the inbound payload.
+     * @param payloadJson     Raw JSON of the [HandoffEnvelopeV2] payload.
+     * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
+     */
+    private suspend fun handleHandoffEnvelopeV2(
+        taskId: String,
+        payloadJson: String,
+        inboundTraceId: String?
+    ) {
+        val consumedAtMs = System.currentTimeMillis()
+
+        // ── Step 1: structured envelope-received log ──────────────────────────────
+        Log.i(TAG, "[PR-H:HANDOFF_V2] envelope received task_id=$taskId trace_id=$inboundTraceId")
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "handoff_envelope_v2_received",
+                "task_id" to taskId,
+                "trace_id" to (inboundTraceId ?: ""),
+                "consumed_at_ms" to consumedAtMs
+            )
+        )
+
+        // ── Step 2: parse ─────────────────────────────────────────────────────────
+        val envelope = try {
+            gson.fromJson(payloadJson, HandoffEnvelopeV2::class.java)
+        } catch (e: Exception) {
+            Log.e(TAG, "[PR-H:HANDOFF_V2] envelope parse failed task_id=$taskId: ${e.message}", e)
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "handoff_v2_ingress",
+                errorType = "handoff_v2_parse_error",
+                errorContext = e.message ?: "unknown parse error"
+            )
+            val traceId = inboundTraceId ?: java.util.UUID.randomUUID().toString()
+            sendHandoffEnvelopeV2Result(
+                HandoffEnvelopeV2ResultPayload(
+                    task_id = taskId,
+                    trace_id = traceId,
+                    correlation_id = taskId,
+                    status = EdgeExecutor.STATUS_ERROR,
+                    error = "bad_payload: ${e.message}",
+                    consumed_at_ms = consumedAtMs,
+                    device_id = localDeviceId,
+                    route_mode = ROUTE_MODE_CROSS_DEVICE
+                ),
+                traceId
+            )
+            return
+        }
+
+        // Preserve inbound trace_id; generate only when absent.
+        val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
+            ?: envelope.trace_id.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.randomUUID().toString()
+
+        Log.i(
+            TAG,
+            "[PR-H:HANDOFF_V2] envelope parsed task_id=$taskId trace_id=$traceId " +
+                "goal=${envelope.goal.take(60)} exec_mode=${envelope.exec_mode} " +
+                "route_mode=${envelope.route_mode} dispatch_plan_id=${envelope.dispatch_plan_id}"
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "handoff_envelope_v2_parsed",
+                "task_id" to taskId,
+                "trace_id" to traceId,
+                "exec_mode" to envelope.exec_mode,
+                "route_mode" to envelope.route_mode,
+                "dispatch_intent" to (envelope.dispatch_intent ?: ""),
+                "dispatch_plan_id" to (envelope.dispatch_plan_id ?: ""),
+                "continuity_token" to (envelope.continuity_token ?: ""),
+                "executor_target_type" to (envelope.executor_target_type ?: ""),
+                "is_resumable" to (envelope.is_resumable?.toString() ?: "")
+            )
+        )
+
+        // ── Step 3: pause local loop ──────────────────────────────────────────────
+        UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+
+        // ── Step 4: build GoalExecutionPayload and execute ────────────────────────
+        var goalResult: GoalResultPayload? = null
+        try {
+            Log.i(TAG, "[PR-H:HANDOFF_V2] dispatch start task_id=$taskId trace_id=$traceId")
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "handoff_v2_dispatch_start",
+                    "task_id" to taskId,
+                    "trace_id" to traceId
+                )
+            )
+            updateNotification("HandoffV2 任务 ${taskId.take(8)}…")
+
+            val goalPayload = GoalExecutionPayload(
+                task_id = taskId,
+                goal = envelope.goal,
+                constraints = envelope.constraints,
+                max_steps = 10,
+                timeout_ms = 0L,
+                source_runtime_posture = envelope.source_runtime_posture,
+                execution_context = envelope.execution_context,
+                executor_target_type = envelope.executor_target_type,
+                continuity_token = envelope.continuity_token,
+                recovery_context = envelope.recovery_context,
+                is_resumable = envelope.is_resumable,
+                interruption_reason = envelope.interruption_reason,
+                dispatch_plan_id = envelope.dispatch_plan_id,
+                source_dispatch_strategy = envelope.source_dispatch_strategy
+            )
+
+            val rawResult = UFOGalaxyApplication.localGoalExecutor.executeGoal(goalPayload)
+            goalResult = rawResult.copy(
+                correlation_id = taskId,
+                device_id = localDeviceId,
+                device_role = UFOGalaxyApplication.appSettings.deviceRole,
+                latency_ms = rawResult.latency_ms ?: 0L,
+                source_runtime_posture = envelope.source_runtime_posture,
+                executor_target_type = envelope.executor_target_type,
+                continuity_token = envelope.continuity_token,
+                dispatch_plan_id = envelope.dispatch_plan_id
+            )
+
+            Log.i(
+                TAG,
+                "[PR-H:HANDOFF_V2] dispatch end task_id=$taskId trace_id=$traceId " +
+                    "status=${goalResult.status} latency=${goalResult.latency_ms}ms"
+            )
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "handoff_v2_dispatch_end",
+                    "task_id" to taskId,
+                    "trace_id" to traceId,
+                    "status" to goalResult.status,
+                    "latency_ms" to (goalResult.latency_ms ?: 0L)
+                )
+            )
+            updateNotification("HandoffV2 ${taskId.take(8)}: ${goalResult.status}")
+
+            sendHandoffEnvelopeV2Result(
+                HandoffEnvelopeV2ResultPayload(
+                    task_id = taskId,
+                    trace_id = traceId,
+                    correlation_id = taskId,
+                    status = goalResult.status,
+                    result_summary = goalResult.result
+                        ?: "handoff_v2: ${goalResult.status}",
+                    error = goalResult.error,
+                    consumed_at_ms = consumedAtMs,
+                    device_id = localDeviceId,
+                    route_mode = ROUTE_MODE_CROSS_DEVICE,
+                    dispatch_plan_id = envelope.dispatch_plan_id,
+                    continuity_token = envelope.continuity_token,
+                    dispatch_intent = envelope.dispatch_intent,
+                    execution_context = envelope.execution_context,
+                    executor_target_type = envelope.executor_target_type,
+                    source_runtime_posture = envelope.source_runtime_posture
+                ),
+                traceId
+            )
+        } catch (err: Exception) {
+            Log.e(TAG, "[PR-H:HANDOFF_V2] execution failed task_id=$taskId trace_id=$traceId", err)
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "handoff_v2_execution",
+                errorType = "handoff_v2_execution_failed",
+                errorContext = err.message ?: "unknown execution error"
+            )
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "handoff_v2_execution_failed",
+                    "task_id" to taskId,
+                    "trace_id" to traceId,
+                    "error" to (err.message ?: "unknown")
+                )
+            )
+            sendHandoffEnvelopeV2Result(
+                HandoffEnvelopeV2ResultPayload(
+                    task_id = taskId,
+                    trace_id = traceId,
+                    correlation_id = taskId,
+                    status = EdgeExecutor.STATUS_ERROR,
+                    error = "handoff_v2_execution_failed: ${err.message ?: "unknown"}",
+                    consumed_at_ms = consumedAtMs,
+                    device_id = localDeviceId,
+                    route_mode = ROUTE_MODE_CROSS_DEVICE,
+                    dispatch_plan_id = envelope.dispatch_plan_id,
+                    continuity_token = envelope.continuity_token,
+                    dispatch_intent = envelope.dispatch_intent,
+                    execution_context = envelope.execution_context,
+                    executor_target_type = envelope.executor_target_type,
+                    source_runtime_posture = envelope.source_runtime_posture
+                ),
+                traceId
+            )
+        } finally {
+            // ── Step 6: unblock local loop ────────────────────────────────────────
+            UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+        }
+
+        // Persist to OpenClawd memory (non-blocking, outside try/finally).
+        goalResult?.let { result ->
+            serviceScope.launch(Dispatchers.IO) {
+                storeMemoryEntry(
+                    taskId = taskId,
+                    goal = envelope.goal,
+                    status = result.status,
+                    summary = "handoff_envelope_v2: ${result.steps.size} step(s)",
+                    steps = result.steps.map { "${it.action}: ${if (it.success) "ok" else (it.error ?: "fail")}" },
+                    routeMode = ROUTE_MODE_CROSS_DEVICE
+                )
+            }
+        }
+    }
+
+    /**
+     * Sends a [HandoffEnvelopeV2ResultPayload] as a [MsgType.HANDOFF_ENVELOPE_V2_RESULT]
+     * AIP v3 envelope uplink.
+     *
+     * Emits a structured log entry at each call so V2 can correlate the result with its
+     * original dispatch without relying on gateway-side state.
+     *
+     * @param result   The populated [HandoffEnvelopeV2ResultPayload] to transmit.
+     * @param traceId  End-to-end trace identifier; echoed in the AIP v3 envelope.
+     */
+    private fun sendHandoffEnvelopeV2Result(
+        result: HandoffEnvelopeV2ResultPayload,
+        traceId: String
+    ) {
+        val envelope = AipMessage(
+            type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
+            payload = result,
+            correlation_id = result.correlation_id,
+            device_id = localDeviceId,
+            trace_id = traceId,
+            route_mode = result.route_mode,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(
+                result.task_id, MsgType.HANDOFF_ENVELOPE_V2_RESULT, traceId
+            )
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        Log.i(
+            TAG,
+            "[PR-H:HANDOFF_V2_RESULT] ack/result emitted task_id=${result.task_id} " +
+                "trace_id=$traceId status=${result.status} sent=$sent"
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "handoff_envelope_v2_result_emitted",
+                "task_id" to result.task_id,
+                "trace_id" to traceId,
+                "status" to result.status,
+                "sent" to sent,
+                "dispatch_plan_id" to (result.dispatch_plan_id ?: ""),
+                "continuity_token" to (result.continuity_token ?: ""),
+                "executor_target_type" to (result.executor_target_type ?: "")
+            )
+        )
+    }
     private fun sendGoalResult(result: GoalResultPayload) {
         val envelope = AipMessage(
             type = MsgType.GOAL_RESULT,

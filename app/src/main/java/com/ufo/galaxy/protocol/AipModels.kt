@@ -136,7 +136,26 @@ enum class MsgType(val value: String) {
      *  Carries ACK / PROGRESS / RESULT (COMPLETED / FAILED / TIMEOUT / CANCELLED) events.
      *  Payload model: [DelegatedExecutionSignalPayload].
      *  @status pr16 — payload defined; send path present via GalaxyConnectionService. */
-    DELEGATED_EXECUTION_SIGNAL("delegated_execution_signal");
+    DELEGATED_EXECUTION_SIGNAL("delegated_execution_signal"),
+
+    // ── PR-H: HandoffEnvelopeV2 native Android consumption ───────────────────────────────
+    // Downlink: V2 sends a HandoffEnvelopeV2 to this device, requesting native consumption
+    // of the enclosed task via the full Android execution chain (parse → execute → ack/result).
+    // HANDOFF_ENVELOPE_V2_RESULT is the uplink reply carrying the ACK and execution outcome.
+
+    /** Downlink: V2 sends a [com.ufo.galaxy.agent.HandoffEnvelopeV2] envelope to Android
+     *  for native consumption.  Android parses the envelope, maps it to an execution payload,
+     *  executes the goal via the canonical execution chain, and sends back a
+     *  [HANDOFF_ENVELOPE_V2_RESULT] uplink with the ACK / result / failure state.
+     *  Payload model: [com.ufo.galaxy.agent.HandoffEnvelopeV2].
+     *  @status pr-h — promoted; dedicated stateful handler in GalaxyConnectionService. */
+    HANDOFF_ENVELOPE_V2("handoff_envelope_v2"),
+
+    /** Uplink: Android reports the result of consuming a [HANDOFF_ENVELOPE_V2].
+     *  Carries ACK / status / result_summary / error for end-to-end V2 correlation.
+     *  Payload model: [HandoffEnvelopeV2ResultPayload].
+     *  @status pr-h — payload defined; send path present via GalaxyConnectionService. */
+    HANDOFF_ENVELOPE_V2_RESULT("handoff_envelope_v2_result");
 
     companion object {
         /**
@@ -207,7 +226,9 @@ enum class MsgType(val value: String) {
             PEER_ANNOUNCE, PEER_EXCHANGE, MESH_TOPOLOGY,
             WAKE_EVENT, SESSION_MIGRATE,
             COORD_SYNC, BROADCAST, LOCK, UNLOCK,
-            TAKEOVER_REQUEST, TAKEOVER_RESPONSE
+            TAKEOVER_REQUEST, TAKEOVER_RESPONSE,
+            // ── PR-H: HandoffEnvelopeV2 native consumption ──────────────────
+            HANDOFF_ENVELOPE_V2
         )
 
         /**
@@ -1154,4 +1175,69 @@ data class PeerAnnouncePayload(
     val peer_role: String? = null,
     val session_id: String? = null,
     val announce_seq: Int = 0
+)
+
+// ── PR-H: HandoffEnvelopeV2 native consumption result payload ─────────────────────────────
+
+/**
+ * Uplink result payload for [MsgType.HANDOFF_ENVELOPE_V2_RESULT].
+ *
+ * Sent by Android after consuming a [MsgType.HANDOFF_ENVELOPE_V2] envelope.
+ * Carries the full ACK / execution outcome so V2 can reconcile its handoff
+ * state without a "consumed-but-no-confirmation" black-hole.
+ *
+ * All identity fields are echoed from the originating envelope to allow
+ * end-to-end correlation by V2 without requiring per-device session state.
+ *
+ * | Field                    | Role                                                              |
+ * |--------------------------|-------------------------------------------------------------------|
+ * | [task_id]                | Echoed from [com.ufo.galaxy.agent.HandoffEnvelopeV2.task_id]      |
+ * | [trace_id]               | Echoed from [com.ufo.galaxy.agent.HandoffEnvelopeV2.trace_id]     |
+ * | [correlation_id]         | Set to [task_id] for reply routing                                |
+ * | [status]                 | Terminal status: "success" / "error" / "timeout" / "rejected"    |
+ * | [result_summary]         | Human-readable one-line outcome for gateway aggregation           |
+ * | [error]                  | Structured error detail when [status] is "error" / "rejected"    |
+ * | [consumed_at_ms]         | Epoch-ms timestamp when Android received and started consuming    |
+ * | [device_id]              | Consuming Android device identifier                               |
+ * | [route_mode]             | Routing path ("cross_device") for gateway correlation             |
+ * | [dispatch_plan_id]       | Echoed from the originating envelope; null for legacy senders     |
+ * | [continuity_token]       | Echoed from the originating envelope; null for legacy senders     |
+ * | [dispatch_intent]        | Echoed from the originating envelope; null for legacy senders     |
+ * | [execution_context]      | Echoed from the originating envelope; empty for legacy senders    |
+ * | [executor_target_type]   | Echoed from the originating envelope; null for legacy senders     |
+ * | [source_runtime_posture] | Echoed from the originating envelope; null for legacy senders     |
+ *
+ * @param task_id                Unique task identifier echoed from [HandoffEnvelopeV2].
+ * @param trace_id               End-to-end trace identifier echoed from [HandoffEnvelopeV2].
+ * @param correlation_id         Set to [task_id] for gateway reply routing.
+ * @param status                 Terminal execution status: "success", "error", "timeout", or "rejected".
+ * @param result_summary         Human-readable one-line outcome description.
+ * @param error                  Structured error description when [status] is "error" or "rejected".
+ * @param consumed_at_ms         Epoch-ms timestamp when Android received the envelope.
+ * @param device_id              Consuming Android device identifier.
+ * @param route_mode             Routing path; always "cross_device" for handoff consumption.
+ * @param dispatch_plan_id       Echoed from [HandoffEnvelopeV2.dispatch_plan_id]; null for legacy.
+ * @param continuity_token       Echoed from [HandoffEnvelopeV2.continuity_token]; null for legacy.
+ * @param dispatch_intent        Echoed from [HandoffEnvelopeV2.dispatch_intent]; null for legacy.
+ * @param execution_context      Echoed from [HandoffEnvelopeV2.execution_context]; empty for legacy.
+ * @param executor_target_type   Echoed from [HandoffEnvelopeV2.executor_target_type]; null for legacy.
+ * @param source_runtime_posture Echoed from [HandoffEnvelopeV2.source_runtime_posture]; null for legacy.
+ */
+data class HandoffEnvelopeV2ResultPayload(
+    val task_id: String,
+    val trace_id: String,
+    val correlation_id: String,
+    val status: String,
+    val result_summary: String? = null,
+    val error: String? = null,
+    val consumed_at_ms: Long = System.currentTimeMillis(),
+    val device_id: String = "",
+    val route_mode: String = "cross_device",
+    // ── Echoed identity fields for end-to-end V2 correlation ─────────────────────────
+    val dispatch_plan_id: String? = null,
+    val continuity_token: String? = null,
+    val dispatch_intent: String? = null,
+    val execution_context: Map<String, String> = emptyMap(),
+    val executor_target_type: String? = null,
+    val source_runtime_posture: String? = null
 )
