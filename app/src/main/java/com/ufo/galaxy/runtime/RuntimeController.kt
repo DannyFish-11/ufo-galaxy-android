@@ -515,6 +515,44 @@ class RuntimeController(
         _durableSessionContinuityRecord.asStateFlow()
 
     /**
+     * PR-G — Stable `runtime_attachment_session_id` for the current activation era.
+     *
+     * This is the authoritative Android-side **attachment identity** that the V2 continuity
+     * reconnect consumer expects to see on every registration and reconnect handshake.
+     *
+     * Lifecycle:
+     *  - `null` before the first [openAttachedSession] call.
+     *  - Set to a freshly generated UUID v4 on [openAttachedSession] with
+     *    [SessionOpenSource.USER_ACTIVATION] or [SessionOpenSource.BACKGROUND_RESTORE]
+     *    (or [SessionOpenSource.TEST_ONLY]).
+     *  - **Preserved** (not replaced) on [openAttachedSession] with
+     *    [SessionOpenSource.RECONNECT_RECOVERY]: the same ID is reused, allowing the V2
+     *    continuity consumer to recognise a returning device without treating it as a
+     *    brand-new attachment.
+     *  - Cleared to `null` by [stop] and [invalidateSession], marking the end of the
+     *    current attachment era; the next activation generates a fresh ID.
+     *
+     * Also propagated to [GalaxyWebSocketClient] via [updateRuntimeConnectionConfig] so
+     * that the `runtime_attachment_session_id` wire field appears in every subsequent
+     * `device_register` and `capability_report` message, including reconnect handshakes.
+     */
+    @Volatile
+    private var _runtimeAttachmentSessionId: String? = null
+
+    /**
+     * Returns the current `runtime_attachment_session_id` held by this runtime (PR-G).
+     *
+     * Non-`null` once the first [openAttachedSession] call assigns an ID (including the
+     * pre-generation in [start] and [connectIfEnabled]).  `null` before activation and
+     * after [stop] or [invalidateSession].
+     *
+     * This is also the value propagated to [webSocketClient] and carried in every
+     * subsequent `device_register` / `capability_report` handshake message.
+     */
+    val runtimeAttachmentSessionId: String?
+        get() = _runtimeAttachmentSessionId
+
+    /**
      * PR-29 — Deduplication guard for [notifyTakeoverFailed].
      *
      * Stores the set of `takeoverId` values for which a [TakeoverFallbackEvent] has already
@@ -690,6 +728,19 @@ class RuntimeController(
         Log.i(TAG, "[RUNTIME] Starting cross-device runtime (timeout=${registrationTimeoutMs}ms)")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_start", "timeout_ms" to registrationTimeoutMs))
 
+        // PR-G: Pre-generate runtime_attachment_session_id before connecting so the very
+        // first device_register / capability_report handshake already carries the stable
+        // attachment identity.  If an ID was already set (e.g. from a prior background
+        // restore that was interrupted), reuse it rather than creating a new era.
+        if (_runtimeAttachmentSessionId == null) {
+            _runtimeAttachmentSessionId = UUID.randomUUID().toString()
+            Log.d(TAG, "[RUNTIME] Pre-generated runtime_attachment_session_id=${_runtimeAttachmentSessionId} for initial handshake")
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "runtime_attachment_session_id_pre_generated",
+                "runtime_attachment_session_id" to _runtimeAttachmentSessionId!!
+            ))
+        }
+
         // Enable WS client for this attempt.
         syncWebSocketRuntimeSettings()
         webSocketClient.setCrossDeviceEnabled(true)
@@ -799,6 +850,19 @@ class RuntimeController(
         Log.d(TAG, "[RUNTIME] connectIfEnabled: crossDevice=$crossDeviceOn state=${_state.value}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_connect_if_enabled", "cross_device" to crossDeviceOn))
 
+        // PR-G: Pre-generate runtime_attachment_session_id before connecting so the initial
+        // handshake on background restore already carries a stable attachment identity.
+        // If an ID is already set (transparent reconnect within the same era), preserve it.
+        if (crossDeviceOn && _runtimeAttachmentSessionId == null) {
+            _runtimeAttachmentSessionId = UUID.randomUUID().toString()
+            Log.d(TAG, "[RUNTIME] connectIfEnabled: pre-generated runtime_attachment_session_id=${_runtimeAttachmentSessionId}")
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "runtime_attachment_session_id_pre_generated",
+                "source" to "connect_if_enabled",
+                "runtime_attachment_session_id" to _runtimeAttachmentSessionId!!
+            ))
+        }
+
         syncWebSocketRuntimeSettings()
         webSocketClient.setCrossDeviceEnabled(crossDeviceOn)
 
@@ -874,6 +938,11 @@ class RuntimeController(
         // PR-1: Terminate the durable session era on explicit stop.  The next activation
         // will start a fresh era with a new durableSessionId.
         _durableSessionContinuityRecord.value = null
+        // PR-G: Terminate the attachment session era.  The next activation generates a fresh
+        // runtime_attachment_session_id so V2 treats it as a brand-new attachment, not a
+        // continuation of the stopped session.
+        _runtimeAttachmentSessionId = null
+        webSocketClient.clearRuntimeAttachmentSessionIdentity()
         // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
         _lastKnownHealthState = ParticipantHealthState.UNKNOWN
         // PR-37: Use transitionState() so the transition event is observable and any
@@ -1166,7 +1235,11 @@ class RuntimeController(
             serverUrl = settings.effectiveGatewayWsUrl(),
             gatewayToken = settings.gatewayToken,
             runtimeSessionId = com.ufo.galaxy.UFOGalaxyApplication.runtimeSessionId,
-            deviceId = settings.deviceId
+            deviceId = settings.deviceId,
+            // PR-G: propagate attachment identity so it is present in the very first handshake.
+            runtimeAttachmentSessionId = _runtimeAttachmentSessionId,
+            durableSessionId = _durableSessionContinuityRecord.value?.durableSessionId,
+            sessionContinuityEpoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch
         )
     }
 
@@ -1192,6 +1265,11 @@ class RuntimeController(
         // PR-1: Terminate the durable era — the invalidated identity is no longer a
         // trustworthy durable anchor for the center-side durable mesh/session registry.
         _durableSessionContinuityRecord.value = null
+        // PR-G: Terminate the attachment session era — the invalidated identity must not
+        // be carried into the next handshake, as V2 would incorrectly treat it as resuming
+        // the same attachment that was just invalidated.
+        _runtimeAttachmentSessionId = null
+        webSocketClient.clearRuntimeAttachmentSessionIdentity()
         // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
         _lastKnownHealthState = ParticipantHealthState.UNKNOWN
     }
@@ -1398,9 +1476,28 @@ class RuntimeController(
         if (descriptor == null) {
             Log.w(TAG, "[RUNTIME] openAttachedSession: no hostDescriptor available; session will use unknown-host identity")
         }
+
+        // PR-G: Determine the runtime_attachment_session_id for the new session.
+        //  - RECONNECT_RECOVERY: preserve the existing ID so V2 continuity consumer can
+        //    recognise this as a resumption of the same attachment, not a brand-new one.
+        //    If no ID exists yet (defensive), fall back to the pre-generated ID or generate fresh.
+        //  - All other sources: use the pre-generated ID from start()/connectIfEnabled()
+        //    if available; generate fresh otherwise.
+        val attachmentSessionId: String = when (source) {
+            SessionOpenSource.RECONNECT_RECOVERY ->
+                _runtimeAttachmentSessionId
+                    ?: replacingDetachedSessionId
+                    ?: UUID.randomUUID().toString()
+            else ->
+                _runtimeAttachmentSessionId ?: UUID.randomUUID().toString()
+        }
+        // Lock in the attachment session ID for this era (no-op if already set to the same value).
+        _runtimeAttachmentSessionId = attachmentSessionId
+
         val session = AttachedRuntimeSession.create(
             hostId = descriptor?.hostId ?: "unknown-host",
-            deviceId = descriptor?.deviceId ?: settings.deviceId
+            deviceId = descriptor?.deviceId ?: settings.deviceId,
+            sessionId = attachmentSessionId
         )
         // Generate a fresh per-connection runtime session ID for the snapshot projection (PR-19).
         _currentRuntimeSessionId = UUID.randomUUID().toString()
@@ -1422,18 +1519,31 @@ class RuntimeController(
                 currentDurable
         }
 
+        // PR-G: Propagate the attachment session identity to the WS client so every
+        // subsequent message (including the reconnect capability_report) carries it.
+        // This call happens BEFORE sendHandshake() on the reconnect path because
+        // simulateConnected/permanentWsListener.onConnected fires listeners BEFORE
+        // the WS client calls sendHandshake() in onOpen.
+        webSocketClient.updateRuntimeConnectionConfig(
+            runtimeAttachmentSessionId = attachmentSessionId,
+            durableSessionId = _durableSessionContinuityRecord.value?.durableSessionId,
+            sessionContinuityEpoch = _durableSessionContinuityRecord.value?.sessionContinuityEpoch
+        )
+
         updateHostSessionSnapshot()
         Log.i(
             TAG,
             "[RUNTIME] Attached runtime session opened: source=${source.wireValue} " +
                 "session_id=${session.sessionId} host_id=${session.hostId} " +
+                "runtime_attachment_session_id=$attachmentSessionId " +
                 "runtime_session_id=${_currentRuntimeSessionId} " +
                 "durable_session_id=${_durableSessionContinuityRecord.value?.durableSessionId} " +
                 "epoch=${_durableSessionContinuityRecord.value?.sessionContinuityEpoch}"
         )
         val attachLog = mutableMapOf<String, Any>(
             "event" to "runtime_session_attached",
-            "source" to source.wireValue
+            "source" to source.wireValue,
+            "runtime_attachment_session_id" to attachmentSessionId
         )
         replacingDetachedSessionId?.let {
             attachLog["replaces_detached_session_id"] = it
