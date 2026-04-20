@@ -1199,6 +1199,55 @@ object StabilizationBaseline {
                 "V2 can stably distinguish hold from administrative disabled.",
             introducedPr = 5
         )
+    ) + listOf(
+
+        // ── PR-51: Android participant runtime truth and reconciliation signal ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-participant-runtime-truth",
+            displayName = "AndroidParticipantRuntimeTruth",
+            packagePath = "com.ufo.galaxy.runtime.AndroidParticipantRuntimeTruth",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 consolidated participant-level runtime truth snapshot for V2 " +
+                "reconciliation — combines participant identity, participationState, " +
+                "coordinationRole, sourceRuntimePosture, session truth (sessionId, " +
+                "sessionState, delegatedExecutionCount), healthState, readinessState, " +
+                "active task status, and a reconciliationEpoch into a single, point-in-time " +
+                "map-serializable snapshot. Provides isFullyReconcilable and " +
+                "isAttachedAndEligible helpers. V2 should treat this as Android's " +
+                "authoritative self-reported local truth for canonical reconciliation passes.",
+            introducedPr = 51
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "active-task-status",
+            displayName = "ActiveTaskStatus",
+            packagePath = "com.ufo.galaxy.runtime.ActiveTaskStatus",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 in-flight task execution status enum carried by " +
+                "AndroidParticipantRuntimeTruth — RUNNING, PENDING, CANCELLING, FAILING — " +
+                "exposes the Android-side view of a currently executing task so V2 can " +
+                "track task progress before a terminal AndroidSessionContribution arrives. " +
+                "Complements AndroidSessionContribution (terminal results) with a " +
+                "pre-terminal in-progress status signal.",
+            introducedPr = 51
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "reconciliation-signal",
+            displayName = "ReconciliationSignal",
+            packagePath = "com.ufo.galaxy.runtime.ReconciliationSignal",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-51 structured, protocol-safe wrapper for all Android→V2 " +
+                "reconciliation signals — TASK_ACCEPTED, TASK_STATUS_UPDATE, TASK_RESULT, " +
+                "TASK_CANCELLED, TASK_FAILED, PARTICIPANT_STATE, RUNTIME_TRUTH_SNAPSHOT. " +
+                "Provides factory helpers (taskAccepted, taskCancelled, taskFailed, " +
+                "taskResult, runtimeTruthSnapshot) and isTerminal/hasRuntimeTruth helpers. " +
+                "Covers all lifecycle phases of Android→V2 signal flow, including " +
+                "pre-terminal cancel/failure notification and full snapshot publication.",
+            introducedPr = 51
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
