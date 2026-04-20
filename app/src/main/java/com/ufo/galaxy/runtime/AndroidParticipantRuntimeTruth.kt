@@ -270,7 +270,7 @@ data class AndroidParticipantRuntimeTruth(
                 deviceRole = descriptor.deviceRole,
                 participationState = descriptor.participationState,
                 coordinationRole = coordinationRole,
-                sourceRuntimePosture = sessionSnapshot?.posture ?: SourceRuntimePosture.DEFAULT,
+                sourceRuntimePosture = sessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
                 sessionId = sessionSnapshot?.sessionId,
                 sessionState = sessionSnapshot?.attachmentState?.let {
                     AttachedRuntimeSession.State.fromValue(it)
@@ -312,13 +312,13 @@ enum class ActiveTaskStatus(val wireValue: String) {
     /**
      * Android received a cancellation request for the currently executing task and
      * is in the process of stopping execution.  A [ReconciliationSignal] with
-     * [ReconciliationSignal.Kind.CANCELLATION] will follow.
+     * [ReconciliationSignal.Kind.TASK_CANCELLED] will follow.
      */
     CANCELLING("cancelling"),
 
     /**
      * Task execution encountered an error condition.  Android will emit a
-     * [ReconciliationSignal] with [ReconciliationSignal.Kind.FAILURE] immediately.
+     * [ReconciliationSignal] with [ReconciliationSignal.Kind.TASK_FAILED] immediately.
      */
     FAILING("failing");
 
