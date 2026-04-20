@@ -252,7 +252,7 @@ class GalaxyWebSocketClient(
         fun onAdvancedMessage(type: com.ufo.galaxy.protocol.MsgType, messageId: String?, rawJson: String) = Unit
 
         /**
-         * Called when a message with a completely unrecognised type string is received.
+         * Called when a completely unrecognised message type string is received.
          *
          * This is the last-resort fallback to prevent silent failures. The default
          * implementation is a no-op; override to add structured error reporting.
@@ -261,6 +261,21 @@ class GalaxyWebSocketClient(
          * @param rawJson  Full raw JSON of the inbound envelope.
          */
         fun onUnknownMessage(rawType: String?, rawJson: String) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.HANDOFF_ENVELOPE_V2] message is
+         * received (PR-H native consumption path).
+         *
+         * [taskId] is the task_id extracted from the envelope payload.
+         * [envelopePayloadJson] is the raw JSON of the payload object, ready for
+         * deserialization into [com.ufo.galaxy.agent.HandoffEnvelopeV2].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should echo [traceId] in the result reply for full-chain correlation.
+         *
+         * Default implementation is a no-op for backward compatibility with existing
+         * [Listener] implementations that pre-date PR-H.
+         */
+        fun onHandoffEnvelopeV2(taskId: String, envelopePayloadJson: String, traceId: String? = null) = Unit
     }
     
     private val client = buildOkHttpClient(allowSelfSigned)
@@ -1140,6 +1155,24 @@ class GalaxyWebSocketClient(
                     val payloadJson = payloadObj?.toString() ?: "{}"
                     Log.i(TAG, "[WS:DOWNLINK] type=task_cancel task_id=$taskId")
                     listeners.forEach { it.onTaskCancel(taskId, payloadJson) }
+                }
+                // ── PR-H: HandoffEnvelopeV2 native consumption downlink ─────────────────
+                // Dedicated strongly-typed dispatch path: parsed before the ADVANCED_TYPES
+                // fallback so the envelope is never silently absorbed by the generic handler.
+                "handoff_envelope_v2" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val taskId = payloadObj?.get("task_id")?.asString ?: ""
+                    val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                        ?: payloadObj?.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    Log.i(TAG, "[WS:DOWNLINK] type=handoff_envelope_v2 task_id=$taskId trace_id=$traceId")
+                    GalaxyLogger.log(TAG, mapOf(
+                        "event" to "handoff_envelope_v2_received",
+                        "task_id" to taskId,
+                        "trace_id" to (traceId ?: ""),
+                        "status" to "dispatching"
+                    ))
+                    listeners.forEach { it.onHandoffEnvelopeV2(taskId, payloadJson, traceId) }
                 }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")
