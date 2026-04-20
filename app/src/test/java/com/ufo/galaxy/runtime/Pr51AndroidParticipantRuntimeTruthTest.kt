@@ -1098,7 +1098,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     }
 
     @Test
-    fun `all PR-51 entries reference com ufo galaxy packagePath`() {
+    fun `all PR-51 entries reference com.ufo.galaxy packagePath`() {
         val pr51Entries = StabilizationBaseline.entries.filter { it.introducedPr == 51 }
         pr51Entries.forEach { entry ->
             assertTrue(

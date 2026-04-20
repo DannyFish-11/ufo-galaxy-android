@@ -25,7 +25,7 @@ Android is the **participant-side** runtime owner. It exclusively owns the follo
 
 | Truth Domain | Android-owned fields | Surface |
 |---|---|---|
-| **Participant identity** | `participant_id`, `device_id`, `host_id`, `device_role`, `formation_role` | `RuntimeHostDescriptor`, `CanonicalParticipantModel` |
+| **Participant identity** | `participantId`, `deviceId`, `hostId`, `deviceRole`, `formationRole` | `RuntimeHostDescriptor`, `CanonicalParticipantModel` |
 | **Participation state** | `participationState` (ACTIVE / STANDBY / DRAINING / INACTIVE) | `RuntimeHostDescriptor.HostParticipationState` |
 | **Session attachment** | `sessionId`, `sessionState`, `delegatedExecutionCount`, `isReuseValid` | `AttachedRuntimeSession`, `AttachedRuntimeHostSessionSnapshot` |
 | **Runtime posture** | `source_runtime_posture` (JOIN_RUNTIME / CONTROL_ONLY) | `SourceRuntimePosture` |
