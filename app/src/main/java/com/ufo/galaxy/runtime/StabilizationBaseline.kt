@@ -1297,6 +1297,54 @@ object StabilizationBaseline {
                 "self-reported local truth and resolve conflicts in its favour.",
             introducedPr = 52
         )
+    ) + listOf(
+
+        // ── PR-53: Android lifecycle, recovery, and hybrid-participant hardening ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "app-lifecycle-participant-boundary",
+            displayName = "AppLifecycleParticipantBoundary",
+            packagePath = "com.ufo.galaxy.runtime.AppLifecycleParticipantBoundary",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-53 canonical mapping from Android app lifecycle events " +
+                "(FOREGROUND, BACKGROUND, BACKGROUND_KILL, CONFIGURATION_CHANGE, " +
+                "MEMORY_PRESSURE, PROCESS_RECREATION) to participant-side state effects " +
+                "(ParticipantStateEffect) and session continuity behaviors " +
+                "(SessionContinuityBehavior). Makes lifecycle→participant state transitions " +
+                "reviewable and intentional; declares what Android can recover locally vs " +
+                "what requires V2 resync. Eliminates implicit/scattered lifecycle behavior.",
+            introducedPr = 53
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "hybrid-participant-capability-boundary",
+            displayName = "HybridParticipantCapabilityBoundary",
+            packagePath = "com.ufo.galaxy.runtime.HybridParticipantCapabilityBoundary",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-53 explicit hybrid/distributed execution capability maturity registry " +
+                "for Android participant — classifies STAGED_MESH_EXECUTION, BARRIER_PARTICIPATION, " +
+                "and FORMATION_REBALANCE as FULLY_WIRED; classifies HYBRID_EXECUTE, RAG_QUERY, and " +
+                "CODE_EXECUTE as CONTRACT_FIRST with mandatory non-silent response contracts. " +
+                "Eliminates silent degrade-only behavior for CONTRACT_FIRST capabilities; provides " +
+                "RESULT_CAPABILITY_MATURITY_TAG wire constant for V2-readable limitation signaling.",
+            introducedPr = 53
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "participant-recovery-readiness-snapshot",
+            displayName = "ParticipantRecoveryReadinessSnapshot",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantRecoveryReadinessSnapshot",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-53 static durability/V2-resync registry for all runtime-critical " +
+                "local state fields — covers crossDeviceEnabled (SETTINGS_PERSISTED, survives kill), " +
+                "durableSessionId and health/readiness (DURABLE_IN_MEMORY, survives reconnect), " +
+                "AttachedRuntimeSession and in-flight task state (EPHEMERAL), and global session " +
+                "assignment (V2_CANONICAL). Provides locallyRecoverableAfterWsReconnect, " +
+                "requiresV2ResyncAfterProcessKillList, and requiresV2ResyncAfterWsReconnectList " +
+                "query helpers so recovery correctness is reviewable in tests.",
+            introducedPr = 53
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
