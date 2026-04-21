@@ -597,6 +597,48 @@ object GalaxyLogger {
      */
     const val TAG_RECOVERY_OBSERVE = "GALAXY:RECOVERY:OBSERVE"
 
+    // ── PR-60: App lifecycle and hybrid-participant observability tags ─────────
+
+    /**
+     * PR-60 — Fired when an [com.ufo.galaxy.runtime.AndroidAppLifecycleTransition] is
+     * handled by [com.ufo.galaxy.runtime.RuntimeController.onAppLifecycleTransition].
+     *
+     * Makes app-level lifecycle transitions explicit and auditable in the log stream.
+     * Each entry carries the transition wire value and the resulting runtime action.
+     *
+     * Required fields: `event` (`"app_lifecycle_transition"`), `transition` (wire value
+     * from [com.ufo.galaxy.runtime.AndroidAppLifecycleTransition.wireValue]).
+     *
+     * Optional fields: `runtime_state` (current [com.ufo.galaxy.runtime.RuntimeController.RuntimeState]).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:APP:LIFECYCLE","fields":{"event":"app_lifecycle_transition","transition":"foreground","runtime_state":"LocalOnly"}}
+     * ```
+     */
+    const val TAG_APP_LIFECYCLE = "GALAXY:APP:LIFECYCLE"
+
+    /**
+     * PR-60 — Fired when a [com.ufo.galaxy.runtime.HybridParticipantCapability] limitation
+     * is reported in response to a hybrid/distributed execution request.
+     *
+     * Provides a structured, non-silent record for every case where Android responds to a
+     * hybrid execution request with a degrade or limitation reply.  V2 consumers can filter
+     * by this tag to identify which hybrid capabilities are triggering limitations.
+     *
+     * Required fields: `event` (`"hybrid_capability_limitation"`), `capability` (wire value
+     * from [com.ufo.galaxy.runtime.HybridParticipantCapability.wireValue]), `support_level`
+     * (wire value from [com.ufo.galaxy.runtime.HybridParticipantCapability.SupportLevel.wireValue]).
+     *
+     * Optional fields: `task_id`, `reason`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:HYBRID:PARTICIPANT","fields":{"event":"hybrid_capability_limitation","capability":"hybrid_execute_full","support_level":"not_yet_implemented","task_id":"t-1"}}
+     * ```
+     */
+    const val TAG_HYBRID_PARTICIPANT = "GALAXY:HYBRID:PARTICIPANT"
+
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
     private const val MAX_MEMORY_ENTRIES = 500

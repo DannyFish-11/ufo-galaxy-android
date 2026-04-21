@@ -1353,6 +1353,71 @@ class RuntimeController(
         controllerScope.cancel()
     }
 
+    /**
+     * PR-60 — Explicit app-level lifecycle transition handler.
+     *
+     * This is the **canonical entry point** for app-level lifecycle events that affect the
+     * runtime.  Call this from the appropriate Android lifecycle callbacks to ensure the
+     * runtime responds consistently and observably.
+     *
+     * ## Call sites
+     *
+     * | [AndroidAppLifecycleTransition] | Call from |
+     * |---|---|
+     * | [AndroidAppLifecycleTransition.FOREGROUND] | `MainViewModel.onResume()`, `GalaxyConnectionService.onStartCommand()` |
+     * | [AndroidAppLifecycleTransition.BACKGROUND] | `MainViewModel.onPause()` (currently no-op — connection preserved) |
+     * | [AndroidAppLifecycleTransition.PROCESS_RECREATED] | Application.onCreate() or equivalent restart path |
+     * | [AndroidAppLifecycleTransition.RUNTIME_STOPPED] | User-initiated stop / `MainViewModel.toggleCrossDeviceEnabled(false)` |
+     * | [AndroidAppLifecycleTransition.CONFIGURATION_CHANGE] | Activity recreation (no-op — RuntimeController is process-scoped) |
+     *
+     * ## What this method does
+     *
+     * Each [AndroidAppLifecycleTransition] maps to exactly one runtime action documented
+     * in [AndroidAppLifecycleTransition.runtimeImplication].  The action is executed
+     * synchronously (for non-suspending paths) or logged as "requires coroutine scope"
+     * for suspend paths (callers are responsible for the coroutine launch).
+     *
+     * All transitions are logged on [GalaxyLogger.TAG_APP_LIFECYCLE] for auditability.
+     *
+     * ## Why this method exists
+     *
+     * Before PR-60, lifecycle events were handled implicitly at scattered call sites with
+     * no named contract.  This method makes the mapping explicit, testable, and reviewable
+     * — a reviewer can read [AndroidAppLifecycleTransition] and verify that every app-level
+     * lifecycle event has a documented runtime response.
+     *
+     * @param transition The app-level lifecycle transition to handle.
+     */
+    fun onAppLifecycleTransition(transition: AndroidAppLifecycleTransition) {
+        val runtimeState = _state.value.javaClass.simpleName
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_APP_LIFECYCLE,
+            mapOf(
+                "event" to "app_lifecycle_transition",
+                "transition" to transition.wireValue,
+                "runtime_state" to runtimeState
+            )
+        )
+        Log.d(TAG, "[RUNTIME] App lifecycle transition: ${transition.wireValue} (runtime=$runtimeState)")
+        when (transition) {
+            AndroidAppLifecycleTransition.FOREGROUND ->
+                // Restore WS if cross-device is enabled; no-op if already Active.
+                connectIfEnabled()
+            AndroidAppLifecycleTransition.BACKGROUND ->
+                // Intentional no-op: preserve WS connection for background execution.
+                Log.d(TAG, "[RUNTIME] Background: WS connection preserved for background execution")
+            AndroidAppLifecycleTransition.PROCESS_RECREATED ->
+                // New process: restore from persisted settings; new attachment era.
+                connectIfEnabled()
+            AndroidAppLifecycleTransition.RUNTIME_STOPPED ->
+                // Explicit stop: disconnect WS, detach session, LocalOnly.
+                stop()
+            AndroidAppLifecycleTransition.CONFIGURATION_CHANGE ->
+                // RuntimeController is process-scoped — no-op for config changes.
+                Log.d(TAG, "[RUNTIME] Configuration change: RuntimeController is process-scoped, no-op")
+        }
+    }
+
     /** Applies latest AppSettings connection/auth/session values onto the live WS client. */
     private fun syncWebSocketRuntimeSettings() {
         webSocketClient.updateRuntimeConnectionConfig(
