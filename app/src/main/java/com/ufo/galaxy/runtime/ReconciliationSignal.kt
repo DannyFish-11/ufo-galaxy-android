@@ -412,7 +412,10 @@ data class ReconciliationSignal(
          * @param participantId  Stable participant node identifier.
          * @param healthState    Current [ParticipantHealthState] of the participant.
          * @param readinessState Current [ParticipantReadinessState] for dispatch selection.
-         * @param posture        Current [SourceRuntimePosture] value.
+         * @param posture        Optional posture value from [SourceRuntimePosture] constants
+         *                       (e.g. [SourceRuntimePosture.CONTROL_ONLY],
+         *                       [SourceRuntimePosture.JOIN_RUNTIME]); `null` when the posture
+         *                       is not being reported in this signal.
          * @param signalId       Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
          */

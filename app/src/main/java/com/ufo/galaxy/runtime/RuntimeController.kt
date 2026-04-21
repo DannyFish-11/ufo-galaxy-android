@@ -1544,6 +1544,13 @@ class RuntimeController(
      *    is [AttachedRuntimeSession.State.DETACHING] or [AttachedRuntimeSession.State.DETACHED]),
      *    this is a no-op: the caller must not be accepting new tasks through a non-reusable
      *    session, so incrementing would be misleading.
+     *
+     * ## Reconciliation signal
+     *
+     * This method does **not** emit a [ReconciliationSignal].  Callers that have a stable
+     * `taskId` from the inbound dispatch envelope should prefer [recordDelegatedTaskAccepted],
+     * which both increments the counter and emits a [ReconciliationSignal.Kind.TASK_ACCEPTED]
+     * signal on [reconciliationSignals] so V2 can immediately mark the task as in-progress.
      */
     fun recordDelegatedExecutionAccepted() {
         val current = _attachedSession.value ?: return
