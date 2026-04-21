@@ -7,6 +7,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -478,6 +479,44 @@ class RuntimeController(
         _v2LifecycleEvents.asSharedFlow()
 
     /**
+     * PR-52 — Observable structured Android→V2 reconciliation signal stream.
+     *
+     * Emits a [ReconciliationSignal] for every Android participant runtime event that
+     * V2 must reconcile into its canonical orchestration truth:
+     *
+     *  - [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT] — on session attach/detach
+     *    and on-demand via [publishRuntimeTruthSnapshot]; carries a full
+     *    [AndroidParticipantRuntimeTruth] snapshot.
+     *  - [ReconciliationSignal.Kind.PARTICIPANT_STATE] — on participant health/readiness
+     *    change via [notifyParticipantHealthChanged].
+     *  - [ReconciliationSignal.Kind.TASK_ACCEPTED] — emitted via [recordTaskAccepted].
+     *  - [ReconciliationSignal.Kind.TASK_RESULT] — emitted via [recordTaskCompleted].
+     *  - [ReconciliationSignal.Kind.TASK_CANCELLED] — on takeover cancelled outcome
+     *    ([TakeoverFallbackEvent.Cause.CANCELLED]) via [notifyTakeoverFailed].
+     *  - [ReconciliationSignal.Kind.TASK_FAILED] — on takeover failure/timeout/disconnect
+     *    outcome via [notifyTakeoverFailed].
+     *
+     * V2 consumers should collect this flow and process each signal through their
+     * participant truth reconciliation loop as documented in [ReconciliationSignal].
+     *
+     * Backed by a buffer of [RECONCILIATION_SIGNAL_BUFFER_CAPACITY] entries.
+     * Observers should drain promptly to avoid event loss.
+     */
+    private val _reconciliationSignals =
+        MutableSharedFlow<ReconciliationSignal>(
+            extraBufferCapacity = RECONCILIATION_SIGNAL_BUFFER_CAPACITY
+        )
+
+    /**
+     * Observable stream of [ReconciliationSignal] instances (PR-52).
+     *
+     * Collect from a coroutine scope scoped to the V2 reconciliation consumer's lifetime to
+     * receive all Android-side participant truth signals as structured, protocol-safe events.
+     */
+    val reconciliationSignals: SharedFlow<ReconciliationSignal> =
+        _reconciliationSignals.asSharedFlow()
+
+    /**
      * PR-1 — Observable durable session continuity record for this Android runtime.
      *
      * Tracks the **durable session identity** that persists across WS reconnects within a
@@ -579,6 +618,29 @@ class RuntimeController(
      */
     @Volatile
     private var _lastKnownHealthState: ParticipantHealthState = ParticipantHealthState.UNKNOWN
+
+    /**
+     * PR-52 — Last known [ParticipantReadinessState] for this participant.
+     *
+     * Updated by [notifyParticipantHealthChanged] when a readiness-state transition occurs,
+     * and reset to [ParticipantReadinessState.UNKNOWN] by [stop] and [invalidateSession].
+     * Used to populate [AndroidParticipantRuntimeTruth] snapshots without requiring callers
+     * to re-supply readiness on every signal.
+     */
+    @Volatile
+    private var _lastKnownReadinessState: ParticipantReadinessState = ParticipantReadinessState.UNKNOWN
+
+    /**
+     * PR-52 — Monotonically increasing reconciliation epoch for [AndroidParticipantRuntimeTruth].
+     *
+     * Incremented each time a new [AndroidParticipantRuntimeTruth] snapshot is created via
+     * [buildCurrentRuntimeTruth].  V2 uses this to detect stale snapshots: a snapshot with
+     * a lower epoch than the most-recently-received snapshot for the same participant is
+     * superseded and should be discarded.
+     *
+     * Scoped to this runtime process lifetime; not reset between sessions.
+     */
+    private val _reconciliationEpoch = AtomicInteger(0)
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -945,6 +1007,8 @@ class RuntimeController(
         webSocketClient.clearRuntimeAttachmentSessionIdentity()
         // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
         _lastKnownHealthState = ParticipantHealthState.UNKNOWN
+        // PR-52: Reset readiness-state tracker so the next activation era starts from UNKNOWN.
+        _lastKnownReadinessState = ParticipantReadinessState.UNKNOWN
         // PR-37: Use transitionState() so the transition event is observable and any
         // unexpected prior state is surfaced as a diagnostic event.
         transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "stop")
@@ -1150,6 +1214,35 @@ class RuntimeController(
                 cause = cause
             )
         )
+        // PR-52: Emit a structured reconciliation signal for the task outcome so V2 can
+        // close the task in its canonical orchestration truth without parsing takeover logs.
+        if (taskId.isNotBlank()) {
+            val descriptor = hostDescriptor
+            if (descriptor != null) {
+                val participantId = RuntimeIdentityContracts.participantNodeId(
+                    deviceId = descriptor.deviceId,
+                    runtimeHostId = descriptor.hostId
+                )
+                val signal = when (cause) {
+                    TakeoverFallbackEvent.Cause.CANCELLED ->
+                        ReconciliationSignal.taskCancelled(
+                            participantId = participantId,
+                            taskId = taskId,
+                            reconciliationEpoch = _reconciliationEpoch.get()
+                        )
+                    TakeoverFallbackEvent.Cause.FAILED,
+                    TakeoverFallbackEvent.Cause.TIMEOUT,
+                    TakeoverFallbackEvent.Cause.DISCONNECT ->
+                        ReconciliationSignal.taskFailed(
+                            participantId = participantId,
+                            taskId = taskId,
+                            errorDetail = "${cause.wireValue}: $reason",
+                            reconciliationEpoch = _reconciliationEpoch.get()
+                        )
+                }
+                emitReconciliationSignal(signal)
+            }
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -1272,6 +1365,8 @@ class RuntimeController(
         webSocketClient.clearRuntimeAttachmentSessionIdentity()
         // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
         _lastKnownHealthState = ParticipantHealthState.UNKNOWN
+        // PR-52: Reset readiness-state tracker so the next activation era starts from UNKNOWN.
+        _lastKnownReadinessState = ParticipantReadinessState.UNKNOWN
     }
 
     /**
@@ -1583,6 +1678,11 @@ class RuntimeController(
                 )
             }
             emitV2LifecycleEvent(v2Event)
+            // PR-52: Emit RUNTIME_TRUTH_SNAPSHOT for V2 participant truth reconciliation.
+            // Emitted after the V2 lifecycle event so consumers see the lifecycle event first.
+            buildCurrentRuntimeTruth()?.let {
+                emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(it))
+            }
         }
     }
 
@@ -1624,6 +1724,11 @@ class RuntimeController(
                 sessionDurationMs = sessionDurationMs
             )
         )
+        // PR-52: Emit RUNTIME_TRUTH_SNAPSHOT for V2 participant truth reconciliation.
+        // Emitted after the V2 lifecycle event so the snapshot reflects the detached state.
+        buildCurrentRuntimeTruth()?.let {
+            emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(it))
+        }
     }
 
     // ── Snapshot projection sync ──────────────────────────────────────────────
@@ -1703,6 +1808,68 @@ class RuntimeController(
         }
         GalaxyLogger.log(GalaxyLogger.TAG_V2_LIFECYCLE, fields)
         _v2LifecycleEvents.tryEmit(event)
+    }
+
+    // ── PR-52: Reconciliation signal helpers ──────────────────────────────────
+
+    /**
+     * PR-52 — Emits a [ReconciliationSignal] on [_reconciliationSignals] and logs a
+     * structured entry for observability.
+     *
+     * This is the **single write path** for [_reconciliationSignals].  All reconciliation
+     * signal emissions must go through this method so the structured log entry is always
+     * emitted alongside the flow event.
+     *
+     * @param signal The [ReconciliationSignal] to emit.
+     */
+    private fun emitReconciliationSignal(signal: ReconciliationSignal) {
+        GalaxyLogger.log(
+            TAG,
+            buildMap {
+                put("event", "reconciliation_signal")
+                put("kind", signal.kind.wireValue)
+                put("participant_id", signal.participantId)
+                signal.taskId?.let { put("task_id", it) }
+                put("status", signal.status)
+                put("epoch", signal.reconciliationEpoch)
+                put("signal_id", signal.signalId)
+            }
+        )
+        _reconciliationSignals.tryEmit(signal)
+    }
+
+    /**
+     * PR-52 — Builds an [AndroidParticipantRuntimeTruth] snapshot from the current
+     * runtime-host and session state.
+     *
+     * Returns `null` when [hostDescriptor] is not available (e.g. early startup or
+     * test contexts without a descriptor), since a participant truth snapshot without
+     * stable identity is not useful for V2 reconciliation.
+     *
+     * [reconciliationEpoch] is incremented atomically so each snapshot has a unique,
+     * monotonically increasing epoch for V2 staleness detection.
+     *
+     * @param healthState    Health state to include; defaults to [_lastKnownHealthState].
+     * @param readinessState Readiness state to include; defaults to [_lastKnownReadinessState].
+     * @param activeTaskId   In-flight task ID; null if idle.
+     * @param activeTaskStatus In-flight task status; null if idle.
+     */
+    private fun buildCurrentRuntimeTruth(
+        healthState: ParticipantHealthState = _lastKnownHealthState,
+        readinessState: ParticipantReadinessState = _lastKnownReadinessState,
+        activeTaskId: String? = null,
+        activeTaskStatus: ActiveTaskStatus? = null
+    ): AndroidParticipantRuntimeTruth? {
+        val descriptor = hostDescriptor ?: return null
+        return AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor,
+            sessionSnapshot = currentHostSessionSnapshot(),
+            healthState = healthState,
+            readinessState = readinessState,
+            activeTaskId = activeTaskId,
+            activeTaskStatus = activeTaskStatus,
+            reconciliationEpoch = _reconciliationEpoch.incrementAndGet()
+        )
     }
 
     // ── Setup error helpers (PR-27) ───────────────────────────────────────────
@@ -1970,6 +2137,8 @@ class RuntimeController(
         // harness can distinguish a simple health signal from an active degradation.
         val previousHealth = _lastKnownHealthState
         _lastKnownHealthState = newHealthState
+        // PR-52: Update readiness state tracker for use in reconciliation truth snapshots.
+        _lastKnownReadinessState = readinessState
         emitV2LifecycleEvent(
             V2MultiDeviceLifecycleEvent.DeviceHealthChanged(
                 deviceId = descriptor.deviceId,
@@ -1999,6 +2168,28 @@ class RuntimeController(
                 )
             )
         }
+        // PR-52: Emit PARTICIPANT_STATE reconciliation signal so V2 can update its canonical
+        // participant truth without waiting for the next full RUNTIME_TRUTH_SNAPSHOT.
+        val participantId = RuntimeIdentityContracts.participantNodeId(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        )
+        emitReconciliationSignal(
+            ReconciliationSignal(
+                kind = ReconciliationSignal.Kind.PARTICIPANT_STATE,
+                participantId = participantId,
+                taskId = null,
+                correlationId = null,
+                status = ReconciliationSignal.STATUS_STATE_CHANGED,
+                payload = mapOf(
+                    "health_state" to newHealthState.wireValue,
+                    "readiness_state" to readinessState.wireValue
+                ),
+                signalId = UUID.randomUUID().toString(),
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = _reconciliationEpoch.get()
+            )
+        )
     }
 
     /**
@@ -2238,6 +2429,100 @@ class RuntimeController(
         }
     }
 
+    // ── PR-52: Reconciliation-signal public API ───────────────────────────────
+
+    /**
+     * PR-52 — Publishes a full [AndroidParticipantRuntimeTruth] snapshot on
+     * [reconciliationSignals] as a [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT] signal.
+     *
+     * V2 consumers should call (or request) this method periodically or when a full
+     * participant truth reconciliation pass is needed.  [RuntimeController] also calls this
+     * automatically at session open and session close, but on-demand publication is useful
+     * when V2 requests a snapshot outside of a lifecycle event (e.g. after a short partition).
+     *
+     * No-op when [hostDescriptor] is not available (no stable participant identity yet).
+     *
+     * @param healthState    Health state to include in the snapshot; defaults to the last
+     *                       known value tracked by [notifyParticipantHealthChanged].
+     * @param readinessState Readiness state to include; defaults to the last known value.
+     * @param activeTaskId   In-flight task identifier; null if idle.
+     * @param activeTaskStatus In-flight task status; null if idle.
+     */
+    fun publishRuntimeTruthSnapshot(
+        healthState: ParticipantHealthState = _lastKnownHealthState,
+        readinessState: ParticipantReadinessState = _lastKnownReadinessState,
+        activeTaskId: String? = null,
+        activeTaskStatus: ActiveTaskStatus? = null
+    ) {
+        val truth = buildCurrentRuntimeTruth(healthState, readinessState, activeTaskId, activeTaskStatus)
+            ?: return
+        emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(truth))
+    }
+
+    /**
+     * PR-52 — Emits a [ReconciliationSignal.Kind.TASK_ACCEPTED] signal, indicating that
+     * Android has accepted a delegated task and begun execution.
+     *
+     * V2 should record the task as actively in-progress under this participant on receipt
+     * of this signal, blocking duplicate dispatch until a terminal signal arrives.
+     *
+     * Must be called from the execution path immediately after accepting a delegated task
+     * (before any suspending execution steps, to ensure V2 receives the accepted signal
+     * before any potential failure or result signal).
+     *
+     * No-op when [hostDescriptor] is not available.
+     *
+     * @param taskId        Task identifier from the inbound dispatch envelope.
+     * @param correlationId Correlation identifier from the inbound envelope; may be null.
+     */
+    fun recordTaskAccepted(taskId: String, correlationId: String? = null) {
+        val descriptor = hostDescriptor ?: return
+        val participantId = RuntimeIdentityContracts.participantNodeId(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        )
+        emitReconciliationSignal(
+            ReconciliationSignal.taskAccepted(
+                participantId = participantId,
+                taskId = taskId,
+                correlationId = correlationId,
+                reconciliationEpoch = _reconciliationEpoch.get()
+            )
+        )
+    }
+
+    /**
+     * PR-52 — Emits a [ReconciliationSignal.Kind.TASK_RESULT] signal, indicating that
+     * Android completed a delegated task successfully.
+     *
+     * V2 should close the task as a success and update the participant's contribution record
+     * on receipt of this signal.
+     *
+     * Must be called from the execution path immediately after task completion is determined
+     * (before the terminal [AndroidSessionContribution] is published, so V2 can begin
+     * pipeline advancement early).
+     *
+     * No-op when [hostDescriptor] is not available.
+     *
+     * @param taskId        Task identifier of the completed task.
+     * @param correlationId Correlation identifier from the originating request; may be null.
+     */
+    fun recordTaskCompleted(taskId: String, correlationId: String? = null) {
+        val descriptor = hostDescriptor ?: return
+        val participantId = RuntimeIdentityContracts.participantNodeId(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        )
+        emitReconciliationSignal(
+            ReconciliationSignal.taskResult(
+                participantId = participantId,
+                taskId = taskId,
+                correlationId = correlationId,
+                reconciliationEpoch = _reconciliationEpoch.get()
+            )
+        )
+    }
+
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
@@ -2272,5 +2557,14 @@ class RuntimeController(
          * briefly slow to drain.
          */
         private const val V2_LIFECYCLE_EVENT_BUFFER_CAPACITY = 16
+
+        /**
+         * PR-52 — Buffer capacity for [_reconciliationSignals].
+         *
+         * Sized to accommodate a burst of reconciliation signals (task-accepted →
+         * status-update → result, plus participant-state and snapshot signals) without
+         * dropping events when the V2 reconciliation consumer is briefly slow to drain.
+         */
+        private const val RECONCILIATION_SIGNAL_BUFFER_CAPACITY = 32
     }
 }
