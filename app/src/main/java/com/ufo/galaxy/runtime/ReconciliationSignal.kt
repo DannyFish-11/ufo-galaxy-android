@@ -366,6 +366,86 @@ data class ReconciliationSignal(
         )
 
         /**
+         * Creates a [Kind.TASK_STATUS_UPDATE] signal reporting an intermediate execution
+         * status for a currently running task.
+         *
+         * V2 should update its in-flight progress view without closing the task.
+         *
+         * @param participantId Stable participant node identifier.
+         * @param taskId        Task identifier of the in-progress task.
+         * @param correlationId Correlation identifier from the originating request.
+         * @param progressDetail Optional human-readable description of the current progress step.
+         * @param signalId      Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         */
+        fun taskStatusUpdate(
+            participantId: String,
+            taskId: String,
+            correlationId: String? = null,
+            progressDetail: String? = null,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0
+        ): ReconciliationSignal {
+            val payload = buildMap<String, Any?> {
+                progressDetail?.let { put("progress_detail", it) }
+            }
+            return ReconciliationSignal(
+                kind = Kind.TASK_STATUS_UPDATE,
+                participantId = participantId,
+                taskId = taskId,
+                correlationId = correlationId,
+                status = STATUS_IN_PROGRESS,
+                payload = payload,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = reconciliationEpoch
+            )
+        }
+
+        /**
+         * Creates a [Kind.PARTICIPANT_STATE] signal reporting an Android participant state
+         * change (health, readiness, or posture).
+         *
+         * V2 should update its canonical participant view immediately on receipt.
+         * This signal is independent of any in-flight task and may be emitted at any time.
+         *
+         * @param participantId  Stable participant node identifier.
+         * @param healthState    Current [ParticipantHealthState] of the participant.
+         * @param readinessState Current [ParticipantReadinessState] for dispatch selection.
+         * @param posture        Optional posture value from [SourceRuntimePosture] constants
+         *                       (e.g. [SourceRuntimePosture.CONTROL_ONLY],
+         *                       [SourceRuntimePosture.JOIN_RUNTIME]); `null` when the posture
+         *                       is not being reported in this signal.
+         * @param signalId       Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         */
+        fun participantStateSignal(
+            participantId: String,
+            healthState: ParticipantHealthState,
+            readinessState: ParticipantReadinessState,
+            posture: String? = null,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0
+        ): ReconciliationSignal {
+            val payload = buildMap<String, Any?> {
+                put("health_state", healthState.wireValue)
+                put("readiness_state", readinessState.wireValue)
+                posture?.let { put("source_runtime_posture", it) }
+            }
+            return ReconciliationSignal(
+                kind = Kind.PARTICIPANT_STATE,
+                participantId = participantId,
+                taskId = null,
+                correlationId = null,
+                status = STATUS_STATE_CHANGED,
+                payload = payload,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = reconciliationEpoch
+            )
+        }
+
+        /**
          * Creates a [Kind.RUNTIME_TRUTH_SNAPSHOT] signal carrying a full participant truth snapshot.
          *
          * @param truth         The [AndroidParticipantRuntimeTruth] snapshot to publish.
