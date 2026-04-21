@@ -213,6 +213,7 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 |---|---|---|
 | `AndroidParticipantRuntimeTruth` | Consolidated participant truth snapshot | PR-51 |
 | `ReconciliationSignal` | Structured Android→V2 signal wrapper | PR-51 |
+| `ReconciliationSignalSink` | Testable sink for V2-facing reconciliation signals | PR-52 |
 | `ActiveTaskStatus` | In-flight task status enum | PR-51 |
 | `AndroidSessionContribution` | Terminal task result/cancellation envelope | PR-4 |
 | `StagedMeshParticipationResult` | Staged-mesh target execution result | PR-32 |
@@ -238,6 +239,9 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 - ✅ Mesh session lifecycle hints (PR-44) — tested in `Pr44MeshSessionLifecycleMappingTest`
 - ✅ Consolidated participant truth snapshot (`AndroidParticipantRuntimeTruth`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
 - ✅ Structured reconciliation signal (`ReconciliationSignal`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
+- ✅ `ReconciliationSignalSink` wired into `DelegatedTakeoverExecutor` (PR-52) — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `TASK_ACCEPTED` / `TASK_RESULT` / `TASK_CANCELLED` / `TASK_FAILED` signals emitted from execution lifecycle (PR-52) — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `buildRuntimeTruthSnapshot()` on `RuntimeController` (PR-52) — provides point-in-time `AndroidParticipantRuntimeTruth` for V2 reconciliation passes
 
 ### Contract-first / partially wired
 

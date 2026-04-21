@@ -1247,6 +1247,41 @@ object StabilizationBaseline {
                 "Covers all lifecycle phases of Android→V2 signal flow, including " +
                 "pre-terminal cancel/failure notification and full snapshot publication.",
             introducedPr = 51
+        ),
+
+        // ── PR-52: Reconciliation signal sink and executor integration ─────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "reconciliation-signal-sink",
+            displayName = "ReconciliationSignalSink",
+            packagePath = "com.ufo.galaxy.runtime.ReconciliationSignalSink",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-52 testable functional interface for V2-facing ReconciliationSignal " +
+                "emission. Mirrors DelegatedExecutionSignalSink for the reconciliation signal " +
+                "path. DelegatedTakeoverExecutor accepts an optional ReconciliationSignalSink " +
+                "and emits TASK_ACCEPTED, TASK_RESULT, TASK_CANCELLED, TASK_FAILED signals via " +
+                "it at each task lifecycle milestone. Defaults to no-op preserving backward " +
+                "compatibility. Production callers supply a concrete sink that forwards signals " +
+                "to V2 via the established transport. Enables full test coverage of reconciliation " +
+                "signal emission without requiring an Android framework or live connection.",
+            introducedPr = 52
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-truth-snapshot",
+            displayName = "RuntimeController.buildRuntimeTruthSnapshot",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-52 point-in-time AndroidParticipantRuntimeTruth snapshot builder " +
+                "on RuntimeController. Consolidates current hostDescriptor, session snapshot, " +
+                "health state, readiness state, and optional in-flight task info into a single " +
+                "AndroidParticipantRuntimeTruth snapshot for V2 reconciliation passes. " +
+                "Increments a monotonically increasing _reconciliationEpochCounter per call so " +
+                "V2 can detect and discard stale snapshots. Returns null if hostDescriptor is " +
+                "not yet initialised. Companion to ReconciliationSignal.runtimeTruthSnapshot " +
+                "for full RUNTIME_TRUTH_SNAPSHOT emission.",
+            introducedPr = 52
         )
     )
 

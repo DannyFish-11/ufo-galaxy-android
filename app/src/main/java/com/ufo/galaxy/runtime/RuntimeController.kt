@@ -580,6 +580,18 @@ class RuntimeController(
     @Volatile
     private var _lastKnownHealthState: ParticipantHealthState = ParticipantHealthState.UNKNOWN
 
+    /**
+     * PR-52 — Monotonically increasing counter for [AndroidParticipantRuntimeTruth] snapshots.
+     *
+     * Incremented on every call to [buildRuntimeTruthSnapshot] so V2 can detect stale
+     * snapshots: a snapshot with a lower epoch than a previously received one should be
+     * discarded.  Scoped to this runtime process lifetime (not persisted across process
+     * restarts).  Access is single-threaded (main/IO thread boundary controlled by callers);
+     * declared volatile for safe publication to reader threads.
+     */
+    @Volatile
+    private var _reconciliationEpochCounter: Int = 0
+
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -1389,6 +1401,66 @@ class RuntimeController(
             hostSessionSnapshot = snapshot,
             readinessProjection = readiness,
             capabilityRefs = capabilityRefs
+        )
+    }
+
+    /**
+     * PR-52 — Builds a point-in-time [AndroidParticipantRuntimeTruth] snapshot from the
+     * current runtime state.
+     *
+     * The snapshot is a **consolidated, read-only projection** of the Android participant's
+     * current local truth: identity, participation, session, health, readiness, and any
+     * in-flight task status.  V2 should consume this as Android's authoritative self-report
+     * for canonical reconciliation passes.
+     *
+     * ## Responsibility boundary
+     *
+     * Android owns the content of this snapshot.  V2 owns the canonical reconciliation
+     * decision.  Android must not rely on V2's reconciliation state — only V2 holds the
+     * global orchestration truth.
+     *
+     * ## Epoch semantics
+     *
+     * Each call increments [_reconciliationEpochCounter] so successive snapshots carry a
+     * strictly increasing epoch.  V2 can use the epoch to detect and discard stale snapshots
+     * that arrive out-of-order over the transport layer.
+     *
+     * ## Null conditions
+     *
+     * Returns `null` when [hostDescriptor] is not yet available (i.e. the runtime host
+     * descriptor has not been initialised), since there is no participant identity to report.
+     *
+     * @param activeTaskId     Identifier of the currently executing task; pass `null` if
+     *                         no task is in flight.
+     * @param activeTaskStatus Current [ActiveTaskStatus] of the in-flight task; pass `null`
+     *                         if no task is in flight.
+     * @return An [AndroidParticipantRuntimeTruth] snapshot reflecting the current state,
+     *         or `null` when the runtime host descriptor is not available.
+     */
+    fun buildRuntimeTruthSnapshot(
+        activeTaskId: String? = null,
+        activeTaskStatus: ActiveTaskStatus? = null
+    ): AndroidParticipantRuntimeTruth? {
+        val descriptor = hostDescriptor ?: return null
+        val sessionSnapshot = currentHostSessionSnapshot()
+        val readinessState = when {
+            targetReadinessProjection.value?.selectionOutcome == TargetSelectionOutcome.SELECTED ->
+                ParticipantReadinessState.READY
+            targetReadinessProjection.value?.selectionOutcome == TargetSelectionOutcome.FALLBACK ->
+                ParticipantReadinessState.READY_WITH_FALLBACK
+            targetReadinessProjection.value?.selectionOutcome == TargetSelectionOutcome.REJECTED ->
+                ParticipantReadinessState.NOT_READY
+            else -> ParticipantReadinessState.UNKNOWN
+        }
+        val epoch = ++_reconciliationEpochCounter
+        return AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor,
+            sessionSnapshot = sessionSnapshot,
+            healthState = _lastKnownHealthState,
+            readinessState = readinessState,
+            activeTaskId = activeTaskId,
+            activeTaskStatus = activeTaskStatus,
+            reconciliationEpoch = epoch
         )
     }
 
