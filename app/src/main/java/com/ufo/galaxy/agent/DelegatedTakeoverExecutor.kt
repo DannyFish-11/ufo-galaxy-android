@@ -8,6 +8,8 @@ import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedExecutionTracker
 import com.ufo.galaxy.runtime.EmittedSignalLedger
+import com.ufo.galaxy.runtime.ReconciliationSignal
+import com.ufo.galaxy.runtime.ReconciliationSignalSink
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -101,15 +103,33 @@ import kotlinx.coroutines.TimeoutCancellationException
  * interfaces and can be supplied as lambdas in unit tests without an Android framework
  * or a real WebSocket connection.
  *
- * @param pipeline   The local goal-execution pipeline; in production this delegates to
- *                   [AutonomousExecutionPipeline.handleGoalExecution].
- * @param signalSink Receives [DelegatedExecutionSignal] events emitted during the
- *                   execution lifecycle (ACK and RESULT); in production this is wired to
- *                   structured logging and future outbound signal transmission.
+ * ## Reconciliation signal emission (PR-52)
+ *
+ * When [reconciliationSignalSink] is provided the executor emits a [ReconciliationSignal]
+ * at each task lifecycle milestone alongside the internal [DelegatedExecutionSignal]:
+ *
+ *  - [ReconciliationSignal.Kind.TASK_ACCEPTED] on ACK — V2 can mark the task as in-progress.
+ *  - [ReconciliationSignal.Kind.TASK_RESULT] on successful completion — V2 closes the task.
+ *  - [ReconciliationSignal.Kind.TASK_CANCELLED] on [CancellationException] — V2 closes as cancelled.
+ *  - [ReconciliationSignal.Kind.TASK_FAILED] on timeout or other exception — V2 closes as failed.
+ *
+ * If [reconciliationSignalSink] is not supplied (defaults to a no-op) the executor behaves
+ * exactly as before this change; all existing callers remain unaffected.
+ *
+ * @param pipeline                 The local goal-execution pipeline; in production this
+ *                                 delegates to [AutonomousExecutionPipeline.handleGoalExecution].
+ * @param signalSink               Receives [DelegatedExecutionSignal] events emitted during the
+ *                                 execution lifecycle (ACK and RESULT); in production this is wired
+ *                                 to structured logging and future outbound signal transmission.
+ * @param reconciliationSignalSink Optional [ReconciliationSignalSink] that receives structured
+ *                                 V2-facing [ReconciliationSignal] events at each lifecycle
+ *                                 milestone.  Defaults to a no-op so existing callers are
+ *                                 unaffected.
  */
 class DelegatedTakeoverExecutor(
     private val pipeline: GoalExecutionPipeline,
-    private val signalSink: DelegatedExecutionSignalSink
+    private val signalSink: DelegatedExecutionSignalSink,
+    private val reconciliationSignalSink: ReconciliationSignalSink = ReconciliationSignalSink { }
 ) {
 
     // ── Outcome types ─────────────────────────────────────────────────────────
@@ -219,6 +239,12 @@ class DelegatedTakeoverExecutor(
      * @param initialRecord The initial [DelegatedActivationRecord] in
      *                      [DelegatedActivationRecord.ActivationStatus.PENDING] produced
      *                      by [DelegatedRuntimeReceiver.receive].
+     * @param participantId Stable participant node identifier (e.g. `deviceId:hostId`) used
+     *                      to populate [ReconciliationSignal] events forwarded to V2 via
+     *                      [reconciliationSignalSink].  Defaults to empty string; when blank,
+     *                      [DelegatedRuntimeUnit.attachedSessionId] is used as a fallback so
+     *                      V2 can still correlate signals even if the full participant identity
+     *                      was not available at the call site.
      * @param nowMs         Epoch-ms reference time used for tracker timestamps; defaults
      *                      to the current wall clock.  Pass an explicit value in tests to
      *                      produce deterministic timestamps.
@@ -228,8 +254,15 @@ class DelegatedTakeoverExecutor(
     fun execute(
         unit: DelegatedRuntimeUnit,
         initialRecord: DelegatedActivationRecord,
+        participantId: String = "",
         nowMs: Long = System.currentTimeMillis()
     ): ExecutionOutcome {
+
+        // Resolve the participant identity used in ReconciliationSignal events.
+        // Prefer the caller-supplied participantId; fall back to attachedSessionId so
+        // V2 can always correlate signals to at least the session even when the full
+        // participant identity (deviceId:hostId) was not threaded to this call site.
+        val resolvedParticipantId = participantId.ifBlank { unit.attachedSessionId }
 
         // ── 0. Create per-execution emitted-signal ledger (PR-18) ─────────────
         // Every signal emitted below is recorded in this ledger so that callers
@@ -245,6 +278,18 @@ class DelegatedTakeoverExecutor(
         val ackSignal = DelegatedExecutionSignal.ack(tracker, nowMs)
         ledger.recordEmitted(ackSignal)
         signalSink.onSignal(ackSignal)
+
+        // ── 2a. Emit TASK_ACCEPTED reconciliation signal (PR-52) ──────────────
+        // Informs V2 that Android has accepted the delegated task and execution will
+        // begin.  V2 should mark the task as actively in-progress under this participant
+        // and block duplicate dispatch until a terminal reconciliation signal arrives.
+        reconciliationSignalSink.onSignal(
+            ReconciliationSignal.taskAccepted(
+                participantId = resolvedParticipantId,
+                taskId = unit.taskId,
+                correlationId = unit.traceId
+            )
+        )
 
         Log.d(
             TAG,
@@ -304,6 +349,19 @@ class DelegatedTakeoverExecutor(
             ledger.recordEmitted(resultSignal)
             signalSink.onSignal(resultSignal)
 
+            // ── Emit TASK_RESULT reconciliation signal (PR-52) ────────────────
+            // Pre-terminal completion signal for V2: Android completed the task
+            // successfully.  V2 may advance pipeline state on receipt of this signal
+            // while awaiting the terminal AndroidSessionContribution for canonical
+            // session-truth closure.
+            reconciliationSignalSink.onSignal(
+                ReconciliationSignal.taskResult(
+                    participantId = resolvedParticipantId,
+                    taskId = unit.taskId,
+                    correlationId = unit.traceId
+                )
+            )
+
             Log.d(
                 TAG,
                 "[PR15:TAKEOVER] RESULT(completed) emitted unit_id=${unit.unitId} " +
@@ -323,6 +381,19 @@ class DelegatedTakeoverExecutor(
             signalSink.onSignal(timeoutSignal)
 
             val errorMessage = e.message ?: "execution_timeout"
+
+            // ── Emit TASK_FAILED reconciliation signal for timeout (PR-52) ────
+            // V2 should begin fallback/retry evaluation on receipt; do not re-dispatch
+            // to this participant until the session is re-established.
+            reconciliationSignalSink.onSignal(
+                ReconciliationSignal.taskFailed(
+                    participantId = resolvedParticipantId,
+                    taskId = unit.taskId,
+                    correlationId = unit.traceId,
+                    errorDetail = errorMessage
+                )
+            )
+
             Log.w(
                 TAG,
                 "[PR15:TAKEOVER] RESULT(timeout) emitted unit_id=${unit.unitId} " +
@@ -342,6 +413,19 @@ class DelegatedTakeoverExecutor(
             signalSink.onSignal(cancelledSignal)
 
             val errorMessage = e.message ?: "execution_cancelled"
+
+            // ── Emit TASK_CANCELLED reconciliation signal (PR-52) ─────────────
+            // Pre-terminal signal: V2 should close the task as cancelled and release
+            // any reserved execution capacity for this participant.  Emitted as soon as
+            // Android determines the task is being stopped (before full termination).
+            reconciliationSignalSink.onSignal(
+                ReconciliationSignal.taskCancelled(
+                    participantId = resolvedParticipantId,
+                    taskId = unit.taskId,
+                    correlationId = unit.traceId
+                )
+            )
+
             Log.w(
                 TAG,
                 "[PR15:TAKEOVER] RESULT(cancelled) emitted unit_id=${unit.unitId} " +
@@ -362,6 +446,19 @@ class DelegatedTakeoverExecutor(
             signalSink.onSignal(failedSignal)
 
             val errorMessage = e.message ?: "execution_error"
+
+            // ── Emit TASK_FAILED reconciliation signal (PR-52) ────────────────
+            // Pre-terminal failure signal: V2 should trigger fallback/retry if policy
+            // requires.  Emitted as soon as Android detects the failure condition.
+            reconciliationSignalSink.onSignal(
+                ReconciliationSignal.taskFailed(
+                    participantId = resolvedParticipantId,
+                    taskId = unit.taskId,
+                    correlationId = unit.traceId,
+                    errorDetail = errorMessage
+                )
+            )
+
             Log.w(
                 TAG,
                 "[PR15:TAKEOVER] RESULT(failed) emitted unit_id=${unit.unitId} " +
