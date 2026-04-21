@@ -70,6 +70,7 @@ import org.junit.Test
  * ### Reconciliation signal independence
  *  - Reconciliation signals do not affect DelegatedExecutionSignal emission count.
  *  - DelegatedExecutionSignal events are not affected by reconciliation sink presence.
+ *  - signalId is non-null for each reconciliation signal emitted.
  */
 class Pr52ReconciliationSignalEmissionTest {
 
@@ -451,7 +452,7 @@ class Pr52ReconciliationSignalEmissionTest {
     }
 
     @Test
-    fun `signal signalId is non-null for each reconciliation signal emitted`() {
+    fun `signalId is non-null for each reconciliation signal emitted`() {
         val (captured, sink) = captureReconciliationSignals()
         buildExecutor(pipeline = successPipeline(), reconciliationSink = sink)
             .execute(makeUnit(), pendingRecord(), participantId = "pid", nowMs = 1_000L)

@@ -241,10 +241,10 @@ class DelegatedTakeoverExecutor(
      *                      by [DelegatedRuntimeReceiver.receive].
      * @param participantId Stable participant node identifier (e.g. `deviceId:hostId`) used
      *                      to populate [ReconciliationSignal] events forwarded to V2 via
-     *                      [reconciliationSignalSink].  Defaults to empty string; when blank,
-     *                      [DelegatedRuntimeUnit.attachedSessionId] is used as a fallback so
-     *                      V2 can still correlate signals even if the full participant identity
-     *                      was not available at the call site.
+     *                      [reconciliationSignalSink].  Defaults to empty string; when blank
+     *                      (empty or whitespace-only), [DelegatedRuntimeUnit.attachedSessionId]
+     *                      is used as a fallback so V2 can still correlate signals even if the
+     *                      full participant identity was not available at the call site.
      * @param nowMs         Epoch-ms reference time used for tracker timestamps; defaults
      *                      to the current wall clock.  Pass an explicit value in tests to
      *                      produce deterministic timestamps.

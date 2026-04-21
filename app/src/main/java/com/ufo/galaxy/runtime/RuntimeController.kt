@@ -7,6 +7,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -586,11 +587,13 @@ class RuntimeController(
      * Incremented on every call to [buildRuntimeTruthSnapshot] so V2 can detect stale
      * snapshots: a snapshot with a lower epoch than a previously received one should be
      * discarded.  Scoped to this runtime process lifetime (not persisted across process
-     * restarts).  Access is single-threaded (main/IO thread boundary controlled by callers);
-     * declared volatile for safe publication to reader threads.
+     * restarts).  [AtomicInteger] ensures thread-safe monotonic increments without explicit
+     * synchronization — concurrent callers each receive a unique, strictly increasing epoch.
+     *
+     * Initialised to 0; [buildRuntimeTruthSnapshot] calls [AtomicInteger.incrementAndGet]
+     * **before** reading the value, so the first snapshot always receives epoch 1.
      */
-    @Volatile
-    private var _reconciliationEpochCounter: Int = 0
+    private val _reconciliationEpochCounter = AtomicInteger(0)
 
     /** Internal scope used for the observer that handles WS connection during [start]. */
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -1452,7 +1455,7 @@ class RuntimeController(
                 ParticipantReadinessState.NOT_READY
             else -> ParticipantReadinessState.UNKNOWN
         }
-        val epoch = ++_reconciliationEpochCounter
+        val epoch = _reconciliationEpochCounter.incrementAndGet()
         return AndroidParticipantRuntimeTruth.from(
             descriptor = descriptor,
             sessionSnapshot = sessionSnapshot,
