@@ -1248,6 +1248,28 @@ object StabilizationBaseline {
                 "pre-terminal cancel/failure notification and full snapshot publication.",
             introducedPr = 51
         )
+    ) + listOf(
+
+        // ── PR-52: RuntimeController reconciliation signal wiring ─────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-reconciliation-signals",
+            displayName = "RuntimeController.reconciliationSignals",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-52 wires ReconciliationSignal emission into RuntimeController's " +
+                "key lifecycle points: RUNTIME_TRUTH_SNAPSHOT on session open/close, " +
+                "PARTICIPANT_STATE on notifyParticipantHealthChanged, TASK_CANCELLED/ " +
+                "TASK_FAILED on notifyTakeoverFailed, and TASK_ACCEPTED/TASK_RESULT via " +
+                "recordTaskAccepted/recordTaskCompleted. The reconciliationSignals " +
+                "SharedFlow is the single observable stream through which V2 reconciles " +
+                "Android participant truth into its canonical orchestration state. " +
+                "publishRuntimeTruthSnapshot provides on-demand full-snapshot publication " +
+                "for V2-initiated reconciliation passes. Android is now a transparently " +
+                "observed participant rather than an opaque remote executor.",
+            introducedPr = 52
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

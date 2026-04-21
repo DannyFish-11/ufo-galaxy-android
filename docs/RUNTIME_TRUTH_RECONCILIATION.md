@@ -195,8 +195,11 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 2. **Signal `signalId` fields are stable and unique.** V2 may use `signalId` for deduplication
    when a signal is retried over a lossy transport.
 
-3. **`reconciliationEpoch` is monotonically increasing.** V2 should discard a snapshot with a
-   lower epoch than the most recently received snapshot for the same `participantId`.
+3. **`reconciliationEpoch` is monotonically increasing across all signal types.** Every
+   `ReconciliationSignal` for a given participant has a strictly higher epoch than all
+   previously emitted signals — not just snapshots.  V2 should discard any signal with a
+   lower epoch than the most recently received signal for the same `participantId` to handle
+   transport reordering.
 
 4. **Android does not modify V2 canonical state directly.** All state changes on V2's side
    are V2's decision based on Android's signals. Android owns its local truth; V2 owns the
@@ -214,6 +217,10 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 | `AndroidParticipantRuntimeTruth` | Consolidated participant truth snapshot | PR-51 |
 | `ReconciliationSignal` | Structured Android→V2 signal wrapper | PR-51 |
 | `ActiveTaskStatus` | In-flight task status enum | PR-51 |
+| `RuntimeController.reconciliationSignals` | Observable stream of all Android→V2 reconciliation signals | PR-52 |
+| `RuntimeController.publishRuntimeTruthSnapshot` | On-demand full participant truth snapshot publication | PR-52 |
+| `RuntimeController.recordTaskAccepted` | Emit TASK_ACCEPTED signal at task execution start | PR-52 |
+| `RuntimeController.recordTaskCompleted` | Emit TASK_RESULT signal at task completion | PR-52 |
 | `AndroidSessionContribution` | Terminal task result/cancellation envelope | PR-4 |
 | `StagedMeshParticipationResult` | Staged-mesh target execution result | PR-32 |
 | `CanonicalParticipantModel` | Participant read-model projection | PR-6 |
@@ -238,6 +245,16 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 - ✅ Mesh session lifecycle hints (PR-44) — tested in `Pr44MeshSessionLifecycleMappingTest`
 - ✅ Consolidated participant truth snapshot (`AndroidParticipantRuntimeTruth`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
 - ✅ Structured reconciliation signal (`ReconciliationSignal`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
+- ✅ `RuntimeController.reconciliationSignals` flow wired and emitting at all key lifecycle points — tested in `Pr52ReconciliationSignalRuntimeWiringTest`
+  - RUNTIME_TRUTH_SNAPSHOT on session open (`setActiveForTest` / `openAttachedSession`)
+  - RUNTIME_TRUTH_SNAPSHOT on session close (`stop` / `closeAttachedSession`)
+  - RUNTIME_TRUTH_SNAPSHOT on session invalidation (`invalidateSession`)
+  - PARTICIPANT_STATE on health/readiness change (`notifyParticipantHealthChanged`)
+  - TASK_CANCELLED on cooperative cancel (`notifyTakeoverFailed(cause=CANCELLED)`)
+  - TASK_FAILED on unclassified failure, timeout, or disconnect (`notifyTakeoverFailed(cause=FAILED/TIMEOUT/DISCONNECT)`)
+  - TASK_ACCEPTED via `recordTaskAccepted`
+  - TASK_RESULT via `recordTaskCompleted`
+  - On-demand RUNTIME_TRUTH_SNAPSHOT via `publishRuntimeTruthSnapshot`
 
 ### Contract-first / partially wired
 
