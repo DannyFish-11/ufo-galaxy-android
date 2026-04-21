@@ -195,8 +195,11 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 2. **Signal `signalId` fields are stable and unique.** V2 may use `signalId` for deduplication
    when a signal is retried over a lossy transport.
 
-3. **`reconciliationEpoch` is monotonically increasing.** V2 should discard a snapshot with a
-   lower epoch than the most recently received snapshot for the same `participantId`.
+3. **`reconciliationEpoch` is monotonically increasing across all signal types.** Every
+   `ReconciliationSignal` for a given participant has a strictly higher epoch than all
+   previously emitted signals — not just snapshots.  V2 should discard any signal with a
+   lower epoch than the most recently received signal for the same `participantId` to handle
+   transport reordering.
 
 4. **Android does not modify V2 canonical state directly.** All state changes on V2's side
    are V2's decision based on Android's signals. Android owns its local truth; V2 owns the

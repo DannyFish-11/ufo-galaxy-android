@@ -633,10 +633,13 @@ class RuntimeController(
     /**
      * PR-52 — Monotonically increasing reconciliation epoch for [AndroidParticipantRuntimeTruth].
      *
-     * Incremented each time a new [AndroidParticipantRuntimeTruth] snapshot is created via
-     * [buildCurrentRuntimeTruth].  V2 uses this to detect stale snapshots: a snapshot with
-     * a lower epoch than the most-recently-received snapshot for the same participant is
-     * superseded and should be discarded.
+     * Incremented each time a [ReconciliationSignal] is emitted via [emitReconciliationSignal]
+     * (through [buildCurrentRuntimeTruth] for snapshot signals, or directly for task/participant
+     * signals).  Every signal therefore has a strictly higher epoch than all previously emitted
+     * signals, giving V2 a total order over all Android→V2 signals for this participant.
+     *
+     * V2 should discard any signal with a lower epoch than the most-recently-received signal
+     * for the same participant identity to handle transport reordering.
      *
      * Scoped to this runtime process lifetime; not reset between sessions.
      */
@@ -1228,7 +1231,7 @@ class RuntimeController(
                         ReconciliationSignal.taskCancelled(
                             participantId = participantId,
                             taskId = taskId,
-                            reconciliationEpoch = _reconciliationEpoch.get()
+                            reconciliationEpoch = _reconciliationEpoch.incrementAndGet()
                         )
                     TakeoverFallbackEvent.Cause.FAILED,
                     TakeoverFallbackEvent.Cause.TIMEOUT,
@@ -1237,7 +1240,7 @@ class RuntimeController(
                             participantId = participantId,
                             taskId = taskId,
                             errorDetail = "${cause.wireValue}: $reason",
-                            reconciliationEpoch = _reconciliationEpoch.get()
+                            reconciliationEpoch = _reconciliationEpoch.incrementAndGet()
                         )
                 }
                 emitReconciliationSignal(signal)
@@ -2187,7 +2190,7 @@ class RuntimeController(
                 ),
                 signalId = UUID.randomUUID().toString(),
                 emittedAtMs = System.currentTimeMillis(),
-                reconciliationEpoch = _reconciliationEpoch.get()
+                reconciliationEpoch = _reconciliationEpoch.incrementAndGet()
             )
         )
     }
@@ -2486,7 +2489,7 @@ class RuntimeController(
                 participantId = participantId,
                 taskId = taskId,
                 correlationId = correlationId,
-                reconciliationEpoch = _reconciliationEpoch.get()
+                reconciliationEpoch = _reconciliationEpoch.incrementAndGet()
             )
         )
     }
@@ -2518,7 +2521,7 @@ class RuntimeController(
                 participantId = participantId,
                 taskId = taskId,
                 correlationId = correlationId,
-                reconciliationEpoch = _reconciliationEpoch.get()
+                reconciliationEpoch = _reconciliationEpoch.incrementAndGet()
             )
         )
     }

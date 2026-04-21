@@ -867,7 +867,7 @@ class Pr52ReconciliationSignalRuntimeWiringTest {
     }
 
     @Test
-    fun `successive RUNTIME_TRUTH_SNAPSHOT signals have non-decreasing reconciliationEpoch`() {
+    fun `successive RUNTIME_TRUTH_SNAPSHOT signals have strictly increasing reconciliationEpoch`() {
         val descriptor = buildTestHostDescriptor()
         val (controller, _) = buildController(hostDescriptor = descriptor)
         controller.setActiveForTest()
@@ -882,8 +882,8 @@ class Pr52ReconciliationSignalRuntimeWiringTest {
         assertNotNull("First snapshot must be emitted", first)
         assertNotNull("Second snapshot must be emitted", second)
         assertTrue(
-            "Second snapshot epoch must be >= first snapshot epoch",
-            second!!.reconciliationEpoch >= first!!.reconciliationEpoch
+            "Second snapshot epoch must be strictly greater than first snapshot epoch",
+            second!!.reconciliationEpoch > first!!.reconciliationEpoch
         )
     }
 }
