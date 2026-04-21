@@ -1248,6 +1248,55 @@ object StabilizationBaseline {
                 "pre-terminal cancel/failure notification and full snapshot publication.",
             introducedPr = 51
         )
+    ) + listOf(
+
+        // ── PR-52: ReconciliationSignal factory helpers and RuntimeController emission ──
+
+        BaselineSurfaceEntry(
+            surfaceId = "reconciliation-signal-factories",
+            displayName = "ReconciliationSignal factory helpers (taskStatusUpdate, participantStateSignal)",
+            packagePath = "com.ufo.galaxy.runtime.ReconciliationSignal",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-52 completes ReconciliationSignal factory coverage with " +
+                "taskStatusUpdate (TASK_STATUS_UPDATE kind, STATUS_IN_PROGRESS, optional " +
+                "progressDetail) and participantStateSignal (PARTICIPANT_STATE kind, " +
+                "STATUS_STATE_CHANGED, carries healthState + readinessState + optional " +
+                "posture in payload).  Fills the factory gap left by PR-51 for the two " +
+                "non-terminal, non-snapshot signal kinds.",
+            introducedPr = 52
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-reconciliation-signals",
+            displayName = "RuntimeController.reconciliationSignals",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-52 adds reconciliationSignals SharedFlow to RuntimeController — " +
+                "the canonical Android→V2 structured reconciliation signal stream.  Emission " +
+                "points: recordDelegatedTaskAccepted (TASK_ACCEPTED), notifyTakeoverFailed " +
+                "(TASK_FAILED or TASK_CANCELLED), publishTaskResult (TASK_RESULT), " +
+                "publishTaskCancelled (TASK_CANCELLED), notifyParticipantHealthChanged " +
+                "(PARTICIPANT_STATE), publishRuntimeTruthSnapshot (RUNTIME_TRUTH_SNAPSHOT). " +
+                "V2 collects this flow to reconcile its canonical participant truth without " +
+                "polling or inspecting internal RuntimeController state.",
+            introducedPr = 52
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-publish-truth-snapshot",
+            displayName = "RuntimeController.publishRuntimeTruthSnapshot",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-52 adds publishRuntimeTruthSnapshot to RuntimeController — the " +
+                "canonical entry point for a full RUNTIME_TRUTH_SNAPSHOT reconciliation " +
+                "signal.  Assembles AndroidParticipantRuntimeTruth from the current " +
+                "hostDescriptor and hostSessionSnapshot, advances the reconciliationEpoch, " +
+                "and emits the snapshot on reconciliationSignals for V2 to perform a full " +
+                "reconciliation pass.  V2 should treat the snapshot as Android's authoritative " +
+                "self-reported local truth and resolve conflicts in its favour.",
+            introducedPr = 52
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

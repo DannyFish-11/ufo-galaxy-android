@@ -1,6 +1,6 @@
 # Android Runtime Truth and V2 Reconciliation
 
-> **PR-51**
+> **PR-51 / PR-52**
 > Introduced in: `ufo-galaxy-android`
 > Audience: V2 orchestration engineers, Android platform engineers, distributed runtime reviewers
 
@@ -65,9 +65,28 @@ Android                                    V2
   │── ReconciliationSignal.TASK_RESULT ────►│ (task completed successfully)
   │                                         │── close task as success; update session truth
   │                                         │
+  │── ReconciliationSignal.PARTICIPANT_STATE►│ (health/readiness state changed)
+  │                                         │── update participant state in canonical registry
+  │                                         │
   │── V2MultiDeviceLifecycleEvent ─────────►│ (participant health/connectivity events)
   │                                         │── update device health; trigger mesh session lifecycle
 ```
+
+All `ReconciliationSignal` instances are emitted on `RuntimeController.reconciliationSignals`
+(a `SharedFlow<ReconciliationSignal>`).  V2 should collect this flow to receive all structured
+Android→V2 reconciliation signals without polling or inspecting raw runtime state.
+
+**Emission points in `RuntimeController`:**
+
+| Signal Kind | Emission method | Trigger |
+|---|---|---|
+| `TASK_ACCEPTED` | `recordDelegatedTaskAccepted(taskId, correlationId)` | Delegated task accepted by Android |
+| `TASK_STATUS_UPDATE` | `ReconciliationSignal.taskStatusUpdate(...)` (caller-built) | Mid-execution status report |
+| `TASK_RESULT` | `publishTaskResult(taskId, correlationId)` | Task completed successfully |
+| `TASK_CANCELLED` | `publishTaskCancelled(taskId, correlationId)` or `notifyTakeoverFailed(..., CANCELLED)` | Task stopped by cancel |
+| `TASK_FAILED` | `notifyTakeoverFailed(..., FAILED/TIMEOUT/DISCONNECT)` | Task ended with failure |
+| `PARTICIPANT_STATE` | `notifyParticipantHealthChanged(health, readiness)` | Health or readiness changed |
+| `RUNTIME_TRUTH_SNAPSHOT` | `publishRuntimeTruthSnapshot(health, readiness, ...)` | Full reconciliation snapshot requested |
 
 ---
 
@@ -214,6 +233,11 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 | `AndroidParticipantRuntimeTruth` | Consolidated participant truth snapshot | PR-51 |
 | `ReconciliationSignal` | Structured Android→V2 signal wrapper | PR-51 |
 | `ActiveTaskStatus` | In-flight task status enum | PR-51 |
+| `RuntimeController.reconciliationSignals` | Observable Android→V2 reconciliation signal stream | PR-52 |
+| `RuntimeController.publishRuntimeTruthSnapshot` | Emits full participant truth snapshot to V2 | PR-52 |
+| `RuntimeController.recordDelegatedTaskAccepted` | Session counter + TASK_ACCEPTED signal emission | PR-52 |
+| `RuntimeController.publishTaskResult` | TASK_RESULT signal emission | PR-52 |
+| `RuntimeController.publishTaskCancelled` | TASK_CANCELLED signal emission | PR-52 |
 | `AndroidSessionContribution` | Terminal task result/cancellation envelope | PR-4 |
 | `StagedMeshParticipationResult` | Staged-mesh target execution result | PR-32 |
 | `CanonicalParticipantModel` | Participant read-model projection | PR-6 |
@@ -238,6 +262,15 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 - ✅ Mesh session lifecycle hints (PR-44) — tested in `Pr44MeshSessionLifecycleMappingTest`
 - ✅ Consolidated participant truth snapshot (`AndroidParticipantRuntimeTruth`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
 - ✅ Structured reconciliation signal (`ReconciliationSignal`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
+- ✅ `ReconciliationSignal.taskStatusUpdate` factory helper — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `ReconciliationSignal.participantStateSignal` factory helper — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.reconciliationSignals` observable flow — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.recordDelegatedTaskAccepted` TASK_ACCEPTED emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.publishTaskResult` TASK_RESULT emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.publishTaskCancelled` TASK_CANCELLED emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.publishRuntimeTruthSnapshot` RUNTIME_TRUTH_SNAPSHOT emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `notifyTakeoverFailed` TASK_FAILED/TASK_CANCELLED reconciliation signal — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `notifyParticipantHealthChanged` PARTICIPANT_STATE reconciliation signal — tested in `Pr52ReconciliationSignalEmissionTest`
 
 ### Contract-first / partially wired
 

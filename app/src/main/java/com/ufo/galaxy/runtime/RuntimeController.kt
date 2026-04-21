@@ -7,6 +7,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -476,6 +477,58 @@ class RuntimeController(
      */
     val v2LifecycleEvents: SharedFlow<V2MultiDeviceLifecycleEvent> =
         _v2LifecycleEvents.asSharedFlow()
+
+    /**
+     * PR-52 — Monotonically increasing reconciliation epoch counter for this runtime process.
+     *
+     * Incremented by [nextReconciliationEpoch] each time a [ReconciliationSignal] or
+     * [AndroidParticipantRuntimeTruth] snapshot is produced.  V2 uses the epoch to detect
+     * stale snapshots: a snapshot with a lower epoch than the most recently received
+     * snapshot for the same [participantId] must be discarded.
+     *
+     * Scoped to the current process lifetime.  Resets to zero only on process restart.
+     */
+    private val _reconciliationEpoch = AtomicInteger(0)
+
+    /**
+     * PR-52 — Backing flow for [reconciliationSignals].
+     *
+     * Buffered to accommodate a burst of task lifecycle signals (accepted → status update →
+     * terminal) without dropping events when the V2 consumer is briefly slow to drain.
+     */
+    private val _reconciliationSignals =
+        MutableSharedFlow<ReconciliationSignal>(
+            extraBufferCapacity = RECONCILIATION_SIGNAL_BUFFER_CAPACITY
+        )
+
+    /**
+     * PR-52 — Observable stream of [ReconciliationSignal] instances.
+     *
+     * This is the **canonical Android→V2 reconciliation signal stream**.  V2 should collect
+     * this flow and dispatch each signal to its participant-truth reconciliation loop:
+     *
+     *  - [ReconciliationSignal.Kind.TASK_ACCEPTED]        → mark task in-progress under this participant
+     *  - [ReconciliationSignal.Kind.TASK_STATUS_UPDATE]   → update in-flight progress view
+     *  - [ReconciliationSignal.Kind.TASK_RESULT]          → close task as success
+     *  - [ReconciliationSignal.Kind.TASK_CANCELLED]       → close task as cancelled
+     *  - [ReconciliationSignal.Kind.TASK_FAILED]          → close task as failed; trigger fallback if needed
+     *  - [ReconciliationSignal.Kind.PARTICIPANT_STATE]    → update canonical participant state
+     *  - [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT] → full reconciliation pass
+     *
+     * Emission points:
+     *  - [recordDelegatedTaskAccepted] → [ReconciliationSignal.Kind.TASK_ACCEPTED]
+     *  - [notifyTakeoverFailed] → [ReconciliationSignal.Kind.TASK_FAILED] or
+     *    [ReconciliationSignal.Kind.TASK_CANCELLED] depending on [TakeoverFallbackEvent.Cause]
+     *  - [publishTaskResult] → [ReconciliationSignal.Kind.TASK_RESULT]
+     *  - [publishTaskCancelled] → [ReconciliationSignal.Kind.TASK_CANCELLED]
+     *  - [notifyParticipantHealthChanged] → [ReconciliationSignal.Kind.PARTICIPANT_STATE]
+     *  - [publishRuntimeTruthSnapshot] → [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT]
+     *
+     * Backed by a buffer of [RECONCILIATION_SIGNAL_BUFFER_CAPACITY] entries.
+     * Observers should drain promptly to avoid event loss.
+     */
+    val reconciliationSignals: SharedFlow<ReconciliationSignal> =
+        _reconciliationSignals.asSharedFlow()
 
     /**
      * PR-1 — Observable durable session continuity record for this Android runtime.
@@ -1150,9 +1203,80 @@ class RuntimeController(
                 cause = cause
             )
         )
+        // PR-52: Emit a structured reconciliation signal so V2 can close the task in its
+        // canonical participant truth.  Map TakeoverFallbackEvent.Cause to the appropriate
+        // ReconciliationSignal kind: CANCELLED for cooperative cancel, FAILED for all others.
+        currentParticipantId()?.let { pid ->
+            val signal = if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
+                ReconciliationSignal.taskCancelled(
+                    participantId = pid,
+                    taskId = taskId,
+                    reconciliationEpoch = nextReconciliationEpoch()
+                )
+            } else {
+                ReconciliationSignal.taskFailed(
+                    participantId = pid,
+                    taskId = taskId,
+                    errorDetail = "${cause.wireValue}: $reason",
+                    reconciliationEpoch = nextReconciliationEpoch()
+                )
+            }
+            emitReconciliationSignal(signal)
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /**
+     * PR-52 — Returns the stable participant node ID derived from [hostDescriptor], or
+     * `null` when no descriptor is available.
+     *
+     * Used by reconciliation signal emission paths to identify this participant.
+     */
+    private fun currentParticipantId(): String? {
+        val descriptor = hostDescriptor ?: return null
+        return RuntimeIdentityContracts.participantNodeId(
+            deviceId = descriptor.deviceId,
+            runtimeHostId = descriptor.hostId
+        )
+    }
+
+    /**
+     * PR-52 — Atomically increments and returns the next reconciliation epoch.
+     *
+     * The epoch is monotonically increasing within a process lifetime.  V2 uses it to
+     * detect stale snapshots: a snapshot with a lower epoch than the last-seen epoch for
+     * the same participant must be discarded.
+     */
+    private fun nextReconciliationEpoch(): Int = _reconciliationEpoch.incrementAndGet()
+
+    /**
+     * PR-52 — Emits [signal] on [_reconciliationSignals] and logs it.
+     *
+     * Uses [MutableSharedFlow.tryEmit] (non-suspend) so callers do not need to be in a
+     * coroutine.  Logs a warning when the buffer is full and the signal is dropped.
+     */
+    private fun emitReconciliationSignal(signal: ReconciliationSignal) {
+        val emitted = _reconciliationSignals.tryEmit(signal)
+        if (!emitted) {
+            Log.w(
+                TAG,
+                "[RUNTIME] reconciliationSignals buffer full — signal dropped: " +
+                    "kind=${signal.kind.wireValue} participant=${signal.participantId} task=${signal.taskId}"
+            )
+        }
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "reconciliation_signal_emitted",
+                "kind" to signal.kind.wireValue,
+                "participant_id" to signal.participantId,
+                "task_id" to (signal.taskId ?: ""),
+                "signal_id" to signal.signalId,
+                "reconciliation_epoch" to signal.reconciliationEpoch
+            )
+        )
+    }
 
     /**
      * Handles a registration failure: emits [registrationError] and [setupError], updates
@@ -1431,6 +1555,140 @@ class RuntimeController(
             "[RUNTIME] Delegated execution accepted: session_id=${current.sessionId} " +
                 "execution_count=${current.delegatedExecutionCount + 1}"
         )
+    }
+
+    /**
+     * PR-52 — Records that a delegated task has been accepted and emits a
+     * [ReconciliationSignal.Kind.TASK_ACCEPTED] signal on [reconciliationSignals].
+     *
+     * This is the **structured reconciliation entry point** for task acceptance.  It:
+     *  1. Calls [recordDelegatedExecutionAccepted] to advance the session execution counter.
+     *  2. Emits a [ReconciliationSignal.Kind.TASK_ACCEPTED] signal so V2 can immediately
+     *     mark the task as in-progress under this participant without waiting for the
+     *     terminal result.
+     *
+     * Callers that only need the session counter update (and do not have a stable `taskId`)
+     * may continue to call [recordDelegatedExecutionAccepted] directly.  New callers with
+     * task identity should prefer this method.
+     *
+     * @param taskId        Task identifier from the inbound dispatch envelope.
+     * @param correlationId Optional correlation identifier echoed from the originating request.
+     */
+    fun recordDelegatedTaskAccepted(
+        taskId: String,
+        correlationId: String? = null
+    ) {
+        recordDelegatedExecutionAccepted()
+        val pid = currentParticipantId() ?: run {
+            Log.d(TAG, "[RUNTIME] recordDelegatedTaskAccepted: no hostDescriptor — skipping signal")
+            return
+        }
+        emitReconciliationSignal(
+            ReconciliationSignal.taskAccepted(
+                participantId = pid,
+                taskId = taskId,
+                correlationId = correlationId,
+                reconciliationEpoch = nextReconciliationEpoch()
+            )
+        )
+    }
+
+    /**
+     * PR-52 — Emits a [ReconciliationSignal.Kind.TASK_RESULT] signal indicating Android
+     * completed a delegated task successfully.
+     *
+     * This signal is the **pre-terminal** success notification for V2.  V2 may advance its
+     * pipeline state on receipt.  The terminal session-truth record is closed separately
+     * by the [AndroidSessionContribution.Kind.FINAL_COMPLETION] contribution.
+     *
+     * @param taskId        Task identifier of the completed task.
+     * @param correlationId Optional correlation identifier from the originating request.
+     */
+    fun publishTaskResult(
+        taskId: String,
+        correlationId: String? = null
+    ) {
+        val pid = currentParticipantId() ?: run {
+            Log.d(TAG, "[RUNTIME] publishTaskResult: no hostDescriptor — skipping signal")
+            return
+        }
+        emitReconciliationSignal(
+            ReconciliationSignal.taskResult(
+                participantId = pid,
+                taskId = taskId,
+                correlationId = correlationId,
+                reconciliationEpoch = nextReconciliationEpoch()
+            )
+        )
+    }
+
+    /**
+     * PR-52 — Emits a [ReconciliationSignal.Kind.TASK_CANCELLED] signal indicating Android
+     * cancelled a delegated task via an explicit cooperative cancel path (i.e. not through
+     * [notifyTakeoverFailed]).
+     *
+     * Use [notifyTakeoverFailed] with [TakeoverFallbackEvent.Cause.CANCELLED] when the
+     * cancellation is part of a takeover failure flow.  Use this method when the cancel
+     * arises from a direct cancel request (e.g. user-initiated cancel) outside the
+     * takeover failure path.
+     *
+     * @param taskId        Task identifier of the cancelled task.
+     * @param correlationId Optional correlation identifier from the originating request.
+     */
+    fun publishTaskCancelled(
+        taskId: String,
+        correlationId: String? = null
+    ) {
+        val pid = currentParticipantId() ?: run {
+            Log.d(TAG, "[RUNTIME] publishTaskCancelled: no hostDescriptor — skipping signal")
+            return
+        }
+        emitReconciliationSignal(
+            ReconciliationSignal.taskCancelled(
+                participantId = pid,
+                taskId = taskId,
+                correlationId = correlationId,
+                reconciliationEpoch = nextReconciliationEpoch()
+            )
+        )
+    }
+
+    /**
+     * PR-52 — Builds and emits a [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT] signal
+     * carrying the current full [AndroidParticipantRuntimeTruth] snapshot.
+     *
+     * V2 must perform a full reconciliation pass against the snapshot on receipt, resolving
+     * any conflicts in favour of the snapshot (Android owns its local truth).
+     *
+     * This method is a no-op when no [hostDescriptor] has been configured (i.e. when
+     * [hostDescriptor] is `null`).
+     *
+     * @param healthState       Current [ParticipantHealthState] of the participant.
+     * @param readinessState    Current [ParticipantReadinessState] for dispatch selection.
+     * @param activeTaskId      In-flight task identifier; null if idle.
+     * @param activeTaskStatus  Status of the in-flight task; null if idle.
+     */
+    fun publishRuntimeTruthSnapshot(
+        healthState: ParticipantHealthState = ParticipantHealthState.UNKNOWN,
+        readinessState: ParticipantReadinessState = ParticipantReadinessState.UNKNOWN,
+        activeTaskId: String? = null,
+        activeTaskStatus: ActiveTaskStatus? = null
+    ) {
+        val descriptor = hostDescriptor ?: run {
+            Log.d(TAG, "[RUNTIME] publishRuntimeTruthSnapshot: no hostDescriptor — skipping signal")
+            return
+        }
+        val epoch = nextReconciliationEpoch()
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor,
+            sessionSnapshot = currentHostSessionSnapshot(),
+            healthState = healthState,
+            readinessState = readinessState,
+            activeTaskId = activeTaskId,
+            activeTaskStatus = activeTaskStatus,
+            reconciliationEpoch = epoch
+        )
+        emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(truth))
     }
 
     /**
@@ -1999,6 +2257,19 @@ class RuntimeController(
                 )
             )
         }
+        // PR-52: Emit a PARTICIPANT_STATE reconciliation signal so V2 can update its
+        // canonical participant view to reflect the new health and readiness state
+        // independently of the V2MultiDeviceLifecycleEvent stream.
+        currentParticipantId()?.let { pid ->
+            emitReconciliationSignal(
+                ReconciliationSignal.participantStateSignal(
+                    participantId = pid,
+                    healthState = newHealthState,
+                    readinessState = readinessState,
+                    reconciliationEpoch = nextReconciliationEpoch()
+                )
+            )
+        }
     }
 
     /**
@@ -2272,5 +2543,14 @@ class RuntimeController(
          * briefly slow to drain.
          */
         private const val V2_LIFECYCLE_EVENT_BUFFER_CAPACITY = 16
+
+        /**
+         * PR-52 — Buffer capacity for [_reconciliationSignals].
+         *
+         * Sized to accommodate a burst of task lifecycle signals (accepted → status update
+         * → terminal) plus concurrent participant-state and snapshot signals without
+         * dropping events when the V2 consumer is briefly slow to drain.
+         */
+        private const val RECONCILIATION_SIGNAL_BUFFER_CAPACITY = 32
     }
 }
