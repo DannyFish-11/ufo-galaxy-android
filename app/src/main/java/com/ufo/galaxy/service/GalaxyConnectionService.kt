@@ -25,6 +25,7 @@ import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
+import com.ufo.galaxy.runtime.HybridParticipantCapability
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.runtime.toOutboundPayload
 import com.ufo.galaxy.runtime.SourceRuntimePosture
@@ -1541,8 +1542,14 @@ class GalaxyConnectionService : Service() {
     /**
      * Sends a [HybridDegradePayload] in response to a [MsgType.HYBRID_EXECUTE] message.
      *
-     * Called when the full hybrid executor is not yet implemented; informs the gateway that
-     * the device has downgraded to local-only mode for this task.
+     * Called because [HybridParticipantCapability.HYBRID_EXECUTE_FULL] is currently
+     * [HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED] — this is an
+     * intentional, tracked deferral (not an accidental omission).  The degrade reply
+     * explicitly informs the gateway of the capability limitation so V2 can apply its
+     * own fallback policy rather than silently receiving an empty/error response.
+     *
+     * V2 must treat this reply as an explicit capability unavailability signal and apply
+     * its own fallback policy (e.g., full remote execution).
      *
      * @param rawHybridJson The raw JSON of the inbound hybrid_execute envelope, used to
      *                      extract [task_id] for the degrade reply.
@@ -1555,6 +1562,21 @@ class GalaxyConnectionService : Service() {
             Log.w(TAG, "[ADVANCED:HYBRID_DEGRADE] failed to extract task_id from hybrid_execute payload: ${e.message}")
             ""
         }
+
+        // PR-60: Log a structured hybrid-participant capability limitation before sending
+        // the degrade reply so V2 and log-analysis tooling can distinguish "capability
+        // not available" from a generic error.
+        val capability = HybridParticipantCapability.HYBRID_EXECUTE_FULL
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_HYBRID_PARTICIPANT,
+            mapOf(
+                "event" to "hybrid_capability_limitation",
+                "capability" to capability.wireValue,
+                "support_level" to capability.supportLevel.wireValue,
+                "task_id" to taskId,
+                "reason" to capability.description
+            )
+        )
 
         val degradePayload = HybridDegradePayload(
             task_id = taskId,
@@ -1572,12 +1594,13 @@ class GalaxyConnectionService : Service() {
             idempotency_key = buildIdempotencyKey(taskId.ifBlank { "hybrid_degrade" }, MsgType.HYBRID_DEGRADE)
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
-        Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent")
+        Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent capability=${capability.wireValue}")
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "hybrid_degrade_sent",
                 "task_id" to taskId,
-                "reason" to "hybrid_executor_not_implemented"
+                "reason" to "hybrid_executor_not_implemented",
+                "capability" to capability.wireValue
             )
         )
     }
