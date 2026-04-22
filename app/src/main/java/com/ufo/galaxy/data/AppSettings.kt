@@ -150,6 +150,25 @@ interface AppSettings {
      */
     var gatewayToken: String
 
+    /**
+     * PR-7 — Prior durable session ID for process-recreation re-attach.
+     *
+     * Persisted when a durable session era ends (clean stop or era invalidation).
+     * On process recreation, Android reads this value to construct a
+     * [com.ufo.galaxy.runtime.ProcessRecreatedReattachHint] and include it in the
+     * `DeviceConnected` event, allowing V2 to optionally correlate the re-attaching
+     * device with its prior session.
+     *
+     * A blank string indicates no prior session is known (true first launch or after an
+     * explicit clear). V2 must treat a blank value as equivalent to a brand-new device
+     * attachment.
+     *
+     * **Authority boundary**: Android only presents this hint; V2 decides whether to
+     * restore participant state. Android must never self-authorize session continuation
+     * based on this field.
+     */
+    var lastDurableSessionId: String
+
     // ── Local-chain execution settings (planner / grounding) ─────────────────
 
     /**
@@ -346,6 +365,7 @@ class InMemoryAppSettings(
     override var deviceId: String = "",
     override var metricsEndpoint: String = "",
     override var gatewayToken: String = "",
+    override var lastDurableSessionId: String = "",
     // Local-chain execution settings
     override var plannerMaxTokens: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS,
     override var plannerTemperature: Double = SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE,
@@ -490,6 +510,12 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getString(KEY_GATEWAY_TOKEN, "") ?: ""
         set(value) { prefs.edit().putString(KEY_GATEWAY_TOKEN, value).apply() }
 
+    // ── PR-7: Prior durable session ID (process-recreation re-attach hint) ────
+
+    override var lastDurableSessionId: String
+        get() = prefs.getString(KEY_LAST_DURABLE_SESSION_ID, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_LAST_DURABLE_SESSION_ID, value).apply() }
+
     // ── Local-chain execution settings ───────────────────────────────────────
 
     override var plannerMaxTokens: Int
@@ -542,6 +568,9 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_METRICS_ENDPOINT = "metrics_endpoint"
         const val KEY_GATEWAY_TOKEN = "gateway_token"
+
+        // PR-7: Process-recreation re-attach hint key
+        const val KEY_LAST_DURABLE_SESSION_ID = "last_durable_session_id"
 
         // Local-chain execution keys
         const val KEY_PLANNER_MAX_TOKENS = "planner_max_tokens"

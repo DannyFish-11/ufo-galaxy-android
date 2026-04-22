@@ -176,6 +176,29 @@ object ContinuityRecoveryContext {
     const val REASON_TRANSPORT_DEGRADED = "transport_degraded"
 
     /**
+     * PR-7 — [interruption_reason] wire value indicating that Android's process was
+     * killed by the low-memory killer and is now re-attaching after process recreation.
+     *
+     * This reason distinguishes a **process-recreation re-attach** from:
+     * - A purely fresh first-launch attach (no prior session identity).
+     * - A reconnect-recovery attach within the same activation era.
+     * - An explicit-stop and re-enable (user-initiated new era).
+     *
+     * When this reason is present on an inbound execution contract, Android is being
+     * re-dispatched into a new activation era that was preceded by a process kill.
+     * A [ProcessRecreatedReattachHint] carrying the prior session identity may also be
+     * present in the `DeviceConnected` event metadata (via the
+     * [ProcessRecreatedReattachHint.KEY_PRIOR_DURABLE_SESSION_ID] field).
+     *
+     * V2 may use this hint to optionally correlate the re-attaching participant with
+     * its prior session, subject to V2's own participant-loss timeout policy.
+     *
+     * @see ProcessRecreatedReattachHint
+     * @see ParticipantAttachmentTransitionSemantics.AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH
+     */
+    const val REASON_PROCESS_RECREATION = "process_recreation"
+
+    /**
      * Set of all recognised [interruption_reason] wire values.
      *
      * Callers MUST tolerate values outside this set; future V2 versions may
@@ -185,7 +208,8 @@ object ContinuityRecoveryContext {
         REASON_RECONNECT,
         REASON_HANDOFF,
         REASON_DEVICE_PAUSE,
-        REASON_TRANSPORT_DEGRADED
+        REASON_TRANSPORT_DEGRADED,
+        REASON_PROCESS_RECREATION
     )
 
     // ── Recovery participant role helpers ─────────────────────────────────────
@@ -265,4 +289,19 @@ object ContinuityRecoveryContext {
      */
     fun isTransportInterruption(reason: String?): Boolean =
         reason == REASON_RECONNECT || reason == REASON_TRANSPORT_DEGRADED
+
+    /**
+     * PR-7 — Returns `true` when [reason] indicates a process-recreation re-attach.
+     *
+     * When `true`, a [ProcessRecreatedReattachHint] may be present in the
+     * `DeviceConnected` event metadata.  V2 can use this to optionally correlate the
+     * re-attaching participant with its prior session, subject to its own participant-loss
+     * timeout policy.
+     *
+     * @param reason Raw [interruption_reason] string from the inbound envelope.
+     * @see REASON_PROCESS_RECREATION
+     * @see ProcessRecreatedReattachHint
+     */
+    fun isProcessRecreationReattach(reason: String?): Boolean =
+        reason == REASON_PROCESS_RECREATION
 }

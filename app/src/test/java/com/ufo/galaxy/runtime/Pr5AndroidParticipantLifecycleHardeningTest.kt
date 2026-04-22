@@ -817,9 +817,9 @@ class Pr5AndroidParticipantLifecycleHardeningTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `transition registry has 6 entries`() {
-        assertEquals(6, ParticipantAttachmentTransitionSemantics.transitionCount)
-        assertEquals(6, ParticipantAttachmentTransitionSemantics.transitions.size)
+    fun `transition registry has 7 entries`() {
+        assertEquals(7, ParticipantAttachmentTransitionSemantics.transitionCount)
+        assertEquals(7, ParticipantAttachmentTransitionSemantics.transitions.size)
     }
 
     @Test
