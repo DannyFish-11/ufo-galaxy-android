@@ -246,6 +246,81 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 | `RuntimeTruthPrecedenceRules` | Three-tier truth precedence model (internal) | PR-39 |
 | `AndroidContractFinalizer` | Contract responsibility boundaries | PR-41 |
 | `RuntimeInvariantEnforcer` | Internal invariant enforcement | PR-42 |
+| `AndroidAppLifecycleTransition` | Named lifecycle transitions with runtime implications | PR-60 |
+| `HybridParticipantCapability` | Structured hybrid/distributed capability status | PR-60 |
+| `AndroidLifecycleRecoveryContract` | Recovery boundary: process recreation, transient disconnect, hybrid limitations | PR-60 |
+| `ParticipantRuntimeSemanticsBoundary` | Single reviewer-facing boundary: truth ownership, execution semantics, first-class participant declaration | PR-61 |
+
+---
+
+## Reviewer Guide (PR-61 Acceptance Criteria)
+
+A reviewer can determine the following from the structures in this document:
+
+### 1. What Android considers local participant/runtime truth
+
+**See**: `ParticipantRuntimeSemanticsBoundary.ANDROID_TRUTH_DOMAIN`
+
+Android exclusively owns **10 truth domains**:
+
+| Domain | Key fields | Canonical surface |
+|---|---|---|
+| Participant identity | `participantId`, `deviceId`, `hostId`, `deviceRole`, `formationRole` | `RuntimeHostDescriptor` |
+| Participation state | `participationState` | `HostParticipationState` |
+| Session attachment | `sessionId`, `sessionState`, `delegatedExecutionCount` | `AttachedRuntimeSession` |
+| Runtime posture | `sourceRuntimePosture` | `SourceRuntimePosture` |
+| Health state | `healthState` | `ParticipantHealthState` |
+| Readiness state | `readinessState` | `ParticipantReadinessState` |
+| Active task status | `activeTaskId`, `activeTaskStatus` | `ActiveTaskStatus` |
+| Task outcomes | cancel, status, failure, result | `ReconciliationSignal` |
+| Lifecycle transitions | app lifecycle events | `AndroidAppLifecycleTransition` |
+| Hybrid capability | capability support level | `HybridParticipantCapability` |
+
+V2 must treat all fields in these domains as Android-reported local truth.
+
+### 2. How Android represents cancel/status/failure/result semantics
+
+**See**: `ParticipantRuntimeSemanticsBoundary.EXECUTION_OUTCOMES`
+
+| Signal | Phase | Terminal? | Android emits when… |
+|---|---|---|---|
+| `TASK_ACCEPTED` | Pre-execution | No | Task accepted; execution started |
+| `TASK_STATUS_UPDATE` | In-progress | No | Intermediate progress update |
+| `TASK_RESULT` | Terminal | **Yes** | Task completed successfully |
+| `TASK_CANCELLED` | Terminal | **Yes** | Cancel determined (before termination completes) |
+| `TASK_FAILED` | Terminal | **Yes** | Failure detected (before termination completes) |
+| `PARTICIPANT_STATE` | Any time | No | Health/readiness/posture changed |
+| `RUNTIME_TRUTH_SNAPSHOT` | Any time | No | Full reconciliation snapshot requested |
+
+Key protocol invariants (`ParticipantRuntimeSemanticsBoundary.PROTOCOL_SAFETY_RULES`):
+- `TASK_CANCELLED` for a `taskId` means **no** `TASK_RESULT` will follow for that `taskId`.
+- `signalId` values are unique for deduplication.
+- `reconciliationEpoch` is monotonically increasing per participant.
+- `RUNTIME_TRUTH_SNAPSHOT` resolves conflicts **in Android's favour**.
+- Android owns local truth; V2 owns canonical orchestration truth.
+
+### 3. Whether Android behaves as a first-class participant runtime
+
+**See**: `ParticipantRuntimeSemanticsBoundary.FIRST_CLASS_PARTICIPANT_DECLARATION`
+
+Android is a first-class participant runtime because it:
+
+1. **Runs a complete local AI execution loop** — MobileVLM planner + SeeClick grounding + AccessibilityService (screenshot → plan → click → repeat)
+2. **Owns local truth exclusively** — 10 truth domains; V2 must not override without a signal
+3. **Has lifecycle authority** — `AndroidAppLifecycleTransition` decisions are Android's
+4. **Emits pre-terminal cancel signals** — `TASK_CANCELLED` before termination completes
+5. **Emits pre-terminal failure signals** — `TASK_FAILED` before termination completes
+6. **Can elevate posture** — `JOIN_RUNTIME` makes Android a full runtime host peer
+7. **Self-assesses health** — reports `ParticipantHealthState` independently
+8. **Self-assesses readiness** — reports `ParticipantReadinessState` independently
+9. **Participates in formation** — COORDINATOR or PARTICIPANT role
+
+Android is **not** a second orchestration authority:
+- Does not assign tasks or decide dispatch
+- Does not unilaterally continue or terminate sessions
+- Does not override V2 canonical truth
+- Does not participate in barrier coordination (V2-side authority)
+- Does not make formation rebalance decisions
 
 ---
 
@@ -271,6 +346,10 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 - ✅ `RuntimeController.publishRuntimeTruthSnapshot` RUNTIME_TRUTH_SNAPSHOT emission — tested in `Pr52ReconciliationSignalEmissionTest`
 - ✅ `notifyTakeoverFailed` TASK_FAILED/TASK_CANCELLED reconciliation signal — tested in `Pr52ReconciliationSignalEmissionTest`
 - ✅ `notifyParticipantHealthChanged` PARTICIPANT_STATE reconciliation signal — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `AndroidAppLifecycleTransition` — named lifecycle model with runtime implications — tested in `Pr60AndroidLifecycleHardeningTest`
+- ✅ `HybridParticipantCapability` — structured capability status registry — tested in `Pr60AndroidLifecycleHardeningTest`
+- ✅ `AndroidLifecycleRecoveryContract` — process recreation and disconnect recovery boundaries — tested in `Pr60AndroidLifecycleHardeningTest`
+- ✅ `ParticipantRuntimeSemanticsBoundary` — reviewer-facing boundary for all 3 acceptance criteria — tested in `Pr61ParticipantRuntimeTruthBoundaryTest`
 
 ### Contract-first / partially wired
 
