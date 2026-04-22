@@ -1345,6 +1345,104 @@ object StabilizationBaseline {
                 "query helpers so recovery correctness is reviewable in tests.",
             introducedPr = 53
         )
+    ) + listOf(
+
+        // ── PR-60: Android app lifecycle transitions, hybrid capability, and recovery contract ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-app-lifecycle-transition",
+            displayName = "AndroidAppLifecycleTransition",
+            packagePath = "com.ufo.galaxy.runtime.AndroidAppLifecycleTransition",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-60 explicit Android app-level lifecycle transition model for the " +
+                "participant runtime — FOREGROUND, BACKGROUND, PROCESS_RECREATED, " +
+                "RUNTIME_STOPPED, CONFIGURATION_CHANGE — with wireValue and runtimeImplication " +
+                "for each. Makes lifecycle authority explicit: every app-level event that can " +
+                "affect the runtime is named and reviewable. RuntimeController.onAppLifecycleTransition " +
+                "dispatches each transition to the correct runtime action (connectIfEnabled or stop). " +
+                "Eliminates implicit scattered lifecycle handling.",
+            introducedPr = 60
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "hybrid-participant-capability",
+            displayName = "HybridParticipantCapability",
+            packagePath = "com.ufo.galaxy.runtime.HybridParticipantCapability",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-60 structured hybrid/distributed execution capability model for the " +
+                "Android participant — HYBRID_EXECUTE_FULL (NOT_YET_IMPLEMENTED), " +
+                "STAGED_MESH_SUBTASK (AVAILABLE), PARALLEL_SUBTASK (AVAILABLE), " +
+                "WEBRTC_PEER_TRANSPORT (MINIMAL_COMPAT), BARRIER_COORDINATION (NOT_YET_IMPLEMENTED). " +
+                "Replaces silent degrade-only behavior with named, structured capability status. " +
+                "V2 can distinguish capability-unavailable from not-ready from intentional-deferral. " +
+                "Provides availableCapabilities() and deferredCapabilities() query helpers.",
+            introducedPr = 60
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-lifecycle-recovery-contract",
+            displayName = "AndroidLifecycleRecoveryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidLifecycleRecoveryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-60 structured recovery boundary contract declaring what survives and " +
+                "what is lost across Android process recreation, transient WS disconnect, and " +
+                "hybrid participant scenarios. PROCESS_RECREATION_BOUNDARY maps " +
+                "SURVIVES_PROCESS_RECREATION (crossDeviceEnabled) and " +
+                "LOST_ON_PROCESS_RECREATION (DurableSessionContinuityRecord, in-flight task state). " +
+                "TRANSIENT_DISCONNECT_RECOVERY declares android_recovers_locally and v2_must_handle " +
+                "boundaries. HYBRID_LIMITATIONS documents NOT_YET_IMPLEMENTED hybrid capabilities " +
+                "so reviewers can verify completeness.",
+            introducedPr = 60
+        )
+    ) + listOf(
+
+        // ── PR-61: Participant runtime semantics boundary — structured reviewer-facing contract ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "participant-runtime-semantics-boundary",
+            displayName = "ParticipantRuntimeSemanticsBoundary",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantRuntimeSemanticsBoundary",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-61 single structured reviewer-facing boundary for three acceptance " +
+                "criteria: (1) ANDROID_TRUTH_DOMAIN — 10 Android-owned truth domains with " +
+                "canonical surface, snapshot surface, and V2 consumer action for each; " +
+                "(2) EXECUTION_OUTCOMES — 7-entry cancel/status/failure/result protocol with " +
+                "phase, isTerminal, emit-condition, and V2-action for each outcome; and " +
+                "PROTOCOL_SAFETY_RULES (5 invariants); " +
+                "(3) FIRST_CLASS_PARTICIPANT_DECLARATION + 9 distinguishing behaviours + " +
+                "5 NOT_ORCHESTRATION_AUTHORITY_BOUNDARIES. Provides a single point of reference " +
+                "for reviewers to verify Android's participant runtime truth, execution semantics, " +
+                "and first-class participant posture without assembling from scattered surfaces.",
+            introducedPr = 61
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "participant-execution-phase",
+            displayName = "ParticipantRuntimeSemanticsBoundary.ExecutionPhase",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantRuntimeSemanticsBoundary",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-61 execution phase taxonomy for the Android participant task lifecycle — " +
+                "PRE_EXECUTION, IN_PROGRESS, TERMINAL, ANY — with stable wireValue for each. " +
+                "Used to classify each ExecutionOutcome in the EXECUTION_OUTCOMES protocol registry " +
+                "so reviewers can immediately see which outcomes are pre-execution, in-progress, " +
+                "terminal, or lifecycle-independent. Mirrors ReconciliationSignal phase semantics.",
+            introducedPr = 61
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "participant-truth-domain-entry",
+            displayName = "ParticipantRuntimeSemanticsBoundary.TruthDomainEntry",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantRuntimeSemanticsBoundary",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-61 structured truth domain entry used in ANDROID_TRUTH_DOMAIN — " +
+                "captures domainKey, fields, canonicalSurface, snapshotSurface, and v2ConsumerAction " +
+                "for each Android-owned truth domain. Enables programmatic verification that the " +
+                "complete truth ownership inventory is present and non-empty in tests, and serves " +
+                "as documentation of V2's expected response to each domain update.",
+            introducedPr = 61
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
