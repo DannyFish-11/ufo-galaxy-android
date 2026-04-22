@@ -305,5 +305,5 @@ object HybridRuntimeContinuityContract {
     /**
      * PR number that introduced this hybrid runtime continuity contract.
      */
-    const val INTRODUCED_PR: String = "PR5Android"
+    const val INTRODUCED_PR: String = "PR-5Android"
 }

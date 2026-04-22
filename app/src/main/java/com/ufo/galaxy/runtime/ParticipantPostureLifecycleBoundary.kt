@@ -327,5 +327,5 @@ object ParticipantPostureLifecycleBoundary {
     /**
      * PR number that introduced this posture-aware lifecycle boundary declaration.
      */
-    const val INTRODUCED_PR: String = "PR5Android"
+    const val INTRODUCED_PR: String = "PR-5Android"
 }

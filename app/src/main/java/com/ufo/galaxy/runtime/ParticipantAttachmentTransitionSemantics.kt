@@ -341,5 +341,5 @@ object ParticipantAttachmentTransitionSemantics {
     /**
      * PR number that introduced this attachment transition semantics declaration.
      */
-    const val INTRODUCED_PR: String = "PR5Android"
+    const val INTRODUCED_PR: String = "PR-5Android"
 }
