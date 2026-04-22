@@ -1443,6 +1443,72 @@ object StabilizationBaseline {
                 "as documentation of V2's expected response to each domain update.",
             introducedPr = 61
         )
+    ) + listOf(
+
+        // ── PR-62: Participant live execution surface — runtime truth wired into live execution ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "participant-live-execution-surface",
+            displayName = "ParticipantLiveExecutionSurface",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantLiveExecutionSurface",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-62 canonical reviewer reference for tracing Android participant truth " +
+                "through live execution, lifecycle, and protocol surfaces. Answers all four PR-62 " +
+                "acceptance criteria: LIVE_EXECUTION_WIRING (6 entries: where truth lives in execution " +
+                "code paths), TASK_LIFECYCLE_WIRING (5 entries: how cancel/status/failure/result affect " +
+                "continuity), INTERRUPTION_AND_RECOVERY (6 scenarios: what emits/clears/resets on " +
+                "interruption), FIRST_CLASS_PARTICIPANT_EVIDENCE (7 behaviors: why Android is now a " +
+                "live runtime, not a shell). Companion to RuntimeController active task truth fields " +
+                "(_activeTaskId, _activeTaskStatus), publishTaskStatusUpdate(), auto-TASK_FAILED on " +
+                "disconnect, and auto-RUNTIME_TRUTH_SNAPSHOT on reconnect.",
+            introducedPr = 62
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-active-task-truth",
+            displayName = "RuntimeController.activeTaskId / activeTaskStatus",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-62 live active task state tracking in RuntimeController: " +
+                "_activeTaskId (volatile String?) and _activeTaskStatus (volatile ActiveTaskStatus?) " +
+                "track the in-flight task across accept, status-update, result, cancel, and failure " +
+                "lifecycle phases. Set by recordDelegatedTaskAccepted(); cleared by publishTaskResult(), " +
+                "publishTaskCancelled(), notifyTakeoverFailed(), and clearActiveTaskState() (which is " +
+                "called automatically by closeAttachedSession on DISCONNECT/INVALIDATION). Enables " +
+                "automatic TASK_FAILED emission when a session is interrupted, and automatic " +
+                "RUNTIME_TRUTH_SNAPSHOT with IDLE state on reconnect.",
+            introducedPr = 62
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-controller-publish-task-status-update",
+            displayName = "RuntimeController.publishTaskStatusUpdate()",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeController",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-62 live execution method for emitting TASK_STATUS_UPDATE reconciliation " +
+                "signals. Before PR-62, ReconciliationSignal.Kind.TASK_STATUS_UPDATE existed but " +
+                "RuntimeController had no publishTaskStatusUpdate() method — the TASK_STATUS_UPDATE " +
+                "wire path was defined but not wired into the live execution surface. " +
+                "publishTaskStatusUpdate(taskId, correlationId?, progressDetail?) closes this gap: " +
+                "it emits the signal with STATUS_IN_PROGRESS and logs to TAG_LIVE_EXECUTION. " +
+                "Callers (e.g. DelegatedTakeoverExecutor) can report intermediate step progress " +
+                "to V2 without exposing raw reconciliationSignals write access.",
+            introducedPr = 62
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "galaxy-logger-tag-live-execution",
+            displayName = "GalaxyLogger.TAG_LIVE_EXECUTION",
+            packagePath = "com.ufo.galaxy.observability.GalaxyLogger",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-62 structured log tag for all live participant execution events: " +
+                "task_accepted, task_status_update, task_interrupted_by_session_close, " +
+                "active_task_state_cleared, reconnect_idle_truth_snapshot_emitted. " +
+                "Provides a single filter path (GALAXY:LIVE:EXECUTION) for tracing Android " +
+                "participant truth through the complete task lifecycle in production logs.",
+            introducedPr = 62
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
