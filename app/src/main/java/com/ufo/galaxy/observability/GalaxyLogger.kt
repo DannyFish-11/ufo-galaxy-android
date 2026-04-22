@@ -639,6 +639,25 @@ object GalaxyLogger {
      */
     const val TAG_HYBRID_PARTICIPANT = "GALAXY:HYBRID:PARTICIPANT"
 
+    /**
+     * PR-62 — Fired for every live participant execution surface event: task accepted,
+     * status update, result, cancellation, failure, and interruption (task lost on
+     * disconnect).
+     *
+     * This tag provides a single filter path for tracing Android participant truth
+     * through live execution, lifecycle, and protocol surfaces.
+     *
+     * Required fields: `event`, `task_id`.
+     * Optional fields: `participant_id`, `status`, `progress_detail`, `error_detail`,
+     * `interrupted_by`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:LIVE:EXECUTION","fields":{"event":"task_status_update","task_id":"t-1","participant_id":"p-1","status":"in_progress","progress_detail":"step 2 of 5"}}
+     * ```
+     */
+    const val TAG_LIVE_EXECUTION = "GALAXY:LIVE:EXECUTION"
+
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
     private const val MAX_MEMORY_ENTRIES = 500

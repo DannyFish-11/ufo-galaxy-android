@@ -633,7 +633,56 @@ class RuntimeController(
     @Volatile
     private var _lastKnownHealthState: ParticipantHealthState = ParticipantHealthState.UNKNOWN
 
-    /** Internal scope used for the observer that handles WS connection during [start]. */
+    /**
+     * PR-62 — Tracks the task ID of any currently executing delegated task.
+     *
+     * Set by [recordDelegatedTaskAccepted] when a task is accepted.  Cleared by
+     * [publishTaskResult], [publishTaskCancelled], [notifyTakeoverFailed], and
+     * [clearActiveTaskState].  Used by [closeAttachedSession] to emit a TASK_FAILED
+     * signal for any in-flight task that is interrupted by a WS disconnect or session
+     * invalidation, ensuring V2 always receives a terminal signal regardless of the
+     * interruption cause.
+     *
+     * `null` when no task is actively executing (idle state).
+     */
+    @Volatile
+    private var _activeTaskId: String? = null
+
+    /**
+     * PR-62 — Tracks the [ActiveTaskStatus] of any currently executing delegated task.
+     *
+     * Updated atomically with [_activeTaskId].  Cleared alongside [_activeTaskId] by
+     * all terminal task outcome methods.  When set to [ActiveTaskStatus.CANCELLING] or
+     * [ActiveTaskStatus.FAILING], [closeAttachedSession] uses this to emit the appropriate
+     * pre-terminal signal rather than always defaulting to TASK_FAILED.
+     *
+     * `null` when [_activeTaskId] is null (idle state).
+     */
+    @Volatile
+    private var _activeTaskStatus: ActiveTaskStatus? = null
+
+    /**
+     * Returns the task ID of the currently executing delegated task, or `null` if idle (PR-62).
+     *
+     * Non-`null` between [recordDelegatedTaskAccepted] and the matching terminal outcome
+     * call ([publishTaskResult], [publishTaskCancelled], or [notifyTakeoverFailed]).
+     *
+     * This is the canonical Android-local live task identity surface.  V2 observes the
+     * same information via [reconciliationSignals] ([ReconciliationSignal.Kind.TASK_ACCEPTED]
+     * through terminal) and via [publishRuntimeTruthSnapshot] snapshots.
+     */
+    val activeTaskId: String? get() = _activeTaskId
+
+    /**
+     * Returns the [ActiveTaskStatus] of the currently executing task, or `null` if idle (PR-62).
+     *
+     * Non-`null` whenever [activeTaskId] is non-`null`.  Reflects the live execution status
+     * as it progresses from [ActiveTaskStatus.PENDING] → [ActiveTaskStatus.RUNNING] →
+     * [ActiveTaskStatus.CANCELLING] / [ActiveTaskStatus.FAILING] (terminal transition).
+     */
+    val activeTaskStatus: ActiveTaskStatus? get() = _activeTaskStatus
+
+
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     /**
@@ -998,6 +1047,11 @@ class RuntimeController(
         webSocketClient.clearRuntimeAttachmentSessionIdentity()
         // PR-43: Reset health-state tracker so the next activation era starts from UNKNOWN.
         _lastKnownHealthState = ParticipantHealthState.UNKNOWN
+        // PR-62: Clear active task state on explicit stop.  The DISABLE cause used in
+        // closeAttachedSession (above) does not auto-emit TASK_FAILED, so the active task
+        // state must be cleared here.  Any in-flight task is considered abandoned; V2 must
+        // apply its own timeout/retry policy.
+        clearActiveTaskState(_activeTaskId, finishedWith = "runtime_stopped")
         // PR-37: Use transitionState() so the transition event is observable and any
         // unexpected prior state is surfaced as a diagnostic event.
         transitionState(to = RuntimeState.LocalOnly, expectedFrom = null, trigger = "stop")
@@ -1206,6 +1260,16 @@ class RuntimeController(
         // PR-52: Emit a structured reconciliation signal so V2 can close the task in its
         // canonical participant truth.  Map TakeoverFallbackEvent.Cause to the appropriate
         // ReconciliationSignal kind: CANCELLED for cooperative cancel, FAILED for all others.
+        // PR-62: Also set active task status to CANCELLING or FAILING before clearing state,
+        // so any observer of activeTaskStatus sees the transitional state before it is cleared.
+        if (_activeTaskId == taskId) {
+            _activeTaskStatus = if (cause == TakeoverFallbackEvent.Cause.CANCELLED)
+                ActiveTaskStatus.CANCELLING
+            else
+                ActiveTaskStatus.FAILING
+        }
+        // PR-62: Clear active task state after setting the terminal status transition.
+        clearActiveTaskState(taskId, finishedWith = cause.wireValue)
         currentParticipantId()?.let { pid ->
             val signal = if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
                 ReconciliationSignal.taskCancelled(
@@ -1249,6 +1313,36 @@ class RuntimeController(
      * the same participant must be discarded.
      */
     private fun nextReconciliationEpoch(): Int = _reconciliationEpoch.incrementAndGet()
+
+    /**
+     * PR-62 — Clears the active task state ([_activeTaskId] and [_activeTaskStatus]).
+     *
+     * Should only be called from terminal task lifecycle methods ([publishTaskResult],
+     * [publishTaskCancelled]) or from [closeAttachedSession] when a session is interrupted
+     * while a task is in-flight.
+     *
+     * [taskId] is provided for diagnostic log correlation only; it does NOT need to match
+     * [_activeTaskId] — the clearing is unconditional to avoid leaving stale state in edge
+     * cases where the IDs diverge.
+     *
+     * @param taskId         Task ID for diagnostic log entry.
+     * @param finishedWith   Human-readable terminal cause label for the log entry.
+     */
+    private fun clearActiveTaskState(taskId: String?, finishedWith: String) {
+        val previous = _activeTaskId
+        _activeTaskId = null
+        _activeTaskStatus = null
+        if (previous != null) {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_LIVE_EXECUTION,
+                mapOf(
+                    "event" to "active_task_state_cleared",
+                    "task_id" to (taskId ?: previous),
+                    "finished_with" to finishedWith
+                )
+            )
+        }
+    }
 
     /**
      * PR-52 — Emits [signal] on [_reconciliationSignals] and logs it.
@@ -1651,6 +1745,19 @@ class RuntimeController(
         correlationId: String? = null
     ) {
         recordDelegatedExecutionAccepted()
+        // PR-62: Set active task state so the live execution surface tracks the in-flight task.
+        // This ensures that any subsequent WS disconnect emits a TASK_FAILED terminal signal
+        // rather than silently losing the task from participant truth.
+        _activeTaskId = taskId
+        _activeTaskStatus = ActiveTaskStatus.RUNNING
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_LIVE_EXECUTION,
+            mapOf(
+                "event" to "task_accepted",
+                "task_id" to taskId,
+                "participant_id" to (currentParticipantId() ?: "unknown")
+            )
+        )
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] recordDelegatedTaskAccepted: no hostDescriptor — skipping signal")
             return
@@ -1680,6 +1787,8 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        // PR-62: Clear active task state on successful completion.
+        clearActiveTaskState(taskId, finishedWith = "result")
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskResult: no hostDescriptor — skipping signal")
             return
@@ -1704,6 +1813,10 @@ class RuntimeController(
      * arises from a direct cancel request (e.g. user-initiated cancel) outside the
      * takeover failure path.
      *
+     * PR-62: Also transitions [activeTaskStatus] to [ActiveTaskStatus.CANCELLING] before
+     * emitting the signal, so observers of [activeTaskStatus] see the cancelling state
+     * before the task is removed.
+     *
      * @param taskId        Task identifier of the cancelled task.
      * @param correlationId Optional correlation identifier from the originating request.
      */
@@ -1711,6 +1824,13 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        // PR-62: Transition to CANCELLING state before emitting the signal so the
+        // live execution surface reflects the in-progress cancellation.
+        if (_activeTaskId == taskId) {
+            _activeTaskStatus = ActiveTaskStatus.CANCELLING
+        }
+        // PR-62: Clear active task state after setting the cancelling status.
+        clearActiveTaskState(taskId, finishedWith = "cancelled")
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskCancelled: no hostDescriptor — skipping signal")
             return
@@ -1720,6 +1840,62 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                reconciliationEpoch = nextReconciliationEpoch()
+            )
+        )
+    }
+
+    /**
+     * PR-62 — Emits a [ReconciliationSignal.Kind.TASK_STATUS_UPDATE] signal reporting an
+     * intermediate execution status for a currently running task.
+     *
+     * This is the **live execution progress path** for in-flight task status updates.  It
+     * provides V2 with intermediate progress signals so the canonical participant truth
+     * reflects the task's evolving state, not just the accepted/terminal bookends.
+     *
+     * ## Calling convention
+     *
+     * Callers must have a stable `taskId` (from the original dispatch envelope) and must
+     * call this method only while the task is actively executing.  Calling this after
+     * [publishTaskResult], [publishTaskCancelled], or [notifyTakeoverFailed] for the same
+     * `taskId` is a protocol violation: V2 must ignore such signals, but Android must not
+     * emit them.
+     *
+     * ## Relationship to [activeTaskStatus]
+     *
+     * This method does **not** mutate [activeTaskStatus] — that field captures coarse task
+     * lifecycle (RUNNING / CANCELLING / FAILING).  [progressDetail] carries fine-grained
+     * progress narrative for the V2 side only.
+     *
+     * @param taskId         Task identifier of the in-progress task.
+     * @param correlationId  Optional correlation identifier from the originating request.
+     * @param progressDetail Optional human-readable description of the current progress step.
+     */
+    fun publishTaskStatusUpdate(
+        taskId: String,
+        correlationId: String? = null,
+        progressDetail: String? = null
+    ) {
+        val pid = currentParticipantId() ?: run {
+            Log.d(TAG, "[RUNTIME] publishTaskStatusUpdate: no hostDescriptor — skipping signal")
+            return
+        }
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_LIVE_EXECUTION,
+            buildMap {
+                put("event", "task_status_update")
+                put("task_id", taskId)
+                put("participant_id", pid)
+                put("status", ReconciliationSignal.STATUS_IN_PROGRESS)
+                progressDetail?.let { put("progress_detail", it) }
+            }
+        )
+        emitReconciliationSignal(
+            ReconciliationSignal.taskStatusUpdate(
+                participantId = pid,
+                taskId = taskId,
+                correlationId = correlationId,
+                progressDetail = progressDetail,
                 reconciliationEpoch = nextReconciliationEpoch()
             )
         )
@@ -1914,6 +2090,34 @@ class RuntimeController(
             }
             emitV2LifecycleEvent(v2Event)
         }
+        // PR-62: On reconnect, emit a RUNTIME_TRUTH_SNAPSHOT with IDLE active task state.
+        // This is the canonical post-reconnect truth reset: V2 learns that Android has no
+        // in-flight task after reconnect, so it can apply its own fallback policy for any
+        // task that was interrupted by the disconnect.
+        if (source == SessionOpenSource.RECONNECT_RECOVERY) {
+            val descriptor = hostDescriptor
+            if (descriptor != null) {
+                val epoch = nextReconciliationEpoch()
+                val idleTruth = AndroidParticipantRuntimeTruth.from(
+                    descriptor = descriptor,
+                    sessionSnapshot = currentHostSessionSnapshot(),
+                    healthState = _lastKnownHealthState,
+                    readinessState = ParticipantReadinessState.UNKNOWN,
+                    activeTaskId = null,
+                    activeTaskStatus = null,
+                    reconciliationEpoch = epoch
+                )
+                emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(idleTruth))
+                GalaxyLogger.log(
+                    GalaxyLogger.TAG_LIVE_EXECUTION,
+                    mapOf(
+                        "event" to "reconnect_idle_truth_snapshot_emitted",
+                        "source" to source.wireValue,
+                        "reconciliation_epoch" to epoch
+                    )
+                )
+            }
+        }
     }
 
     /**
@@ -1929,6 +2133,46 @@ class RuntimeController(
     private fun closeAttachedSession(cause: AttachedRuntimeSession.DetachCause) {
         val current = _attachedSession.value ?: return
         if (current.isDetached) return
+
+        // PR-62: If a task is currently in-flight and the session is closing due to
+        // DISCONNECT or INVALIDATION (not a user-initiated DISABLE), emit a TASK_FAILED
+        // signal for the interrupted task so V2 always receives a terminal signal.
+        // DISABLE is excluded: stop() is a controlled teardown where callers are
+        // expected to have already resolved task state.
+        val interruptedTaskId = _activeTaskId
+        if (interruptedTaskId != null &&
+            (cause == AttachedRuntimeSession.DetachCause.DISCONNECT ||
+                cause == AttachedRuntimeSession.DetachCause.INVALIDATION)
+        ) {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_LIVE_EXECUTION,
+                mapOf(
+                    "event" to "task_interrupted_by_session_close",
+                    "task_id" to interruptedTaskId,
+                    "interrupted_by" to cause.wireValue,
+                    "participant_id" to (currentParticipantId() ?: "unknown")
+                )
+            )
+            Log.w(
+                TAG,
+                "[RUNTIME] Task interrupted by session close: " +
+                    "task_id=$interruptedTaskId cause=${cause.wireValue}"
+            )
+            // Set FAILING status before clearing to reflect the interruption transition.
+            _activeTaskStatus = ActiveTaskStatus.FAILING
+            clearActiveTaskState(interruptedTaskId, finishedWith = "interrupted_${cause.wireValue}")
+            currentParticipantId()?.let { pid ->
+                emitReconciliationSignal(
+                    ReconciliationSignal.taskFailed(
+                        participantId = pid,
+                        taskId = interruptedTaskId,
+                        errorDetail = "session_interrupted: ${cause.wireValue}",
+                        reconciliationEpoch = nextReconciliationEpoch()
+                    )
+                )
+            }
+        }
+
         val detached = current.detachedWith(cause)
         _attachedSession.value = detached
         updateHostSessionSnapshot()
