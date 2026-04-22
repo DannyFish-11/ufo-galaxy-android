@@ -902,7 +902,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     }
 
     @Test
-    fun `all PR-62 entries have a com_ufo_galaxy or GALAXY packagePath`() {
+    fun `all PR-62 entries have a com.ufo.galaxy or GALAXY packagePath`() {
         val pr62Entries = StabilizationBaseline.entries.filter { it.introducedPr == 62 }
         pr62Entries.forEach { entry ->
             assertTrue(
