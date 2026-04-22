@@ -190,7 +190,33 @@ object ParticipantAttachmentTransitionSemantics {
          * V2 must apply its participant-loss policy if the participant does not reconnect
          * within the V2-side reconnect timeout.
          */
-        DISRUPTED_DETACH("disrupted_detach")
+        DISRUPTED_DETACH("disrupted_detach"),
+
+        /**
+         * PR-7 — Attachment established after Android process recreation, with a
+         * prior-session continuity hint presented to V2.
+         *
+         * Distinct from [FRESH_ATTACH] (no prior session identity at all) and
+         * [NEW_ERA_ATTACH] (explicit stop/restart with no continuity hint):
+         *
+         * - [FRESH_ATTACH]: brand-new device, true first attachment, no prior session.
+         * - [NEW_ERA_ATTACH]: user explicitly stopped and re-enabled; prior session
+         *   identity intentionally discarded.
+         * - [PROCESS_RECREATED_REATTACH]: process was killed by the OS (low-memory killer);
+         *   [AppSettings.lastDurableSessionId] carries the prior era's durableSessionId;
+         *   Android presents this as a [ProcessRecreatedReattachHint] alongside the
+         *   `DeviceConnected` event so V2 can optionally correlate the returning device
+         *   with its prior session.
+         *
+         * V2 receives `DeviceConnected` (not `DeviceReconnected`) because this is still a
+         * new era, not a transparent reconnect.  V2 decides whether to restore participant
+         * state based on the hint and its own participant-loss timeout policy.
+         * Android MUST NOT self-authorize session continuation.
+         *
+         * @see ProcessRecreatedReattachHint
+         * @see ContinuityRecoveryContext.REASON_PROCESS_RECREATION
+         */
+        PROCESS_RECREATED_REATTACH("process_recreated_reattach")
     }
 
     // ── Attachment transition registry ────────────────────────────────────────
@@ -278,6 +304,23 @@ object ParticipantAttachmentTransitionSemantics {
                 "A new durableSessionId is generated. V2 receives DeviceConnected (NOT DeviceReconnected) " +
                 "because the attachment identity is fresh. V2 must NOT attempt to resume any prior " +
                 "session state for this participant — this is a new registration, not a resume."
+        ),
+
+        AttachmentTransitionEntry(
+            transitionId = "process_recreated_reattach",
+            fromState = AttachmentState.UNATTACHED,
+            toState = AttachmentState.ATTACHED,
+            v2EventEmitted = "DeviceConnected",
+            durableSessionEffect = DurableSessionEffect.SESSION_PRESERVED,
+            recoverySemantics = AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH,
+            rationale = "First attachment after Android process recreation (low-memory killer). " +
+                "A new durableSessionId is generated for the new activation era. " +
+                "The prior durableSessionId is preserved in AppSettings.lastDurableSessionId and " +
+                "presented to V2 as a ProcessRecreatedReattachHint alongside the DeviceConnected event. " +
+                "V2 may optionally correlate the re-attaching device with its prior session using the hint, " +
+                "subject to V2's participant-loss timeout policy. " +
+                "Android MUST NOT self-authorize session continuation — only V2 decides whether to restore " +
+                "participant state for the returning device."
         )
     )
 
@@ -311,13 +354,24 @@ object ParticipantAttachmentTransitionSemantics {
 
     /**
      * Returns all transitions that correspond to lifecycle recovery
-     * ([AttachmentRecoverySemantics.RECONNECT_RECOVERY] or [AttachmentRecoverySemantics.NEW_ERA_ATTACH]).
+     * ([AttachmentRecoverySemantics.RECONNECT_RECOVERY], [AttachmentRecoverySemantics.NEW_ERA_ATTACH],
+     * or [AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH]).
      */
     val recoveryTransitions: List<AttachmentTransitionEntry> =
         transitions.filter {
             it.recoverySemantics == AttachmentRecoverySemantics.RECONNECT_RECOVERY ||
-                it.recoverySemantics == AttachmentRecoverySemantics.NEW_ERA_ATTACH
+                it.recoverySemantics == AttachmentRecoverySemantics.NEW_ERA_ATTACH ||
+                it.recoverySemantics == AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH
         }
+
+    /**
+     * PR-7 — Returns all transitions that use process-recreation re-attach semantics.
+     *
+     * These transitions indicate that Android is re-attaching after a process kill with
+     * a [ProcessRecreatedReattachHint] carrying the prior session identity.
+     */
+    val processRecreatedReattachTransitions: List<AttachmentTransitionEntry> =
+        transitions.filter { it.recoverySemantics == AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH }
 
     // ── Wire-key constants ────────────────────────────────────────────────────
 

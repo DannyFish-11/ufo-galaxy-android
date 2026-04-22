@@ -96,10 +96,12 @@ object AndroidLifecycleRecoveryContract {
             "gatewayHost/gatewayPort/useTls/allowSelfSigned (AppSettings/SharedPreferences)",
             "deviceId (AppSettings/SharedPreferences)",
             "gatewayToken (AppSettings/SharedPreferences)",
-            "goalExecutionEnabled and other feature flags (AppSettings/SharedPreferences)"
+            "goalExecutionEnabled and other feature flags (AppSettings/SharedPreferences)",
+            "lastDurableSessionId (AppSettings/SharedPreferences — PR-7 prior-session continuity hint)"
         ),
         LOST_ON_PROCESS_RECREATION to listOf(
-            "DurableSessionContinuityRecord (process-scoped; new era on restart)",
+            "DurableSessionContinuityRecord live record (process-scoped; new era on restart; " +
+                "prior durableSessionId is persisted in AppSettings.lastDurableSessionId as hint)",
             "_runtimeAttachmentSessionId (regenerated fresh; new attachment era)",
             "ReconnectRecoveryState (resets to IDLE)",
             "RuntimeController.RuntimeState (resets to Idle)",
@@ -166,6 +168,45 @@ object AndroidLifecycleRecoveryContract {
             "V2 must treat the participant as unavailable until DeviceConnected is re-observed."
 
     // ── Hybrid participant limitations ────────────────────────────────────────
+
+    /**
+     * PR-7 — Process-recreation re-attach semantics summary.
+     *
+     * After Android process recreation, Android presents a [ProcessRecreatedReattachHint]
+     * carrying the prior [DurableSessionContinuityRecord.durableSessionId] to V2 via the
+     * `DeviceConnected` event metadata.  This allows V2 to optionally correlate the
+     * returning device with its prior session, rather than treating it as an unrecognised
+     * new device.
+     *
+     * ## What Android does in a process-recreation re-attach
+     *
+     * 1. Reads [AppSettings.lastDurableSessionId] from SharedPreferences.
+     * 2. If non-blank: constructs a [ProcessRecreatedReattachHint] with the prior session ID
+     *    and the stable [AppSettings.deviceId].
+     * 3. Emits `DeviceConnected` with [ParticipantAttachmentTransitionSemantics.AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH]
+     *    semantics and the hint metadata (attachment_recovery_reason = "process_recreation",
+     *    prior_durable_session_id = <prior ID>).
+     * 4. Generates a fresh [DurableSessionContinuityRecord] for the new activation era.
+     *
+     * ## What Android does NOT do
+     *
+     * - Android does NOT self-authorize session continuation.
+     * - Android does NOT attempt to restore in-flight task state.
+     * - Android does NOT modify V2-managed tokens ([ContinuityRecoveryContext.CONTINUITY_TOKEN_WIRE_FIELD]).
+     *
+     * ## V2 re-synchronization responsibilities
+     *
+     * V2 decides whether to restore participant state based on:
+     * - The presence of [ProcessRecreatedReattachHint.KEY_PRIOR_DURABLE_SESSION_ID] in
+     *   the `DeviceConnected` event metadata.
+     * - V2's own participant-loss timeout policy for the prior session.
+     * - Whether the [AppSettings.deviceId] matches the expected device identity.
+     */
+    const val PROCESS_RECREATED_REATTACH_NOTE =
+        "PR-7: Android now persists lastDurableSessionId in SharedPreferences and presents a " +
+            "ProcessRecreatedReattachHint in DeviceConnected events after process recreation. " +
+            "V2 may use this hint to optionally correlate the returning device with its prior session. " +
+            "Android does not self-authorize session continuation — only V2 decides."
 
     /**
      * Summary of the intentional hybrid participant limitations on the Android side.
