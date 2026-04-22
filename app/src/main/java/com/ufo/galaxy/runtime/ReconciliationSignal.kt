@@ -228,6 +228,66 @@ data class ReconciliationSignal(
         /** Wire key for [reconciliationEpoch]. */
         const val KEY_RECONCILIATION_EPOCH = "reconciliation_epoch"
 
+        // ── PR-63 progress / checkpoint / subtask payload key constants ────────
+
+        /**
+         * Payload key for a structured execution checkpoint identifier
+         * ([ParticipantProgressCheckpoint.checkpointId]).
+         *
+         * Present in [payload] of a [Kind.TASK_STATUS_UPDATE] signal that carries a
+         * [ParticipantProgressCheckpoint].  V2 can use this key to distinguish structured
+         * checkpoint progress updates from plain [progressDetail] string updates.
+         */
+        const val KEY_CHECKPOINT_ID = ParticipantProgressCheckpoint.KEY_CHECKPOINT_ID
+
+        /**
+         * Payload key for the zero-based execution step index carried by a
+         * [ParticipantProgressCheckpoint] ([ParticipantProgressCheckpoint.stepIndex]).
+         *
+         * Present in [payload] when a checkpoint is carried by this signal.
+         */
+        const val KEY_STEP_INDEX = ParticipantProgressCheckpoint.KEY_STEP_INDEX
+
+        /**
+         * Payload key for the optional total step count hint carried by a
+         * [ParticipantProgressCheckpoint] ([ParticipantProgressCheckpoint.totalSteps]).
+         *
+         * Present in [payload] only when [ParticipantProgressCheckpoint.totalSteps] is non-null.
+         */
+        const val KEY_TOTAL_STEPS = ParticipantProgressCheckpoint.KEY_TOTAL_STEPS
+
+        /**
+         * Payload key for the zero-based subtask index carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.subtaskIndex]).
+         *
+         * Present in [payload] when a subtask report is carried by this signal.
+         */
+        const val KEY_SUBTASK_INDEX = SubtaskProgressReport.KEY_SUBTASK_INDEX
+
+        /**
+         * Payload key for the optional subtask total count carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.subtaskTotal]).
+         *
+         * Present in [payload] only when [SubtaskProgressReport.subtaskTotal] is non-null.
+         */
+        const val KEY_SUBTASK_TOTAL = SubtaskProgressReport.KEY_SUBTASK_TOTAL
+
+        /**
+         * Payload key for the subtask status wire value carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.SubtaskStatus.wireValue]).
+         *
+         * Present in [payload] when a subtask report is carried by this signal.
+         */
+        const val KEY_SUBTASK_STATUS = SubtaskProgressReport.KEY_SUBTASK_STATUS
+
+        /**
+         * Payload key for the human-readable subtask label carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.subtaskLabel]).
+         *
+         * Present in [payload] when a subtask report is carried by this signal.
+         */
+        const val KEY_SUBTASK_LABEL = SubtaskProgressReport.KEY_SUBTASK_LABEL
+
         // ── Status constants (mirror AndroidSessionContribution) ──────────────
 
         /** Wire status for a running / accepted task. */
