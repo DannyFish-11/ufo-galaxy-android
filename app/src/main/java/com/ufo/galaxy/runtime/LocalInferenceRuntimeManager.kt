@@ -143,6 +143,18 @@ class LocalInferenceRuntimeManager(
         val plannerResult = startPlanner()
         val groundingResult = startGrounding()
 
+        // Update ModelAssetManager load marks to reflect actual runtime state.
+        // This is the single authority for marking models as loaded/unloaded.
+        if (plannerService.isModelLoaded())
+            modelAssetManager.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        else
+            modelAssetManager.markUnloaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+
+        if (groundingService.isModelLoaded())
+            modelAssetManager.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        else
+            modelAssetManager.markUnloaded(ModelAssetManager.MODEL_ID_SEECLICK)
+
         // Step 3: take a health snapshot and derive manager state
         val snapshot = healthCheck()
         val combinedResult = deriveResult(plannerResult, groundingResult, snapshot)
