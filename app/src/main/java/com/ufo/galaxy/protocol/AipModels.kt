@@ -675,6 +675,15 @@ data class CommandResultPayload(
  *                            `"local"`, `"remote_handoff"`, `"fallback_local"`,
  *                            `"staged_mesh"`.  Unknown values MUST be tolerated.  `null`
  *                            for legacy / pre-V2 senders.
+ * @param delegated_flow_id   (PR-bridge) Stable identifier for the V2 canonical delegated flow
+ *                            entity that produced this command.  When present, Android uses this as
+ *                            [com.ufo.galaxy.runtime.AndroidDelegatedFlowBridge.delegatedFlowId].
+ *                            `null` for legacy/pre-bridge senders; Android derives a local
+ *                            identifier from [task_id] in that case.
+ * @param flow_lineage_id     (PR-bridge) Lineage identity of the V2 canonical delegated flow
+ *                            entity.  Shared by all Android-side flows belonging to the same V2
+ *                            canonical flow family.  `null` for legacy/pre-bridge senders;
+ *                            Android defaults to [task_id].
  */
 data class GoalExecutionPayload(
     val task_id: String,
@@ -705,7 +714,10 @@ data class GoalExecutionPayload(
     // ── PR-49 (PR-I): V2 policy-driven routing outcome metadata (optional; null-safe for legacy senders) ──
     val policy_routing_outcome: String? = null,
     val policy_failure_reason: String? = null,
-    val readiness_degradation_hint: String? = null
+    val readiness_degradation_hint: String? = null,
+    // ── PR-bridge: Delegated flow bridge identity (optional; null-safe for legacy senders) ──
+    val delegated_flow_id: String? = null,
+    val flow_lineage_id: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -1064,6 +1076,13 @@ data class HybridDegradePayload(
  *                               [signal_kind] = `"result"` signals.  Wire values:
  *                               `"completed"`, `"failed"`, `"timeout"`, `"cancelled"`,
  *                               `"rejected"`.  `null` for ACK and PROGRESS signals.
+ * @param delegated_flow_id      (PR-bridge) Stable identifier for the V2 canonical delegated
+ *                               flow entity this signal belongs to.  `null` when the signal was
+ *                               emitted by a flow created before PR-bridge.
+ * @param flow_lineage_id        (PR-bridge) Lineage identity of the V2 canonical delegated flow
+ *                               entity.  Allows the main-repo host to correlate this signal with
+ *                               other signals from the same flow family.  `null` when the signal
+ *                               was emitted by a flow created before PR-bridge.
  */
 data class DelegatedExecutionSignalPayload(
     val signal_id: String,
@@ -1078,7 +1097,10 @@ data class DelegatedExecutionSignalPayload(
     val step_count: Int,
     val activation_status_hint: String,
     val timestamp_ms: Long,
-    val result_kind: String? = null
+    val result_kind: String? = null,
+    // ── PR-bridge: Delegated flow bridge identity (optional; null for pre-bridge signals) ──
+    val delegated_flow_id: String? = null,
+    val flow_lineage_id: String? = null
 )
 
 // ── PR-35: Promoted long-tail payload models ──────────────────────────────────────────────

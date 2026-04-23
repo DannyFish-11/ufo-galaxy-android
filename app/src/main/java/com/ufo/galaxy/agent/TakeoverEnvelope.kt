@@ -108,6 +108,17 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  *                                     execution; `false` when terminal; null for legacy senders.
  * @param interruption_reason          (PR-F) Reason for the interruption that triggered this
  *                                     resume/recovery dispatch; null for non-recovery dispatches.
+ * @param delegated_flow_id            (PR-bridge) Stable identifier for the V2 canonical delegated
+ *                                     flow entity that produced this command.  When present,
+ *                                     Android uses this value as the
+ *                                     [com.ufo.galaxy.runtime.AndroidDelegatedFlowBridge.delegatedFlowId]
+ *                                     for this execution.  `null` for legacy/pre-bridge senders;
+ *                                     Android derives a local identifier from [takeover_id] in that case.
+ * @param flow_lineage_id              (PR-bridge) Lineage identity of the V2 canonical delegated
+ *                                     flow entity.  Shared by all Android-side flows that belong to
+ *                                     the same V2 canonical flow family (e.g. a goal_execution and a
+ *                                     subsequent takeover_request for the same task).  `null` for
+ *                                     legacy/pre-bridge senders; Android defaults to [task_id].
  */
 data class TakeoverRequestEnvelope(
     val takeover_id: String,
@@ -138,7 +149,10 @@ data class TakeoverRequestEnvelope(
     val continuity_token: String? = null,
     val recovery_context: Map<String, String> = emptyMap(),
     val is_resumable: Boolean? = null,
-    val interruption_reason: String? = null
+    val interruption_reason: String? = null,
+    // ── PR-bridge: Delegated flow bridge identity (optional; null-safe for legacy senders) ──
+    val delegated_flow_id: String? = null,
+    val flow_lineage_id: String? = null
 ) {
     /**
      * Returns the resolved [source_runtime_posture] using [SourceRuntimePosture.fromValue].

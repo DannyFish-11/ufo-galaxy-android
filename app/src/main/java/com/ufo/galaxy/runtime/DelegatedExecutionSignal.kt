@@ -107,6 +107,15 @@ package com.ufo.galaxy.runtime
  *                                [EMISSION_SEQ_ACK] (1) → [EMISSION_SEQ_PROGRESS] (2) →
  *                                [EMISSION_SEQ_RESULT] (3).  Allows the host to detect
  *                                out-of-order delivery and reject stale duplicates.
+ * @property delegatedFlowId      (PR-bridge) Stable identifier for the V2 canonical delegated
+ *                                flow entity this signal belongs to.  Sourced from
+ *                                [com.ufo.galaxy.runtime.AndroidDelegatedFlowBridge.delegatedFlowId]
+ *                                when available; `null` for pre-bridge signals.  The host can use
+ *                                this to correlate the signal with its canonical flow entity.
+ * @property flowLineageId        (PR-bridge) Lineage identity of the V2 canonical delegated flow
+ *                                entity.  Sourced from
+ *                                [com.ufo.galaxy.runtime.AndroidDelegatedFlowBridge.flowLineageId]
+ *                                when available; `null` for pre-bridge signals.
  */
 data class DelegatedExecutionSignal(
     val kind: Kind,
@@ -120,7 +129,10 @@ data class DelegatedExecutionSignal(
     val resultKind: ResultKind?,
     val timestampMs: Long,
     val signalId: String,
-    val emissionSeq: Int
+    val emissionSeq: Int,
+    // ── PR-bridge: Delegated flow bridge identity (optional; null for pre-bridge signals) ──
+    val delegatedFlowId: String? = null,
+    val flowLineageId: String? = null
 ) {
 
     // ── Enums ─────────────────────────────────────────────────────────────────
@@ -318,6 +330,9 @@ data class DelegatedExecutionSignal(
         put(KEY_SIGNAL_ID, signalId)
         put(KEY_EMISSION_SEQ, emissionSeq)
         resultKind?.let { put(KEY_RESULT_KIND, it.wireValue) }
+        // ── PR-bridge: Delegated flow bridge identity ─────────────────────────
+        delegatedFlowId?.let { put(KEY_DELEGATED_FLOW_ID, it) }
+        flowLineageId?.let { put(KEY_FLOW_LINEAGE_ID, it) }
     }
 
     // ── Companion / constants ─────────────────────────────────────────────────
@@ -375,6 +390,26 @@ data class DelegatedExecutionSignal(
          */
         const val KEY_EMISSION_SEQ = "exec_signal_emission_seq"
 
+        // ── PR-bridge: Delegated flow bridge identity key constants ───────────
+
+        /**
+         * Metadata key for the V2 canonical delegated flow entity identifier.
+         *
+         * Present in [toMetadataMap] when [delegatedFlowId] is non-null.
+         * Absent for signals emitted before PR-bridge.
+         * Value type: String — sourced from [AndroidDelegatedFlowBridge.delegatedFlowId].
+         */
+        const val KEY_DELEGATED_FLOW_ID = "exec_signal_delegated_flow_id"
+
+        /**
+         * Metadata key for the V2 canonical delegated flow lineage identity.
+         *
+         * Present in [toMetadataMap] when [flowLineageId] is non-null.
+         * Absent for signals emitted before PR-bridge.
+         * Value type: String — sourced from [AndroidDelegatedFlowBridge.flowLineageId].
+         */
+        const val KEY_FLOW_LINEAGE_ID = "exec_signal_flow_lineage_id"
+
         /**
          * Canonical emission-sequence position for [Kind.ACK] signals.
          *
@@ -429,7 +464,10 @@ data class DelegatedExecutionSignal(
             resultKind = null,
             timestampMs = timestampMs,
             signalId = signalId,
-            emissionSeq = EMISSION_SEQ_ACK
+            emissionSeq = EMISSION_SEQ_ACK,
+            // ── PR-bridge: propagate flow identity from tracker ───────────────
+            delegatedFlowId = tracker.delegatedFlowId.ifEmpty { null },
+            flowLineageId = tracker.flowLineageId.ifEmpty { null }
         )
 
         /**
@@ -462,7 +500,10 @@ data class DelegatedExecutionSignal(
             resultKind = null,
             timestampMs = timestampMs,
             signalId = signalId,
-            emissionSeq = EMISSION_SEQ_PROGRESS
+            emissionSeq = EMISSION_SEQ_PROGRESS,
+            // ── PR-bridge: propagate flow identity from tracker ───────────────
+            delegatedFlowId = tracker.delegatedFlowId.ifEmpty { null },
+            flowLineageId = tracker.flowLineageId.ifEmpty { null }
         )
 
         /**
@@ -498,7 +539,10 @@ data class DelegatedExecutionSignal(
             resultKind = resultKind,
             timestampMs = timestampMs,
             signalId = signalId,
-            emissionSeq = EMISSION_SEQ_RESULT
+            emissionSeq = EMISSION_SEQ_RESULT,
+            // ── PR-bridge: propagate flow identity from tracker ───────────────
+            delegatedFlowId = tracker.delegatedFlowId.ifEmpty { null },
+            flowLineageId = tracker.flowLineageId.ifEmpty { null }
         )
 
         /**
@@ -573,5 +617,8 @@ fun DelegatedExecutionSignal.toOutboundPayload(
         step_count             = stepCount,
         activation_status_hint = activationStatusHint,
         timestamp_ms           = timestampMs,
-        result_kind            = resultKind?.wireValue
+        result_kind            = resultKind?.wireValue,
+        // ── PR-bridge: propagate flow bridge identity for end-to-end V2 correlation ──
+        delegated_flow_id      = delegatedFlowId,
+        flow_lineage_id        = flowLineageId
     )

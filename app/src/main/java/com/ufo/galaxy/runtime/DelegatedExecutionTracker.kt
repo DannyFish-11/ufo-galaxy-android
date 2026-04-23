@@ -99,6 +99,24 @@ data class DelegatedExecutionTracker(
     val attachedSessionId: String
         get() = record.attachedSessionId
 
+    /**
+     * Stable identifier for the V2 canonical delegated flow entity this tracker belongs to.
+     *
+     * Sourced from [com.ufo.galaxy.agent.DelegatedRuntimeUnit.delegatedFlowId]; empty string
+     * when the unit was produced by a pre-bridge sender (callers should fall back to [unitId]).
+     */
+    val delegatedFlowId: String
+        get() = record.unit.delegatedFlowId
+
+    /**
+     * Lineage identity of the V2 canonical delegated flow entity.
+     *
+     * Sourced from [com.ufo.galaxy.agent.DelegatedRuntimeUnit.flowLineageId]; empty string
+     * when the unit was produced by a pre-bridge sender (callers should fall back to [taskId]).
+     */
+    val flowLineageId: String
+        get() = record.unit.flowLineageId
+
     /** `true` when the underlying record is in a terminal state. */
     val isTerminal: Boolean
         get() = record.isTerminal

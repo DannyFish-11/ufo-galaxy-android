@@ -81,6 +81,17 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
  *                                     wire values the delegated task requires; empty from legacy senders.
  * @property continuationToken         (PR-9) Opaque, stable machine-readable continuation state token
  *                                     from the originating executor; null when not provided.
+ * @property delegatedFlowId           (PR-bridge) Stable identifier for the V2 canonical delegated
+ *                                     flow entity this unit belongs to.  Sourced from
+ *                                     [TakeoverRequestEnvelope.delegated_flow_id] when the V2 sender
+ *                                     provides it; empty string for legacy senders (callers should
+ *                                     fall back to [unitId] for a locally-stable identifier).
+ * @property flowLineageId             (PR-bridge) Lineage identity of the V2 canonical delegated
+ *                                     flow entity.  Shared by all Android-side flows belonging to
+ *                                     the same V2 canonical flow family.  Sourced from
+ *                                     [TakeoverRequestEnvelope.flow_lineage_id] when provided;
+ *                                     empty string for legacy senders (callers should fall back
+ *                                     to [taskId]).
  */
 data class DelegatedRuntimeUnit(
     val unitId: String,
@@ -98,7 +109,10 @@ data class DelegatedRuntimeUnit(
     val originatingHostId: String? = null,
     val originatingFormationRole: String? = null,
     val requiredCapabilityDimensions: List<String> = emptyList(),
-    val continuationToken: String? = null
+    val continuationToken: String? = null,
+    // ── PR-bridge: Delegated flow bridge identity ─────────────────────────────
+    val delegatedFlowId: String = "",
+    val flowLineageId: String = ""
 ) {
 
     // ── Derived helpers ───────────────────────────────────────────────────────
@@ -156,6 +170,9 @@ data class DelegatedRuntimeUnit(
             put(KEY_REQUIRED_CAPABILITY_DIMENSIONS, requiredCapabilityDimensions.joinToString(","))
         }
         continuationToken?.let { put(KEY_CONTINUATION_TOKEN, it) }
+        // ── PR-bridge: Delegated flow bridge identity ─────────────────────────
+        if (delegatedFlowId.isNotEmpty()) put(KEY_DELEGATED_FLOW_ID, delegatedFlowId)
+        if (flowLineageId.isNotEmpty()) put(KEY_FLOW_LINEAGE_ID, flowLineageId)
     }
 
     // ── Companion / constants ─────────────────────────────────────────────────
@@ -231,6 +248,24 @@ data class DelegatedRuntimeUnit(
          */
         const val KEY_CONTINUATION_TOKEN = "delegated_unit_continuation_token"
 
+        // ── PR-bridge: Delegated flow bridge identity key constants ───────────
+
+        /**
+         * Metadata key for the V2 canonical delegated flow entity identifier.
+         *
+         * Absent from [toMetadataMap] when [delegatedFlowId] is empty (legacy senders).
+         * Value type: String — sourced from [TakeoverRequestEnvelope.delegated_flow_id].
+         */
+        const val KEY_DELEGATED_FLOW_ID = "delegated_unit_delegated_flow_id"
+
+        /**
+         * Metadata key for the V2 canonical delegated flow lineage identity.
+         *
+         * Absent from [toMetadataMap] when [flowLineageId] is empty (legacy senders).
+         * Value type: String — sourced from [TakeoverRequestEnvelope.flow_lineage_id].
+         */
+        const val KEY_FLOW_LINEAGE_ID = "delegated_unit_flow_lineage_id"
+
         /**
          * Creates a [DelegatedRuntimeUnit] from a [TakeoverRequestEnvelope] and an
          * [attachedSessionId].
@@ -268,7 +303,10 @@ data class DelegatedRuntimeUnit(
             originatingHostId = envelope.originating_host_id,
             originatingFormationRole = envelope.originating_formation_role,
             requiredCapabilityDimensions = envelope.required_capability_dimensions,
-            continuationToken = envelope.continuation_token
+            continuationToken = envelope.continuation_token,
+            // ── PR-bridge: Delegated flow bridge identity ──────────────────────────
+            delegatedFlowId = envelope.delegated_flow_id ?: "",
+            flowLineageId = envelope.flow_lineage_id ?: ""
         )
     }
 }
