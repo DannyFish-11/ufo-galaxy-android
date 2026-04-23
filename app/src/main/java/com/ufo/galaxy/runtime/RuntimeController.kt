@@ -2062,13 +2062,17 @@ class RuntimeController(
         updateHostSessionSnapshot()
         Log.i(
             TAG,
-            "[RUNTIME] Attached runtime session opened: source=${source.wireValue} " +
-                "session_id=${session.sessionId} host_id=${session.hostId} " +
-                "runtime_attachment_session_id=$attachmentSessionId " +
-                "runtime_session_id=${_currentRuntimeSessionId} " +
-                "durable_session_id=${_durableSessionContinuityRecord.value?.durableSessionId} " +
-                "epoch=${_durableSessionContinuityRecord.value?.sessionContinuityEpoch}" +
-                if (priorReattachHint != null) " prior_durable_session_id=${priorReattachHint.priorDurableSessionId}" else ""
+            buildString {
+                append("[RUNTIME] Attached runtime session opened: source=${source.wireValue} ")
+                append("session_id=${session.sessionId} host_id=${session.hostId} ")
+                append("runtime_attachment_session_id=$attachmentSessionId ")
+                append("runtime_session_id=${_currentRuntimeSessionId} ")
+                append("durable_session_id=${_durableSessionContinuityRecord.value?.durableSessionId} ")
+                append("epoch=${_durableSessionContinuityRecord.value?.sessionContinuityEpoch}")
+                if (priorReattachHint != null) {
+                    append(" prior_durable_session_id=${priorReattachHint.priorDurableSessionId}")
+                }
+            }
         )
         val attachLog = mutableMapOf<String, Any>(
             "event" to "runtime_session_attached",

@@ -2,6 +2,7 @@ package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -682,9 +683,10 @@ class Pr44MeshSessionLifecycleMappingTest {
             processRecreatedReattachHint = hint
         )
         assertNotNull(event.processRecreatedReattachHint)
-        assertFalse(
+        assertNotEquals(
             "priorDurableSessionId in hint must differ from the new era durableSessionId",
-            event.processRecreatedReattachHint!!.priorDurableSessionId == event.durableSessionId
+            event.durableSessionId,
+            event.processRecreatedReattachHint!!.priorDurableSessionId
         )
     }
 }
