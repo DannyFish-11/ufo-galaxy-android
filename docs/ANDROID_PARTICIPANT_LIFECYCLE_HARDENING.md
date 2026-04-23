@@ -158,6 +158,7 @@ ATTACHED   ──(disrupted_detach)→ REATTACHING
 REATTACHING──(reconnect_recovery_attach)──→ ATTACHED
 REATTACHING──(reconnect_failure_detach)───→ UNATTACHED
 UNATTACHED ──(new_era_attach)──→ ATTACHED
+UNATTACHED ──(process_recreated_reattach)─→ ATTACHED
 ```
 
 ### Attachment Transition Table
@@ -170,6 +171,7 @@ UNATTACHED ──(new_era_attach)──→ ATTACHED
 | `reconnect_recovery_attach` | REATTACHING → ATTACHED | `DeviceReconnected` | EPOCH_ADVANCED | `RECONNECT_RECOVERY` |
 | `reconnect_failure_detach` | REATTACHING → UNATTACHED | `DeviceDisconnected` | SESSION_RESET | `DISRUPTED_DETACH` |
 | `new_era_attach` | UNATTACHED → ATTACHED | `DeviceConnected` | SESSION_PRESERVED | `NEW_ERA_ATTACH` |
+| `process_recreated_reattach` | UNATTACHED → ATTACHED | `DeviceConnected` | SESSION_PRESERVED | `PROCESS_RECREATED_REATTACH` |
 
 ### Design Notes
 
@@ -181,8 +183,18 @@ UNATTACHED ──(new_era_attach)──→ ATTACHED
   is advanced on successful reconnect.  V2 uses the epoch to correlate the returning participant
   to its prior session.
 
-- **`new_era_attach` emits DeviceConnected (not DeviceReconnected)** — After process kill,
-  the attachment identity is fresh.  V2 MUST treat this as a new registration, not a resume.
+- **`new_era_attach` emits DeviceConnected (not DeviceReconnected)** — After an explicit stop
+  and user re-enable, the attachment identity is intentionally fresh.  V2 MUST treat this as
+  a new registration, not a resume.  `AppSettings.lastDurableSessionId` is cleared by `stop()`
+  so no prior-session hint is present.
+
+- **`process_recreated_reattach` emits DeviceConnected with a prior-session hint (PR-7)** —
+  After Android's process is killed by the OS and recreated (with `crossDeviceEnabled=true`
+  still set), the attachment identity is fresh but the prior `durableSessionId` has been
+  preserved in `AppSettings.lastDurableSessionId` (SharedPreferences).  Android emits
+  `DeviceConnected` with a `ProcessRecreatedReattachHint` in `openSource = "background_restore"`,
+  allowing V2 to optionally correlate the returning device with its prior session entry.
+  V2 MUST NOT force session continuation from this hint — it is advisory only.
 
 ### AC4: Bounded under V2 canonical orchestration authority
 
@@ -211,14 +223,18 @@ The following remain explicitly out of scope for PR-5Android:
 All three surfaces have comprehensive unit test coverage in
 `Pr5AndroidParticipantLifecycleHardeningTest`.
 
+PR-7 process-recreation re-attach semantics have dedicated test coverage in
+`Pr7DurableParticipantIdentityReattachTest`.
+
 ### Test coverage summary
 
 | Surface | Test Coverage |
 |---|---|
 | `ParticipantPostureLifecycleBoundary` | Enum wire values, boundary registry (6/6 events), POSTURE_AMPLIFIED/NEUTRAL classifications, query helpers, wire-key constants |
 | `HybridRuntimeContinuityContract` | Enum wire values, continuity registry (6/6 capabilities), continuity tiers per capability, process-kill invariant, query helpers, wire-key constants |
-| `ParticipantAttachmentTransitionSemantics` | Enum wire values, transition registry (6 entries), V2 event per transition, durable session effect per transition, query helpers, wire-key constants |
+| `ParticipantAttachmentTransitionSemantics` | Enum wire values, transition registry (7 entries after PR-7), V2 event per transition, durable session effect per transition, query helpers, wire-key constants |
 | Cross-surface coherence | Android-as-participant constraint, new-era event ↔ attachment transition consistency, process-kill re-announcement completeness |
+| PR-7 durable identity / re-attach | `AppSettings.lastDurableSessionId` persistence, `ProcessRecreatedReattachHint` construction and wire format, `ContinuityRecoveryContext.REASON_PROCESS_RECREATION`, `PROCESS_RECREATED_REATTACH` enum and transition registry |
 
 ---
 
@@ -230,7 +246,7 @@ All three surfaces have comprehensive unit test coverage in
 | `HybridParticipantCapabilityBoundary` | Hybrid capability maturity (FULLY_WIRED vs CONTRACT_FIRST) | PR-53 |
 | `ParticipantRecoveryReadinessSnapshot` | Durability/V2-resync registry for local state fields | PR-53 |
 | `AndroidAppLifecycleTransition` | App-level lifecycle event model | PR-60 |
-| `AndroidLifecycleRecoveryContract` | Recovery boundary documentation constants | PR-60 |
+| `AndroidLifecycleRecoveryContract` | Recovery boundary documentation constants | PR-60/PR-7 |
 | `ContinuityRecoveryContext` | Interruption reason vocabulary and token boundary | PR-F |
 | `DurableSessionContinuityRecord` | Live durable session era record (in-memory) | PR-1 |
 | `ReconnectRecoveryState` | Observable WS reconnect phase | PR-33 |
@@ -239,4 +255,7 @@ All three surfaces have comprehensive unit test coverage in
 | `AndroidParticipantRuntimeTruth` | Consolidated participant truth snapshot | PR-51 |
 | **`ParticipantPostureLifecycleBoundary`** | **Posture-aware lifecycle impact and V2 loss policy** | **PR-5Android** |
 | **`HybridRuntimeContinuityContract`** | **Hybrid runtime continuity across lifecycle disruptions** | **PR-5Android** |
-| **`ParticipantAttachmentTransitionSemantics`** | **Attachment lifecycle transitions with V2 event expectations** | **PR-5Android** |
+| **`ParticipantAttachmentTransitionSemantics`** | **Attachment lifecycle transitions with V2 event expectations (7 entries after PR-7)** | **PR-5Android/PR-7** |
+| **`ProcessRecreatedReattachHint`** | **Prior-session continuity hint for process-recreation re-attach** | **PR-7** |
+| **`AppSettings.lastDurableSessionId`** | **Persisted prior durable session ID (SharedPreferences)** | **PR-7** |
+| **`V2MultiDeviceLifecycleEvent.DeviceConnected.processRecreatedReattachHint`** | **Advisory re-attach hint included in DeviceConnected for process-recreation cases** | **PR-F** |

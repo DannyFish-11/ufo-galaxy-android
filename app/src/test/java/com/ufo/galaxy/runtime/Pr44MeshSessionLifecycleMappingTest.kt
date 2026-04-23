@@ -2,6 +2,7 @@ package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -597,6 +598,95 @@ class Pr44MeshSessionLifecycleMappingTest {
             "PR-44 must not add entries with introducedPr=43; PR-43 count must stay at 3",
             3,
             pr43Entries.size
+        )
+    }
+
+    // ── DeviceConnected.processRecreatedReattachHint (PR-7/PR-F) ─────────────
+
+    @Test
+    fun `DeviceConnected processRecreatedReattachHint defaults to null`() {
+        val event = V2MultiDeviceLifecycleEvent.DeviceConnected(
+            deviceId = "Pixel_8",
+            sessionId = "sess-1",
+            runtimeSessionId = "rt-1",
+            durableSessionId = "durable-1",
+            sessionContinuityEpoch = 0,
+            openSource = "user_activation"
+        )
+        assertTrue(
+            "processRecreatedReattachHint must be null by default (fresh attach)",
+            event.processRecreatedReattachHint == null
+        )
+    }
+
+    @Test
+    fun `DeviceConnected processRecreatedReattachHint can be set for process_recreation reattach`() {
+        val hint = ProcessRecreatedReattachHint(
+            priorDurableSessionId = "prior-era-id-123",
+            deviceId = "Pixel_8"
+        )
+        val event = V2MultiDeviceLifecycleEvent.DeviceConnected(
+            deviceId = "Pixel_8",
+            sessionId = "sess-1",
+            runtimeSessionId = "rt-1",
+            durableSessionId = "new-era-id-456",
+            sessionContinuityEpoch = 0,
+            openSource = "background_restore",
+            processRecreatedReattachHint = hint
+        )
+        assertNotNull(
+            "processRecreatedReattachHint must be non-null for process-recreation re-attach",
+            event.processRecreatedReattachHint
+        )
+        assertEquals(
+            "priorDurableSessionId in hint must match expected value",
+            "prior-era-id-123",
+            event.processRecreatedReattachHint!!.priorDurableSessionId
+        )
+    }
+
+    @Test
+    fun `DeviceConnected with processRecreatedReattachHint does not affect meshLifecycleHint`() {
+        val hint = ProcessRecreatedReattachHint(
+            priorDurableSessionId = "prior-era-id-123",
+            deviceId = "Pixel_8"
+        )
+        val event = V2MultiDeviceLifecycleEvent.DeviceConnected(
+            deviceId = "Pixel_8",
+            sessionId = "sess-1",
+            runtimeSessionId = "rt-1",
+            durableSessionId = "new-era-id-456",
+            sessionContinuityEpoch = 0,
+            openSource = "background_restore",
+            processRecreatedReattachHint = hint
+        )
+        assertEquals(
+            "meshLifecycleHint must remain RESTORE_ACTIVATE for background_restore even with hint",
+            V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint.RESTORE_ACTIVATE,
+            event.meshLifecycleHint
+        )
+    }
+
+    @Test
+    fun `DeviceConnected processRecreatedReattachHint priorDurableSessionId differs from durableSessionId`() {
+        val hint = ProcessRecreatedReattachHint(
+            priorDurableSessionId = "prior-era-id-OLD",
+            deviceId = "Pixel_8"
+        )
+        val event = V2MultiDeviceLifecycleEvent.DeviceConnected(
+            deviceId = "Pixel_8",
+            sessionId = "sess-2",
+            runtimeSessionId = "rt-2",
+            durableSessionId = "new-era-id-NEW",
+            sessionContinuityEpoch = 0,
+            openSource = "background_restore",
+            processRecreatedReattachHint = hint
+        )
+        assertNotNull(event.processRecreatedReattachHint)
+        assertNotEquals(
+            "priorDurableSessionId in hint must differ from the new era durableSessionId",
+            event.durableSessionId,
+            event.processRecreatedReattachHint!!.priorDurableSessionId
         )
     }
 }
