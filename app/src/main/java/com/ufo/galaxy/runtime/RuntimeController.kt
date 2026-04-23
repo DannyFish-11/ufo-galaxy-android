@@ -1039,6 +1039,9 @@ class RuntimeController(
         _reconnectRecoveryState.value = ReconnectRecoveryState.IDLE
         // PR-1: Terminate the durable session era on explicit stop.  The next activation
         // will start a fresh era with a new durableSessionId.
+        // PR-7: Also clear the persisted prior-session hint so the next DeviceConnected is
+        // treated as a new-era attach (not a process-recreation re-attach).
+        settings.lastDurableSessionId = ""
         _durableSessionContinuityRecord.value = null
         // PR-G: Terminate the attachment session era.  The next activation generates a fresh
         // runtime_attachment_session_id so V2 treats it as a brand-new attachment, not a
@@ -1547,6 +1550,9 @@ class RuntimeController(
         closeAttachedSession(AttachedRuntimeSession.DetachCause.INVALIDATION)
         // PR-1: Terminate the durable era — the invalidated identity is no longer a
         // trustworthy durable anchor for the center-side durable mesh/session registry.
+        // PR-7: Also clear the persisted prior-session hint — the invalidated identity
+        // must not be presented as a re-attach hint to V2.
+        settings.lastDurableSessionId = ""
         _durableSessionContinuityRecord.value = null
         // PR-G: Terminate the attachment session era — the invalidated identity must not
         // be carried into the next handshake, as V2 would incorrectly treat it as resuming
@@ -2015,6 +2021,13 @@ class RuntimeController(
         //  - RECONNECT_RECOVERY with existing record: increment epoch (same durableSessionId).
         //  - USER_ACTIVATION / BACKGROUND_RESTORE with an existing record: preserve it.
         //    (Defensive: in practice stop() clears the record before a new activation starts.)
+        // PR-7: Before creating a new era, capture any process-recreation re-attach hint
+        //   from the persisted prior session ID (BACKGROUND_RESTORE only).  This must happen
+        //   BEFORE we overwrite settings.lastDurableSessionId with the new era's ID below.
+        val priorReattachHint: ProcessRecreatedReattachHint? =
+            if (source == SessionOpenSource.BACKGROUND_RESTORE) {
+                ProcessRecreatedReattachHint.fromAppSettings(settings)
+            } else null
         val currentDurable = _durableSessionContinuityRecord.value
         _durableSessionContinuityRecord.value = when {
             source == SessionOpenSource.RECONNECT_RECOVERY && currentDurable != null ->
@@ -2023,6 +2036,16 @@ class RuntimeController(
                 DurableSessionContinuityRecord.create(source.wireValue)
             else ->
                 currentDurable
+        }
+        // PR-7: Persist the new era's durableSessionId to SharedPreferences so it survives
+        //   an OS process kill.  On the next BACKGROUND_RESTORE this ID is read back as the
+        //   ProcessRecreatedReattachHint presented to V2.
+        //   Only update when a new era was created (currentDurable == null → new ID generated).
+        //   RECONNECT_RECOVERY preserves the same ID already in settings; no write needed.
+        if (currentDurable == null) {
+            _durableSessionContinuityRecord.value?.durableSessionId?.let { newId ->
+                settings.lastDurableSessionId = newId
+            }
         }
 
         // PR-G: Propagate the attachment session identity to the WS client so every
@@ -2044,7 +2067,8 @@ class RuntimeController(
                 "runtime_attachment_session_id=$attachmentSessionId " +
                 "runtime_session_id=${_currentRuntimeSessionId} " +
                 "durable_session_id=${_durableSessionContinuityRecord.value?.durableSessionId} " +
-                "epoch=${_durableSessionContinuityRecord.value?.sessionContinuityEpoch}"
+                "epoch=${_durableSessionContinuityRecord.value?.sessionContinuityEpoch}" +
+                if (priorReattachHint != null) " prior_durable_session_id=${priorReattachHint.priorDurableSessionId}" else ""
         )
         val attachLog = mutableMapOf<String, Any>(
             "event" to "runtime_session_attached",
@@ -2057,6 +2081,10 @@ class RuntimeController(
         _durableSessionContinuityRecord.value?.let {
             attachLog[DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID] = it.durableSessionId
             attachLog[DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH] = it.sessionContinuityEpoch
+        }
+        priorReattachHint?.let { hint ->
+            attachLog[ProcessRecreatedReattachHint.KEY_PRIOR_DURABLE_SESSION_ID] = hint.priorDurableSessionId
+            attachLog[ProcessRecreatedReattachHint.KEY_ATTACHMENT_RECOVERY_REASON] = ProcessRecreatedReattachHint.RECOVERY_REASON_VALUE
         }
         GalaxyLogger.log(TAG, attachLog + session.toMetadataMap())
         // Sync host descriptor participation state to ACTIVE.
@@ -2079,13 +2107,17 @@ class RuntimeController(
                     sessionContinuityEpoch = epoch
                 )
             } else {
+                // PR-7: Include the process-recreation re-attach hint when re-attaching
+                // after a process kill (BACKGROUND_RESTORE with a known prior session).
+                // The hint is advisory for V2; Android never self-authorizes session continuation.
                 V2MultiDeviceLifecycleEvent.DeviceConnected(
                     deviceId = session.deviceId,
                     sessionId = session.sessionId,
                     runtimeSessionId = runtimeSessionId,
                     durableSessionId = durableSessionId,
                     sessionContinuityEpoch = epoch,
-                    openSource = source.wireValue
+                    openSource = source.wireValue,
+                    processRecreatedReattachHint = priorReattachHint
                 )
             }
             emitV2LifecycleEvent(v2Event)

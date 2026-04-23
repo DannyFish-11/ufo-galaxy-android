@@ -894,4 +894,90 @@ class Pr1DurableSessionRuntimeFoundationTest {
             )
         }
     }
+
+    // ── RuntimeController — PR-7 lastDurableSessionId persistence ────────────
+
+    private fun buildControllerWithSettings(): Triple<RuntimeController, GalaxyWebSocketClient, InMemoryAppSettings> {
+        val settings = InMemoryAppSettings()
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false
+        )
+        val controller = RuntimeController(
+            webSocketClient = client,
+            settings = settings,
+            loopController = buildLoopController(),
+            registrationTimeoutMs = 100L
+        )
+        return Triple(controller, client, settings)
+    }
+
+    @Test
+    fun `setActiveForTest persists durableSessionId to settings lastDurableSessionId`() {
+        val (controller, _, settings) = buildControllerWithSettings()
+
+        assertTrue("Precondition: lastDurableSessionId must be blank before activation",
+            settings.lastDurableSessionId.isBlank())
+
+        controller.setActiveForTest()
+
+        val durableId = controller.durableSessionContinuityRecord.value?.durableSessionId
+        assertNotNull("Precondition: durable record must exist after setActiveForTest", durableId)
+        assertEquals(
+            "lastDurableSessionId must match the active durableSessionId after activation",
+            durableId,
+            settings.lastDurableSessionId
+        )
+    }
+
+    @Test
+    fun `stop() clears settings lastDurableSessionId`() {
+        val (controller, _, settings) = buildControllerWithSettings()
+        controller.setActiveForTest()
+
+        assertTrue("Precondition: lastDurableSessionId must be non-blank after activation",
+            settings.lastDurableSessionId.isNotBlank())
+
+        controller.stop()
+
+        assertTrue(
+            "lastDurableSessionId must be blank after stop()",
+            settings.lastDurableSessionId.isBlank()
+        )
+    }
+
+    @Test
+    fun `invalidateSession() clears settings lastDurableSessionId`() {
+        val (controller, _, settings) = buildControllerWithSettings()
+        controller.setActiveForTest()
+
+        assertTrue("Precondition: lastDurableSessionId must be non-blank after activation",
+            settings.lastDurableSessionId.isNotBlank())
+
+        controller.invalidateSession()
+
+        assertTrue(
+            "lastDurableSessionId must be blank after invalidateSession()",
+            settings.lastDurableSessionId.isBlank()
+        )
+    }
+
+    @Test
+    fun `reconnect cycle does not change settings lastDurableSessionId`() {
+        val (controller, client, settings) = buildControllerWithSettings()
+        controller.setActiveForTest()
+
+        val idAfterActivation = settings.lastDurableSessionId
+        assertTrue("Precondition: lastDurableSessionId must be non-blank after activation",
+            idAfterActivation.isNotBlank())
+
+        client.simulateDisconnected()
+        client.simulateConnected()
+
+        assertEquals(
+            "lastDurableSessionId must be unchanged after a transparent reconnect cycle",
+            idAfterActivation,
+            settings.lastDurableSessionId
+        )
+    }
 }

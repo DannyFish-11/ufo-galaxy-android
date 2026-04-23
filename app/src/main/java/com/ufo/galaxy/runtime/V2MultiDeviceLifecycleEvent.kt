@@ -214,6 +214,22 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      * (for `"user_activation"`) or [MeshSessionLifecycleHint.RESTORE_ACTIVATE] (for
      * `"background_restore"`).
      *
+     * ## PR-7 — Process-recreation re-attach hint
+     *
+     * When Android re-attaches after a process kill (`openSource = "background_restore"`) and
+     * a prior durable session ID is available in [AppSettings][com.ufo.galaxy.data.AppSettings],
+     * [processRecreatedReattachHint] carries the prior session continuity hint so V2 can
+     * optionally correlate the returning device with its prior session.
+     *
+     * - Non-null: this is a process-recreation re-attach; the hint carries the prior
+     *   [ProcessRecreatedReattachHint.priorDurableSessionId] and the stable
+     *   [ProcessRecreatedReattachHint.deviceId].
+     * - `null`: fresh first attachment, user-initiated new era, or no prior session available.
+     *
+     * V2 MUST NOT force session continuation from this hint — it is advisory only.
+     * V2 decides whether to restore participant state based on its own participant-loss
+     * timeout policy.
+     *
      * @property deviceId              Stable device identifier.
      * @property sessionId             Session ID of the newly opened attached session.
      * @property runtimeSessionId      Per-connection runtime session UUID (changes on each
@@ -224,6 +240,9 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
      *                                 first connect).
      * @property openSource            Wire value of the session-open source:
      *                                 `"user_activation"` or `"background_restore"`.
+     * @property processRecreatedReattachHint PR-7 — Prior-session continuity hint; non-null only
+     *                                 on process-recreation re-attach with a known prior session.
+     *                                 Advisory for V2; never self-authorised by Android.
      * @property timestampMs           Wall-clock emission timestamp.
      */
     data class DeviceConnected(
@@ -233,6 +252,7 @@ sealed class V2MultiDeviceLifecycleEvent(open val wireValue: String) {
         val durableSessionId: String?,
         val sessionContinuityEpoch: Int,
         val openSource: String,
+        val processRecreatedReattachHint: ProcessRecreatedReattachHint? = null,
         override val timestampMs: Long = System.currentTimeMillis()
     ) : V2MultiDeviceLifecycleEvent(WIRE_DEVICE_CONNECTED) {
 
