@@ -250,6 +250,10 @@ V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
 | `HybridParticipantCapability` | Structured hybrid/distributed capability status | PR-60 |
 | `AndroidLifecycleRecoveryContract` | Recovery boundary: process recreation, transient disconnect, hybrid limitations | PR-60 |
 | `ParticipantRuntimeSemanticsBoundary` | Single reviewer-facing boundary: truth ownership, execution semantics, first-class participant declaration | PR-61 |
+| `ParticipantLiveExecutionSurface` | Live execution wiring: active task state tracking, publishTaskStatusUpdate, auto-TASK_FAILED on disconnect, auto-RUNTIME_TRUTH_SNAPSHOT on reconnect | PR-62 |
+| `ParticipantProgressFeedbackSurface` | Richer progress/checkpoint/subtask feedback surfaces beyond ack/result/error | PR-63 |
+| `ParticipantProgressCheckpoint` | Named, structured execution-stage marker (planning→grounding→step→finalizing) | PR-63 |
+| `SubtaskProgressReport` | Typed subtask-level progress report (index, label, PENDING/EXECUTING/COMPLETE/FAILED/SKIPPED) | PR-63 |
 
 ---
 
@@ -350,6 +354,11 @@ Android is **not** a second orchestration authority:
 - ✅ `HybridParticipantCapability` — structured capability status registry — tested in `Pr60AndroidLifecycleHardeningTest`
 - ✅ `AndroidLifecycleRecoveryContract` — process recreation and disconnect recovery boundaries — tested in `Pr60AndroidLifecycleHardeningTest`
 - ✅ `ParticipantRuntimeSemanticsBoundary` — reviewer-facing boundary for all 3 acceptance criteria — tested in `Pr61ParticipantRuntimeTruthBoundaryTest`
+- ✅ `ParticipantLiveExecutionSurface` — live execution wiring: active task state, TASK_STATUS_UPDATE, auto-TASK_FAILED, auto-RUNTIME_TRUTH_SNAPSHOT — tested in `Pr62ParticipantLiveExecutionSurfaceTest`
+- ✅ `ParticipantProgressFeedbackSurface` — richer progress/checkpoint/subtask feedback surfaces — tested in `Pr8ParticipantProgressFeedbackTest`
+- ✅ `ParticipantProgressCheckpoint` — named, structured execution-stage markers — tested in `Pr8ParticipantProgressFeedbackTest`
+- ✅ `SubtaskProgressReport` — typed subtask progress with status, index, label — tested in `Pr8ParticipantProgressFeedbackTest`
+- ✅ `ReconciliationSignal` progress payload key constants — tested in `Pr8ParticipantProgressFeedbackTest`
 
 ### Contract-first / partially wired
 
@@ -364,3 +373,64 @@ Android is **not** a second orchestration authority:
 - ❌ Barrier / merge / completion tracking (V2-side concern)
 - ❌ Formation rebalance decisions (V2 decides; Android reports health/readiness)
 - ❌ Task retry/fallback policy (V2 policy; Android only signals failure)
+
+---
+
+## Reviewer Guide (PR-63 Acceptance Criteria)
+
+A reviewer can determine the following from `ParticipantProgressFeedbackSurface`:
+
+### 1. Which richer Android runtime/progress states are now emitted outward
+
+**See**: `ParticipantProgressFeedbackSurface.PROGRESS_FEEDBACK_SURFACES`
+
+| Surface | What it exposes |
+|---|---|
+| `ParticipantProgressCheckpoint` | Named execution-stage markers (8 canonical stages) via `TASK_STATUS_UPDATE` payload |
+| `SubtaskProgressReport` | Typed subtask progress: index, label, status (PENDING/EXECUTING/COMPLETE/FAILED/SKIPPED) |
+| Structured `TASK_STATUS_UPDATE` payload keys | `KEY_CHECKPOINT_ID`, `KEY_SUBTASK_INDEX`, `KEY_SUBTASK_STATUS`, `KEY_SUBTASK_LABEL` etc. |
+| `KNOWN_CHECKPOINT_IDS` registry | Stable, versioned set of all canonical Android execution stage identifiers |
+| `SubtaskStatus.ALL_WIRE_VALUES` | Stable set of all subtask status wire values for V2-side validation |
+
+### 2. How Android local execution is represented beyond ack/result/error
+
+**Before PR-63**: TASK_ACCEPTED → (optional TASK_STATUS_UPDATE with free-form string) → terminal
+
+**After PR-63**: TASK_ACCEPTED → structured TASK_STATUS_UPDATE signals at each stage boundary:
+
+| Stage checkpoint | Wire value | Meaning |
+|---|---|---|
+| `planning_started` | Emitted at task acceptance | Planning phase begins |
+| `planning_complete` | Plan produced | Grounding/action phase begins |
+| `grounding_started` | For each step | UI coordinate mapping begins |
+| `grounding_complete` | Grounding done | Action dispatch begins |
+| `step_executing` | Step N of M | Step execution in progress |
+| `step_complete` | Step N done | Next step or finalization |
+| `replanning` | Plan revision needed | Re-planning in progress |
+| `finalizing` | All steps done | Result assembly (terminal follows) |
+
+Each checkpoint carries `checkpoint_id`, `checkpoint_step_index`, optional `checkpoint_total_steps`.
+Each subtask report carries `subtask_index`, `subtask_label`, `subtask_status`, optional `subtask_total`.
+
+### 3. Whether Android participant runtime activity is now more reviewable from outside
+
+**See**: `ParticipantProgressFeedbackSurface.OBSERVABILITY_SURFACES`
+
+- `KNOWN_CHECKPOINT_IDS` — reviewers can enumerate all canonical execution stages at compile time
+- `SubtaskStatus.ALL_WIRE_VALUES` — all subtask status wire values are named constants
+- `ReconciliationSignal.KEY_CHECKPOINT_ID` etc. — all payload keys are publicly named constants
+- `toPayloadMap()` — deterministic, immutable wire output; directly assertable in unit tests
+
+### 4. Whether the added feedback remains bounded under participant-local authority
+
+**See**: `ParticipantProgressFeedbackSurface.AUTHORITY_BOUNDARY_DECLARATIONS`
+
+| Android owns | V2 retains authority over |
+|---|---|
+| Checkpoint identity and ordering | Task lifecycle outcomes (retry, fallback, failure) |
+| Subtask labeling and plan breakdown | Dispatch, assignment, rebalance |
+| Progress signal frequency and count | Whether to act on subtask-level state |
+| When to emit `CHECKPOINT_REPLANNING` | Whether to intervene on replanning |
+
+Android does **not** make orchestration decisions based on its own subtask progress.
+V2 does **not** require a specific number or order of progress signals before accepting terminal signals.

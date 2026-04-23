@@ -1508,6 +1508,68 @@ object StabilizationBaseline {
                 "Provides a single filter path (GALAXY:LIVE:EXECUTION) for tracing Android " +
                 "participant truth through the complete task lifecycle in production logs.",
             introducedPr = 62
+        ),
+
+        // ── PR-63: Participant progress feedback surfaces — richer execution progress outbound ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "participant-progress-feedback-surface",
+            displayName = "ParticipantProgressFeedbackSurface",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantProgressFeedbackSurface",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-63 canonical reviewer reference for Android participant richer " +
+                "execution progress and feedback surfaces. Answers all four PR-63 acceptance " +
+                "criteria: PROGRESS_FEEDBACK_SURFACES (5 entries: which richer states are emitted), " +
+                "OUTBOUND_EXECUTION_MODELING (5 entries: how execution is represented beyond " +
+                "ack/result/error), OBSERVABILITY_SURFACES (4 entries: how Android activity is " +
+                "reviewable from outside), AUTHORITY_BOUNDARY_DECLARATIONS (5 entries: feedback " +
+                "bounded under participant-local authority). Companion to ParticipantProgressCheckpoint, " +
+                "SubtaskProgressReport, and ReconciliationSignal structured progress payload keys.",
+            introducedPr = 63
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "participant-progress-checkpoint",
+            displayName = "ParticipantProgressCheckpoint",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantProgressCheckpoint",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-63 named, structured execution-stage marker for Android's local AI " +
+                "pipeline. Carries checkpointId (stable stage identifier from KNOWN_CHECKPOINT_IDS), " +
+                "stepIndex, optional totalSteps, optional detail, and toPayloadMap() for wire " +
+                "encoding into ReconciliationSignal.Kind.TASK_STATUS_UPDATE payload. Eight canonical " +
+                "stage identifiers: planning_started, planning_complete, grounding_started, " +
+                "grounding_complete, step_executing, step_complete, replanning, finalizing. " +
+                "Replaces free-form progressDetail string with a typed, structured execution stage model.",
+            introducedPr = 63
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "subtask-progress-report",
+            displayName = "SubtaskProgressReport",
+            packagePath = "com.ufo.galaxy.runtime.SubtaskProgressReport",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-63 typed subtask-level progress report for Android's plan execution. " +
+                "Carries subtaskIndex (zero-based), optional subtaskTotal, subtaskLabel (step " +
+                "description), subtaskStatus enum (PENDING / EXECUTING / COMPLETE / FAILED / SKIPPED), " +
+                "and toPayloadMap() for wire encoding. Provides V2 with ordered, typed step-N-of-M " +
+                "execution progress rather than an opaque step count integer. " +
+                "SubtaskStatus.ALL_WIRE_VALUES and fromValue() support safe V2-side parsing.",
+            introducedPr = 63
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "reconciliation-signal-progress-keys",
+            displayName = "ReconciliationSignal progress payload key constants",
+            packagePath = "com.ufo.galaxy.runtime.ReconciliationSignal",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-63 stable payload key constants added to ReconciliationSignal companion: " +
+                "KEY_CHECKPOINT_ID, KEY_STEP_INDEX, KEY_TOTAL_STEPS (checkpoint progress), " +
+                "KEY_SUBTASK_INDEX, KEY_SUBTASK_TOTAL, KEY_SUBTASK_STATUS, KEY_SUBTASK_LABEL " +
+                "(subtask progress). These constants give V2 and tooling stable, named keys " +
+                "for structured progress fields in TASK_STATUS_UPDATE payloads, replacing " +
+                "the prior single 'progress_detail' free-form string key.",
+            introducedPr = 63
         )
     )
 
