@@ -13,6 +13,7 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * |--------------------------|-------------------------------------------------------------------------|
  * | [trace_id]               | End-to-end observability identifier (propagated unchanged)              |
  * | [task_id]                | Unique task identifier; echoed on every reply                           |
+ * | [handoff_id]             | Stable V2 handoff identifier for this dispatch; null for legacy senders |
  * | [goal]                   | Natural-language objective for Agent Runtime                            |
  * | [exec_mode]              | Execution mode: "local" / "remote" / "both"                             |
  * | [route_mode]             | Routing path: "local" / "cross_device"                                  |
@@ -82,11 +83,14 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * @param continuity_token       (PR-F) Opaque stable continuity token; null for legacy senders.
  * @param recovery_context       (PR-F) Optional key-value recovery hints from V2.
  * @param is_resumable           (PR-F) Resumability flag from V2; null for legacy senders.
+ * @param handoff_id             Stable V2 handoff identifier for this dispatch; null for legacy
+ *                               senders that do not yet include the field.
  * @param interruption_reason    (PR-F) Interruption reason for recovery dispatches; null otherwise.
  */
 data class HandoffEnvelopeV2(
     val trace_id: String,
     val task_id: String,
+    val handoff_id: String? = null,
     val goal: String,
     val exec_mode: String,
     val route_mode: String,

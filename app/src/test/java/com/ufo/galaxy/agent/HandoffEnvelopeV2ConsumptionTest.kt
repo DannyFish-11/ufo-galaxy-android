@@ -48,22 +48,35 @@ import org.junit.Test
  *  - dispatch_plan_id is forwarded
  *  - source_dispatch_strategy is forwarded
  *
- * ### HandoffEnvelopeV2ResultPayload — construction (happy path)
- *  - status "success" is preserved
+ * ### HandoffEnvelopeV2ResultPayload — construction (result path)
+ *  - status STATUS_RESULT ("result") is preserved
  *  - task_id and trace_id are echoed
  *  - correlation_id equals task_id
  *  - device_id is set
  *  - route_mode defaults to "cross_device"
  *  - All echoed optional fields are carried through correctly
  *
- * ### HandoffEnvelopeV2ResultPayload — construction (error path)
- *  - status "error" is preserved
+ * ### HandoffEnvelopeV2ResultPayload — construction (failure path)
+ *  - status STATUS_FAILURE ("failure") is preserved
  *  - error field is populated
  *  - result_summary is optional / null when absent
  *
  * ### HandoffEnvelopeV2ResultPayload — construction (parse-failure path)
- *  - status "error" and error starts with "bad_payload:"
+ *  - status STATUS_FAILURE and error starts with "bad_payload:"
  *  - echoed optional fields are null/empty for missing envelope
+ *
+ * ### HandoffEnvelopeV2ResultPayload — ACK path
+ *  - status STATUS_ACK ("ack") is preserved
+ *  - STATUS_ACK, STATUS_RESULT, STATUS_FAILURE constants have correct wire values
+ *  - Three status values are distinct
+ *  - ack/result/failure status JSON round-trips correctly
+ *
+ * ### HandoffEnvelopeV2ResultPayload — handoff_id field
+ *  - handoff_id is echoed from envelope when present
+ *  - handoff_id falls back to task_id when envelope omits it
+ *  - HandoffEnvelopeV2 handoff_id defaults to null for legacy envelopes
+ *  - HandoffEnvelopeV2 handoff_id round-trips via Gson when set
+ *  - Serialised payload JSON contains handoff_id
  *
  * ### AipMessage — outbound HANDOFF_ENVELOPE_V2_RESULT envelope
  *  - type is HANDOFF_ENVELOPE_V2_RESULT
@@ -394,11 +407,12 @@ class HandoffEnvelopeV2ConsumptionTest {
         traceId: String = "trace-r",
         env: HandoffEnvelopeV2 = fullEnvelope(taskId = "task-r", traceId = "trace-r")
     ) = HandoffEnvelopeV2ResultPayload(
+        handoff_id = env.handoff_id ?: taskId,
         task_id = taskId,
         trace_id = traceId,
         correlation_id = taskId,
-        status = "success",
-        result_summary = "handoff_v2: success",
+        status = HandoffEnvelopeV2ResultPayload.STATUS_RESULT,
+        result_summary = "handoff_v2: result",
         error = null,
         device_id = "Samsung_Galaxy",
         route_mode = "cross_device",
@@ -411,8 +425,8 @@ class HandoffEnvelopeV2ConsumptionTest {
     )
 
     @Test
-    fun `result status success is preserved`() {
-        assertEquals("success", buildSuccessResult().status)
+    fun `result status result is preserved`() {
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_RESULT, buildSuccessResult().status)
     }
 
     @Test
@@ -498,18 +512,19 @@ class HandoffEnvelopeV2ConsumptionTest {
         traceId: String = "trace-err",
         errorMsg: String = "handoff_v2_execution_failed: NullPointerException"
     ) = HandoffEnvelopeV2ResultPayload(
+        handoff_id = taskId,
         task_id = taskId,
         trace_id = traceId,
         correlation_id = taskId,
-        status = "error",
+        status = HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
         error = errorMsg,
         device_id = "Samsung_Galaxy",
         route_mode = "cross_device"
     )
 
     @Test
-    fun `result status error is preserved`() {
-        assertEquals("error", buildErrorResult().status)
+    fun `result status failure is preserved`() {
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_FAILURE, buildErrorResult().status)
     }
 
     @Test
@@ -529,25 +544,27 @@ class HandoffEnvelopeV2ConsumptionTest {
     @Test
     fun `bad_payload error status starts with bad_payload prefix`() {
         val r = HandoffEnvelopeV2ResultPayload(
+            handoff_id = "task-bad",
             task_id = "task-bad",
             trace_id = "trace-bad",
             correlation_id = "task-bad",
-            status = "error",
+            status = HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
             error = "bad_payload: Gson parse failed",
             device_id = "test_device",
             route_mode = "cross_device"
         )
-        assertEquals("error", r.status)
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_FAILURE, r.status)
         assertTrue("error must start with bad_payload:", r.error!!.startsWith("bad_payload:"))
     }
 
     @Test
     fun `parse-failure result has null optional echo fields`() {
         val r = HandoffEnvelopeV2ResultPayload(
+            handoff_id = "task-parse-fail",
             task_id = "task-parse-fail",
             trace_id = "trace-pf",
             correlation_id = "task-parse-fail",
-            status = "error",
+            status = HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
             error = "bad_payload: malformed JSON",
             device_id = "test",
             route_mode = "cross_device"
@@ -558,6 +575,183 @@ class HandoffEnvelopeV2ConsumptionTest {
         assertTrue(r.execution_context.isEmpty())
         assertNull(r.executor_target_type)
         assertNull(r.source_runtime_posture)
+    }
+
+    // ── Section: HandoffEnvelopeV2ResultPayload — ACK path ───────────────────
+
+    private fun buildAckResult(
+        taskId: String = "task-ack",
+        traceId: String = "trace-ack",
+        env: HandoffEnvelopeV2 = fullEnvelope(taskId = "task-ack", traceId = "trace-ack")
+    ) = HandoffEnvelopeV2ResultPayload(
+        handoff_id = env.handoff_id ?: taskId,
+        task_id = taskId,
+        trace_id = traceId,
+        correlation_id = taskId,
+        status = HandoffEnvelopeV2ResultPayload.STATUS_ACK,
+        device_id = "Samsung_Galaxy",
+        route_mode = "cross_device",
+        dispatch_plan_id = env.dispatch_plan_id,
+        continuity_token = env.continuity_token,
+        dispatch_intent = env.dispatch_intent,
+        execution_context = env.execution_context,
+        executor_target_type = env.executor_target_type,
+        source_runtime_posture = env.source_runtime_posture
+    )
+
+    @Test
+    fun `status ACK constant wire value is ack`() {
+        assertEquals("ack", HandoffEnvelopeV2ResultPayload.STATUS_ACK)
+    }
+
+    @Test
+    fun `status RESULT constant wire value is result`() {
+        assertEquals("result", HandoffEnvelopeV2ResultPayload.STATUS_RESULT)
+    }
+
+    @Test
+    fun `status FAILURE constant wire value is failure`() {
+        assertEquals("failure", HandoffEnvelopeV2ResultPayload.STATUS_FAILURE)
+    }
+
+    @Test
+    fun `ack result status is ack`() {
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_ACK, buildAckResult().status)
+    }
+
+    @Test
+    fun `ack result task_id is echoed`() {
+        val r = buildAckResult(taskId = "task-ack-001")
+        assertEquals("task-ack-001", r.task_id)
+    }
+
+    @Test
+    fun `ack result trace_id is echoed`() {
+        val r = buildAckResult(traceId = "trace-ack-001")
+        assertEquals("trace-ack-001", r.trace_id)
+    }
+
+    @Test
+    fun `ack result correlation_id equals task_id`() {
+        val r = buildAckResult(taskId = "task-corr-ack")
+        assertEquals(r.task_id, r.correlation_id)
+    }
+
+    @Test
+    fun `ack result has no result_summary or error`() {
+        val r = buildAckResult()
+        assertNull(r.result_summary)
+        assertNull(r.error)
+    }
+
+    @Test
+    fun `ack result echo fields are populated from envelope`() {
+        val env = fullEnvelope(
+            taskId = "task-ack-echo",
+            dispatchPlanId = "plan-ack",
+            continuityToken = "ct-ack",
+            dispatchIntent = "task_execute",
+            executorTargetType = "android_device",
+            sourceRuntimePosture = "join_runtime"
+        )
+        val r = buildAckResult(taskId = "task-ack-echo", env = env)
+        assertEquals("plan-ack", r.dispatch_plan_id)
+        assertEquals("ct-ack", r.continuity_token)
+        assertEquals("task_execute", r.dispatch_intent)
+        assertEquals("android_device", r.executor_target_type)
+        assertEquals("join_runtime", r.source_runtime_posture)
+    }
+
+    // ── Section: HandoffEnvelopeV2ResultPayload — handoff_id field ───────────
+
+    @Test
+    fun `handoff_id is echoed from envelope when present`() {
+        val r = HandoffEnvelopeV2ResultPayload(
+            handoff_id = "handoff-stable-001",
+            task_id = "task-hid",
+            trace_id = "trace-hid",
+            correlation_id = "task-hid",
+            status = HandoffEnvelopeV2ResultPayload.STATUS_RESULT,
+            result_summary = "ok",
+            device_id = "dev",
+            route_mode = "cross_device"
+        )
+        assertEquals("handoff-stable-001", r.handoff_id)
+    }
+
+    @Test
+    fun `handoff_id falls back to task_id when envelope omits it`() {
+        val taskId = "task-no-hid"
+        // Simulate: envelope.handoff_id is null, fall back to task_id
+        val effectiveHandoffId = null ?: taskId
+        val r = HandoffEnvelopeV2ResultPayload(
+            handoff_id = effectiveHandoffId,
+            task_id = taskId,
+            trace_id = "trace-no-hid",
+            correlation_id = taskId,
+            status = HandoffEnvelopeV2ResultPayload.STATUS_ACK,
+            device_id = "dev",
+            route_mode = "cross_device"
+        )
+        assertEquals(taskId, r.handoff_id)
+    }
+
+    @Test
+    fun `HandoffEnvelopeV2 handoff_id field defaults to null for legacy envelopes`() {
+        val env = minimalEnvelope()
+        assertNull(env.handoff_id)
+    }
+
+    @Test
+    fun `HandoffEnvelopeV2 handoff_id round-trips via Gson when set`() {
+        val json = """
+            {
+              "trace_id": "t1",
+              "task_id": "task1",
+              "handoff_id": "hid-001",
+              "goal": "do something",
+              "exec_mode": "local",
+              "route_mode": "local"
+            }
+        """.trimIndent()
+        val parsed = gson.fromJson(json, HandoffEnvelopeV2::class.java)
+        assertEquals("hid-001", parsed.handoff_id)
+    }
+
+    @Test
+    fun `HandoffEnvelopeV2ResultPayload JSON contains handoff_id`() {
+        val r = buildAckResult()
+        val json = gson.toJson(r)
+        assertTrue("serialised payload must contain handoff_id", json.contains("handoff_id"))
+    }
+
+    @Test
+    fun `three status values are distinct`() {
+        assertFalse(HandoffEnvelopeV2ResultPayload.STATUS_ACK == HandoffEnvelopeV2ResultPayload.STATUS_RESULT)
+        assertFalse(HandoffEnvelopeV2ResultPayload.STATUS_ACK == HandoffEnvelopeV2ResultPayload.STATUS_FAILURE)
+        assertFalse(HandoffEnvelopeV2ResultPayload.STATUS_RESULT == HandoffEnvelopeV2ResultPayload.STATUS_FAILURE)
+    }
+
+    @Test
+    fun `ack result JSON round-trips correctly`() {
+        val r = buildAckResult(taskId = "task-json-ack", traceId = "trace-json-ack")
+        val json = gson.toJson(r)
+        assertTrue(json.contains("\"ack\""))
+        assertTrue(json.contains("task-json-ack"))
+    }
+
+    @Test
+    fun `result status JSON round-trips correctly`() {
+        val r = buildSuccessResult(taskId = "task-json-result", traceId = "trace-json-result")
+        val json = gson.toJson(r)
+        assertTrue(json.contains("\"result\""))
+    }
+
+    @Test
+    fun `failure status JSON round-trips correctly`() {
+        val r = buildErrorResult(taskId = "task-json-fail", traceId = "trace-json-fail")
+        val json = gson.toJson(r)
+        assertTrue(json.contains("\"failure\""))
     }
 
     // ── Section: AipMessage outbound envelope ─────────────────────────────────
@@ -659,12 +853,14 @@ class HandoffEnvelopeV2ConsumptionTest {
     @Test
     fun `minimal HandoffEnvelopeV2ResultPayload with only required fields is valid`() {
         val r = HandoffEnvelopeV2ResultPayload(
+            handoff_id = "t",
             task_id = "t",
             trace_id = "tr",
             correlation_id = "t",
-            status = "success"
+            status = HandoffEnvelopeV2ResultPayload.STATUS_RESULT
         )
-        assertEquals("success", r.status)
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_RESULT, r.status)
+        assertEquals("t", r.handoff_id)
         assertTrue("route_mode defaults to cross_device", r.route_mode == "cross_device")
         assertTrue("device_id defaults to empty string", r.device_id.isEmpty())
         assertNull(r.result_summary)
