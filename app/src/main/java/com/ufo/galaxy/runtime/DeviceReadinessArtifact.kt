@@ -77,7 +77,12 @@ sealed class DeviceReadinessArtifact {
      * @property deviceId     The device identifier for which readiness was evaluated.
      * @property snapshotId   Stable identifier for the readiness snapshot.
      * @property gapReason    Human-readable explanation of the truth gap.
-     * @property dimension    Always [DelegatedRuntimeReadinessDimension.LOCAL_TRUTH_OWNERSHIP_CENTRAL_ALIGNMENT].
+     * @property dimension    The dimension whose gap produced this artifact: either
+     *                        [DelegatedRuntimeReadinessDimension.LOCAL_TRUTH_OWNERSHIP_CENTRAL_ALIGNMENT]
+     *                        (truth ownership gap) or
+     *                        [DelegatedRuntimeReadinessDimension.CONTINUITY_REPLAY_RECONNECT]
+     *                        (continuity gap, which directly produces a truth-gap artifact in
+     *                        the canonical readiness model).
      */
     data class DeviceNotReadyDueToTruthGap(
         val deviceId: String,
