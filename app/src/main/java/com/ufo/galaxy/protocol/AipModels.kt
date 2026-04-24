@@ -155,7 +155,20 @@ enum class MsgType(val value: String) {
      *  Carries ACK / status / result_summary / error for end-to-end V2 correlation.
      *  Payload model: [HandoffEnvelopeV2ResultPayload].
      *  @status pr-h — payload defined; send path present via GalaxyConnectionService. */
-    HANDOFF_ENVELOPE_V2_RESULT("handoff_envelope_v2_result");
+    HANDOFF_ENVELOPE_V2_RESULT("handoff_envelope_v2_result"),
+
+    // ── PR-06: Reconciliation signal uplink ────────────────────────────────────────────────
+    // Uplink signal emitted by Android RuntimeController for all reconciliation lifecycle
+    // events. Carries task and participant state changes from Android to V2 so V2's
+    // participant-truth reconciliation loop can close against Android's canonical local truth.
+
+    /** Uplink: Android emits a reconciliation signal to V2.
+     *  Carries TASK_RESULT / TASK_CANCELLED / TASK_FAILED / PARTICIPANT_STATE /
+     *  RUNTIME_TRUTH_SNAPSHOT (and all other [com.ufo.galaxy.runtime.ReconciliationSignal.Kind])
+     *  events from [com.ufo.galaxy.runtime.RuntimeController.reconciliationSignals].
+     *  Payload model: [ReconciliationSignalPayload].
+     *  @status pr-06 — payload defined; send path present via GalaxyConnectionService. */
+    RECONCILIATION_SIGNAL("reconciliation_signal");
 
     companion object {
         /**
@@ -1197,6 +1210,55 @@ data class PeerAnnouncePayload(
     val peer_role: String? = null,
     val session_id: String? = null,
     val announce_seq: Int = 0
+)
+
+// ── PR-06: Reconciliation signal uplink payload ────────────────────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.RECONCILIATION_SIGNAL].
+ *
+ * Carries a reconciliation lifecycle signal from [com.ufo.galaxy.runtime.RuntimeController.reconciliationSignals]
+ * to V2 so V2's participant-truth reconciliation loop can apply Android's canonical local truth.
+ *
+ * All identity fields are stable across retries so V2 can deduplicate by [signal_id].
+ *
+ * ### Required fields (always present)
+ * @param signal_id            Stable UUID idempotency key for this emission.  V2 can discard
+ *                             duplicate deliveries with the same [signal_id].
+ * @param kind                 Wire discriminator from [com.ufo.galaxy.runtime.ReconciliationSignal.Kind.wireValue]:
+ *                             `"task_result"`, `"task_cancelled"`, `"task_failed"`,
+ *                             `"task_accepted"`, `"task_status_update"`,
+ *                             `"participant_state"`, or `"runtime_truth_snapshot"`.
+ * @param participant_id       Stable participant node identifier for V2 routing.
+ * @param status               Wire-level status matching [com.ufo.galaxy.runtime.ReconciliationSignal]
+ *                             status constants (e.g. `"success"`, `"cancelled"`, `"failed"`).
+ * @param emitted_at_ms        Epoch-millisecond timestamp when the signal was emitted on-device.
+ * @param reconciliation_epoch Monotonic epoch from the participant's runtime-truth clock.
+ * @param device_id            Stable identifier of the Android device emitting the signal.
+ *
+ * ### Conditional fields
+ * @param task_id              Task this signal belongs to; `null` for participant-state signals.
+ * @param correlation_id       Correlation identifier echoed from the originating request; may be `null`.
+ * @param session_id           Runtime session identifier at time of emission; may be `null`.
+ * @param payload              Signal-specific free-form fields (e.g. `error_detail`, `health_state`).
+ *                             Empty map when no additional fields apply.
+ * @param runtime_truth        Populated only for `kind = "runtime_truth_snapshot"` signals.
+ *                             Contains the serialised [com.ufo.galaxy.runtime.AndroidParticipantRuntimeTruth]
+ *                             key-value map.  `null` for all other signal kinds.
+ */
+data class ReconciliationSignalPayload(
+    val signal_id: String,
+    val kind: String,
+    val participant_id: String,
+    val status: String,
+    val emitted_at_ms: Long,
+    val reconciliation_epoch: Int,
+    val device_id: String,
+    val task_id: String? = null,
+    val correlation_id: String? = null,
+    val session_id: String? = null,
+    val payload: Map<String, Any?> = emptyMap(),
+    val runtime_truth: Map<String, Any>? = null
 )
 
 // ── PR-H: HandoffEnvelopeV2 native consumption result payload ─────────────────────────────
