@@ -1228,7 +1228,8 @@ data class PeerAnnouncePayload(
  *
  * | Field                    | Role                                                              |
  * |--------------------------|-------------------------------------------------------------------|
- * | [handoff_id]             | Stable handoff identifier; echoed from the originating envelope   |
+ * | [handoff_id]             | Stable handoff identifier; echoed from the originating envelope;  |
+ * |                          | resolved at construction time (falls back to [task_id] for legacy)|
  * | [task_id]                | Echoed from [com.ufo.galaxy.agent.HandoffEnvelopeV2.task_id]      |
  * | [trace_id]               | Echoed from [com.ufo.galaxy.agent.HandoffEnvelopeV2.trace_id]     |
  * | [correlation_id]         | Set to [task_id] for reply routing                                |
@@ -1245,8 +1246,11 @@ data class PeerAnnouncePayload(
  * | [executor_target_type]   | Echoed from the originating envelope; null for legacy senders     |
  * | [source_runtime_posture] | Echoed from the originating envelope; null for legacy senders     |
  *
- * @param handoff_id             Stable handoff identifier echoed from [HandoffEnvelopeV2.handoff_id];
- *                               falls back to [task_id] for legacy senders that omit the field.
+ * @param handoff_id             Stable handoff identifier echoed from [HandoffEnvelopeV2.handoff_id].
+ *                               Always non-null in the result payload: callers must resolve the
+ *                               effective identifier at construction time (using
+ *                               `envelope.handoff_id?.takeIf { it.isNotBlank() } ?: task_id`
+ *                               for legacy senders that omit the field).
  * @param task_id                Unique task identifier echoed from [HandoffEnvelopeV2].
  * @param trace_id               End-to-end trace identifier echoed from [HandoffEnvelopeV2].
  * @param correlation_id         Set to [task_id] for gateway reply routing.

@@ -736,22 +736,25 @@ class HandoffEnvelopeV2ConsumptionTest {
     fun `ack result JSON round-trips correctly`() {
         val r = buildAckResult(taskId = "task-json-ack", traceId = "trace-json-ack")
         val json = gson.toJson(r)
-        assertTrue(json.contains("\"ack\""))
-        assertTrue(json.contains("task-json-ack"))
+        val parsed = gson.fromJson(json, HandoffEnvelopeV2ResultPayload::class.java)
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_ACK, parsed.status)
+        assertEquals("task-json-ack", parsed.task_id)
     }
 
     @Test
     fun `result status JSON round-trips correctly`() {
         val r = buildSuccessResult(taskId = "task-json-result", traceId = "trace-json-result")
         val json = gson.toJson(r)
-        assertTrue(json.contains("\"result\""))
+        val parsed = gson.fromJson(json, HandoffEnvelopeV2ResultPayload::class.java)
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_RESULT, parsed.status)
     }
 
     @Test
     fun `failure status JSON round-trips correctly`() {
         val r = buildErrorResult(taskId = "task-json-fail", traceId = "trace-json-fail")
         val json = gson.toJson(r)
-        assertTrue(json.contains("\"failure\""))
+        val parsed = gson.fromJson(json, HandoffEnvelopeV2ResultPayload::class.java)
+        assertEquals(HandoffEnvelopeV2ResultPayload.STATUS_FAILURE, parsed.status)
     }
 
     // ── Section: AipMessage outbound envelope ─────────────────────────────────
