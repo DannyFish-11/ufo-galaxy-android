@@ -1570,6 +1570,62 @@ object StabilizationBaseline {
                 "for structured progress fields in TASK_STATUS_UPDATE payloads, replacing " +
                 "the prior single 'progress_detail' free-form string key.",
             introducedPr = 63
+        ),
+
+        // ── PR-64: Unified truth/reconciliation convergence — RuntimeTruthPatch + reducer ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "unified-truth-reconciliation-surface",
+            displayName = "UnifiedTruthReconciliationSurface",
+            packagePath = "com.ufo.galaxy.runtime.UnifiedTruthReconciliationSurface",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-64 canonical reviewer reference for Android unified truth/reconciliation " +
+                "convergence model. Answers all four PR-64 acceptance criteria: " +
+                "AUTHORITATIVE_TRUTH_SOURCES (8 entries: delegated result/cancelled/failed, " +
+                "handoff accepted/rejected, takeover accepted/rejected, session terminal), " +
+                "NOTIFICATION_SIGNALS (4 entries: participant state changed, task status update, " +
+                "runtime truth snapshot request, subtask checkpoint), " +
+                "CONVERGENCE_MODEL (6 entries: single reducer entry, typed discriminator, " +
+                "authoritative flag gate, epoch ordering guard, terminal idempotency, participant safety), " +
+                "MULTI_EVENT_ORDERING (6 entries: ordering scenarios demonstrating stable truth convergence). " +
+                "Companion to RuntimeTruthPatch and TruthReconciliationReducer.",
+            introducedPr = 64
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "runtime-truth-patch",
+            displayName = "RuntimeTruthPatch",
+            packagePath = "com.ufo.galaxy.runtime.RuntimeTruthPatch",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-64 typed, atomic, event-sourced truth update data class. " +
+                "Carries patchId, participantId, taskId, Kind (9-value enum: delegated_task_result, " +
+                "delegated_task_cancelled, delegated_task_failed, handoff_accepted, handoff_rejected, " +
+                "takeover_accepted, takeover_rejected, participant_state_changed, session_terminal), " +
+                "isAuthoritative (authoritative vs. notification flag), taskTerminalOutcome " +
+                "(COMPLETED / CANCELLED / FAILED), handoffOutcome (ACCEPTED / REJECTED), " +
+                "takeoverOutcome (ACCEPTED / REJECTED), errorDetail, patchedAtMs, reconciliationEpoch. " +
+                "toMap() produces stable wire key→value Map under KEY_* constants. " +
+                "Replaces per-module independent truth mutations with a single typed event envelope.",
+            introducedPr = 64
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "truth-reconciliation-reducer",
+            displayName = "TruthReconciliationReducer",
+            packagePath = "com.ufo.galaxy.runtime.TruthReconciliationReducer",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-64 pure, stateless reducer function object implementing Android's unified " +
+                "local truth convergence. Primary API: reduce(current, patch) → ReduceResult. " +
+                "Batch API: reduceFold(initial, patches) → AndroidParticipantRuntimeTruth. " +
+                "Enforces four invariants: (1) epoch gating — stale patches discarded, " +
+                "(2) authoritative-only mutation — notification signals advance epoch only, " +
+                "(3) terminal idempotency — duplicate terminal patches are safe no-ops, " +
+                "(4) participant safety — cross-participant patches rejected. " +
+                "ReduceResult.applied / discardReason enable caller-side observability without " +
+                "snapshot equality comparison. Closes the pre-PR-64 gap where multiple modules " +
+                "independently advanced the same task terminal state.",
+            introducedPr = 64
         )
     )
 
