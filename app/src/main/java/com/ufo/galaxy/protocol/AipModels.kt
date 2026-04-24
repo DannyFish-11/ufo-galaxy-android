@@ -1211,14 +1211,31 @@ data class PeerAnnouncePayload(
  * All identity fields are echoed from the originating envelope to allow
  * end-to-end correlation by V2 without requiring per-device session state.
  *
+ * ## Status model
+ *
+ * The [status] field uses a stable three-value vocabulary defined by companion constants:
+ *
+ * | [status] value        | Constant            | Meaning                                      |
+ * |-----------------------|---------------------|----------------------------------------------|
+ * | `"ack"`               | [STATUS_ACK]        | Envelope received and parsed; execution starting |
+ * | `"result"`            | [STATUS_RESULT]     | Execution completed successfully              |
+ * | `"failure"`           | [STATUS_FAILURE]    | Execution failed (parse error, runtime error) |
+ *
+ * Android sends one [STATUS_ACK] immediately after the envelope is parsed, then exactly
+ * one terminal message: either [STATUS_RESULT] or [STATUS_FAILURE].
+ *
+ * ## Fields
+ *
  * | Field                    | Role                                                              |
  * |--------------------------|-------------------------------------------------------------------|
+ * | [handoff_id]             | Stable handoff identifier; echoed from the originating envelope;  |
+ * |                          | resolved at construction time (falls back to [task_id] for legacy)|
  * | [task_id]                | Echoed from [com.ufo.galaxy.agent.HandoffEnvelopeV2.task_id]      |
  * | [trace_id]               | Echoed from [com.ufo.galaxy.agent.HandoffEnvelopeV2.trace_id]     |
  * | [correlation_id]         | Set to [task_id] for reply routing                                |
- * | [status]                 | Terminal status: "success" / "error" / "timeout" / "rejected"    |
+ * | [status]                 | Stable status: [STATUS_ACK] / [STATUS_RESULT] / [STATUS_FAILURE]  |
  * | [result_summary]         | Human-readable one-line outcome for gateway aggregation           |
- * | [error]                  | Structured error detail when [status] is "error" / "rejected"    |
+ * | [error]                  | Structured error detail when [status] is [STATUS_FAILURE]         |
  * | [consumed_at_ms]         | Epoch-ms timestamp when Android received and started consuming    |
  * | [device_id]              | Consuming Android device identifier                               |
  * | [route_mode]             | Routing path ("cross_device") for gateway correlation             |
@@ -1229,12 +1246,17 @@ data class PeerAnnouncePayload(
  * | [executor_target_type]   | Echoed from the originating envelope; null for legacy senders     |
  * | [source_runtime_posture] | Echoed from the originating envelope; null for legacy senders     |
  *
+ * @param handoff_id             Stable handoff identifier echoed from [HandoffEnvelopeV2.handoff_id].
+ *                               Always non-null in the result payload: callers must resolve the
+ *                               effective identifier at construction time (using
+ *                               `envelope.handoff_id?.takeIf { it.isNotBlank() } ?: task_id`
+ *                               for legacy senders that omit the field).
  * @param task_id                Unique task identifier echoed from [HandoffEnvelopeV2].
  * @param trace_id               End-to-end trace identifier echoed from [HandoffEnvelopeV2].
  * @param correlation_id         Set to [task_id] for gateway reply routing.
- * @param status                 Terminal execution status: "success", "error", "timeout", or "rejected".
+ * @param status                 Stable execution status: [STATUS_ACK], [STATUS_RESULT], or [STATUS_FAILURE].
  * @param result_summary         Human-readable one-line outcome description.
- * @param error                  Structured error description when [status] is "error" or "rejected".
+ * @param error                  Structured error description when [status] is [STATUS_FAILURE].
  * @param consumed_at_ms         Epoch-ms timestamp when Android received the envelope.
  * @param device_id              Consuming Android device identifier.
  * @param route_mode             Routing path; always "cross_device" for handoff consumption.
@@ -1246,6 +1268,7 @@ data class PeerAnnouncePayload(
  * @param source_runtime_posture Echoed from [HandoffEnvelopeV2.source_runtime_posture]; null for legacy.
  */
 data class HandoffEnvelopeV2ResultPayload(
+    val handoff_id: String,
     val task_id: String,
     val trace_id: String,
     val correlation_id: String,
@@ -1262,4 +1285,15 @@ data class HandoffEnvelopeV2ResultPayload(
     val execution_context: Map<String, String> = emptyMap(),
     val executor_target_type: String? = null,
     val source_runtime_posture: String? = null
-)
+) {
+    companion object {
+        /** Stable status: Android has received and parsed the envelope; execution is starting. */
+        const val STATUS_ACK = "ack"
+
+        /** Stable status: execution completed successfully; [HandoffEnvelopeV2ResultPayload.result_summary] is set. */
+        const val STATUS_RESULT = "result"
+
+        /** Stable status: execution failed (parse error or runtime error); [HandoffEnvelopeV2ResultPayload.error] is set. */
+        const val STATUS_FAILURE = "failure"
+    }
+}

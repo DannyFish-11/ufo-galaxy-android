@@ -1117,10 +1117,11 @@ class GalaxyConnectionService : Service() {
             val traceId = inboundTraceId ?: java.util.UUID.randomUUID().toString()
             sendHandoffEnvelopeV2Result(
                 HandoffEnvelopeV2ResultPayload(
+                    handoff_id = taskId,
                     task_id = taskId,
                     trace_id = traceId,
                     correlation_id = taskId,
-                    status = EdgeExecutor.STATUS_ERROR,
+                    status = HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
                     error = "bad_payload: ${e.message}",
                     consumed_at_ms = consumedAtMs,
                     device_id = localDeviceId,
@@ -1136,10 +1137,13 @@ class GalaxyConnectionService : Service() {
             ?: envelope.trace_id.takeIf { it.isNotBlank() }
             ?: java.util.UUID.randomUUID().toString()
 
+        // Resolve stable handoff identifier; fall back to task_id for legacy senders.
+        val handoffId = envelope.handoff_id?.takeIf { it.isNotBlank() } ?: taskId
+
         Log.i(
             TAG,
             "[PR-H:HANDOFF_V2] envelope parsed task_id=$taskId trace_id=$traceId " +
-                "goal=${envelope.goal.take(60)} exec_mode=${envelope.exec_mode} " +
+                "handoff_id=$handoffId goal=${envelope.goal.take(60)} exec_mode=${envelope.exec_mode} " +
                 "route_mode=${envelope.route_mode} dispatch_plan_id=${envelope.dispatch_plan_id}"
         )
         GalaxyLogger.log(
@@ -1147,6 +1151,7 @@ class GalaxyConnectionService : Service() {
                 "event" to "handoff_envelope_v2_parsed",
                 "task_id" to taskId,
                 "trace_id" to traceId,
+                "handoff_id" to handoffId,
                 "exec_mode" to envelope.exec_mode,
                 "route_mode" to envelope.route_mode,
                 "dispatch_intent" to (envelope.dispatch_intent ?: ""),
@@ -1155,6 +1160,27 @@ class GalaxyConnectionService : Service() {
                 "executor_target_type" to (envelope.executor_target_type ?: ""),
                 "is_resumable" to (envelope.is_resumable?.toString() ?: "")
             )
+        )
+
+        // ── Step 2.5: send immediate ACK ─────────────────────────────────────────
+        sendHandoffEnvelopeV2Result(
+            HandoffEnvelopeV2ResultPayload(
+                handoff_id = handoffId,
+                task_id = taskId,
+                trace_id = traceId,
+                correlation_id = taskId,
+                status = HandoffEnvelopeV2ResultPayload.STATUS_ACK,
+                consumed_at_ms = consumedAtMs,
+                device_id = localDeviceId,
+                route_mode = ROUTE_MODE_CROSS_DEVICE,
+                dispatch_plan_id = envelope.dispatch_plan_id,
+                continuity_token = envelope.continuity_token,
+                dispatch_intent = envelope.dispatch_intent,
+                execution_context = envelope.execution_context,
+                executor_target_type = envelope.executor_target_type,
+                source_runtime_posture = envelope.source_runtime_posture
+            ),
+            traceId
         )
 
         // ── Step 3: pause local loop ──────────────────────────────────────────────
@@ -1220,10 +1246,19 @@ class GalaxyConnectionService : Service() {
 
             sendHandoffEnvelopeV2Result(
                 HandoffEnvelopeV2ResultPayload(
+                    handoff_id = handoffId,
                     task_id = taskId,
                     trace_id = traceId,
                     correlation_id = taskId,
-                    status = goalResult.status,
+                    // Map EdgeExecutor terminal statuses to the stable V2 protocol vocabulary.
+                    // STATUS_SUCCESS ("success") → STATUS_RESULT ("result").
+                    // All other terminal statuses (STATUS_ERROR, STATUS_TIMEOUT, STATUS_CANCELLED)
+                    // map to STATUS_FAILURE ("failure") so V2 sees a single, unambiguous failure
+                    // signal regardless of the on-device error class.
+                    status = if (goalResult.status == EdgeExecutor.STATUS_SUCCESS)
+                        HandoffEnvelopeV2ResultPayload.STATUS_RESULT
+                    else
+                        HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
                     result_summary = goalResult.result
                         ?: "handoff_v2: ${goalResult.status}",
                     error = goalResult.error,
@@ -1257,10 +1292,11 @@ class GalaxyConnectionService : Service() {
             )
             sendHandoffEnvelopeV2Result(
                 HandoffEnvelopeV2ResultPayload(
+                    handoff_id = handoffId,
                     task_id = taskId,
                     trace_id = traceId,
                     correlation_id = taskId,
-                    status = EdgeExecutor.STATUS_ERROR,
+                    status = HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
                     error = "handoff_v2_execution_failed: ${err.message ?: "unknown"}",
                     consumed_at_ms = consumedAtMs,
                     device_id = localDeviceId,
