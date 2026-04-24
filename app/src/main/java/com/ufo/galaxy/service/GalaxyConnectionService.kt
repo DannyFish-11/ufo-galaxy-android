@@ -26,6 +26,7 @@ import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.HybridParticipantCapability
+import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.runtime.toOutboundPayload
 import com.ufo.galaxy.runtime.SourceRuntimePosture
@@ -48,6 +49,7 @@ import com.ufo.galaxy.protocol.PeerAnnouncePayload
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
+import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
@@ -501,6 +503,16 @@ class GalaxyConnectionService : Service() {
             // Re-run all readiness checks after models are loaded so the UI and
             // capability_report reflect the final state (including overlay/accessibility).
             UFOGalaxyApplication.instance.refreshReadiness()
+        }
+
+        // PR-06: Collect RuntimeController.reconciliationSignals and forward each signal
+        // to V2 via the RECONCILIATION_SIGNAL wire uplink.  This coroutine runs for the
+        // lifetime of the service and is cancelled automatically when serviceScope is
+        // cancelled in onDestroy.
+        serviceScope.launch {
+            UFOGalaxyApplication.runtimeController.reconciliationSignals.collect { signal ->
+                sendReconciliationSignal(signal)
+            }
         }
         
         return START_STICKY
@@ -1569,6 +1581,80 @@ class GalaxyConnectionService : Service() {
                     "signal_id" to signal.signalId,
                     "signal_kind" to signal.kind.wireValue,
                     "task_id" to signal.taskId,
+                    "error" to (e.message ?: "unknown")
+                )
+            )
+        }
+    }
+
+    // ── PR-06: Reconciliation signal uplink ───────────────────────────────────
+
+    /**
+     * Transmits a [ReconciliationSignal] as a [MsgType.RECONCILIATION_SIGNAL] AIP v3
+     * uplink message (PR-06).
+     *
+     * Serialises the signal into a [ReconciliationSignalPayload] and sends it via
+     * [webSocketClient].  Called for every signal emitted by
+     * [com.ufo.galaxy.runtime.RuntimeController.reconciliationSignals].
+     *
+     * Send failure **never throws** — any error is caught and logged so the
+     * reconciliation signal stream is never interrupted.
+     *
+     * @param signal The [ReconciliationSignal] to transmit.
+     */
+    private fun sendReconciliationSignal(signal: ReconciliationSignal) {
+        try {
+            val runtimeTruth = signal.runtimeTruth?.toMap()
+            val sessionId = UFOGalaxyApplication.runtimeSessionId
+            val payload = ReconciliationSignalPayload(
+                signal_id = signal.signalId,
+                kind = signal.kind.wireValue,
+                participant_id = signal.participantId,
+                status = signal.status,
+                emitted_at_ms = signal.emittedAtMs,
+                reconciliation_epoch = signal.reconciliationEpoch,
+                device_id = localDeviceId,
+                task_id = signal.taskId,
+                correlation_id = signal.correlationId,
+                session_id = sessionId,
+                payload = signal.payload,
+                runtime_truth = runtimeTruth
+            )
+            val envelope = AipMessage(
+                type = MsgType.RECONCILIATION_SIGNAL,
+                payload = payload,
+                device_id = localDeviceId,
+                correlation_id = signal.taskId,
+                idempotency_key = signal.signalId,
+                runtime_session_id = sessionId
+            )
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            if (sent) {
+                Log.d(TAG, "[RECONCILIATION_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
+            } else {
+                Log.w(
+                    TAG,
+                    "[RECONCILIATION_SIGNAL] send failed signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                )
+                GalaxyLogger.log(
+                    TAG, mapOf(
+                        "event" to "reconciliation_signal_send_failed",
+                        "signal_id" to signal.signalId,
+                        "signal_kind" to signal.kind.wireValue,
+                        "task_id" to (signal.taskId ?: ""),
+                        "participant_id" to signal.participantId,
+                        "is_terminal" to signal.isTerminal
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "[RECONCILIATION_SIGNAL] unexpected error sending signal signal_id=${signal.signalId}: ${e.message}", e)
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "reconciliation_signal_send_error",
+                    "signal_id" to signal.signalId,
+                    "signal_kind" to signal.kind.wireValue,
+                    "task_id" to (signal.taskId ?: ""),
                     "error" to (e.message ?: "unknown")
                 )
             )
