@@ -404,7 +404,7 @@ class Pr4AndroidEvaluatorArtifactEmissionTest {
     }
 
     @Test
-    fun `strategy evaluator with CANONICAL_CONTRACT_STABILITY AT_RISK produces RiskDueToContractInstability`() {
+    fun `strategy evaluator with contract stability AT_RISK produces RiskDueToContractInstability`() {
         DelegatedRuntimeStrategyDimension.entries.forEach {
             strategyEvaluator.markDimensionOnTrack(it)
         }
