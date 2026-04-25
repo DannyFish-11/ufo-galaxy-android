@@ -55,14 +55,22 @@ class OfflineTaskQueue(
     /**
      * A single queued outgoing message.
      *
-     * @param type      The AIP message type string (e.g. "task_result").
-     * @param json      The fully-serialised JSON payload ready to transmit.
-     * @param queuedAt  Epoch-millis timestamp used for stale-message eviction on load.
+     * @param type       The AIP message type string (e.g. "task_result").
+     * @param json       The fully-serialised JSON payload ready to transmit.
+     * @param queuedAt   Epoch-millis timestamp used for stale-message eviction on load.
+     * @param sessionTag Optional session/authority tag identifying the durable session that
+     *                   was active when this message was enqueued.  When non-null, the tag
+     *                   is compared against the current active session during drain to detect
+     *                   stale authority.  Messages tagged with a session that has since
+     *                   changed are discarded by [discardForDifferentSession] before flush.
+     *                   Null for messages enqueued without session tracking (pre-PR-66
+     *                   callers), which are always forwarded regardless of current session.
      */
     data class QueuedMessage(
         val type: String,
         val json: String,
-        val queuedAt: Long = System.currentTimeMillis()
+        val queuedAt: Long = System.currentTimeMillis(),
+        val sessionTag: String? = null
     )
 
     private val queue = ArrayDeque<QueuedMessage>()
@@ -87,8 +95,16 @@ class OfflineTaskQueue(
      *
      * If the queue is already at [maxQueueSize], the oldest entry is dropped
      * and a WARN is emitted before the new message is appended.
+     *
+     * @param type       The AIP message type string (e.g. "task_result").
+     * @param json       The fully-serialised JSON payload.
+     * @param sessionTag Optional durable-session identity tag for authority bounding.
+     *                   Pass the current [DurableSessionContinuityRecord.durableSessionId]
+     *                   (or equivalent) so that [discardForDifferentSession] can purge this
+     *                   message if the session has changed before the queue is drained.
+     *                   Omit (default `null`) if the caller does not need session tracking.
      */
-    fun enqueue(type: String, json: String) {
+    fun enqueue(type: String, json: String, sessionTag: String? = null) {
         val newSize = synchronized(lock) {
             if (queue.size >= maxQueueSize) {
                 val dropped = queue.poll()
@@ -98,7 +114,7 @@ class OfflineTaskQueue(
                         "type=${dropped?.type} queuedAt=${dropped?.queuedAt}"
                 )
             }
-            queue.add(QueuedMessage(type, json))
+            queue.add(QueuedMessage(type, json, sessionTag = sessionTag))
             Log.d(TAG, "[WS:OfflineQueue] Enqueued type=$type queue_size=${queue.size}")
             saveToPrefsLocked()
             queue.size
@@ -128,6 +144,58 @@ class OfflineTaskQueue(
             saveToPrefsLocked()
         }
         _sizeFlow.value = 0
+    }
+
+    /**
+     * Removes all queued messages whose [QueuedMessage.sessionTag] is non-null and does
+     * not equal [currentTag].
+     *
+     * This method is the Android-side authority-bounding gate for offline queue drain.
+     * Call it immediately before [drainAll] on reconnect to ensure that messages enqueued
+     * under an earlier durable session are not sent after the authority window has changed:
+     *
+     * ```kotlin
+     * // On reconnect — purge stale-session messages before drain:
+     * val discarded = offlineQueue.discardForDifferentSession(currentDurableSessionId)
+     * if (discarded > 0) {
+     *     Log.i(TAG, "Discarded $discarded offline message(s) from prior session era")
+     * }
+     * val pending = offlineQueue.drainAll()
+     * pending.forEach { ws.sendJson(it.json) }
+     * ```
+     *
+     * Messages with a **null** [QueuedMessage.sessionTag] are left unchanged — they were
+     * enqueued without session tracking (pre-PR-66 callers or callers that do not need
+     * session-scoped authority bounding) and are always forwarded.
+     *
+     * @param currentTag  The active durable session identity tag.  Messages tagged with a
+     *                    **different** non-null value are discarded.
+     * @return            The number of messages removed.
+     */
+    fun discardForDifferentSession(currentTag: String): Int {
+        val result = synchronized(lock) {
+            val before = queue.size
+            val iter = queue.iterator()
+            while (iter.hasNext()) {
+                val msg = iter.next()
+                if (msg.sessionTag != null && msg.sessionTag != currentTag) {
+                    iter.remove()
+                }
+            }
+            val discarded = before - queue.size
+            val newSize = queue.size
+            if (discarded > 0) {
+                saveToPrefsLocked()
+                Log.i(
+                    TAG,
+                    "[WS:OfflineQueue] Discarded $discarded stale-session message(s) " +
+                        "(currentTag=$currentTag)"
+                )
+            }
+            Pair(discarded, newSize)
+        }
+        _sizeFlow.value = result.second
+        return result.first
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────
