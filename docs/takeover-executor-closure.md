@@ -58,7 +58,7 @@ All continuity / recovery fields from `TakeoverRequestEnvelope` propagate into
 | `checkpoint` | `checkpoint` | Progress checkpoint |
 | `continuation_token` | `continuationToken` | Durable continuity anchor |
 | `handoff_reason` | `handoffReason` | Interruption/handoff reason |
-| `source_runtime_posture` | `resolvedPosture` (normalised) | V2 posture for correlation |
+| `source_runtime_posture` | `resolvedPosture` (normalized) | V2 posture for correlation |
 
 **Tested in:** `TakeoverExecutorClosureTest` (context inheritance section)
 
