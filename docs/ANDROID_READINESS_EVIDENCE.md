@@ -3,8 +3,10 @@
 **PR-6Android / PR-67** — Make Android readiness evidence reviewable and release-gate
 friendly.
 
-**PR-7Android / PR-68** — Reopen Android PR-7: Align Android readiness evidence with
-canonical distributed release-gate skeleton.
+**PR-7Android / PR-68** — Fresh replacement for the previous Android PR-7 effort:
+Align Android readiness evidence with the canonical distributed release-gate skeleton.
+This PR supersedes any prior Android PR-7 attempt and is the canonical reviewable PR
+for this alignment work.
 
 This document is the Android-side readiness evidence guide for reviewers, release gates,
 and governance PRs that need to assess whether Android is a trustworthy participant in a

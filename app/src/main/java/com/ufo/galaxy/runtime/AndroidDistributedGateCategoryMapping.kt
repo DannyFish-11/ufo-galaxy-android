@@ -1,7 +1,7 @@
 package com.ufo.galaxy.runtime
 
 /**
- * PR-7Android (Android) — Android-side alignment layer mapping readiness evidence
+ * PR-7Android / PR-68 — Android-side alignment layer mapping readiness evidence
  * dimensions to the V2 canonical distributed release-gate skeleton.
  *
  * [AndroidDistributedGateCategoryMapping] is the companion alignment object that makes
