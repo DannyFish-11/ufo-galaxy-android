@@ -32,7 +32,7 @@ import java.util.UUID
  *  - takeover_id / task_id / trace_id are echoed from the request.
  *  - accepted=false carries the rejection reason.
  *  - source_runtime_posture is echoed from the request for correlation.
- *  - accepted=true path (future PR-5) is structurally valid.
+ *  - accepted=true path (PR-5) is structurally valid.
  *
  * ### TakeoverHandlingResult
  *  - Accepted result carries the correct fields.
@@ -217,10 +217,13 @@ class HandoffTakeoverCanonicalPathTest {
             task_id = "t-11",
             trace_id = "tr-11",
             accepted = false,
-            rejection_reason = "takeover_executor_not_implemented"
+            rejection_reason = TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_CROSS_DEVICE_DISABLED.reason
         )
         assertFalse("accepted must be false for rejection", response.accepted)
-        assertEquals("takeover_executor_not_implemented", response.rejection_reason)
+        assertEquals(
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_CROSS_DEVICE_DISABLED.reason,
+            response.rejection_reason
+        )
     }
 
     @Test
@@ -286,10 +289,10 @@ class HandoffTakeoverCanonicalPathTest {
             taskId = "t-21",
             traceId = "tr-21",
             accepted = false,
-            reason = "takeover_executor_not_implemented"
+            reason = DelegatedRuntimeReceiver.RejectionOutcome.NO_ATTACHED_SESSION.reason
         )
         assertFalse(result.accepted)
-        assertEquals("takeover_executor_not_implemented", result.reason)
+        assertEquals(DelegatedRuntimeReceiver.RejectionOutcome.NO_ATTACHED_SESSION.reason, result.reason)
     }
 
     // ── MsgType canonical takeover types ──────────────────────────────────────

@@ -128,7 +128,7 @@ The following items are confirmed **not covered** by this PR and require follow-
 |-----|----------|-------|
 | Dimension-state population from real runtime events | 🔴 High | Owners (`AndroidRecoveryParticipationOwner`, `AndroidLocalTruthOwnershipCoordinator`, etc.) must call `markDimensionReady` / `markDimensionGap` on the evaluator. Without this, the readiness report is always UNKNOWN at service start. |
 | Follow-up readiness reports after dimension-state changes | 🔴 High | Reactive hook needed so V2 receives an updated readiness artifact whenever dimension state changes during the session. |
-| Takeover executor full implementation (TakeoverEligibilityAssessor → full takeover flow) | 🔴 High | `AipModels.kt` comment still notes full takeover executor deferred. The delegated execution loop is proven but the full takeover path is not. |
+| Takeover executor full implementation (TakeoverEligibilityAssessor → full takeover flow) | ✅ Closed | Full takeover executor implemented and validated. `AipModels.kt` status updated to canonical. `TakeoverExecutorClosureTest` proves acceptance/rejection/execution/signal/replay path. See `docs/takeover-executor-closure.md`. |
 | Integration test: `GalaxyConnectionService` HANDOFF_ENVELOPE_V2 → HANDOFF_ENVELOPE_V2_RESULT | 🟠 Medium | Needs Robolectric or instrumented test to drive the real service with a fake WebSocket. |
 | Integration test: `RuntimeController.reconciliationSignals` → wire send | 🟠 Medium | Same Robolectric constraint. The coroutine collector is wired but not proven by a service-level test. |
 | Legacy path default-off | 🟠 Medium | Compat gate / legacy path kill switch not yet default-off. `GalaxyConnectionService` still serves legacy routing. |

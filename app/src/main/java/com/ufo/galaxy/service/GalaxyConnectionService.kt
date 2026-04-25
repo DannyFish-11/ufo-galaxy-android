@@ -2076,15 +2076,24 @@ class GalaxyConnectionService : Service() {
      * Handles an inbound [MsgType.TAKEOVER_REQUEST] message via the canonical path.
      *
      * Parses the raw JSON into a [TakeoverRequestEnvelope], evaluates device eligibility
-     * via [TakeoverEligibilityAssessor], logs structured metadata (including posture for
-     * correlation), and sends a [TakeoverResponseEnvelope] back to the gateway.
+     * via [TakeoverEligibilityAssessor], gates receipt on an active [AttachedRuntimeSession]
+     * via [DelegatedRuntimeReceiver], and either rejects with a structured reason or
+     * sends an acceptance [TakeoverResponseEnvelope] and dispatches to [DelegatedTakeoverExecutor].
      *
      * ## Decision flow
      * 1. Parse the inbound JSON into a [TakeoverRequestEnvelope].
-     * 2. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
-     * 3. If **not eligible**: send rejection with the assessor's structured reason and return.
-     * 4. If **eligible** but full takeover executor is deferred: send rejection with
-     *    `"takeover_executor_not_implemented"` (PR-5 TODO) and return.
+     * 2. Validate the handoff contract via [HandoffContractValidator]; reject on invalid.
+     * 3. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
+     * 4. If **not eligible**: send rejection with the assessor's structured reason and return.
+     * 5. Gate delegated receipt on an active [AttachedRuntimeSession] via
+     *    [DelegatedRuntimeReceiver.receive]; reject with session-rejection reason if no
+     *    session is attached.
+     * 6. If **eligible and session present**: send acceptance [TakeoverResponseEnvelope]
+     *    (including [RuntimeHostDescriptor.hostId] and [FormationRole.wireValue]),
+     *    then dispatch [DelegatedTakeoverExecutor.execute] asynchronously.
+     *    The executor drives the full lifecycle: PENDING → ACTIVATING → ACTIVE →
+     *    COMPLETED/FAILED, emitting ACK/PROGRESS/RESULT signals via [delegatedSignalSink],
+     *    and sends a [MsgType.GOAL_RESULT] or [sendGoalError] uplink on completion.
      *
      * ## Concurrent-takeover protection
      * [activeTakeoverId] is set to the incoming `takeover_id` while the request is being
