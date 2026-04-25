@@ -120,14 +120,124 @@ right signals from the real runtime paths, not only from standalone model code.
 
 ---
 
+### Chain 5 — Governance Evaluator Artifact Visibility toward V2 (PR-4 Android)
+
+**Emission semantics**: **Canonical participant evidence** — V2 post-graduation governance /
+enforcement paths must treat this artifact as the authoritative Android-side compliance signal.
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| `MsgType.DEVICE_GOVERNANCE_REPORT` wire value is `"device_governance_report"` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `DeviceGovernanceReportPayload` serialises with `artifact_tag`, `snapshot_id`, `device_id`, `dimension_states` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `DelegatedRuntimePostGraduationGovernanceEvaluator.buildSnapshot()` returns non-blank `snapshotId` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| All-UNKNOWN evaluator produces `device_governance_unknown_due_to_missing_signal` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| All-COMPLIANT evaluator produces `device_governance_compliant` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| REGRESSION snapshot produces a violation artifact tag | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| AipMessage envelope with `DEVICE_GOVERNANCE_REPORT` type round-trips through Gson | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `GalaxyConnectionService` instantiates `DelegatedRuntimePostGraduationGovernanceEvaluator` | ✅ Wired | `GalaxyConnectionService.kt` `delegatedRuntimeGovernanceEvaluator` field |
+| `GalaxyConnectionService.sendDeviceGovernanceReport()` builds snapshot and sends uplink | ✅ Wired | `GalaxyConnectionService.kt` `sendDeviceGovernanceReport()` method |
+| Initial governance report emitted after service start | ✅ Wired | `GalaxyConnectionService.onStartCommand` launch block |
+| `EvaluatorArtifactEmissionSemantics.REGISTRY` classifies `DEVICE_GOVERNANCE_REPORT` as `CANONICAL_PARTICIPANT_EVIDENCE` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| Governance dimension-state population from real post-graduation lifecycle callbacks | 🔲 Deferred | Follow-up PR should connect observation signals from `AndroidLocalTruthOwnershipCoordinator`, `AndroidFlowAwareResultConvergenceParticipant`, etc. |
+| Follow-up governance reports after dimension-state changes | 🔲 Deferred | Reactive dimension-change hook in evaluator / owners needed |
+
+**Emission path**: `GalaxyConnectionService.onStartCommand` →
+`sendDeviceGovernanceReport()` →
+`DelegatedRuntimePostGraduationGovernanceEvaluator.buildSnapshot()` →
+`DeviceGovernanceReportPayload` →
+`AipMessage(DEVICE_GOVERNANCE_REPORT, ...)` →
+`GalaxyWebSocketClient.sendJson()`.
+
+---
+
+### Chain 6 — Acceptance Evaluator Artifact Visibility toward V2 (PR-4 Android)
+
+**Emission semantics**: **Canonical participant evidence** — V2 graduation gate paths must
+treat this artifact as the authoritative Android-side acceptance verdict.
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| `MsgType.DEVICE_ACCEPTANCE_REPORT` wire value is `"device_acceptance_report"` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `DeviceAcceptanceReportPayload` serialises with `artifact_tag`, `snapshot_id`, `device_id`, `dimension_states` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `DelegatedRuntimeAcceptanceEvaluator.buildSnapshot()` returns non-blank `snapshotId` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| All-UNKNOWN evaluator produces `device_acceptance_unknown_due_to_incomplete_signal` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| All-EVIDENCED evaluator produces `device_accepted_for_graduation` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| GAP snapshot produces a rejected artifact tag | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| AipMessage envelope with `DEVICE_ACCEPTANCE_REPORT` type round-trips through Gson | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `GalaxyConnectionService` instantiates `DelegatedRuntimeAcceptanceEvaluator` | ✅ Wired | `GalaxyConnectionService.kt` `delegatedRuntimeAcceptanceEvaluator` field |
+| `GalaxyConnectionService.sendDeviceAcceptanceReport()` builds snapshot and sends uplink | ✅ Wired | `GalaxyConnectionService.kt` `sendDeviceAcceptanceReport()` method |
+| Initial acceptance report emitted after service start | ✅ Wired | `GalaxyConnectionService.onStartCommand` launch block |
+| `EvaluatorArtifactEmissionSemantics.REGISTRY` classifies `DEVICE_ACCEPTANCE_REPORT` as `CANONICAL_PARTICIPANT_EVIDENCE` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| Evidence dimension population from readiness prerequisite wiring and per-dimension callbacks | 🔲 Deferred | Follow-up PR should wire evidence evidence signals from `DelegatedRuntimeReadinessEvaluator`, truth/result/event/compat/continuity owners |
+| Follow-up acceptance reports after dimension-state changes | 🔲 Deferred | Reactive evidence-change hook needed |
+
+**Emission path**: `GalaxyConnectionService.onStartCommand` →
+`sendDeviceAcceptanceReport()` →
+`DelegatedRuntimeAcceptanceEvaluator.buildSnapshot()` →
+`DeviceAcceptanceReportPayload` →
+`AipMessage(DEVICE_ACCEPTANCE_REPORT, ...)` →
+`GalaxyWebSocketClient.sendJson()`.
+
+---
+
+### Chain 7 — Strategy Evaluator Artifact Visibility toward V2 (PR-4 Android)
+
+**Emission semantics**: **Advisory / observation-only** — V2 retains full authority over
+program strategy and evolution control decisions.  V2 should treat this artifact as
+informational input and must not gate on it without an explicit policy decision.
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| `MsgType.DEVICE_STRATEGY_REPORT` wire value is `"device_strategy_report"` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `DeviceStrategyReportPayload` serialises with `artifact_tag`, `snapshot_id`, `device_id`, `dimension_states` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `DelegatedRuntimeStrategyEvaluator.buildSnapshot()` returns non-blank `snapshotId` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| All-UNKNOWN evaluator produces `device_strategy_unknown_due_to_missing_program_signal` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| All-ON_TRACK evaluator produces `device_strategy_on_track` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| AT_RISK snapshot produces a risk artifact tag | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| AipMessage envelope with `DEVICE_STRATEGY_REPORT` type round-trips through Gson | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| `GalaxyConnectionService` instantiates `DelegatedRuntimeStrategyEvaluator` | ✅ Wired | `GalaxyConnectionService.kt` `delegatedRuntimeStrategyEvaluator` field |
+| `GalaxyConnectionService.sendDeviceStrategyReport()` builds snapshot and sends uplink | ✅ Wired | `GalaxyConnectionService.kt` `sendDeviceStrategyReport()` method |
+| Initial strategy report emitted after service start | ✅ Wired | `GalaxyConnectionService.onStartCommand` launch block |
+| `EvaluatorArtifactEmissionSemantics.REGISTRY` classifies `DEVICE_STRATEGY_REPORT` as `ADVISORY_OBSERVATION_ONLY` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
+| Strategy dimension population from real program-level signals | 🔲 Deferred | Current emission always carries all-UNKNOWN posture (advisory — no strategy risk detected). Real program signal population deferred to a follow-up PR. |
+| Follow-up strategy reports after dimension-state changes | 🔲 Deferred | Reactive posture-change hook needed |
+
+**Emission path**: `GalaxyConnectionService.onStartCommand` →
+`sendDeviceStrategyReport()` →
+`DelegatedRuntimeStrategyEvaluator.buildSnapshot()` →
+`DeviceStrategyReportPayload` →
+`AipMessage(DEVICE_STRATEGY_REPORT, ...)` →
+`GalaxyWebSocketClient.sendJson()`.
+
+---
+
+## PR-4 Android Evaluator Artifact Semantic Classification
+
+This table provides the canonical V2-side classification reference for all Android evaluator
+artifacts established by Android PR-4. See `EvaluatorArtifactEmissionSemantics.kt` for the
+machine-readable source of truth.
+
+| Wire type | Evaluator | Emission class | V2 action |
+|-----------|-----------|---------------|-----------|
+| `device_readiness_report` | `DelegatedRuntimeReadinessEvaluator` | **Canonical participant evidence** | V2 readiness gate may proceed only if all dimensions are READY |
+| `device_governance_report` | `DelegatedRuntimePostGraduationGovernanceEvaluator` | **Canonical participant evidence** | V2 must escalate / block on REGRESSION artifacts |
+| `device_acceptance_report` | `DelegatedRuntimeAcceptanceEvaluator` | **Canonical participant evidence** | V2 graduation gate proceeds only on `device_accepted_for_graduation` |
+| `device_strategy_report` | `DelegatedRuntimeStrategyEvaluator` | **Advisory / observation-only** | V2 retains strategy authority; risk signals inform, not gate |
+| `reconciliation_signal` | `RuntimeController` (SharedFlow) | **Canonical participant evidence** | V2 must update participant truth per signal kind |
+
+---
+
 ## Open Gaps for Later PRs
 
 The following items are confirmed **not covered** by this PR and require follow-up:
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Dimension-state population from real runtime events | 🔴 High | Owners (`AndroidRecoveryParticipationOwner`, `AndroidLocalTruthOwnershipCoordinator`, etc.) must call `markDimensionReady` / `markDimensionGap` on the evaluator. Without this, the readiness report is always UNKNOWN at service start. |
-| Follow-up readiness reports after dimension-state changes | 🔴 High | Reactive hook needed so V2 receives an updated readiness artifact whenever dimension state changes during the session. |
+| Dimension-state population from real runtime events (readiness) | 🔴 High | Owners (`AndroidRecoveryParticipationOwner`, `AndroidLocalTruthOwnershipCoordinator`, etc.) must call `markDimensionReady` / `markDimensionGap` on the readiness evaluator. Without this, the readiness report is always UNKNOWN at service start. |
+| Follow-up readiness/governance/acceptance/strategy reports after dimension-state changes | 🔴 High | Reactive hook needed so V2 receives an updated artifact whenever dimension state changes during the session. |
+| Governance dimension-state population from real post-graduation lifecycle callbacks | 🔴 High | Follow-up PR should connect observation signals from `AndroidLocalTruthOwnershipCoordinator`, `AndroidFlowAwareResultConvergenceParticipant`, and other owners into `DelegatedRuntimePostGraduationGovernanceEvaluator`. |
+| Acceptance dimension-state population from real evidence chain | 🔴 High | Follow-up PR should wire evidence signals from readiness-prerequisite, truth/result/event/compat/continuity owners into `DelegatedRuntimeAcceptanceEvaluator`. |
+| Strategy dimension-state population from real program-level signals | 🟠 Medium | Current emission always carries all-UNKNOWN (advisory — no risk detected). Real program signals are advisory only; deferred to later PR. |
 | Takeover executor full implementation (TakeoverEligibilityAssessor → full takeover flow) | 🔴 High | `AipModels.kt` comment still notes full takeover executor deferred. The delegated execution loop is proven but the full takeover path is not. |
 | Integration test: `GalaxyConnectionService` HANDOFF_ENVELOPE_V2 → HANDOFF_ENVELOPE_V2_RESULT | 🟠 Medium | Needs Robolectric or instrumented test to drive the real service with a fake WebSocket. |
 | Integration test: `RuntimeController.reconciliationSignals` → wire send | 🟠 Medium | Same Robolectric constraint. The coroutine collector is wired but not proven by a service-level test. |
@@ -144,8 +254,11 @@ The following items are confirmed **not covered** by this PR and require follow-
 | HandoffEnvelopeV2 round-trip | ✅ | ✅ | ✅ | ✅ | 🔲 |
 | Delegated execution signal loop | ✅ | ✅ | ✅ | ✅ | 🔲 |
 | Device readiness artifact → V2 | ✅ | ✅ | ✅ | ✅ | 🔲 |
+| Device governance artifact → V2 | ✅ | ✅ | ✅ | ✅ | 🔲 |
+| Device acceptance artifact → V2 | ✅ | ✅ | ✅ | ✅ | 🔲 |
+| Device strategy artifact → V2 | ✅ | ✅ | ✅ | ✅ | 🔲 |
 
-All four chains are model-complete, transport-capable, and proven by pure-JVM tests.
+All seven chains are model-complete, transport-capable, and proven by pure-JVM tests.
 Integration tests remain open (see gaps above).
 
 ---
