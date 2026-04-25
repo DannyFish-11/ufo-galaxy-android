@@ -3,6 +3,10 @@
 **PR-6Android / PR-67** — Make Android readiness evidence reviewable and release-gate
 friendly.
 
+> **PR-7Android (reopened)** — See [`ANDROID_DISTRIBUTED_GATE_MAPPING.md`](ANDROID_DISTRIBUTED_GATE_MAPPING.md)
+> for the companion gate-alignment layer that maps every evidence entry in this document
+> to the V2 canonical distributed gate skeleton (V2 PR-7).
+
 This document is the Android-side readiness evidence guide for reviewers, release gates,
 and governance PRs that need to assess whether Android is a trustworthy participant in a
 V2 canonical release.
@@ -258,3 +262,21 @@ The accompanying test suite is
 [`Pr67AndroidReadinessEvidenceSurfaceTest.kt`](../app/src/test/java/com/ufo/galaxy/runtime/Pr67AndroidReadinessEvidenceSurfaceTest.kt).
 
 All acceptance criteria from this PR (AC1–AC5) are validated by that test suite.
+
+---
+
+## Distributed Gate Mapping (PR-7Android)
+
+**PR-7Android (reopened)** adds an explicit gate-alignment layer on top of this evidence
+surface.  See [`ANDROID_DISTRIBUTED_GATE_MAPPING.md`](ANDROID_DISTRIBUTED_GATE_MAPPING.md)
+for a mapping that shows:
+
+- How each evidence entry maps to one of the six V2 canonical distributed gate dimensions.
+- Which evidence is **STRONG_PARTICIPANT_RUNTIME** vs **ADVISORY_OBSERVATION** vs
+  **DEPRECATED_COMPAT** vs **INTENTIONALLY_LOCAL** in gate-consumption terms.
+- How later release-policy or CI work can query the mapping by gate dimension.
+
+The machine-readable mapping is
+[`AndroidDistributedGateMapping.kt`](../app/src/main/java/com/ufo/galaxy/runtime/AndroidDistributedGateMapping.kt),
+validated by
+[`Pr7bAndroidDistributedGateMappingTest.kt`](../app/src/test/java/com/ufo/galaxy/runtime/Pr7bAndroidDistributedGateMappingTest.kt).
