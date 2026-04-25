@@ -25,6 +25,8 @@ import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
+import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
+import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessSnapshot
 import com.ufo.galaxy.runtime.HybridParticipantCapability
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
@@ -50,6 +52,7 @@ import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
@@ -169,6 +172,20 @@ class GalaxyConnectionService : Service() {
      */
     private val delegatedRuntimeReceiver = DelegatedRuntimeReceiver()
     private val handoffContractValidator = HandoffContractValidator()
+
+    /**
+     * Evaluator for Android delegated-runtime readiness (Android-side signal closure).
+     *
+     * Holds per-dimension gate state and produces [com.ufo.galaxy.runtime.DeviceReadinessArtifact]
+     * / [com.ufo.galaxy.runtime.DelegatedRuntimeReadinessSnapshot] outputs that are forwarded to
+     * V2 via [sendDeviceReadinessReport].
+     *
+     * Dimension states are populated during runtime lifecycle events:
+     *  - Service start / capability_report handshake — an initial report is emitted so V2 has
+     *    a baseline Android-side readiness signal immediately on connection.
+     *  - Any subsequent dimension change may trigger a follow-up report as needed.
+     */
+    private val delegatedRuntimeReadinessEvaluator = DelegatedRuntimeReadinessEvaluator()
 
     /**
      * Signal sink for delegated-execution lifecycle events (PR-12 / PR-16).
@@ -513,6 +530,16 @@ class GalaxyConnectionService : Service() {
             UFOGalaxyApplication.runtimeController.reconciliationSignals.collect { signal ->
                 sendReconciliationSignal(signal)
             }
+        }
+
+        // Android-side signal closure: emit the initial device readiness report so V2
+        // readiness-gate and governance paths have a baseline Android-side artifact
+        // immediately after service start.  All dimensions start as UNKNOWN at this point,
+        // which is itself a valid structured signal — V2 can distinguish "not yet reported"
+        // from "reported with a gap".  Follow-up reports are emitted whenever dimension
+        // states change.
+        serviceScope.launch {
+            sendDeviceReadinessReport()
         }
         
         return START_STICKY
@@ -1661,8 +1688,92 @@ class GalaxyConnectionService : Service() {
         }
     }
 
+    // ── Android-side signal closure: device readiness report uplink ───────────
+
     /**
-     * Sends a [HybridDegradePayload] in response to a [MsgType.HYBRID_EXECUTE] message.
+     * Builds a [DeviceReadinessReportPayload] from the current
+     * [delegatedRuntimeReadinessEvaluator] state and transmits it as a
+     * [MsgType.DEVICE_READINESS_REPORT] AIP v3 uplink message.
+     *
+     * Called during service start so V2 readiness-gate and governance paths have a
+     * baseline Android-side readiness artifact available immediately on connection.
+     * At this stage all dimensions are typically UNKNOWN, which is itself a valid
+     * structured signal — V2 can distinguish "not yet reported" from "reported with a
+     * gap".  Follow-up reports are emitted whenever dimension states change.
+     * Send failure never throws — any error is caught and logged.
+     */
+    private fun sendDeviceReadinessReport() {
+        try {
+            // Guard: skip if device ID is not yet available to avoid sending malformed reports.
+            val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: run {
+                Log.w(TAG, "[DEVICE_READINESS_REPORT] skipped — localDeviceId is blank")
+                return
+            }
+            val snapshot = delegatedRuntimeReadinessEvaluator.buildSnapshot(deviceId = deviceId)
+            val artifact = snapshot.artifact
+
+            val dimensionStates: Map<String, String> = snapshot.dimensionStates.entries
+                .associate { (dim, state) -> dim.wireValue to state.status.wireValue }
+
+            val missingDimensions: List<String> =
+                snapshot.dimensionStates.entries
+                    .filter { (_, state) ->
+                        state.status == DelegatedRuntimeReadinessSnapshot.DimensionStatus.UNKNOWN
+                    }
+                    .map { (dim, _) -> dim.wireValue }
+
+            val firstGapReason: String? =
+                snapshot.dimensionStates.values
+                    .firstOrNull { it.status == DelegatedRuntimeReadinessSnapshot.DimensionStatus.GAP }
+                    ?.gapReason
+
+            val payload = DeviceReadinessReportPayload(
+                artifact_tag = artifact.semanticTag,
+                snapshot_id = snapshot.snapshotId,
+                device_id = deviceId,
+                session_id = UFOGalaxyApplication.runtimeSessionId,
+                reported_at_ms = snapshot.reportedAtMs,
+                dimension_states = dimensionStates,
+                first_gap_reason = firstGapReason,
+                missing_dimensions = missingDimensions
+            )
+
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_READINESS_REPORT,
+                payload = payload,
+                device_id = deviceId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_READINESS_REPORT)
+            )
+
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            Log.i(
+                TAG,
+                "[DEVICE_READINESS_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
+                    "artifact=${artifact.semanticTag} sent=$sent"
+            )
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "device_readiness_report_emitted",
+                    "snapshot_id" to snapshot.snapshotId,
+                    "artifact_tag" to artifact.semanticTag,
+                    "missing_dimension_count" to missingDimensions.size,
+                    "gap_reason" to (firstGapReason ?: ""),
+                    "sent" to sent
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_READINESS_REPORT] unexpected error: ${e.message}", e)
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "device_readiness_report_error",
+                    "error" to (e.message ?: "unknown")
+                )
+            )
+        }
+    }
+
+    /**
      *
      * Called because [HybridParticipantCapability.HYBRID_EXECUTE_FULL] is currently
      * [HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED] — this is an

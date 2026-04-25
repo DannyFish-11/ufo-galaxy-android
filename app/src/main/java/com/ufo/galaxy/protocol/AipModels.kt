@@ -168,7 +168,22 @@ enum class MsgType(val value: String) {
      *  events from [com.ufo.galaxy.runtime.RuntimeController.reconciliationSignals].
      *  Payload model: [ReconciliationSignalPayload].
      *  @status pr-06 — payload defined; send path present via GalaxyConnectionService. */
-    RECONCILIATION_SIGNAL("reconciliation_signal");
+    RECONCILIATION_SIGNAL("reconciliation_signal"),
+
+    // ── Android-side signal closure: readiness artifact uplink ───────────────────────────────
+    // Uplink message that carries the structured [com.ufo.galaxy.runtime.DeviceReadinessArtifact]
+    // and per-dimension [com.ufo.galaxy.runtime.DelegatedRuntimeReadinessSnapshot] produced by
+    // [com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator].
+    // Enables V2 readiness-gate and governance paths to absorb Android-side readiness conclusions
+    // without polling, closing the evaluator → V2 visibility gap.
+
+    /** Uplink: Android reports its delegated-runtime readiness artifact and per-dimension
+     *  snapshot to V2.  Emitted after capability_report is sent and after each relevant
+     *  dimension-state change so V2 release-gate and governance paths have a reliable
+     *  Android-side readiness signal.
+     *  Payload model: [DeviceReadinessReportPayload].
+     *  @status android-closure — payload defined; send path present via GalaxyConnectionService. */
+    DEVICE_READINESS_REPORT("device_readiness_report");
 
     companion object {
         /**
@@ -1359,3 +1374,54 @@ data class HandoffEnvelopeV2ResultPayload(
         const val STATUS_FAILURE = "failure"
     }
 }
+
+// ── Android-side signal closure: device readiness report uplink ──────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.DEVICE_READINESS_REPORT].
+ *
+ * Carries the structured readiness artifact and per-dimension snapshot produced by
+ * [com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator] toward V2 release-gate and
+ * governance consumption paths.
+ *
+ * Emitted by Android after the capability_report handshake completes and after any
+ * relevant dimension-state change, so V2 always has a current Android-side readiness
+ * conclusion available without needing to poll.
+ *
+ * ## Artifact vocabulary
+ *
+ * The [artifact_tag] field uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator]:
+ *
+ * | [artifact_tag]                                        | Meaning                                                |
+ * |-------------------------------------------------------|--------------------------------------------------------|
+ * | `"device_ready_for_release"`                          | All five dimensions are READY; V2 gate may proceed.    |
+ * | `"device_not_ready_due_to_truth_gap"`                 | Truth / continuity dimension has an unresolved gap.    |
+ * | `"device_not_ready_due_to_result_gap"`                | Result-convergence dimension has an unresolved gap.    |
+ * | `"device_not_ready_due_to_execution_event_gap"`       | Canonical-execution-event dimension has a gap.         |
+ * | `"device_not_ready_due_to_compat_gap"`                | Compat / legacy-blocking dimension has a gap.          |
+ * | `"device_readiness_unknown_due_to_missing_signal"`    | One or more dimensions have no signal yet.             |
+ *
+ * @param artifact_tag        Stable wire-tag of the [com.ufo.galaxy.runtime.DeviceReadinessArtifact].
+ * @param snapshot_id         UUID of this readiness snapshot; stable across retransmissions.
+ * @param device_id           Device identifier.
+ * @param session_id          Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms      Wall-clock epoch-ms timestamp of artifact production.
+ * @param dimension_states    Per-dimension status map: dimension wire-name → status string
+ *                            (`"READY"`, `"GAP"`, or `"UNKNOWN"`).
+ * @param first_gap_reason    Human-readable explanation of the first gap found; null when
+ *                            artifact is [artifact_tag] `device_ready_for_release` or
+ *                            `device_readiness_unknown_due_to_missing_signal`.
+ * @param missing_dimensions  Dimension wire-names that have no signal yet; empty when all
+ *                            dimensions have been reported.
+ */
+data class DeviceReadinessReportPayload(
+    val artifact_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val first_gap_reason: String? = null,
+    val missing_dimensions: List<String> = emptyList()
+)
