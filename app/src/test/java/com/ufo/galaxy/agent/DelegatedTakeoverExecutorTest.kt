@@ -6,6 +6,8 @@ import com.ufo.galaxy.runtime.DelegatedActivationRecord
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.SourceRuntimePosture
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -69,6 +71,31 @@ import org.junit.Test
  *  - All signals carry the same traceId.
  *  - All signals carry the same attachedSessionId.
  *  - All signals carry the same handoffContractVersion.
+ *
+ * ### Timeout path (TimeoutCancellationException)
+ *  - Three signals emitted on timeout (ACK + PROGRESS + RESULT).
+ *  - RESULT signal on timeout carries ResultKind.TIMEOUT.
+ *  - Outcome is ExecutionOutcome.Failed on timeout.
+ *  - Final tracker is FAILED on timeout.
+ *  - Error message defaults to "execution_timeout" when exception message is null.
+ *
+ * ### Cancellation path (CancellationException non-timeout)
+ *  - Three signals emitted on cancellation (ACK + PROGRESS + RESULT).
+ *  - RESULT signal on cancellation carries ResultKind.CANCELLED.
+ *  - Outcome is ExecutionOutcome.Failed on cancellation.
+ *  - Final tracker is FAILED on cancellation.
+ *  - Error message defaults to "execution_cancelled" when exception message is null.
+ *
+ * ### EmittedSignalLedger — content after execution (PR-18)
+ *  - Ledger lastAck is non-null after successful execution.
+ *  - Ledger lastProgress is non-null after successful execution.
+ *  - Ledger lastResult is non-null after successful execution.
+ *  - Ledger lastResult.resultKind is COMPLETED after successful execution.
+ *  - Ledger lastResult.resultKind is FAILED after pipeline exception.
+ *  - Ledger lastResult.resultKind is TIMEOUT after TimeoutCancellationException.
+ *  - Ledger lastResult.resultKind is CANCELLED after CancellationException.
+ *  - Ledger returned in Completed outcome is populated.
+ *  - Ledger returned in Failed outcome is populated.
  */
 class DelegatedTakeoverExecutorTest {
 
@@ -114,6 +141,22 @@ class DelegatedTakeoverExecutorTest {
         message: String = "simulated failure"
     ): GoalExecutionPipeline = GoalExecutionPipeline { _ ->
         throw RuntimeException(message)
+    }
+
+    private fun nullMessagePipeline(): GoalExecutionPipeline = GoalExecutionPipeline { _ ->
+        throw RuntimeException()   // message is null
+    }
+
+    private fun timeoutPipeline(
+        message: String = "execution_timed_out"
+    ): GoalExecutionPipeline = GoalExecutionPipeline { _ ->
+        throw TimeoutCancellationException(message)
+    }
+
+    private fun cancelPipeline(
+        message: String = "execution_cancelled"
+    ): GoalExecutionPipeline = GoalExecutionPipeline { _ ->
+        throw CancellationException(message)
     }
 
     private fun buildExecutor(
@@ -525,12 +568,184 @@ class DelegatedTakeoverExecutorTest {
 
     @Test
     fun `Failed outcome error falls back to execution_error when exception message is null`() {
-        val nullMessagePipeline = GoalExecutionPipeline { _ ->
-            throw RuntimeException()   // message is null
-        }
-        val executor = buildExecutor(pipeline = nullMessagePipeline)
+        val executor = buildExecutor(pipeline = nullMessagePipeline())
         val outcome = executor.execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
             as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
         assertEquals("execution_error", outcome.error)
+    }
+
+    // ── Timeout path (TimeoutCancellationException) ───────────────────────────
+
+    @Test
+    fun `exactly three signals emitted on timeout (ACK + PROGRESS + RESULT)`() {
+        val (captured, sink) = captureSignals()
+        buildExecutor(pipeline = timeoutPipeline(), sink = sink)
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertEquals("Expected ACK + PROGRESS + RESULT = 3 signals on timeout", 3, captured.size)
+    }
+
+    @Test
+    fun `RESULT signal on timeout carries ResultKind TIMEOUT`() {
+        val (captured, sink) = captureSignals()
+        buildExecutor(pipeline = timeoutPipeline(), sink = sink)
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertEquals(DelegatedExecutionSignal.ResultKind.TIMEOUT, captured[2].resultKind)
+    }
+
+    @Test
+    fun `timeout path returns ExecutionOutcome Failed`() {
+        val outcome = buildExecutor(pipeline = timeoutPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertTrue(
+            "Timeout must return ExecutionOutcome.Failed",
+            outcome is DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        )
+    }
+
+    @Test
+    fun `final tracker is FAILED after timeout`() {
+        val outcome = buildExecutor(pipeline = timeoutPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals(
+            DelegatedActivationRecord.ActivationStatus.FAILED,
+            outcome.tracker.record.activationStatus
+        )
+    }
+
+    @Test
+    fun `Failed outcome error carries message from TimeoutCancellationException`() {
+        val outcome = buildExecutor(pipeline = timeoutPipeline("my_timeout_detail"))
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals("my_timeout_detail", outcome.error)
+    }
+
+    // ── Cancellation path (CancellationException non-timeout) ────────────────
+
+    @Test
+    fun `exactly three signals emitted on cancellation (ACK + PROGRESS + RESULT)`() {
+        val (captured, sink) = captureSignals()
+        buildExecutor(pipeline = cancelPipeline(), sink = sink)
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertEquals("Expected ACK + PROGRESS + RESULT = 3 signals on cancellation", 3, captured.size)
+    }
+
+    @Test
+    fun `RESULT signal on cancellation carries ResultKind CANCELLED`() {
+        val (captured, sink) = captureSignals()
+        buildExecutor(pipeline = cancelPipeline(), sink = sink)
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertEquals(DelegatedExecutionSignal.ResultKind.CANCELLED, captured[2].resultKind)
+    }
+
+    @Test
+    fun `cancellation path returns ExecutionOutcome Failed`() {
+        val outcome = buildExecutor(pipeline = cancelPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+        assertTrue(
+            "Cancellation must return ExecutionOutcome.Failed",
+            outcome is DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        )
+    }
+
+    @Test
+    fun `final tracker is FAILED after cancellation`() {
+        val outcome = buildExecutor(pipeline = cancelPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals(
+            DelegatedActivationRecord.ActivationStatus.FAILED,
+            outcome.tracker.record.activationStatus
+        )
+    }
+
+    @Test
+    fun `Failed outcome error falls back to execution_cancelled when CancellationException message is null`() {
+        val nullCancelPipeline = GoalExecutionPipeline { _ ->
+            throw CancellationException()
+        }
+        val outcome = buildExecutor(pipeline = nullCancelPipeline)
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals("execution_cancelled", outcome.error)
+    }
+
+    // ── EmittedSignalLedger — content after execution (PR-18) ─────────────────
+
+    @Test
+    fun `ledger lastAck is non-null after successful execution`() {
+        val outcome = buildExecutor()
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Completed
+        assertNotNull("lastAck must be recorded in ledger after execution", outcome.ledger.lastAck)
+    }
+
+    @Test
+    fun `ledger lastProgress is non-null after successful execution`() {
+        val outcome = buildExecutor()
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Completed
+        assertNotNull("lastProgress must be recorded in ledger after execution", outcome.ledger.lastProgress)
+    }
+
+    @Test
+    fun `ledger lastResult is non-null after successful execution`() {
+        val outcome = buildExecutor()
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Completed
+        assertNotNull("lastResult must be recorded in ledger after execution", outcome.ledger.lastResult)
+    }
+
+    @Test
+    fun `ledger lastResult resultKind is COMPLETED after successful execution`() {
+        val outcome = buildExecutor()
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Completed
+        assertEquals(DelegatedExecutionSignal.ResultKind.COMPLETED, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `ledger lastResult resultKind is FAILED after pipeline exception`() {
+        val outcome = buildExecutor(pipeline = failingPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `ledger lastResult resultKind is TIMEOUT after TimeoutCancellationException`() {
+        val outcome = buildExecutor(pipeline = timeoutPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals(DelegatedExecutionSignal.ResultKind.TIMEOUT, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `ledger lastResult resultKind is CANCELLED after CancellationException`() {
+        val outcome = buildExecutor(pipeline = cancelPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertEquals(DelegatedExecutionSignal.ResultKind.CANCELLED, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `ledger in Completed outcome has all three signal kinds populated`() {
+        val outcome = buildExecutor()
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Completed
+        assertNotNull(outcome.ledger.lastAck)
+        assertNotNull(outcome.ledger.lastProgress)
+        assertNotNull(outcome.ledger.lastResult)
+    }
+
+    @Test
+    fun `ledger in Failed outcome has all three signal kinds populated`() {
+        val outcome = buildExecutor(pipeline = failingPipeline())
+            .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        assertNotNull(outcome.ledger.lastAck)
+        assertNotNull(outcome.ledger.lastProgress)
+        assertNotNull(outcome.ledger.lastResult)
     }
 }

@@ -119,12 +119,19 @@ enum class MsgType(val value: String) {
 
     /** Downlink: main runtime asks Android to take over execution of an in-flight task.
      *  Payload model: [com.ufo.galaxy.agent.TakeoverRequestEnvelope].
-     *  @status pr3 — payload parsed; ack sent; full takeover executor deferred to PR-5. */
+     *  @status pr15-complete — full delegated takeover executor path closed:
+     *  eligibility gate ([com.ufo.galaxy.agent.TakeoverEligibilityAssessor]),
+     *  session gate ([com.ufo.galaxy.agent.DelegatedRuntimeReceiver]),
+     *  canonical executor ([com.ufo.galaxy.agent.DelegatedTakeoverExecutor]) emitting
+     *  ACK / PROGRESS / RESULT signals with stable identity and [com.ufo.galaxy.runtime.EmittedSignalLedger];
+     *  structured rejection for all ineligible paths; timeout/cancellation/failure outcomes
+     *  distinguished and forwarded to [com.ufo.galaxy.runtime.RuntimeController.notifyTakeoverFailed]. */
     TAKEOVER_REQUEST("takeover_request"),
 
     /** Uplink: Android responds to a [TAKEOVER_REQUEST] with acceptance or rejection.
      *  Payload model: [com.ufo.galaxy.agent.TakeoverResponseEnvelope].
-     *  @status pr3 — model available; send path present via GalaxyConnectionService. */
+     *  @status pr15-complete — accepted/rejected response sent with structured rejection_reason,
+     *  runtime_host_id, and formation_role; send path present via GalaxyConnectionService. */
     TAKEOVER_RESPONSE("takeover_response"),
 
     // ── PR-16: Delegated execution signal outbound transport ──────────────────────────────

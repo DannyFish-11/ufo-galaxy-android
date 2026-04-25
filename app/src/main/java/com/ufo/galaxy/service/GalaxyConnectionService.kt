@@ -2076,22 +2076,29 @@ class GalaxyConnectionService : Service() {
      * Handles an inbound [MsgType.TAKEOVER_REQUEST] message via the canonical path.
      *
      * Parses the raw JSON into a [TakeoverRequestEnvelope], evaluates device eligibility
-     * via [TakeoverEligibilityAssessor], logs structured metadata (including posture for
-     * correlation), and sends a [TakeoverResponseEnvelope] back to the gateway.
+     * via [TakeoverEligibilityAssessor], gates delegated receipt via [DelegatedRuntimeReceiver],
+     * and dispatches accepted takeover work through [delegatedTakeoverExecutor].
      *
      * ## Decision flow
      * 1. Parse the inbound JSON into a [TakeoverRequestEnvelope].
-     * 2. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
-     * 3. If **not eligible**: send rejection with the assessor's structured reason and return.
-     * 4. If **eligible** but full takeover executor is deferred: send rejection with
-     *    `"takeover_executor_not_implemented"` (PR-5 TODO) and return.
+     * 2. Validate the handoff contract; reject with `"handoff_contract_invalid:…"` if invalid.
+     * 3. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
+     * 4. If **not eligible**: send rejection with the assessor's structured reason and return.
+     * 5. Gate delegated receipt via [DelegatedRuntimeReceiver.receive]:
+     *    if the session is null, DETACHING, or DETACHED — send rejection with the receiver's
+     *    reason and return.
+     * 6. Send acceptance [TakeoverResponseEnvelope] (accepted=true) with runtime_host_id and
+     *    formation_role; launch a coroutine to call [delegatedTakeoverExecutor.execute].
+     * 7. On executor completion, send goal_result (success) or goal_error + notify
+     *    [com.ufo.galaxy.runtime.RuntimeController.notifyTakeoverFailed] (failure / timeout /
+     *    cancellation).
      *
      * ## Concurrent-takeover protection
      * [activeTakeoverId] is set to the incoming `takeover_id` while the request is being
      * processed and cleared when the response has been sent.  This prevents a second inbound
      * [MsgType.TAKEOVER_REQUEST] from being accepted while one is already in progress.
      *
-     * ## PR-3 scope
+     * ## Delivery acknowledgement
      * The delivery ack is sent by the generic [MsgType.ACK_ON_RECEIPT_TYPES] path in
      * [onAdvancedMessage] before this function is called.  This function sends the
      * richer [MsgType.TAKEOVER_RESPONSE] envelope which carries the structured decision
