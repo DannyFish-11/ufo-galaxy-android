@@ -168,7 +168,7 @@ treat this artifact as the authoritative Android-side acceptance verdict.
 | `GalaxyConnectionService.sendDeviceAcceptanceReport()` builds snapshot and sends uplink | ✅ Wired | `GalaxyConnectionService.kt` `sendDeviceAcceptanceReport()` method |
 | Initial acceptance report emitted after service start | ✅ Wired | `GalaxyConnectionService.onStartCommand` launch block |
 | `EvaluatorArtifactEmissionSemantics.REGISTRY` classifies `DEVICE_ACCEPTANCE_REPORT` as `CANONICAL_PARTICIPANT_EVIDENCE` | ✅ Proven | `Pr66EvaluatorArtifactEmissionTest` |
-| Evidence dimension population from readiness prerequisite wiring and per-dimension callbacks | 🔲 Deferred | Follow-up PR should wire evidence evidence signals from `DelegatedRuntimeReadinessEvaluator`, truth/result/event/compat/continuity owners |
+| Evidence dimension population from readiness prerequisite wiring and per-dimension callbacks | 🔲 Deferred | Follow-up PR should wire evidence signals from `DelegatedRuntimeReadinessEvaluator`, truth/result/event/compat/continuity owners |
 | Follow-up acceptance reports after dimension-state changes | 🔲 Deferred | Reactive evidence-change hook needed |
 
 **Emission path**: `GalaxyConnectionService.onStartCommand` →

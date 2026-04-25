@@ -2132,6 +2132,9 @@ class GalaxyConnectionService : Service() {
             )
         }
     }
+
+    /**
+     * Called because [HybridParticipantCapability.HYBRID_EXECUTE_FULL] is currently
      * [HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED] — this is an
      * intentional, tracked deferral (not an accidental omission).  The degrade reply
      * explicitly informs the gateway of the capability limitation so V2 can apply its
