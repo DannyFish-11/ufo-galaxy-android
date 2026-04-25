@@ -614,7 +614,7 @@ class DelegatedTakeoverExecutorTest {
     }
 
     @Test
-    fun `Failed outcome error carries message from TimeoutCancellationException`() {
+    fun `timeout path error carries message from TimeoutCancellationException`() {
         val outcome = buildExecutor(pipeline = timeoutPipeline("my_timeout_detail"))
             .execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
             as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
@@ -661,7 +661,7 @@ class DelegatedTakeoverExecutorTest {
     }
 
     @Test
-    fun `Failed outcome error falls back to execution_cancelled when CancellationException message is null`() {
+    fun `cancellation path error falls back to execution_cancelled when CancellationException message is null`() {
         val nullCancelPipeline = GoalExecutionPipeline { _ ->
             throw CancellationException()
         }
