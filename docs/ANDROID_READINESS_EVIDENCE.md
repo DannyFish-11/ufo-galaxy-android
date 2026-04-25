@@ -3,6 +3,9 @@
 **PR-6Android / PR-67** — Make Android readiness evidence reviewable and release-gate
 friendly.
 
+**PR-7Android / PR-68** — Reopen Android PR-7: Align Android readiness evidence with
+canonical distributed release-gate skeleton.
+
 This document is the Android-side readiness evidence guide for reviewers, release gates,
 and governance PRs that need to assess whether Android is a trustworthy participant in a
 V2 canonical release.
@@ -24,6 +27,8 @@ surface.
 3. Where the main readiness dimensions are covered in the Android repository.
 4. How later governance/release gating work can consume this evidence.
 5. What remains deferred to later PRs.
+6. (PR-7Android) How each Android readiness dimension maps to V2 canonical distributed gate categories.
+7. (PR-7Android) Which Android evidence is **participant-runtime** (strong gate input) vs **advisory** vs **deferred/local-only**.
 
 ---
 
@@ -257,4 +262,103 @@ The canonical machine-readable version of this document is
 The accompanying test suite is
 [`Pr67AndroidReadinessEvidenceSurfaceTest.kt`](../app/src/test/java/com/ufo/galaxy/runtime/Pr67AndroidReadinessEvidenceSurfaceTest.kt).
 
-All acceptance criteria from this PR (AC1–AC5) are validated by that test suite.
+All acceptance criteria from PR-6Android (AC1–AC5) are validated by that test suite.
+
+---
+
+## PR-7Android: Gate Category Alignment with V2 Canonical Distributed Release-Gate Skeleton
+
+**PR-7Android / PR-68** adds the alignment layer that maps Android evidence into the
+V2 canonical distributed gate skeleton.  The machine-readable mapping is
+[`AndroidDistributedGateCategoryMapping.kt`](../app/src/main/java/com/ufo/galaxy/runtime/AndroidDistributedGateCategoryMapping.kt),
+validated by
+[`Pr7AndroidDistributedGateMappingTest.kt`](../app/src/test/java/com/ufo/galaxy/runtime/Pr7AndroidDistributedGateMappingTest.kt).
+
+### V2 Canonical Gate Categories
+
+The V2 PR-7 distributed release-gate skeleton defines five gate categories.  Android
+evidence maps into these categories via `AndroidDistributedGateCategoryMapping`.
+
+| V2 Gate Category | Wire value | Primary Android evidence |
+|------------------|------------|--------------------------|
+| `LIFECYCLE_RUNTIME_CORRECTNESS` | `lifecycle_runtime_correctness` | Readiness/acceptance/governance evaluator verdicts, lifecycle transition events |
+| `TAKEOVER_EXECUTION_OUTCOMES` | `takeover_execution_outcomes` | Takeover fallback canonical bounding, takeover metadata unification |
+| `RECONCILIATION_ARTIFACT_EMISSION` | `reconciliation_artifact_emission` | Device readiness/acceptance artifact wire emission, reconciliation signals, unified truth surface |
+| `CONTINUITY_RECOVERY_SAFETY` | `continuity_recovery_safety` | Recovery participation owner, durability contract, hybrid recovery, durable session rehydration, signal replay suppression, duplicate suppression, stale session discard, idempotency guard |
+| `COMPATIBILITY_SUPPRESSION` | `compatibility_suppression` | Compat legacy blocking, retirement registry, authoritative path alignment, retirement fence |
+
+### Android Dimension → V2 Gate Category Mapping Matrix
+
+| Android dimension | V2 gate category | Notes |
+|-------------------|-----------------|-------|
+| `RUNTIME_LIFECYCLE` | `LIFECYCLE_RUNTIME_CORRECTNESS` | Direct 1:1 mapping |
+| `TAKEOVER_EXECUTION` | `TAKEOVER_EXECUTION_OUTCOMES` | Direct 1:1 mapping |
+| `ARTIFACT_EMISSION_RECONCILIATION` | `RECONCILIATION_ARTIFACT_EMISSION` | Direct 1:1 mapping |
+| `CONTINUITY_RECOVERY_SAFETY` | `CONTINUITY_RECOVERY_SAFETY` | Direct 1:1 mapping |
+| `COMPATIBILITY_SUPPRESSION` | `COMPATIBILITY_SUPPRESSION` | Direct 1:1 mapping |
+| `SIGNAL_REPLAY_DUPLICATE_SAFETY` | `CONTINUITY_RECOVERY_SAFETY` | **Absorbed**: signal replay/duplicate suppression is part of the V2 continuity safety contract |
+
+### Evidence Gate Strength
+
+Each mapping entry carries a `GateStrength` that classifies how the Android evidence
+contributes to the V2 gate decision.  This is the gate-level projection of the Android
+`ConfidenceLevel`:
+
+| GateStrength | Wire value | Maps from Android ConfidenceLevel | Meaning |
+|---|---|---|---|
+| `PARTICIPANT_RUNTIME` | `participant_runtime` | `CANONICAL` | Strong evidence from actual Android runtime execution; suitable for canonical gate consumption |
+| `ADVISORY` | `advisory` | `ADVISORY` | Informative/indirect evidence; supports gate confidence but not sufficient alone |
+| `DEFERRED_LOCAL` | `deferred_local` | `DEPRECATED_COMPAT` | Must **NOT** count toward gate decisions; retained for traceability only |
+
+**Summary**: 23 of 26 Android evidence entries are `PARTICIPANT_RUNTIME` gate strength.
+2 entries are `ADVISORY`.  1 entry (`long_tail_compat_registry_legacy_signals`) is
+`DEFERRED_LOCAL` and **must not** count toward release-gate readiness.
+
+### Gate Category Coverage Summary
+
+| V2 Gate Category | PARTICIPANT_RUNTIME entries | ADVISORY entries | DEFERRED_LOCAL entries |
+|---|---|---|---|
+| `LIFECYCLE_RUNTIME_CORRECTNESS` | 4 | 1 | 0 |
+| `TAKEOVER_EXECUTION_OUTCOMES` | 2 | 1 | 0 |
+| `RECONCILIATION_ARTIFACT_EMISSION` | 5 | 0 | 0 |
+| `CONTINUITY_RECOVERY_SAFETY` | 8 | 0 | 0 |
+| `COMPATIBILITY_SUPPRESSION` | 4 | 0 | 1 |
+
+Every V2 gate category has at least one `PARTICIPANT_RUNTIME` Android evidence entry.
+
+### How V2 Can Consume the Gate Category Mapping
+
+```kotlin
+// Get all strong (PARTICIPANT_RUNTIME) Android evidence for a V2 gate category
+AndroidDistributedGateCategoryMapping.participantRuntimeMappingsFor(
+    AndroidDistributedGateCategoryMapping.V2GateCategory.CONTINUITY_RECOVERY_SAFETY
+)
+
+// Get all Android evidence for a gate category (all strengths)
+AndroidDistributedGateCategoryMapping.mappingsForGateCategory(
+    AndroidDistributedGateCategoryMapping.V2GateCategory.RECONCILIATION_ARTIFACT_EMISSION
+)
+
+// Find which V2 gate categories a given Android dimension contributes to
+AndroidDistributedGateCategoryMapping.gateCategoriesForDimension(
+    AndroidReadinessEvidenceSurface.ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY
+)
+// → {CONTINUITY_RECOVERY_SAFETY}
+
+// Look up the gate mapping for a specific evidence entry
+AndroidDistributedGateCategoryMapping.mappingFor(
+    "readiness_evaluator_five_dimension_verdict"
+)
+// → GateMappingEntry(evidenceId=..., v2GateCategory=LIFECYCLE_RUNTIME_CORRECTNESS,
+//                    gateStrength=PARTICIPANT_RUNTIME, ...)
+```
+
+### Authority Boundary (PR-7Android)
+
+This mapping layer does not add Android-side gate authority.  V2 remains the canonical
+orchestration authority.  `AndroidDistributedGateCategoryMapping` only expresses how
+Android participant evidence maps into V2's gate skeleton — the gate decisions themselves
+remain in V2.
+
+`final_release_policy_in_android` remains explicitly deferred in
+`AndroidReadinessEvidenceSurface.deferredItems` — by design.
