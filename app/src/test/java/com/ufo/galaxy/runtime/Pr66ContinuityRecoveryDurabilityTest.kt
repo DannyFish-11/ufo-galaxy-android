@@ -68,6 +68,7 @@ import org.junit.Test
  *  - offline_queue_stale_authority is bounded
  *  - duplicate_signal_cross_execution is bounded
  *  - duplicate_recovery_attempt is bounded
+ *  - stale_identity_reception is bounded
  *
  * ### AndroidRecoveryParticipationOwner — restart/reconnect restoration (AC1)
  *  - process recreation with prior context yields RehydrateThenContinue
@@ -404,6 +405,13 @@ class Pr66ContinuityRecoveryDurabilityTest {
     fun `duplicate_recovery_attempt is bounded`() {
         assertNotNull(
             ContinuityRecoveryDurabilityContract.boundedEmissionFor("duplicate_recovery_attempt")
+        )
+    }
+
+    @Test
+    fun `stale_identity_reception is bounded`() {
+        assertNotNull(
+            ContinuityRecoveryDurabilityContract.boundedEmissionFor("stale_identity_reception")
         )
     }
 
@@ -923,6 +931,45 @@ class Pr66ContinuityRecoveryDurabilityTest {
             ContinuityRecoveryDurabilityContract.deferredItemFor(
                 "takeover_recovery_path_explicit_bounding"
             )
+        )
+    }
+
+    @Test
+    fun `stale identity rejection suppresses unit with mismatched session`() {
+        // Validates bounded emission: stale_identity_reception
+        val integration = AndroidContinuityIntegration()
+        val activeSession = AttachedRuntimeSession(
+            sessionId = "active-session-X",
+            hostId = "host-1",
+            deviceId = "device-1",
+            state = AttachedRuntimeSession.State.ATTACHED
+        )
+        val result = integration.validateRuntimeIdentity(
+            unitAttachedSessionId = "stale-session-OLD",
+            activeSession = activeSession
+        )
+        assertTrue(
+            "Expected StaleIdentity for mismatched session",
+            result is AndroidContinuityIntegration.IdentityValidationResult.StaleIdentity
+        )
+    }
+
+    @Test
+    fun `stale identity not triggered for matching session`() {
+        val integration = AndroidContinuityIntegration()
+        val activeSession = AttachedRuntimeSession(
+            sessionId = "active-session-Y",
+            hostId = "host-1",
+            deviceId = "device-1",
+            state = AttachedRuntimeSession.State.ATTACHED
+        )
+        val result = integration.validateRuntimeIdentity(
+            unitAttachedSessionId = "active-session-Y",
+            activeSession = activeSession
+        )
+        assertEquals(
+            AndroidContinuityIntegration.IdentityValidationResult.Valid,
+            result
         )
     }
 }

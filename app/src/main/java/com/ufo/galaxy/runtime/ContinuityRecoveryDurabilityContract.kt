@@ -389,7 +389,7 @@ object ContinuityRecoveryDurabilityContract {
     const val COVERED_BEHAVIOR_COUNT = 13
 
     /** Expected number of bounded emissions at the time of this PR. */
-    const val BOUNDED_EMISSION_COUNT = 5
+    const val BOUNDED_EMISSION_COUNT = 6
 
     /** Expected number of deferred items at the time of this PR. */
     const val DEFERRED_ITEM_COUNT = 4
