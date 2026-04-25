@@ -2081,10 +2081,16 @@ class GalaxyConnectionService : Service() {
      *
      * ## Decision flow
      * 1. Parse the inbound JSON into a [TakeoverRequestEnvelope].
-     * 2. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
-     * 3. If **not eligible**: send rejection with the assessor's structured reason and return.
-     * 4. If **eligible** but full takeover executor is deferred: send rejection with
-     *    `"takeover_executor_not_implemented"` (PR-5 TODO) and return.
+     * 2. Validate handoff contract via [HandoffContractValidator]; reject with structured
+     *    reason on failure.
+     * 3. Invoke [TakeoverEligibilityAssessor.assess] with the current [activeTakeoverId].
+     * 4. If **not eligible**: send rejection with the assessor's structured reason and return.
+     * 5. Gate delegated receipt through [DelegatedRuntimeReceiver]: session must be ATTACHED.
+     *    If rejected: send rejection with the receiver's structured reason and return.
+     * 6. If **eligible and session accepted**: send acceptance [TakeoverResponseEnvelope]
+     *    (with [TakeoverResponseEnvelope.runtime_host_id] and [TakeoverResponseEnvelope.formation_role]),
+     *    dispatch through [DelegatedTakeoverExecutor] on [serviceScope], emit
+     *    ACK / PROGRESS / RESULT signals, and send the final [GoalResultPayload] or error uplink.
      *
      * ## Concurrent-takeover protection
      * [activeTakeoverId] is set to the incoming `takeover_id` while the request is being
