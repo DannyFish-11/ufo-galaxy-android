@@ -190,7 +190,38 @@ enum class MsgType(val value: String) {
      *  Android-side readiness signal.
      *  Payload model: [DeviceReadinessReportPayload].
      *  @status android-closure — payload defined; send path present via GalaxyConnectionService. */
-    DEVICE_READINESS_REPORT("device_readiness_report");
+    DEVICE_READINESS_REPORT("device_readiness_report"),
+
+    // ── PR-4 (Android): Governance / acceptance / strategy artifact uplinks ───────────────────
+    // Uplink messages that carry the structured evaluator artifacts and per-dimension snapshots
+    // produced by the Android post-graduation governance, acceptance, and strategy evaluators.
+    // Enables V2 governance / graduation / program-strategy paths to absorb Android-side
+    // evaluator conclusions without polling, closing the evaluator → V2 visibility gap for
+    // all four evaluator layers.
+
+    /** Uplink: Android reports its post-graduation governance artifact and per-dimension snapshot
+     *  to V2.  Emitted on service start (baseline with all dimensions UNKNOWN) and after each
+     *  relevant dimension observation-state change so V2 post-graduation governance and
+     *  enforcement paths have a reliable Android-side governance signal.
+     *  Payload model: [DeviceGovernanceReportPayload].
+     *  @status pr-4-android — payload defined; send path present via GalaxyConnectionService. */
+    DEVICE_GOVERNANCE_REPORT("device_governance_report"),
+
+    /** Uplink: Android reports its delegated-runtime acceptance artifact and per-dimension
+     *  snapshot to V2.  Emitted on service start (baseline with all dimensions UNKNOWN) and
+     *  after each relevant dimension evidence-state change so V2 final acceptance / graduation
+     *  gate paths have a reliable Android-side acceptance signal.
+     *  Payload model: [DeviceAcceptanceReportPayload].
+     *  @status pr-4-android — payload defined; send path present via GalaxyConnectionService. */
+    DEVICE_ACCEPTANCE_REPORT("device_acceptance_report"),
+
+    /** Uplink: Android reports its program strategy / evolution posture artifact and per-dimension
+     *  snapshot to V2.  Emitted on service start (baseline with all dimensions UNKNOWN) and
+     *  after each relevant dimension posture-state change so V2 program strategy / evolution
+     *  control paths have a reliable Android-side strategy signal.
+     *  Payload model: [DeviceStrategyReportPayload].
+     *  @status pr-4-android — payload defined; send path present via GalaxyConnectionService. */
+    DEVICE_STRATEGY_REPORT("device_strategy_report");
 
     companion object {
         /**
@@ -1430,5 +1461,173 @@ data class DeviceReadinessReportPayload(
     val reported_at_ms: Long = System.currentTimeMillis(),
     val dimension_states: Map<String, String> = emptyMap(),
     val first_gap_reason: String? = null,
+    val missing_dimensions: List<String> = emptyList()
+)
+
+// ── PR-4 (Android): Governance / acceptance / strategy report uplink payloads ────────────────
+
+/**
+ * Uplink payload for [MsgType.DEVICE_GOVERNANCE_REPORT].
+ *
+ * Carries the structured post-graduation governance artifact and per-dimension observation
+ * snapshot produced by
+ * [com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator] toward V2
+ * post-graduation governance / enforcement layer consumption paths.
+ *
+ * Emitted by Android on service start (baseline — all dimensions UNKNOWN) and after each
+ * relevant dimension observation-state change so V2 always has a current Android-side
+ * governance conclusion available.
+ *
+ * ## Artifact semantics
+ *
+ * [artifact_tag] uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator]:
+ *
+ * | [artifact_tag]                                                    | Meaning                                                               |
+ * |-------------------------------------------------------------------|-----------------------------------------------------------------------|
+ * | `"device_governance_compliant"`                                   | All five dimensions compliant; device remains canonical.              |
+ * | `"device_governance_violation_due_to_truth_regression"`           | Truth / continuity alignment regression detected since graduation.    |
+ * | `"device_governance_violation_due_to_result_regression"`          | Result convergence regression detected since graduation.              |
+ * | `"device_governance_violation_due_to_execution_visibility_regression"` | Execution visibility regression detected since graduation.       |
+ * | `"device_governance_violation_due_to_compat_bypass"`              | Compat / legacy bypass reintroduced since graduation.                 |
+ * | `"device_governance_unknown_due_to_missing_signal"`               | One or more dimensions have no signal yet.                            |
+ *
+ * ## V2 artifact classification
+ *
+ * This artifact is **canonical participant evidence** when produced from a live
+ * post-graduation governance evaluation path in GalaxyConnectionService.  V2 may treat
+ * `device_governance_compliant` as authoritative ongoing-compliance evidence.  Violation
+ * artifacts feed directly into V2 enforcement / escalation inputs.
+ *
+ * @param artifact_tag          Stable wire-tag of the [com.ufo.galaxy.runtime.DeviceGovernanceArtifact].
+ * @param snapshot_id           UUID of this governance snapshot; stable across retransmissions.
+ * @param device_id             Device identifier.
+ * @param session_id            Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms        Wall-clock epoch-ms timestamp of artifact production.
+ * @param dimension_states      Per-dimension observation status map: dimension wire-name →
+ *                              status string (`"COMPLIANT"`, `"REGRESSION"`, or `"UNKNOWN"`).
+ * @param first_regression_reason Human-readable explanation of the first regression found; null
+ *                              when artifact is compliant or unknown-due-to-missing-signal.
+ * @param missing_dimensions    Dimension wire-names that have no observation signal yet; empty
+ *                              when all dimensions have been reported.
+ */
+data class DeviceGovernanceReportPayload(
+    val artifact_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val first_regression_reason: String? = null,
+    val missing_dimensions: List<String> = emptyList()
+)
+
+/**
+ * Uplink payload for [MsgType.DEVICE_ACCEPTANCE_REPORT].
+ *
+ * Carries the structured final acceptance artifact and per-dimension evidence snapshot
+ * produced by [com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceEvaluator] toward V2
+ * final acceptance / graduation gate consumption paths.
+ *
+ * Emitted by Android on service start (baseline — all dimensions UNKNOWN) and after each
+ * relevant dimension evidence-state change so V2 always has a current Android-side
+ * acceptance conclusion available.
+ *
+ * ## Artifact semantics
+ *
+ * [artifact_tag] uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceEvaluator]:
+ *
+ * | [artifact_tag]                                       | Meaning                                                            |
+ * |------------------------------------------------------|--------------------------------------------------------------------|
+ * | `"device_accepted_for_graduation"`                   | All six evidence dimensions satisfied; device may graduate.        |
+ * | `"device_rejected_due_to_missing_evidence"`          | Readiness prerequisite not yet established or explicit gap.        |
+ * | `"device_rejected_due_to_truth_gap"`                 | Truth / continuity evidence gap found.                             |
+ * | `"device_rejected_due_to_result_gap"`                | Result convergence evidence gap found.                             |
+ * | `"device_rejected_due_to_execution_event_gap"`       | Canonical execution event evidence gap found.                      |
+ * | `"device_rejected_due_to_compat_bypass_risk"`        | Compat / legacy bypass risk found in evidence.                     |
+ * | `"device_acceptance_unknown_due_to_incomplete_signal"` | One or more dimensions have no signal yet.                       |
+ *
+ * ## V2 artifact classification
+ *
+ * This artifact is **canonical participant evidence** when produced from a live
+ * acceptance evaluation path in GalaxyConnectionService.  V2 graduation gate must treat
+ * `device_accepted_for_graduation` as an authoritative graduation readiness signal.
+ *
+ * @param artifact_tag          Stable wire-tag of the [com.ufo.galaxy.runtime.DeviceAcceptanceArtifact].
+ * @param snapshot_id           UUID of this acceptance snapshot; stable across retransmissions.
+ * @param device_id             Device identifier.
+ * @param session_id            Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms        Wall-clock epoch-ms timestamp of artifact production.
+ * @param dimension_states      Per-dimension evidence status map: dimension wire-name →
+ *                              status string (`"EVIDENCED"`, `"GAP"`, or `"UNKNOWN"`).
+ * @param first_gap_reason      Human-readable explanation of the first evidence gap found; null
+ *                              when artifact is accepted or unknown-due-to-incomplete-signal.
+ * @param missing_dimensions    Dimension wire-names that have no evidence signal yet; empty
+ *                              when all dimensions have been reported.
+ */
+data class DeviceAcceptanceReportPayload(
+    val artifact_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val first_gap_reason: String? = null,
+    val missing_dimensions: List<String> = emptyList()
+)
+
+/**
+ * Uplink payload for [MsgType.DEVICE_STRATEGY_REPORT].
+ *
+ * Carries the structured program strategy / evolution posture artifact and per-dimension
+ * posture snapshot produced by [com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator]
+ * toward V2 program strategy / evolution control layer consumption paths.
+ *
+ * Emitted by Android on service start (baseline — all dimensions UNKNOWN) and after each
+ * relevant dimension posture-state change so V2 always has a current Android-side strategy
+ * posture conclusion available.
+ *
+ * ## Artifact semantics
+ *
+ * [artifact_tag] uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator]:
+ *
+ * | [artifact_tag]                                                    | Meaning                                                         |
+ * |-------------------------------------------------------------------|-----------------------------------------------------------------|
+ * | `"device_strategy_on_track"`                                      | All five dimensions on track; evolution posture aligned.        |
+ * | `"device_strategy_risk_due_to_contract_instability"`              | Contract instability / regression pressure risk detected.       |
+ * | `"device_strategy_risk_due_to_governance_regression_trend"`       | Negative governance trend detected at strategy level.           |
+ * | `"device_strategy_risk_due_to_rollout_maturity_gap"`              | Rollout maturity / default-on posture gap detected.             |
+ * | `"device_strategy_risk_due_to_runtime_coupling_drift"`            | Cross-module coupling drift detected.                           |
+ * | `"device_strategy_unknown_due_to_missing_program_signal"`         | One or more dimensions have no program signal yet.              |
+ *
+ * ## V2 artifact classification
+ *
+ * This artifact is **advisory / observation-only** by default.  V2 program strategy /
+ * evolution control layer may consume `device_strategy_on_track` as an advisory alignment
+ * signal, but risk artifacts should inform strategy decisions rather than block execution
+ * unilaterally.  V2 retains full orchestration authority over program strategy decisions.
+ *
+ * @param artifact_tag          Stable wire-tag of the [com.ufo.galaxy.runtime.DeviceStrategyArtifact].
+ * @param snapshot_id           UUID of this strategy snapshot; stable across retransmissions.
+ * @param device_id             Device identifier.
+ * @param session_id            Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms        Wall-clock epoch-ms timestamp of artifact production.
+ * @param dimension_states      Per-dimension posture status map: dimension wire-name →
+ *                              status string (`"ON_TRACK"`, `"AT_RISK"`, or `"UNKNOWN"`).
+ * @param first_risk_reason     Human-readable explanation of the first strategic risk found; null
+ *                              when artifact is on-track or unknown-due-to-missing-signal.
+ * @param missing_dimensions    Dimension wire-names that have no program signal yet; empty when
+ *                              all dimensions have been reported.
+ */
+data class DeviceStrategyReportPayload(
+    val artifact_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val first_risk_reason: String? = null,
     val missing_dimensions: List<String> = emptyList()
 )
