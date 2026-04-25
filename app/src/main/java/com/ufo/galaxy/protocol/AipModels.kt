@@ -190,7 +190,40 @@ enum class MsgType(val value: String) {
      *  Android-side readiness signal.
      *  Payload model: [DeviceReadinessReportPayload].
      *  @status android-closure — payload defined; send path present via GalaxyConnectionService. */
-    DEVICE_READINESS_REPORT("device_readiness_report");
+    DEVICE_READINESS_REPORT("device_readiness_report"),
+
+    // ── PR-4 (Android): Governance artifact uplink ───────────────────────────────────────────
+    // Uplink message that carries the structured [com.ufo.galaxy.runtime.DeviceGovernanceArtifact]
+    // and per-dimension [com.ufo.galaxy.runtime.DelegatedRuntimeGovernanceSnapshot] produced by
+    // [com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator].
+    // Enables V2 post-graduation governance / enforcement paths to absorb Android-side governance
+    // conclusions without polling, closing the governance evaluator → V2 visibility gap.
+
+    /** Uplink: Android reports its post-graduation governance artifact and per-dimension
+     *  snapshot to V2.  Emitted on service start and after each relevant dimension-state
+     *  change so V2 governance / enforcement paths have a reliable Android-side governance signal.
+     *  Payload model: [DeviceGovernanceReportPayload].
+     *  Signal semantics: ADVISORY — governance artifact informs V2 enforcement decisions but
+     *  V2 remains the canonical governance authority.
+     *  @status pr-4-android — payload defined; send path present via GalaxyConnectionService. */
+    DEVICE_GOVERNANCE_REPORT("device_governance_report"),
+
+    // ── PR-4 (Android): Strategy artifact uplink ─────────────────────────────────────────────
+    // Uplink message that carries the structured [com.ufo.galaxy.runtime.DeviceStrategyArtifact]
+    // and per-dimension [com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot] produced by
+    // [com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator].
+    // Enables V2 program strategy / evolution control paths to absorb Android-side strategy
+    // posture signals, closing the strategy evaluator → V2 visibility gap.
+
+    /** Uplink: Android reports its program-level strategy posture artifact and per-dimension
+     *  snapshot to V2.  Emitted on service start and after each relevant dimension-state
+     *  change so V2 program strategy / evolution control paths have a reliable Android-side
+     *  strategy posture signal.
+     *  Payload model: [DeviceStrategyReportPayload].
+     *  Signal semantics: ADVISORY — strategy artifact informs V2 program-level decisions but
+     *  V2 remains the canonical strategy authority.
+     *  @status pr-4-android — payload defined; send path present via GalaxyConnectionService. */
+    DEVICE_STRATEGY_REPORT("device_strategy_report");
 
     companion object {
         /**
@@ -1432,3 +1465,131 @@ data class DeviceReadinessReportPayload(
     val first_gap_reason: String? = null,
     val missing_dimensions: List<String> = emptyList()
 )
+
+// ── PR-4 (Android): Device governance report uplink ──────────────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.DEVICE_GOVERNANCE_REPORT].
+ *
+ * Carries the structured post-graduation governance artifact and per-dimension snapshot
+ * produced by [com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator]
+ * toward V2 post-graduation governance / enforcement consumption paths.
+ *
+ * Emitted by Android on service start and after any relevant governance dimension-state
+ * change, so V2 always has a current Android-side post-graduation governance conclusion
+ * available without polling.
+ *
+ * ## Signal semantics
+ *
+ * This is an **ADVISORY** artifact.  V2 remains the canonical governance authority; the
+ * Android-side governance report informs V2 enforcement decisions but does not replace V2
+ * governance policy.  V2 must treat this payload as participant-originated governance
+ * evidence rather than binding enforcement output.
+ *
+ * ## Artifact vocabulary
+ *
+ * The [artifact_tag] field uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator]:
+ *
+ * | [artifact_tag]                                                          | Meaning                                                             |
+ * |-------------------------------------------------------------------------|---------------------------------------------------------------------|
+ * | `"device_governance_compliant"`                                         | All five dimensions compliant; device remains canonical.            |
+ * | `"device_governance_violation_due_to_truth_regression"`                 | Truth alignment regression detected since graduation.               |
+ * | `"device_governance_violation_due_to_result_regression"`                | Result convergence regression detected since graduation.            |
+ * | `"device_governance_violation_due_to_execution_visibility_regression"`  | Canonical execution visibility regression detected.                 |
+ * | `"device_governance_violation_due_to_compat_bypass"`                    | Compat / legacy bypass reintroduced since graduation.               |
+ * | `"device_governance_unknown_due_to_missing_signal"`                     | One or more governance dimensions have no signal.                   |
+ *
+ * @param artifact_tag          Stable wire-tag of the [com.ufo.galaxy.runtime.DeviceGovernanceArtifact].
+ * @param snapshot_id           UUID of this governance snapshot; stable across retransmissions.
+ * @param device_id             Device identifier.
+ * @param session_id            Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms        Wall-clock epoch-ms timestamp of artifact production.
+ * @param dimension_states      Per-dimension status map: dimension wire-name → status string
+ *                              (`"compliant"`, `"regression"`, or `"unknown"`).
+ * @param first_regression_reason Human-readable explanation of the first regression found; null
+ *                              when artifact is compliant or unknown.
+ * @param missing_dimensions    Dimension wire-names that have no observation signal yet.
+ * @param signal_semantics      Stable classification string for this artifact:
+ *                              `"advisory"` — V2 uses as governance evidence, not binding output.
+ */
+data class DeviceGovernanceReportPayload(
+    val artifact_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val first_regression_reason: String? = null,
+    val missing_dimensions: List<String> = emptyList(),
+    val signal_semantics: String = SIGNAL_SEMANTICS_ADVISORY
+) {
+    companion object {
+        /** Advisory semantics tag: V2 treats this artifact as governance evidence, not binding output. */
+        const val SIGNAL_SEMANTICS_ADVISORY = "advisory"
+    }
+}
+
+// ── PR-4 (Android): Device strategy report uplink ────────────────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.DEVICE_STRATEGY_REPORT].
+ *
+ * Carries the structured program-level strategy posture artifact and per-dimension snapshot
+ * produced by [com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator] toward V2 program
+ * strategy / evolution control consumption paths.
+ *
+ * Emitted by Android on service start and after any relevant strategy dimension-state
+ * change, so V2 always has a current Android-side strategy posture signal available
+ * without polling.
+ *
+ * ## Signal semantics
+ *
+ * This is an **ADVISORY** artifact.  V2 remains the canonical strategy authority; the
+ * Android-side strategy report informs V2 program-level decisions but does not replace V2
+ * strategy policy.  V2 must treat this payload as participant-originated strategy posture
+ * evidence rather than binding evolution control output.
+ *
+ * ## Artifact vocabulary
+ *
+ * The [artifact_tag] field uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator]:
+ *
+ * | [artifact_tag]                                                    | Meaning                                                             |
+ * |-------------------------------------------------------------------|---------------------------------------------------------------------|
+ * | `"device_strategy_on_track"`                                      | All five dimensions on track; evolution posture aligned.            |
+ * | `"device_strategy_risk_due_to_contract_instability"`              | Contract stability or regression pressure risk detected.            |
+ * | `"device_strategy_risk_due_to_governance_regression_trend"`       | Governance regression trend risk detected.                          |
+ * | `"device_strategy_risk_due_to_rollout_maturity_gap"`              | Rollout maturity / default-on posture gap detected.                 |
+ * | `"device_strategy_risk_due_to_runtime_coupling_drift"`            | Cross-module coupling drift risk detected.                          |
+ * | `"device_strategy_unknown_due_to_missing_program_signal"`         | One or more strategy dimensions have no program signal.             |
+ *
+ * @param artifact_tag        Stable wire-tag of the [com.ufo.galaxy.runtime.DeviceStrategyArtifact].
+ * @param snapshot_id         UUID of this strategy snapshot; stable across retransmissions.
+ * @param device_id           Device identifier.
+ * @param session_id          Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms      Wall-clock epoch-ms timestamp of artifact production.
+ * @param dimension_states    Per-dimension status map: dimension wire-name → status string
+ *                            (`"on_track"`, `"at_risk"`, or `"unknown"`).
+ * @param first_risk_reason   Human-readable explanation of the first at-risk dimension found;
+ *                            null when artifact is on-track or unknown.
+ * @param missing_dimensions  Dimension wire-names that have no program signal yet.
+ * @param signal_semantics    Stable classification string for this artifact:
+ *                            `"advisory"` — V2 uses as strategy evidence, not binding output.
+ */
+data class DeviceStrategyReportPayload(
+    val artifact_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val first_risk_reason: String? = null,
+    val missing_dimensions: List<String> = emptyList(),
+    val signal_semantics: String = SIGNAL_SEMANTICS_ADVISORY
+) {
+    companion object {
+        /** Advisory semantics tag: V2 treats this artifact as strategy evidence, not binding output. */
+        const val SIGNAL_SEMANTICS_ADVISORY = "advisory"
+    }
+}

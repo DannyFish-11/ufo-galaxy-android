@@ -25,8 +25,10 @@ import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
+import com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessSnapshot
+import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.HybridParticipantCapability
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
@@ -53,6 +55,8 @@ import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
+import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
+import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
@@ -186,6 +190,38 @@ class GalaxyConnectionService : Service() {
      *  - Any subsequent dimension change may trigger a follow-up report as needed.
      */
     private val delegatedRuntimeReadinessEvaluator = DelegatedRuntimeReadinessEvaluator()
+
+    /**
+     * Evaluator for Android delegated-runtime post-graduation governance (PR-4 Android).
+     *
+     * Holds per-dimension observation state and produces
+     * [com.ufo.galaxy.runtime.DeviceGovernanceArtifact] /
+     * [com.ufo.galaxy.runtime.DelegatedRuntimeGovernanceSnapshot] outputs that are forwarded to
+     * V2 via [sendDeviceGovernanceReport].
+     *
+     * Artifact signal semantics: ADVISORY — V2 uses this as governance evidence but remains
+     * the canonical governance authority.
+     *
+     * An initial report is emitted on service start with all dimensions UNKNOWN, which is a
+     * valid structured signal.  V2 can distinguish "not yet reported" from a regression.
+     */
+    private val delegatedRuntimeGovernanceEvaluator = DelegatedRuntimePostGraduationGovernanceEvaluator()
+
+    /**
+     * Evaluator for Android delegated-runtime program-level strategy posture (PR-4 Android).
+     *
+     * Holds per-dimension posture state and produces
+     * [com.ufo.galaxy.runtime.DeviceStrategyArtifact] /
+     * [com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot] outputs that are forwarded to
+     * V2 via [sendDeviceStrategyReport].
+     *
+     * Artifact signal semantics: ADVISORY — V2 uses this as strategy evidence but remains
+     * the canonical strategy / evolution control authority.
+     *
+     * An initial report is emitted on service start with all dimensions UNKNOWN, which is a
+     * valid structured signal.  V2 can distinguish "not yet reported" from an at-risk posture.
+     */
+    private val delegatedRuntimeStrategyEvaluator = DelegatedRuntimeStrategyEvaluator()
 
     /**
      * Signal sink for delegated-execution lifecycle events (PR-12 / PR-16).
@@ -540,6 +576,17 @@ class GalaxyConnectionService : Service() {
         // states change.
         serviceScope.launch {
             sendDeviceReadinessReport()
+        }
+
+        // PR-4 (Android): emit initial device governance and strategy reports on service start.
+        // Both evaluators start with all dimensions UNKNOWN — this is itself a valid structured
+        // signal; V2 can distinguish "not yet reported" from a regression / at-risk posture.
+        // Both artifacts carry ADVISORY signal semantics so V2 can classify them accordingly.
+        serviceScope.launch {
+            sendDeviceGovernanceReport()
+        }
+        serviceScope.launch {
+            sendDeviceStrategyReport()
         }
         
         return START_STICKY
@@ -1773,8 +1820,183 @@ class GalaxyConnectionService : Service() {
         }
     }
 
+    // ── PR-4 (Android): device governance report uplink ──────────────────────
+
     /**
+     * Builds a [DeviceGovernanceReportPayload] from the current
+     * [delegatedRuntimeGovernanceEvaluator] state and transmits it as a
+     * [MsgType.DEVICE_GOVERNANCE_REPORT] AIP v3 uplink message.
      *
+     * Called during service start so V2 post-graduation governance and enforcement paths
+     * have a baseline Android-side governance artifact immediately on connection.
+     * At this stage all dimensions are typically UNKNOWN, which is a valid structured
+     * signal — V2 can distinguish "not yet reported" from a regression.
+     *
+     * Signal semantics: ADVISORY — V2 remains the canonical governance authority.
+     * Send failure never throws — any error is caught and logged.
+     */
+    private fun sendDeviceGovernanceReport() {
+        try {
+            val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: run {
+                Log.w(TAG, "[DEVICE_GOVERNANCE_REPORT] skipped — localDeviceId is blank")
+                return
+            }
+            val snapshot = delegatedRuntimeGovernanceEvaluator.buildSnapshot(deviceId = deviceId)
+            val artifact = snapshot.artifact
+
+            val dimensionStates: Map<String, String> = snapshot.dimensionStates.entries
+                .associate { (dim, state) -> dim.wireValue to state.status.wireValue }
+
+            val missingDimensions: List<String> =
+                snapshot.dimensionStates.entries
+                    .filter { (_, state) ->
+                        state.status == com.ufo.galaxy.runtime.DelegatedRuntimeGovernanceSnapshot.DimensionStatus.UNKNOWN
+                    }
+                    .map { (dim, _) -> dim.wireValue }
+
+            val firstRegressionReason: String? =
+                snapshot.dimensionStates.values
+                    .firstOrNull {
+                        it.status == com.ufo.galaxy.runtime.DelegatedRuntimeGovernanceSnapshot.DimensionStatus.REGRESSION
+                    }
+                    ?.regressionReason
+
+            val payload = DeviceGovernanceReportPayload(
+                artifact_tag = artifact.semanticTag,
+                snapshot_id = snapshot.snapshotId,
+                device_id = deviceId,
+                session_id = UFOGalaxyApplication.runtimeSessionId,
+                reported_at_ms = snapshot.reportedAtMs,
+                dimension_states = dimensionStates,
+                first_regression_reason = firstRegressionReason,
+                missing_dimensions = missingDimensions
+            )
+
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_GOVERNANCE_REPORT,
+                payload = payload,
+                device_id = deviceId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_GOVERNANCE_REPORT)
+            )
+
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            Log.i(
+                TAG,
+                "[DEVICE_GOVERNANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
+                    "artifact=${artifact.semanticTag} sent=$sent"
+            )
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "device_governance_report_emitted",
+                    "snapshot_id" to snapshot.snapshotId,
+                    "artifact_tag" to artifact.semanticTag,
+                    "signal_semantics" to DeviceGovernanceReportPayload.SIGNAL_SEMANTICS_ADVISORY,
+                    "missing_dimension_count" to missingDimensions.size,
+                    "regression_reason" to (firstRegressionReason ?: ""),
+                    "sent" to sent
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_GOVERNANCE_REPORT] unexpected error: ${e.message}", e)
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "device_governance_report_error",
+                    "error" to (e.message ?: "unknown")
+                )
+            )
+        }
+    }
+
+    // ── PR-4 (Android): device strategy report uplink ────────────────────────
+
+    /**
+     * Builds a [DeviceStrategyReportPayload] from the current
+     * [delegatedRuntimeStrategyEvaluator] state and transmits it as a
+     * [MsgType.DEVICE_STRATEGY_REPORT] AIP v3 uplink message.
+     *
+     * Called during service start so V2 program strategy / evolution control paths have a
+     * baseline Android-side strategy posture artifact immediately on connection.
+     * At this stage all dimensions are typically UNKNOWN, which is a valid structured
+     * signal — V2 can distinguish "not yet reported" from an at-risk posture.
+     *
+     * Signal semantics: ADVISORY — V2 remains the canonical strategy / evolution control
+     * authority.  Send failure never throws — any error is caught and logged.
+     */
+    private fun sendDeviceStrategyReport() {
+        try {
+            val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: run {
+                Log.w(TAG, "[DEVICE_STRATEGY_REPORT] skipped — localDeviceId is blank")
+                return
+            }
+            val snapshot = delegatedRuntimeStrategyEvaluator.buildSnapshot(deviceId = deviceId)
+            val artifact = snapshot.artifact
+
+            val dimensionStates: Map<String, String> = snapshot.dimensionStates.entries
+                .associate { (dim, state) -> dim.wireValue to state.status.wireValue }
+
+            val missingDimensions: List<String> =
+                snapshot.dimensionStates.entries
+                    .filter { (_, state) ->
+                        state.status == com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot.DimensionStatus.UNKNOWN
+                    }
+                    .map { (dim, _) -> dim.wireValue }
+
+            val firstRiskReason: String? =
+                snapshot.dimensionStates.values
+                    .firstOrNull {
+                        it.status == com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot.DimensionStatus.AT_RISK
+                    }
+                    ?.riskReason
+
+            val payload = DeviceStrategyReportPayload(
+                artifact_tag = artifact.semanticTag,
+                snapshot_id = snapshot.snapshotId,
+                device_id = deviceId,
+                session_id = UFOGalaxyApplication.runtimeSessionId,
+                reported_at_ms = snapshot.reportedAtMs,
+                dimension_states = dimensionStates,
+                first_risk_reason = firstRiskReason,
+                missing_dimensions = missingDimensions
+            )
+
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_STRATEGY_REPORT,
+                payload = payload,
+                device_id = deviceId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_STRATEGY_REPORT)
+            )
+
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            Log.i(
+                TAG,
+                "[DEVICE_STRATEGY_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
+                    "artifact=${artifact.semanticTag} sent=$sent"
+            )
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "device_strategy_report_emitted",
+                    "snapshot_id" to snapshot.snapshotId,
+                    "artifact_tag" to artifact.semanticTag,
+                    "signal_semantics" to DeviceStrategyReportPayload.SIGNAL_SEMANTICS_ADVISORY,
+                    "missing_dimension_count" to missingDimensions.size,
+                    "risk_reason" to (firstRiskReason ?: ""),
+                    "sent" to sent
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_STRATEGY_REPORT] unexpected error: ${e.message}", e)
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "device_strategy_report_error",
+                    "error" to (e.message ?: "unknown")
+                )
+            )
+        }
+    }
+
+    /**
      * Called because [HybridParticipantCapability.HYBRID_EXECUTE_FULL] is currently
      * [HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED] — this is an
      * intentional, tracked deferral (not an accidental omission).  The degrade reply
