@@ -105,6 +105,24 @@ class EmittedSignalLedger {
             DelegatedExecutionSignal.Kind.RESULT   -> _result
         }
 
+    // ── Public API — terminal-state bounding ─────────────────────────────────
+
+    /**
+     * `true` when a terminal [DelegatedExecutionSignal.Kind.RESULT] signal has been
+     * recorded in this ledger, indicating that execution has reached a terminal state.
+     *
+     * Once `true`, replaying [DelegatedExecutionSignal.Kind.ACK] or
+     * [DelegatedExecutionSignal.Kind.PROGRESS] via [replayBounded] is suppressed because
+     * those signals belong to pre-terminal execution phases.  Sending pre-terminal signals
+     * after a terminal RESULT would produce stale participant influence toward V2.
+     *
+     * [replaySignal] is unaffected and will still return replays for any kind regardless
+     * of terminal state.  Prefer [replayBounded] in recovery contexts where terminal-state
+     * safety is required.
+     */
+    val hasTerminalResult: Boolean
+        get() = _result != null
+
     // ── Public API — replay ───────────────────────────────────────────────────
 
     /**
@@ -132,4 +150,49 @@ class EmittedSignalLedger {
         kind: DelegatedExecutionSignal.Kind,
         replayTimestampMs: Long = System.currentTimeMillis()
     ): DelegatedExecutionSignal? = getForReplay(kind)?.replayAt(replayTimestampMs)
+
+    /**
+     * Returns a **bounded replay copy** of the last recorded signal for [kind], applying
+     * terminal-state suppression.
+     *
+     * Differs from [replaySignal] in one key respect: if [hasTerminalResult] is `true`
+     * (a terminal [DelegatedExecutionSignal.Kind.RESULT] has been recorded) and [kind] is
+     * [DelegatedExecutionSignal.Kind.ACK] or [DelegatedExecutionSignal.Kind.PROGRESS],
+     * this method returns `null`.  Replaying pre-terminal signals after execution has
+     * already terminated would produce **stale participant influence toward V2** — V2 has
+     * already seen the RESULT; receiving ACK or PROGRESS after it would be out-of-order
+     * and semantically invalid.
+     *
+     * For [DelegatedExecutionSignal.Kind.RESULT] replay after terminal state this method
+     * behaves identically to [replaySignal] — replaying the terminal RESULT is safe and
+     * idempotent (same [DelegatedExecutionSignal.signalId] preserved).
+     *
+     * ## Recommended usage in recovery contexts
+     *
+     * Use [replayBounded] instead of [replaySignal] whenever replaying signals during a
+     * reconnect or resume sequence:
+     * ```kotlin
+     * // During reconnect recovery — safe replay with terminal-state bounding:
+     * val replayedAck = ledger.replayBounded(Kind.ACK)        // null if terminal
+     * val replayedProgress = ledger.replayBounded(Kind.PROGRESS)  // null if terminal
+     * val replayedResult = ledger.replayBounded(Kind.RESULT)  // always non-null if recorded
+     * ```
+     *
+     * @param kind              The [DelegatedExecutionSignal.Kind] to replay.
+     * @param replayTimestampMs Epoch-ms re-emission timestamp; defaults to the current
+     *                          wall clock.
+     * @return A bounded replay copy of the last signal of [kind], or `null` if:
+     *         - no signal of [kind] has been recorded yet, or
+     *         - [hasTerminalResult] is `true` and [kind] is [DelegatedExecutionSignal.Kind.ACK]
+     *           or [DelegatedExecutionSignal.Kind.PROGRESS] (stale after terminal state).
+     */
+    fun replayBounded(
+        kind: DelegatedExecutionSignal.Kind,
+        replayTimestampMs: Long = System.currentTimeMillis()
+    ): DelegatedExecutionSignal? {
+        if (hasTerminalResult && kind != DelegatedExecutionSignal.Kind.RESULT) {
+            return null
+        }
+        return replaySignal(kind, replayTimestampMs)
+    }
 }
