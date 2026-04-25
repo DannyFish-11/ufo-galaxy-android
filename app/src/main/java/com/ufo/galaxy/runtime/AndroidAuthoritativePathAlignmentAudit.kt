@@ -289,6 +289,60 @@ object AndroidAuthoritativePathAlignmentAudit {
             introducedPr = 65
         ),
 
+        // ── PR-4 (Android): Governance / acceptance / strategy artifact emission ────────────
+
+        BehaviorEntry(
+            behaviorId = "device_governance_report",
+            tier = BehaviorTier.CANONICAL_DEFAULT,
+            label = "Device governance report on service start",
+            description = "GalaxyConnectionService emits an initial device post-graduation " +
+                "governance report immediately after service start via sendDeviceGovernanceReport(). " +
+                "This gives V2's post-graduation governance and enforcement paths a structured " +
+                "Android-side baseline governance artifact. All dimensions start as UNKNOWN at " +
+                "initial report time — V2 can distinguish 'not yet observed' from 'regression " +
+                "detected'. Governance artifacts are canonical participant evidence: " +
+                "device_governance_compliant is authoritative ongoing-compliance evidence; " +
+                "violation artifacts feed V2 enforcement / escalation inputs.",
+            signalSemantics = SignalSemantics.CANONICAL_PARTICIPANT_EVIDENCE,
+            enforcedBy = "GalaxyConnectionService.sendDeviceGovernanceReport()",
+            introducedPr = 251
+        ),
+
+        BehaviorEntry(
+            behaviorId = "device_acceptance_report",
+            tier = BehaviorTier.CANONICAL_DEFAULT,
+            label = "Device acceptance report on service start",
+            description = "GalaxyConnectionService emits an initial device final-acceptance " +
+                "report immediately after service start via sendDeviceAcceptanceReport(). This " +
+                "gives V2's final acceptance / graduation gate paths a structured Android-side " +
+                "baseline acceptance artifact. All dimensions start as UNKNOWN at initial report " +
+                "time — V2 can distinguish 'not yet evidenced' from 'evidence gap detected'. " +
+                "Acceptance artifacts are canonical participant evidence: " +
+                "device_accepted_for_graduation is an authoritative graduation readiness signal.",
+            signalSemantics = SignalSemantics.CANONICAL_PARTICIPANT_EVIDENCE,
+            enforcedBy = "GalaxyConnectionService.sendDeviceAcceptanceReport()",
+            introducedPr = 251
+        ),
+
+        BehaviorEntry(
+            behaviorId = "device_strategy_report",
+            tier = BehaviorTier.CANONICAL_DEFAULT,
+            label = "Device strategy report on service start (advisory/observation-only)",
+            description = "GalaxyConnectionService emits an initial device program strategy / " +
+                "evolution posture report immediately after service start via " +
+                "sendDeviceStrategyReport(). This gives V2's program strategy / evolution " +
+                "control paths a structured Android-side baseline strategy posture artifact. " +
+                "Strategy artifacts are advisory/observation-only by default — V2 retains full " +
+                "orchestration authority over program strategy decisions. Risk artifacts inform " +
+                "V2 strategy decisions rather than blocking execution unilaterally.",
+            signalSemantics = SignalSemantics.OBSERVATION_SIGNAL,
+            enforcedBy = "GalaxyConnectionService.sendDeviceStrategyReport()",
+            deferralNote = "Strategy artifacts are advisory-only in this PR. Promotion to " +
+                "canonical participant evidence requires a dedicated V2-side policy decision " +
+                "in a future PR.",
+            introducedPr = 251
+        ),
+
         BehaviorEntry(
             behaviorId = "rollout_safe_defaults",
             tier = BehaviorTier.CANONICAL_DEFAULT,
