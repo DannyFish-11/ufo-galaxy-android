@@ -91,7 +91,7 @@ import org.junit.Test
  *  - hasTerminalResult is true after RESULT is recorded
  *  - replayBounded for ACK returns signal when no terminal result
  *  - replayBounded for PROGRESS returns signal when no terminal result
- *  - replayBounded for RESULT returns signal when no terminal result
+ *  - replayBounded for RESULT returns null when no prior recording
  *  - replayBounded for ACK returns null after terminal RESULT
  *  - replayBounded for PROGRESS returns null after terminal RESULT
  *  - replayBounded for RESULT returns non-null after terminal RESULT
@@ -674,9 +674,9 @@ class Pr66ContinuityRecoveryDurabilityTest {
     }
 
     @Test
-    fun `replayBounded for RESULT returns signal when no prior recording`() {
+    fun `replayBounded for RESULT returns null when no prior recording`() {
         val ledger = EmittedSignalLedger()
-        // No signals recorded — should return null (nothing to replay)
+        // No signals recorded — nothing to replay even for RESULT
         val replay = ledger.replayBounded(DelegatedExecutionSignal.Kind.RESULT, 2_000L)
         assertNull(replay)
     }
@@ -897,7 +897,9 @@ class Pr66ContinuityRecoveryDurabilityTest {
 
     @Test
     fun `RehydrateThenContinue carries localContext for V2 presentation`() {
-        // AC4: Android does NOT self-authorize; it presents context to V2 via RehydrateThenContinue
+        // AC4: Android does NOT self-authorize; it presents context to V2 via RehydrateThenContinue.
+        // Verify: the decision type is RehydrateThenContinue (not ResumeLocalExecution), confirming
+        // that Android defers the continuation decision to V2 rather than resuming autonomously.
         val owner = AndroidRecoveryParticipationOwner()
         val localContext = buildLocalContext()
         val decision = AndroidContinuityIntegration.ContinuityDecision.ProcessRecreationReattach(
@@ -910,10 +912,21 @@ class Pr66ContinuityRecoveryDurabilityTest {
                 recoveryAttemptKey = "flow-v2-3",
                 nowMs = 5_000L
             )
-        ) as LocalRecoveryDecision.RehydrateThenContinue
+        )
+        // Android must NOT produce ResumeLocalExecution (self-authorized continuation).
+        // It must produce RehydrateThenContinue, which carries context to present to V2.
+        assertFalse(
+            "Android must not self-authorize — must not return ResumeLocalExecution",
+            result is LocalRecoveryDecision.ResumeLocalExecution
+        )
+        assertTrue(
+            "Android must defer to V2 by returning RehydrateThenContinue",
+            result is LocalRecoveryDecision.RehydrateThenContinue
+        )
+        val rehydrate = result as LocalRecoveryDecision.RehydrateThenContinue
         // The localContext is present for V2 to inspect — Android does not decide continuation
-        assertNotNull(result.localContext)
-        assertEquals(localContext.flowId, result.localContext.flowId)
+        assertNotNull("localContext must be non-null for V2 to evaluate", rehydrate.localContext)
+        assertEquals(localContext.flowId, rehydrate.localContext.flowId)
     }
 
     @Test
