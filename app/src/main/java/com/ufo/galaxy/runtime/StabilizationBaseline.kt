@@ -1627,6 +1627,32 @@ object StabilizationBaseline {
                 "independently advanced the same task terminal state.",
             introducedPr = 64
         )
+    ) + listOf(
+
+        // ── PR-65: Android authoritative-path alignment audit ─────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-authoritative-path-alignment-audit",
+            displayName = "AndroidAuthoritativePathAlignmentAudit",
+            packagePath = "com.ufo.galaxy.runtime.AndroidAuthoritativePathAlignmentAudit",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-65 single machine-readable reference classifying all Android-side " +
+                "runtime behaviors into five authoritative-path tiers: CANONICAL_DEFAULT (7 entries, " +
+                "V2 treats as canonical participant evidence), COMPAT_ALLOWED (3 entries, bounded " +
+                "legacy compatibility still permitted), OBSERVATION_ONLY (3 entries, diagnostic " +
+                "surfaces only), DEPRECATED_BUT_LIVE (3 entries, explicitly gated, default-off), " +
+                "BLOCKED_RETIRED (2 entries, suppressed by AndroidCompatLegacyBlockingParticipant). " +
+                "SignalSemantics enum (CANONICAL_PARTICIPANT_EVIDENCE, OBSERVATION_SIGNAL, " +
+                "LEGACY_INFLUENCED, BLOCKED) maps each tier to a V2-consumable artifact classification. " +
+                "Provides isCanonicalDefault(), isDeprecatedOrBlocked(), deferredEntries(), " +
+                "bySignalSemantics(), and per-tier query helpers so reviewers can verify: " +
+                "(1) which behaviors are canonical vs. compat/legacy, " +
+                "(2) deprecated behaviors are default-off, " +
+                "(3) V2 can classify every Android-originated signal, " +
+                "(4) deferred cleanup is explicitly inventoried with retirement notes.",
+            introducedPr = 65
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
