@@ -2874,10 +2874,13 @@ class GalaxyConnectionService : Service() {
      * [GalaxyWebSocketClient] capabilities and metadata to reflect the **actual** runtime
      * readiness rather than an unconditional static list.
      *
+     * This is a `suspend` function and must be called from a coroutine (e.g., the
+     * `serviceScope.launch` block in [onStartCommand]).
+     *
      * Capability contract:
      * - `local_model_inference` is included in high-level capabilities **only** when the
      *   runtime reports [RuntimeStartResult.Success] or [RuntimeStartResult.Degraded] (i.e.
-     *   at least one inference component is operational).
+     *   at least one inference component is operational, checked via [RuntimeStartResult.isUsable]).
      * - When the runtime reports [RuntimeStartResult.Failure] (both components down) or file-
      *   system checks indicate missing/corrupted models, `local_model_inference` is **omitted**
      *   so the gateway can accurately determine local AI availability.

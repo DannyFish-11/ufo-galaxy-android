@@ -258,7 +258,7 @@ class InferenceCapabilityReportingTest {
             "local_ui_reasoning",
             "cross_device_coordination"
         )
-        if (result.isSuccess || result.isUsable) {
+        if (result.isUsable) {
             caps.add("local_model_inference")
         }
         return caps
