@@ -2870,18 +2870,39 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * 加载 MobileVLM 规划器和 SeeClick grounding 模型。
-     * 加载结果通过 setModelCapabilities 通知 gateway。
-     * Only advertises capabilities when both models are loaded.
+     * Starts the local inference runtime via [LocalInferenceRuntimeManager] and updates
+     * [GalaxyWebSocketClient] capabilities and metadata to reflect the **actual** runtime
+     * readiness rather than an unconditional static list.
      *
-     * Persists [localModelEnabled] to [AppSettings] and updates [GalaxyWebSocketClient]
-     * device metadata so the capability_report reflects the real model state.
+     * This is a `suspend` function and must be called from a coroutine (e.g., the
+     * `serviceScope.launch` block in [onStartCommand]).
+     *
+     * Capability contract:
+     * - `local_model_inference` is included in high-level capabilities **only** when the
+     *   runtime reports [RuntimeStartResult.Success] or [RuntimeStartResult.Degraded] (i.e.
+     *   at least one inference component is operational, checked via [RuntimeStartResult.isUsable]).
+     * - When the runtime reports [RuntimeStartResult.Failure] (both components down) or file-
+     *   system checks indicate missing/corrupted models, `local_model_inference` is **omitted**
+     *   so the gateway can accurately determine local AI availability.
+     * - `inference_runtime_state` in the device metadata carries the canonical string label
+     *   (`"running"` | `"degraded"` | `"unavailable"`) for observability and debugging.
+     * - `local_inference_ready` is `true` only when both planner and grounding are healthy.
+     *
+     * Model asset tracking is delegated to [ModelAssetManager]; [LocalInferenceRuntimeManager]
+     * is the sole authority for runtime lifecycle state.
      */
-    private fun loadModels() {
-        Log.i(TAG, "开始加载本地模型...")
-        val plannerLoaded = UFOGalaxyApplication.plannerService.loadModel()
-        val groundingLoaded = UFOGalaxyApplication.groundingService.loadModel()
-        Log.i(TAG, "模型加载完成: planner=$plannerLoaded grounding=$groundingLoaded")
+    private suspend fun loadModels() {
+        Log.i(TAG, "开始加载本地模型 (via LocalInferenceRuntimeManager)...")
+        val runtimeManager = UFOGalaxyApplication.localInferenceRuntimeManager
+        val startResult = runtimeManager.start()
+
+        val plannerLoaded = UFOGalaxyApplication.plannerService.isModelLoaded()
+        val groundingLoaded = UFOGalaxyApplication.groundingService.isModelLoaded()
+        Log.i(
+            TAG,
+            "模型加载完成: planner=$plannerLoaded grounding=$groundingLoaded " +
+                "runtimeResult=${startResult::class.simpleName}"
+        )
 
         val assetManager = UFOGalaxyApplication.modelAssetManager
         if (plannerLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
@@ -2889,30 +2910,40 @@ class GalaxyConnectionService : Service() {
         if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
         else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
 
-        // Only advertise low-level capabilities when all models are loaded.
+        // Low-level model capabilities are advertised only for components that are actually loaded.
         val lowLevelCaps = mutableListOf<String>()
         if (plannerLoaded) lowLevelCaps.add("local_planning")
         if (groundingLoaded) lowLevelCaps.add("local_grounding")
         webSocketClient.setModelCapabilities(lowLevelCaps)
 
-        // Persist actual model state and update metadata from AppSettings as the source
-        // of truth. `local_model_enabled` reflects whether the inference servers have loaded
-        // the models. `model_ready` (file-level readiness) is set by ReadinessChecker.checkAll()
-        // called in the onStartCommand coroutine after this method returns; we do not set it
-        // here to avoid a two-sources-of-truth conflict.
+        // Persist actual model state.
+        // `local_model_enabled` reflects whether the inference servers have loaded the models.
+        // `model_ready` (file-level readiness) is set by ReadinessChecker.checkAll() called
+        // after this method returns; we do not set it here to avoid a two-sources-of-truth conflict.
         val localModelEnabled = plannerLoaded && groundingLoaded
         val settings = UFOGalaxyApplication.appSettings
         settings.localModelEnabled = localModelEnabled
 
-        webSocketClient.setHighLevelCapabilities(
-            listOf(
-                "autonomous_goal_execution",
-                "local_task_planning",
-                "local_ui_reasoning",
-                "cross_device_coordination",
-                "local_model_inference"
-            )
+        // Honest high-level capability list: `local_model_inference` is included only when
+        // the runtime manager confirms at least one inference component is operational.
+        // A Failure result (both components down) must not claim local inference capability.
+        val highLevelCaps = mutableListOf(
+            "autonomous_goal_execution",
+            "local_task_planning",
+            "local_ui_reasoning",
+            "cross_device_coordination"
         )
+        if (startResult.isUsable) {
+            highLevelCaps.add("local_model_inference")
+        }
+        webSocketClient.setHighLevelCapabilities(highLevelCaps)
+
+        // Derive a human-readable runtime state label for observability.
+        val inferenceRuntimeState = when {
+            startResult.isSuccess -> "running"
+            startResult.isUsable -> "degraded"
+            else -> "unavailable"
+        }
         webSocketClient.setDeviceMetadata(
             mapOf(
                 "goal_execution_enabled" to settings.goalExecutionEnabled,
@@ -2922,21 +2953,29 @@ class GalaxyConnectionService : Service() {
                 "device_role" to settings.deviceRole,
                 "model_ready" to settings.modelReady,
                 "accessibility_ready" to settings.accessibilityReady,
-                "overlay_ready" to settings.overlayReady
+                "overlay_ready" to settings.overlayReady,
+                "inference_runtime_state" to inferenceRuntimeState,
+                "local_inference_ready" to localModelEnabled
             )
         )
-        Log.i(TAG, "已更新模型能力: lowLevel=$lowLevelCaps localModelEnabled=$localModelEnabled modelReady=${settings.modelReady}")
+        Log.i(
+            TAG,
+            "已更新模型能力: lowLevel=$lowLevelCaps highLevel=$highLevelCaps " +
+                "localModelEnabled=$localModelEnabled modelReady=${settings.modelReady} " +
+                "inferenceRuntimeState=$inferenceRuntimeState"
+        )
     }
 
     /**
-     * 卸载本地模型以释放设备内存。
+     * Stops both local inference runtimes via [LocalInferenceRuntimeManager] and releases
+     * device memory. The manager transitions to [ManagerState.Stopped] so that capability
+     * reporting on subsequent reconnects starts from a clean, honest baseline.
      */
     private fun unloadModels() {
-        UFOGalaxyApplication.plannerService.unloadModel()
-        UFOGalaxyApplication.groundingService.unloadModel()
+        UFOGalaxyApplication.localInferenceRuntimeManager.stop()
         UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
         UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
-        Log.i(TAG, "本地模型已卸载")
+        Log.i(TAG, "本地模型已卸载 (LocalInferenceRuntimeManager stopped)")
     }
     
     /**
