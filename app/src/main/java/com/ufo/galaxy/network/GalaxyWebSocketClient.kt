@@ -879,13 +879,17 @@ class GalaxyWebSocketClient(
             device_id = deviceId,
             supported_actions = allActions,
             version = "3.0",
+            // `local_model_inference` is intentionally absent from the fallback list.
+            // It is added by GalaxyConnectionService.loadModels() only after
+            // LocalInferenceRuntimeManager confirms the runtime is operational.
+            // Claiming it before runtime readiness is verified would produce a false
+            // capability advertisement on the initial connection handshake.
             capabilities = highLevelCapabilities.ifEmpty {
                 listOf(
                     "autonomous_goal_execution",
                     "local_task_planning",
                     "local_ui_reasoning",
-                    "cross_device_coordination",
-                    "local_model_inference"
+                    "cross_device_coordination"
                 )
             },
             metadata = mergedMetadata
