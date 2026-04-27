@@ -39,6 +39,10 @@ class InferenceCapabilityReportingTest {
     fun setUp() {
         val tmpDir = File(System.getProperty("java.io.tmpdir"), "cap_report_test_${System.nanoTime()}")
         tmpDir.mkdirs()
+        // Create stub model files so LocalInferenceRuntimeManager.checkModelFiles() passes.
+        File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
+        File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
+        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
         val assetManager = ModelAssetManager(tmpDir)
         planner = StubPlannerService()
         grounding = StubGroundingService()

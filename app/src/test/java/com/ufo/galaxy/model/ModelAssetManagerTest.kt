@@ -185,6 +185,7 @@ class ModelAssetManagerTest {
     fun `downloadSpecsForMissing returns empty list when models are READY`() {
         File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("weights")
         File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("param")
+        File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("bin")
         mam.verifyAll()
         val specs = mam.downloadSpecsForMissing()
         assertTrue("No specs when models are READY (only MISSING/CORRUPTED trigger download)", specs.isEmpty())
