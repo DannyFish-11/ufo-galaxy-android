@@ -287,6 +287,7 @@ class ModelProvisioningLifecycleTest {
     fun `downloadSpecsForMissing returns empty list when all models are loaded`() {
         mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
         mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
         val specs = mam.downloadSpecsForMissing()
         assertTrue("No specs when all models are LOADED", specs.isEmpty())
     }

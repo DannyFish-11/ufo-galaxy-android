@@ -87,6 +87,16 @@ class LocalInferenceRuntimeManager(
          * Entered via [enterSafeMode]; exited via [clearSafeMode] (then [restart]).
          */
         object SafeMode : ManagerState()
+
+        /**
+         * A prior health check detected one or more unhealthy components; the manager is
+         * actively stopping and re-starting the runtimes in an attempt to recover.
+         *
+         * Consumers that observe [RECOVERING][com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus.RECOVERING]
+         * should pause any queued inference requests until the state transitions back to
+         * [Running] or [Degraded], or falls through to [Failed].
+         */
+        object Recovering : ManagerState()
     }
 
     private val _state = MutableStateFlow<ManagerState>(ManagerState.Stopped)
@@ -198,6 +208,67 @@ class LocalInferenceRuntimeManager(
         GalaxyLogger.log(TAG, mapOf("event" to "inference_runtime_restart"))
         stop()
         return start()
+    }
+
+    /**
+     * Checks the current health of both runtimes and, if either is unhealthy, performs a
+     * controlled stop-then-start cycle to restore them.
+     *
+     * ## State transitions
+     * ```
+     * healthy:   (no change)              → returns RuntimeStartResult.Success immediately
+     * unhealthy: Running/Degraded/Failed
+     *           → Recovering
+     *           → Starting
+     *           → Running | Degraded | Failed
+     * ```
+     *
+     * ## Safe-mode interaction
+     * If the manager is already in [ManagerState.SafeMode], this call returns the same
+     * [RuntimeStartResult.Failure] that [start] would return; no recovery is attempted.
+     *
+     * @return [RuntimeStartResult.Success] when the runtime was already healthy (no action
+     *         taken), or the [RuntimeStartResult] from the recovery [start] attempt when a
+     *         restart was needed.
+     */
+    suspend fun recoverIfUnhealthy(): RuntimeStartResult {
+        if (isInSafeMode) {
+            val reason = "Cannot recover: runtime is in safe mode — call clearSafeMode() first"
+            Log.w(TAG, reason)
+            return RuntimeStartResult.Failure(RuntimeStartResult.StartStage.HEALTH_CHECK, reason)
+        }
+
+        val snapshot = healthCheck()
+        if (snapshot.isFullyHealthy) {
+            Log.d(TAG, "recoverIfUnhealthy: runtime is healthy, no recovery needed")
+            return RuntimeStartResult.Success
+        }
+
+        Log.w(
+            TAG,
+            "recoverIfUnhealthy: unhealthy components detected " +
+                "(planner=${snapshot.plannerHealth}, grounding=${snapshot.groundingHealth}) — recovering"
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "inference_runtime_recover_start",
+                "plannerHealth" to snapshot.plannerHealth.name,
+                "groundingHealth" to snapshot.groundingHealth.name
+            )
+        )
+
+        // Unload both runtimes and signal the Recovering state before attempting restart.
+        plannerService.unloadModel()
+        groundingService.unloadModel()
+        _state.value = ManagerState.Recovering
+
+        val result = start()
+        GalaxyLogger.log(
+            TAG,
+            mapOf("event" to "inference_runtime_recover_done", "outcome" to result::class.simpleName)
+        )
+        return result
     }
 
     // ── Per-component start ───────────────────────────────────────────────────

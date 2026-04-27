@@ -114,6 +114,7 @@ class DegradedPlannerService(
             when (state) {
                 is LocalInferenceRuntimeManager.ManagerState.Stopped -> "runtime not started"
                 is LocalInferenceRuntimeManager.ManagerState.Starting -> "runtime is starting"
+                is LocalInferenceRuntimeManager.ManagerState.Recovering -> "runtime is recovering"
                 is LocalInferenceRuntimeManager.ManagerState.Failed -> "runtime failed to start: ${state.reason}"
                 is LocalInferenceRuntimeManager.ManagerState.SafeMode -> "runtime is in safe mode"
                 is LocalInferenceRuntimeManager.ManagerState.Degraded -> "runtime degraded: ${state.reason}"

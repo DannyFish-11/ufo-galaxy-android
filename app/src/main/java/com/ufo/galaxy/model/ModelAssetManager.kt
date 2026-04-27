@@ -55,6 +55,13 @@ class ModelAssetManager(val modelsDir: File) {
         const val MODEL_ID_MOBILEVLM = "mobilevlm"
         const val MODEL_ID_SEECLICK = "seeclick"
 
+        /**
+         * Logical identifier for the SeeClick NCNN binary weight file.
+         * Tracked separately from [MODEL_ID_SEECLICK] (the param file) so that the registry
+         * can independently verify presence, checksum, and download status of both NCNN files.
+         */
+        const val MODEL_ID_SEECLICK_BIN = "seeclick_bin"
+
         /** Sub-directory name under [Context.getFilesDir] for all model files. */
         const val MODELS_DIR = "models"
 
@@ -107,6 +114,11 @@ class ModelAssetManager(val modelsDir: File) {
             id = MODEL_ID_SEECLICK,
             fileName = SEECLICK_PARAM_FILE,
             expectedSha256 = SEECLICK_SHA256
+        ),
+        MODEL_ID_SEECLICK_BIN to ModelInfo(
+            id = MODEL_ID_SEECLICK_BIN,
+            fileName = SEECLICK_BIN_FILE,
+            expectedSha256 = SEECLICK_BIN_SHA256
         )
     )
 
@@ -216,8 +228,9 @@ class ModelAssetManager(val modelsDir: File) {
      * [ModelStatus.MISSING] or [ModelStatus.CORRUPTED] **and** has a non-empty download URL
      * configured in the companion object.
      *
-     * The returned list may contain up to three entries (one GGUF + two NCNN files).
-     * If no download URLs are configured, the list is empty and no network access will occur.
+     * The param and binary SeeClick files are tracked and checked independently: if only the
+     * binary file is missing, only its spec is returned. If no download URLs are configured,
+     * the list is empty and no network access will occur.
      */
     fun downloadSpecsForMissing(): List<ModelDownloader.DownloadSpec> {
         val specs = mutableListOf<ModelDownloader.DownloadSpec>()
@@ -234,22 +247,25 @@ class ModelAssetManager(val modelsDir: File) {
                 )
             }
         }
-        val scStatus = getStatus(MODEL_ID_SEECLICK)
-        if (scStatus == ModelStatus.MISSING || scStatus == ModelStatus.CORRUPTED) {
+        val scParamStatus = getStatus(MODEL_ID_SEECLICK)
+        if (scParamStatus == ModelStatus.MISSING || scParamStatus == ModelStatus.CORRUPTED) {
             if (SEECLICK_PARAM_DOWNLOAD_URL.isNotEmpty()) {
                 specs.add(
                     ModelDownloader.DownloadSpec(
-                        modelId = "${MODEL_ID_SEECLICK}_param",
+                        modelId = MODEL_ID_SEECLICK,
                         url = SEECLICK_PARAM_DOWNLOAD_URL,
                         fileName = SEECLICK_PARAM_FILE,
                         expectedSha256 = SEECLICK_SHA256
                     )
                 )
             }
+        }
+        val scBinStatus = getStatus(MODEL_ID_SEECLICK_BIN)
+        if (scBinStatus == ModelStatus.MISSING || scBinStatus == ModelStatus.CORRUPTED) {
             if (SEECLICK_BIN_DOWNLOAD_URL.isNotEmpty()) {
                 specs.add(
                     ModelDownloader.DownloadSpec(
-                        modelId = "${MODEL_ID_SEECLICK}_bin",
+                        modelId = MODEL_ID_SEECLICK_BIN,
                         url = SEECLICK_BIN_DOWNLOAD_URL,
                         fileName = SEECLICK_BIN_FILE,
                         expectedSha256 = SEECLICK_BIN_SHA256
@@ -258,6 +274,36 @@ class ModelAssetManager(val modelsDir: File) {
             }
         }
         return specs
+    }
+
+    /**
+     * Deletes orphaned and incomplete files from [modelsDir].
+     *
+     * The following files are removed:
+     * - Any file with a `.tmp` extension (incomplete downloads).
+     * - Any file that is not listed in the model registry (unrecognised / stale assets).
+     *
+     * This method performs synchronous disk I/O. Call it from a background thread or
+     * coroutine (e.g., on [kotlinx.coroutines.Dispatchers.IO]) when the inference runtimes
+     * are stopped.
+     *
+     * @return The number of files deleted.
+     */
+    fun cleanupStaleFiles(): Int {
+        val knownFileNames = registry.values.map { it.fileName }.toSet()
+        var deleted = 0
+        modelsDir.listFiles()?.forEach { file ->
+            if (!file.isFile) return@forEach  // skip directories
+            val isStale = file.name.endsWith(".tmp") || file.name !in knownFileNames
+            if (isStale && file.delete()) {
+                deleted++
+                Log.i(TAG, "Cleaned up stale file: ${file.name}")
+            }
+        }
+        if (deleted > 0) {
+            Log.i(TAG, "cleanupStaleFiles: removed $deleted file(s) from ${modelsDir.absolutePath}")
+        }
+        return deleted
     }
 
     private fun sha256(file: File): String {
