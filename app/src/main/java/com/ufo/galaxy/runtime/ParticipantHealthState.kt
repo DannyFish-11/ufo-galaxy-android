@@ -84,6 +84,15 @@ enum class ParticipantHealthState(val wireValue: String) {
     FAILED("failed"),
 
     /**
+     * The device's execution environment is actively starting up (model loading, warmup in
+     * progress).  This is distinct from [UNKNOWN] (pre-assessment) and from [RECOVERING]
+     * (post-failure).  The formation coordinator must not dispatch tasks to a STARTING
+     * participant; no capability advertisement is permitted until the state resolves to
+     * [HEALTHY] or [DEGRADED].
+     */
+    STARTING("starting"),
+
+    /**
      * Health has not yet been assessed.  This is the initial state before the first health check
      * or before the device has completed its startup readiness evaluation.  The formation
      * coordinator should treat UNKNOWN devices conservatively (e.g. equivalent to DEGRADED
@@ -119,5 +128,12 @@ enum class ParticipantHealthState(val wireValue: String) {
          */
         fun isCompromised(state: ParticipantHealthState): Boolean =
             state == DEGRADED || state == RECOVERING || state == FAILED
+
+        /**
+         * Returns `true` when [state] indicates the participant must not advertise any
+         * capability to the control plane.  Covers pre-ready and failure states.
+         */
+        fun isCapabilityAdvertisementBlocked(state: ParticipantHealthState): Boolean =
+            state == STARTING || state == RECOVERING || state == FAILED || state == UNKNOWN
     }
 }

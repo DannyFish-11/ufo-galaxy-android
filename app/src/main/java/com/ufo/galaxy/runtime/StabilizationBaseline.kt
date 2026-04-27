@@ -1653,6 +1653,55 @@ object StabilizationBaseline {
                 "(4) deferred cleanup is explicitly inventoried with retirement notes.",
             introducedPr = 65
         )
+    ) + listOf(
+
+        // ── PR-14 (formal capability declaration): capability honesty and recovery semantics ─
+
+        BaselineSurfaceEntry(
+            surfaceId = "formal-participant-lifecycle-state",
+            displayName = "FormalParticipantLifecycleState",
+            packagePath = "com.ufo.galaxy.runtime.FormalParticipantLifecycleState",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-14 unified five-state participant lifecycle model (STARTING, READY, " +
+                "DEGRADED, RECOVERING, UNAVAILABLE_FAILED) that bridges the internal state machinery " +
+                "to outward-facing capability advertisement and protocol consistency contracts. " +
+                "Provides fromManagerState(), fromHealthState(), capabilityAdvertisementAllowed(), " +
+                "inferenceCapabilityAllowed(), and requiresCapabilityReAdvertise() so every layer " +
+                "uses the same canonical capability gate rather than ad-hoc state checks.",
+            introducedPr = 14
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "capability-readvertise-contract",
+            displayName = "CapabilityReadvertiseContract",
+            packagePath = "com.ufo.galaxy.runtime.CapabilityReadvertiseContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-14 formal post-recovery capability re-advertisement contract. " +
+                "Defines ReadvertiseAction (READVERTISE_FULL, READVERTISE_BASE_ONLY, " +
+                "SUPPRESS_UNTIL_STABLE, BLOCK_READVERTISE), ReadvertiseDecision (binding action + " +
+                "allowedCapabilities + rationale), decide() (state → decision), " +
+                "requiresReRegistration() (state transition → re-registration gate), and " +
+                "heartbeatMustMatchReadvertise() (heartbeat consistency enforcement). " +
+                "Closes the gap between recovery completion and control-plane capability alignment.",
+            introducedPr = 14
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "recovery-capability-alignment-guard",
+            displayName = "RecoveryCapabilityAlignmentGuard",
+            packagePath = "com.ufo.galaxy.runtime.RecoveryCapabilityAlignmentGuard",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-14 post-recovery capability honesty guard. Validates that advertised " +
+                "capabilities are aligned with FormalParticipantLifecycleState and " +
+                "LocalIntelligenceCapabilityStatus truth. Provides checkAlignment() (returns " +
+                "AlignmentResult with violations list), computeAllowedCapabilities() (authoritative " +
+                "capability set for any state combination), isAdvertisementBlocked(), " +
+                "inferenceCapabilityPermitted(), and requiresPostRecoveryReRegistration() " +
+                "(returns ReRegistrationRequirement when control-plane re-registration is needed). " +
+                "Ensures the control plane never sees stale capability claims after recovery.",
+            introducedPr = 14
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
