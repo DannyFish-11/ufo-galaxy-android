@@ -43,10 +43,11 @@ enum class LocalIntelligenceCapabilityStatus(val wireValue: String) {
 
     /**
      * No inference runtime is operational due to an explicit management decision (safe mode,
-     * clean shutdown, or pre-start state).
+     * clean shutdown, or pre-start state) or because the startup pipeline failed.
      * The [LocalInferenceRuntimeManager] is in [LocalInferenceRuntimeManager.ManagerState.Stopped],
      * [LocalInferenceRuntimeManager.ManagerState.Starting],
-     * [LocalInferenceRuntimeManager.ManagerState.Failed], or
+     * [LocalInferenceRuntimeManager.ManagerState.Failed],
+     * [LocalInferenceRuntimeManager.ManagerState.FailedStartup], or
      * [LocalInferenceRuntimeManager.ManagerState.SafeMode].
      * Local model inference is completely unavailable.
      */
@@ -81,25 +82,31 @@ enum class LocalIntelligenceCapabilityStatus(val wireValue: String) {
          * Derives a [LocalIntelligenceCapabilityStatus] from the current
          * [LocalInferenceRuntimeManager.ManagerState].
          *
-         * | ManagerState  | Returned status  |
-         * |---------------|------------------|
-         * | `Running`     | [ACTIVE]         |
-         * | `Degraded`    | [DEGRADED]       |
-         * | `Recovering`  | [RECOVERING]     |
-         * | `Stopped`     | [DISABLED]       |
-         * | `Starting`    | [DISABLED]       |
-         * | `Failed`      | [DISABLED]       |
-         * | `SafeMode`    | [DISABLED]       |
+         * | ManagerState      | Returned status  |
+         * |-------------------|------------------|
+         * | `Running`         | [ACTIVE]         |
+         * | `Degraded`        | [DEGRADED]       |
+         * | `PartialReady`    | [DEGRADED]       |
+         * | `Recovering`      | [RECOVERING]     |
+         * | `Unavailable`     | [UNAVAILABLE]    |
+         * | `Stopped`         | [DISABLED]       |
+         * | `Starting`        | [DISABLED]       |
+         * | `Failed`          | [DISABLED]       |
+         * | `FailedStartup`   | [DISABLED]       |
+         * | `SafeMode`        | [DISABLED]       |
          */
         fun from(state: LocalInferenceRuntimeManager.ManagerState): LocalIntelligenceCapabilityStatus =
             when (state) {
-                is LocalInferenceRuntimeManager.ManagerState.Running    -> ACTIVE
-                is LocalInferenceRuntimeManager.ManagerState.Degraded   -> DEGRADED
-                is LocalInferenceRuntimeManager.ManagerState.Recovering -> RECOVERING
-                is LocalInferenceRuntimeManager.ManagerState.Stopped    -> DISABLED
-                is LocalInferenceRuntimeManager.ManagerState.Starting   -> DISABLED
-                is LocalInferenceRuntimeManager.ManagerState.Failed     -> DISABLED
-                is LocalInferenceRuntimeManager.ManagerState.SafeMode   -> DISABLED
+                is LocalInferenceRuntimeManager.ManagerState.Running       -> ACTIVE
+                is LocalInferenceRuntimeManager.ManagerState.Degraded      -> DEGRADED
+                is LocalInferenceRuntimeManager.ManagerState.PartialReady  -> DEGRADED
+                is LocalInferenceRuntimeManager.ManagerState.Recovering    -> RECOVERING
+                is LocalInferenceRuntimeManager.ManagerState.Unavailable   -> UNAVAILABLE
+                is LocalInferenceRuntimeManager.ManagerState.Stopped       -> DISABLED
+                is LocalInferenceRuntimeManager.ManagerState.Starting      -> DISABLED
+                is LocalInferenceRuntimeManager.ManagerState.Failed        -> DISABLED
+                is LocalInferenceRuntimeManager.ManagerState.FailedStartup -> DISABLED
+                is LocalInferenceRuntimeManager.ManagerState.SafeMode      -> DISABLED
             }
 
         /**

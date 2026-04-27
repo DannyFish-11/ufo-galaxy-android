@@ -118,11 +118,11 @@ class LocalIntelligenceRuntimeRegressionTest {
     }
 
     @Test
-    fun `stop from Failed transitions back to Stopped`() = runBlocking {
+    fun `stop from FailedStartup transitions back to Stopped`() = runBlocking {
         planner.warmupSucceeds = false
         grounding.warmupSucceeds = false
         manager.start()
-        assertTrue("Pre-condition: must be Failed", manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue("Pre-condition: must be FailedStartup", manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
 
         manager.stop()
         assertTrue(
@@ -174,13 +174,13 @@ class LocalIntelligenceRuntimeRegressionTest {
     }
 
     @Test
-    fun `total failure transitions to Failed not Degraded`() = runBlocking {
+    fun `total failure transitions to FailedStartup not Degraded`() = runBlocking {
         planner.warmupSucceeds = false
         grounding.warmupSucceeds = false
         manager.start()
         assertTrue(
-            "Total failure must produce Failed (unusable) — not Degraded",
-            manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed
+            "Total failure must produce FailedStartup (unusable) — not Degraded",
+            manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup
         )
     }
 
@@ -216,12 +216,12 @@ class LocalIntelligenceRuntimeRegressionTest {
     // ── 3. Failure / recovery path basics ────────────────────────────────────
 
     @Test
-    fun `restart from Failed state succeeds when services recover`() = runBlocking {
+    fun `restart from FailedStartup state succeeds when services recover`() = runBlocking {
         // First start fails
         planner.warmupSucceeds = false
         grounding.warmupSucceeds = false
         manager.start()
-        assertTrue("Pre-condition: must be Failed", manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue("Pre-condition: must be FailedStartup", manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
 
         // Services recover
         planner.warmupSucceeds = true

@@ -94,9 +94,69 @@ class LocalInferenceRuntimeManager(
          *
          * Consumers that observe [RECOVERING][com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus.RECOVERING]
          * should pause any queued inference requests until the state transitions back to
-         * [Running] or [Degraded], or falls through to [Failed].
+         * [Running] or [Degraded], or falls through to [FailedStartup].
          */
         object Recovering : ManagerState()
+
+        /**
+         * The runtime startup pipeline failed. This is a **startup-specific** failure,
+         * distinct from a post-startup crash or safe-mode block.
+         *
+         * [reason] describes the failure cause (e.g. "Model files not ready: 'mobilevlm'=MISSING").
+         * [stage] identifies the startup phase at which the pipeline stopped.
+         *
+         * ## Recovery
+         * Call [restart] after resolving the underlying issue (e.g., restore model files or
+         * bring the inference endpoint back online), or call [enterSafeMode] to block all
+         * further attempts until the issue is manually acknowledged.
+         *
+         * ## Distinction from [Failed]
+         * [FailedStartup] is emitted by the [start] pipeline (model-file check, warmup phase).
+         * [Failed] is reserved for failures that occur **after** a successful startup
+         * (e.g., mid-run process crash detected by an external monitor).
+         */
+        data class FailedStartup(
+            val reason: String,
+            val stage: RuntimeStartResult.StartStage
+        ) : ManagerState()
+
+        /**
+         * The runtime is partially initialised: [completedComponents] have finished their
+         * warmup successfully, but [pendingComponents] are still being brought online.
+         *
+         * This is a **transitional state** emitted during [start] after the first component
+         * passes its warmup but before all components are confirmed healthy. Consumers
+         * observing this state should defer inference requests until the state resolves to
+         * [Running] or [Degraded].
+         *
+         * @property completedComponents Names of runtime components that have started.
+         * @property pendingComponents   Names of runtime components still starting up.
+         */
+        data class PartialReady(
+            val completedComponents: List<String>,
+            val pendingComponents: List<String>
+        ) : ManagerState()
+
+        /**
+         * The runtime was previously operational but has become **transiently unavailable**
+         * due to an unexpected failure (e.g., OOM kill, process crash) detected by a health
+         * check, **before** a recovery cycle has been initiated.
+         *
+         * ## Distinction from [FailedStartup]
+         * [Unavailable] is emitted after a confirmed crash of a *previously healthy* runtime,
+         * not during the initial startup pipeline.
+         *
+         * ## Distinction from [Recovering]
+         * [Unavailable] is emitted immediately on crash/health-failure detection.
+         * Once [recoverIfUnhealthy] begins its stop-then-start cycle, the state advances to
+         * [Recovering].
+         *
+         * Consumers should treat this as a transient signal and pause inference until the
+         * state resolves to [Running], [Degraded], or [FailedStartup].
+         *
+         * @property reason Human-readable description of why the runtime became unavailable.
+         */
+        data class Unavailable(val reason: String) : ManagerState()
     }
 
     private val _state = MutableStateFlow<ManagerState>(ManagerState.Stopped)
@@ -144,13 +204,24 @@ class LocalInferenceRuntimeManager(
         // Step 1: model file readiness check
         val fileResult = checkModelFiles()
         if (fileResult != null) {
-            _state.value = ManagerState.Failed(fileResult.message)
-            GalaxyLogger.log(TAG, mapOf("event" to "inference_runtime_failed", "reason" to fileResult.message))
+            _state.value = ManagerState.FailedStartup(fileResult.message, fileResult.stage)
+            GalaxyLogger.log(TAG, mapOf("event" to "inference_runtime_failed_startup", "reason" to fileResult.message))
             return fileResult
         }
 
-        // Step 2: warm up each runtime independently
+        // Step 2a: warm up the planner runtime first
         val plannerResult = startPlanner()
+
+        // Emit PartialReady once the planner is up; grounding is still starting.
+        if (plannerResult.isSuccess) {
+            _state.value = ManagerState.PartialReady(
+                completedComponents = listOf("planner"),
+                pendingComponents = listOf("grounding")
+            )
+            GalaxyLogger.log(TAG, mapOf("event" to "inference_runtime_partial_ready", "completed" to "planner"))
+        }
+
+        // Step 2b: warm up the grounding runtime
         val groundingResult = startGrounding()
 
         // Step 3: take a health snapshot and derive manager state
@@ -172,10 +243,10 @@ class LocalInferenceRuntimeManager(
                 Log.w(TAG, "Inference runtimes started in degraded state: ${combinedResult.message}")
             }
             is RuntimeStartResult.Failure -> {
-                _state.value = ManagerState.Failed(combinedResult.message)
+                _state.value = ManagerState.FailedStartup(combinedResult.message, combinedResult.stage)
                 GalaxyLogger.log(
                     TAG,
-                    mapOf("event" to "inference_runtime_failed", "reason" to combinedResult.message)
+                    mapOf("event" to "inference_runtime_failed_startup", "reason" to combinedResult.message)
                 )
                 Log.e(TAG, "Inference runtimes failed to start: ${combinedResult.message}")
             }
@@ -257,6 +328,12 @@ class LocalInferenceRuntimeManager(
                 "groundingHealth" to snapshot.groundingHealth.name
             )
         )
+
+        // Signal Unavailable immediately on crash detection, before any recovery work begins.
+        val unavailableReason =
+            "planner=${snapshot.plannerHealth}, grounding=${snapshot.groundingHealth}"
+        _state.value = ManagerState.Unavailable(unavailableReason)
+        GalaxyLogger.log(TAG, mapOf("event" to "inference_runtime_unavailable", "reason" to unavailableReason))
 
         // Unload both runtimes and signal the Recovering state before attempting restart.
         plannerService.unloadModel()

@@ -175,8 +175,8 @@ class LocalInferenceRuntimeRecycleTest {
 
         assertFalse("Failed recovery must not return isSuccess", result.isSuccess)
         assertFalse("Failed recovery must not return isUsable", result.isUsable)
-        assertTrue("State must be Failed after unsuccessful recovery",
-            manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue("State must be FailedStartup after unsuccessful recovery",
+            manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
     }
 
     // ── recoverIfUnhealthy: safe-mode interaction ─────────────────────────────
@@ -368,8 +368,8 @@ class LocalInferenceRuntimeRecycleTest {
         assertTrue("Failure must be at MODEL_FILES stage",
             result is RuntimeStartResult.Failure &&
                 result.stage == RuntimeStartResult.StartStage.MODEL_FILES)
-        assertTrue("State must be Failed when model files are missing",
-            bareManager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue("State must be FailedStartup when model files are missing",
+            bareManager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
     }
 
     @Test
