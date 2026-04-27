@@ -93,11 +93,17 @@ class ModelAssetManager(val modelsDir: File) {
 
         /**
          * Remote download URLs for each model file.
-         * Set to a non-empty string to enable automatic download when files are missing.
-         * Leave empty to require manual installation of model files.
+         *
+         * These constants are retained for direct reference and must remain aligned with the
+         * [ModelSource.HuggingFace] entries in [ModelManifest.forKnownModel]. The canonical
+         * source of truth for download URLs in provisioning code is the manifest; these
+         * constants serve as documentation anchors and fallbacks only.
+         *
+         * **Alignment requirement**: [MOBILEVLM_DOWNLOAD_URL] must resolve to a file whose
+         * local name matches [MOBILEVLM_FILE].
          */
         const val MOBILEVLM_DOWNLOAD_URL: String =
-            "https://huggingface.co/ZiangWu/MobileVLM_V2-1.7B-GGUF/resolve/main/mobilevlm-v2-1.7b.gguf"
+            "https://huggingface.co/ZiangWu/MobileVLM_V2-1.7B-GGUF/resolve/main/mobilevlm-v2-1.7b.Q4_K_M.gguf"
         const val SEECLICK_PARAM_DOWNLOAD_URL: String =
             "https://huggingface.co/cckevinn/SeeClick/resolve/main/ncnn/seeclick.ncnn.param"
         const val SEECLICK_BIN_DOWNLOAD_URL: String =
@@ -225,53 +231,36 @@ class ModelAssetManager(val modelsDir: File) {
 
     /**
      * Returns [ModelDownloader.DownloadSpec] entries for every model file that is currently
-     * [ModelStatus.MISSING] or [ModelStatus.CORRUPTED] **and** has a non-empty download URL
-     * configured in the companion object.
+     * [ModelStatus.MISSING] or [ModelStatus.CORRUPTED] **and** has a resolvable remote source
+     * declared in its [ModelManifest].
+     *
+     * The canonical download URL and checksum are derived exclusively from the model's
+     * [ModelManifest] (via [ModelManifest.forKnownModel]), making the manifest the single
+     * source of truth. Models without a manifest, or whose manifest source is a
+     * [ModelSource.LocalPath], are silently skipped (no download needed).
      *
      * The param and binary SeeClick files are tracked and checked independently: if only the
-     * binary file is missing, only its spec is returned. If no download URLs are configured,
-     * the list is empty and no network access will occur.
+     * binary file is missing, only its spec is returned.
      */
     fun downloadSpecsForMissing(): List<ModelDownloader.DownloadSpec> {
         val specs = mutableListOf<ModelDownloader.DownloadSpec>()
-        val vlmStatus = getStatus(MODEL_ID_MOBILEVLM)
-        if (vlmStatus == ModelStatus.MISSING || vlmStatus == ModelStatus.CORRUPTED) {
-            if (MOBILEVLM_DOWNLOAD_URL.isNotEmpty()) {
-                specs.add(
-                    ModelDownloader.DownloadSpec(
-                        modelId = MODEL_ID_MOBILEVLM,
-                        url = MOBILEVLM_DOWNLOAD_URL,
-                        fileName = MOBILEVLM_FILE,
-                        expectedSha256 = MOBILEVLM_SHA256
-                    )
-                )
+        for (info in registry.values) {
+            if (info.status != ModelStatus.MISSING && info.status != ModelStatus.CORRUPTED) continue
+            val manifest = ModelManifest.forKnownModel(info.id) ?: continue
+            val url: String = when (val src = manifest.source) {
+                is ModelSource.HuggingFace -> src.downloadUrl
+                is ModelSource.CustomUrl   -> src.url
+                is ModelSource.LocalPath   -> continue  // local path: no download required
+                null                       -> continue  // no source configured
             }
-        }
-        val scParamStatus = getStatus(MODEL_ID_SEECLICK)
-        if (scParamStatus == ModelStatus.MISSING || scParamStatus == ModelStatus.CORRUPTED) {
-            if (SEECLICK_PARAM_DOWNLOAD_URL.isNotEmpty()) {
-                specs.add(
-                    ModelDownloader.DownloadSpec(
-                        modelId = MODEL_ID_SEECLICK,
-                        url = SEECLICK_PARAM_DOWNLOAD_URL,
-                        fileName = SEECLICK_PARAM_FILE,
-                        expectedSha256 = SEECLICK_SHA256
-                    )
+            specs.add(
+                ModelDownloader.DownloadSpec(
+                    modelId = info.id,
+                    url = url,
+                    fileName = info.fileName,
+                    expectedSha256 = manifest.checksum
                 )
-            }
-        }
-        val scBinStatus = getStatus(MODEL_ID_SEECLICK_BIN)
-        if (scBinStatus == ModelStatus.MISSING || scBinStatus == ModelStatus.CORRUPTED) {
-            if (SEECLICK_BIN_DOWNLOAD_URL.isNotEmpty()) {
-                specs.add(
-                    ModelDownloader.DownloadSpec(
-                        modelId = MODEL_ID_SEECLICK_BIN,
-                        url = SEECLICK_BIN_DOWNLOAD_URL,
-                        fileName = SEECLICK_BIN_FILE,
-                        expectedSha256 = SEECLICK_BIN_SHA256
-                    )
-                )
-            }
+            )
         }
         return specs
     }
@@ -294,6 +283,18 @@ class ModelAssetManager(val modelsDir: File) {
             val file = File(modelsDir, info.fileName)
             if (file.isFile) file.length() else 0L
         }
+
+    /**
+     * Returns true when [modelsDir] has at least [requiredBytes] of usable free space available.
+     *
+     * The provisioning pipeline calls this before starting a download so that a shortage can
+     * be addressed (via [evictForStorage]) rather than failing mid-download with a disk-full
+     * error. A null or non-positive [requiredBytes] value always returns true.
+     */
+    fun hasEnoughStorageFor(requiredBytes: Long?): Boolean {
+        if (requiredBytes == null || requiredBytes <= 0L) return true
+        return modelsDir.usableSpace >= requiredBytes
+    }
 
     /**
      * Evicts [ModelStatus.READY] (not [ModelStatus.LOADED]) models from disk until

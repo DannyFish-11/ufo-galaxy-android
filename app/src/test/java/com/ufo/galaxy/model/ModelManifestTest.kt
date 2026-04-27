@@ -243,4 +243,47 @@ class ModelManifestTest {
         assertTrue("Reason must mention actual runtime version", result.reason.contains("1.0"))
         assertTrue("Reason must mention minimum required version", result.reason.contains("3.0"))
     }
+
+    // ── minDiskSpaceBytes ─────────────────────────────────────────────────────
+
+    @Test
+    fun `mobilevlm manifest has positive minDiskSpaceBytes`() {
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_MOBILEVLM)!!
+        assertNotNull("mobilevlm manifest must declare minDiskSpaceBytes", manifest.minDiskSpaceBytes)
+        assertTrue("mobilevlm minDiskSpaceBytes must be positive", manifest.minDiskSpaceBytes!! > 0L)
+    }
+
+    @Test
+    fun `seeclick manifest has positive minDiskSpaceBytes`() {
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK)!!
+        assertNotNull("seeclick manifest must declare minDiskSpaceBytes", manifest.minDiskSpaceBytes)
+        assertTrue("seeclick minDiskSpaceBytes must be positive", manifest.minDiskSpaceBytes!! > 0L)
+    }
+
+    @Test
+    fun `seeclick_bin manifest has positive minDiskSpaceBytes`() {
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK_BIN)!!
+        assertNotNull("seeclick_bin manifest must declare minDiskSpaceBytes", manifest.minDiskSpaceBytes)
+        assertTrue("seeclick_bin minDiskSpaceBytes must be positive", manifest.minDiskSpaceBytes!! > 0L)
+    }
+
+    @Test
+    fun `mobilevlm minDiskSpaceBytes is larger than seeclick minDiskSpaceBytes`() {
+        val vlmBytes = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_MOBILEVLM)!!.minDiskSpaceBytes!!
+        val scBytes = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK)!!.minDiskSpaceBytes!!
+        assertTrue(
+            "MobileVLM (GGUF ~1.2 GB) must declare more disk space than SeeClick param (~50 MB)",
+            vlmBytes > scBytes
+        )
+    }
+
+    @Test
+    fun `manifest with null minDiskSpaceBytes compiles and defaults to null`() {
+        val manifest = ModelManifest(
+            modelId = "test",
+            modelVersion = "1.0",
+            runtimeType = ModelManifest.RuntimeType.UNKNOWN
+        )
+        assertNull("Default minDiskSpaceBytes must be null", manifest.minDiskSpaceBytes)
+    }
 }
