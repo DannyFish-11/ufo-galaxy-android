@@ -277,6 +277,67 @@ class ModelAssetManager(val modelsDir: File) {
     }
 
     /**
+     * Returns the model file on disk for [modelId], or null if [modelId] is unrecognised.
+     * Does not check whether the file exists.
+     */
+    fun fileFor(modelId: String): File? =
+        registry[modelId]?.let { File(modelsDir, it.fileName) }
+
+    /**
+     * Returns the total number of bytes consumed by all recognised model files currently
+     * present in [modelsDir]. Temporary (`.tmp`) files are excluded.
+     *
+     * Performs synchronous disk I/O; call from a background thread or coroutine.
+     */
+    fun storageUsageBytes(): Long =
+        registry.values.sumOf { info ->
+            val file = File(modelsDir, info.fileName)
+            if (file.isFile) file.length() else 0L
+        }
+
+    /**
+     * Evicts [ModelStatus.READY] (not [ModelStatus.LOADED]) models from disk until
+     * [requiredBytes] of free space is available in [modelsDir] or all evictable models
+     * have been removed.
+     *
+     * Models are evicted in ascending order of parameter count (smallest first), so the
+     * highest-value assets are retained the longest. [ModelStatus.LOADED] models are never
+     * evicted because they are in active use by the inference runtime.
+     *
+     * @param requiredBytes  Target free-space threshold in bytes.
+     * @return               IDs of the models that were removed.
+     */
+    fun evictForStorage(requiredBytes: Long): List<String> {
+        // Identify evictable models sorted smallest-first.
+        val evictable = registry.values
+            .filter { it.status == ModelStatus.READY }
+            .sortedBy { info ->
+                ModelManifest.forKnownModel(info.id)?.parameterCountM ?: Long.MAX_VALUE
+            }
+
+        val evicted = mutableListOf<String>()
+        for (info in evictable) {
+            val file = File(modelsDir, info.fileName)
+            if (file.exists()) {
+                val fileSize = file.length()
+                if (file.delete()) {
+                    info.status = ModelStatus.MISSING
+                    evicted.add(info.id)
+                    Log.i(TAG, "evictForStorage: evicted '${info.id}' ($fileSize bytes freed)")
+                }
+            }
+            // Re-check whether we have freed enough space.
+            val usableBytes = modelsDir.usableSpace
+            if (usableBytes >= requiredBytes) break
+        }
+        if (evicted.isEmpty()) {
+            Log.d(TAG, "evictForStorage: nothing evicted (requiredBytes=$requiredBytes, " +
+                "usable=${modelsDir.usableSpace})")
+        }
+        return evicted
+    }
+
+    /**
      * Deletes orphaned and incomplete files from [modelsDir].
      *
      * The following files are removed:
