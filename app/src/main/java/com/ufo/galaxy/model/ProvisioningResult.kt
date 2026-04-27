@@ -15,6 +15,8 @@ import java.io.File
  *  ```
  *  compatibility check
  *       │ IncompatibleAsset
+ *  low-storage check ─── InsufficientStorage
+ *       │
  *  partial-asset cleanup
  *       │
  *  download ─── DownloadError
@@ -109,6 +111,24 @@ sealed class ProvisioningResult {
         data class ActivationError(
             val modelId: String,
             val cause: String
+        ) : Failure()
+
+        /**
+         * There is not enough free disk space to download and install the model asset, even
+         * after [ModelAssetManager.evictForStorage] attempted to free space by removing
+         * [ModelAssetManager.ModelStatus.READY] models.
+         *
+         * The download was **not** attempted. Callers should surface this to the user as a
+         * low-storage notification rather than retrying immediately.
+         *
+         * @param modelId        Logical model identifier.
+         * @param requiredBytes  Minimum space declared by the manifest ([ModelManifest.minDiskSpaceBytes]).
+         * @param availableBytes Actual usable space in the models directory at the time of the check.
+         */
+        data class InsufficientStorage(
+            val modelId: String,
+            val requiredBytes: Long,
+            val availableBytes: Long
         ) : Failure()
     }
 }

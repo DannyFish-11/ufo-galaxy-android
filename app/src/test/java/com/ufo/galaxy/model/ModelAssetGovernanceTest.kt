@@ -646,4 +646,241 @@ class ModelAssetGovernanceTest {
         )
         assertFalse(result.cause.isEmpty())
     }
+
+    // ── 6. Manifest-driven download spec generation ───────────────────────────
+
+    @Test
+    fun `downloadSpecsForMissing derives MobileVLM URL from manifest source`() {
+        val specs = mam.downloadSpecsForMissing()
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
+        assertNotNull("MobileVLM spec must be present", vlmSpec)
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_MOBILEVLM)!!
+        val expectedUrl = (manifest.source as ModelSource.HuggingFace).downloadUrl
+        assertEquals(
+            "MobileVLM spec URL must match manifest source URL",
+            expectedUrl, vlmSpec!!.url
+        )
+    }
+
+    @Test
+    fun `downloadSpecsForMissing derives SeeClick param URL from manifest source`() {
+        val specs = mam.downloadSpecsForMissing()
+        val scSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK }
+        assertNotNull("SeeClick param spec must be present", scSpec)
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK)!!
+        val expectedUrl = (manifest.source as ModelSource.HuggingFace).downloadUrl
+        assertEquals(
+            "SeeClick param spec URL must match manifest source URL",
+            expectedUrl, scSpec!!.url
+        )
+    }
+
+    @Test
+    fun `downloadSpecsForMissing derives SeeClick bin URL from manifest source`() {
+        val specs = mam.downloadSpecsForMissing()
+        val scBinSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK_BIN }
+        assertNotNull("SeeClick bin spec must be present", scBinSpec)
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK_BIN)!!
+        val expectedUrl = (manifest.source as ModelSource.HuggingFace).downloadUrl
+        assertEquals(
+            "SeeClick bin spec URL must match manifest source URL",
+            expectedUrl, scBinSpec!!.url
+        )
+    }
+
+    @Test
+    fun `downloadSpecsForMissing MobileVLM URL references Q4_K_M quantized file`() {
+        val specs = mam.downloadSpecsForMissing()
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }!!
+        assertTrue(
+            "MobileVLM download URL must reference the Q4_K_M quantized file",
+            vlmSpec.url.contains(ModelAssetManager.MOBILEVLM_FILE)
+        )
+    }
+
+    @Test
+    fun `downloadSpecsForMissing does not include already loaded models`() {
+        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        val specs = mam.downloadSpecsForMissing()
+        assertNull(
+            "Loaded MobileVLM must not appear in missing specs",
+            specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
+        )
+    }
+
+    // ── 7. hasEnoughStorageFor utility ────────────────────────────────────────
+
+    @Test
+    fun `hasEnoughStorageFor returns true for null requiredBytes`() {
+        assertTrue("null requiredBytes must always return true", mam.hasEnoughStorageFor(null))
+    }
+
+    @Test
+    fun `hasEnoughStorageFor returns true for zero requiredBytes`() {
+        assertTrue("zero requiredBytes must always return true", mam.hasEnoughStorageFor(0L))
+    }
+
+    @Test
+    fun `hasEnoughStorageFor returns true when required bytes is very small`() {
+        // Any real filesystem will have at least 1 byte free.
+        assertTrue("1 byte required must always be satisfiable", mam.hasEnoughStorageFor(1L))
+    }
+
+    @Test
+    fun `hasEnoughStorageFor returns false when required bytes exceeds available space`() {
+        // Long.MAX_VALUE bytes is always more than any real filesystem can provide.
+        assertFalse(
+            "Long.MAX_VALUE required bytes must fail the storage check",
+            mam.hasEnoughStorageFor(Long.MAX_VALUE)
+        )
+    }
+
+    // ── 8. Low-storage behavior (InsufficientStorage) ─────────────────────────
+
+    @Test
+    fun `provision returns InsufficientStorage when manifest declares minDiskSpaceBytes and space is lacking`() = runBlocking {
+        val pipeline = makePipeline(fakeHttp())
+        val spec = ModelDownloader.DownloadSpec(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            url = "http://fake.local/model.gguf",
+            fileName = ModelAssetManager.MOBILEVLM_FILE
+        )
+        // Manifest with minDiskSpaceBytes = Long.MAX_VALUE guarantees the check fails.
+        val manifest = ModelManifest(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelVersion = "1.0",
+            runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
+            minDiskSpaceBytes = Long.MAX_VALUE
+        )
+
+        val result = pipeline.provision(spec, manifest = manifest)
+
+        assertTrue(
+            "Insufficient storage must produce Failure.InsufficientStorage",
+            result is ProvisioningResult.Failure.InsufficientStorage
+        )
+    }
+
+    @Test
+    fun `provision InsufficientStorage carries modelId and byte counts`() = runBlocking {
+        val pipeline = makePipeline(fakeHttp())
+        val spec = ModelDownloader.DownloadSpec(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            url = "http://fake.local/model.gguf",
+            fileName = ModelAssetManager.MOBILEVLM_FILE
+        )
+        val manifest = ModelManifest(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelVersion = "1.0",
+            runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
+            minDiskSpaceBytes = Long.MAX_VALUE
+        )
+
+        val result = pipeline.provision(spec, manifest = manifest)
+            as ProvisioningResult.Failure.InsufficientStorage
+
+        assertEquals(ModelAssetManager.MODEL_ID_MOBILEVLM, result.modelId)
+        assertEquals(Long.MAX_VALUE, result.requiredBytes)
+        assertTrue("availableBytes must be non-negative", result.availableBytes >= 0L)
+    }
+
+    @Test
+    fun `provision does not issue HTTP request when storage is insufficient`() = runBlocking {
+        val counting = CountingFactory(fakeHttp())
+        val pipeline = makePipeline(counting)
+        val spec = ModelDownloader.DownloadSpec(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            url = "http://fake.local/model.gguf",
+            fileName = ModelAssetManager.MOBILEVLM_FILE
+        )
+        val manifest = ModelManifest(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelVersion = "1.0",
+            runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
+            minDiskSpaceBytes = Long.MAX_VALUE
+        )
+
+        pipeline.provision(spec, manifest = manifest)
+
+        assertEquals("No HTTP request must be made when storage is insufficient", 0, counting.openCount)
+    }
+
+    @Test
+    fun `provision proceeds when manifest has null minDiskSpaceBytes`() = runBlocking {
+        val body = "weights".toByteArray()
+        val pipeline = makePipeline(fakeHttp(body = body))
+        val spec = ModelDownloader.DownloadSpec(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            url = "http://fake.local/model.gguf",
+            fileName = ModelAssetManager.MOBILEVLM_FILE
+        )
+        val manifest = ModelManifest(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelVersion = "1.0",
+            runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
+            minDiskSpaceBytes = null  // no storage check
+        )
+
+        val result = pipeline.provision(spec, manifest = manifest)
+
+        assertTrue("Null minDiskSpaceBytes must not block provisioning", result is ProvisioningResult.Success)
+    }
+
+    // ── 9. Manifest-driven stages are skipped when manifest is null ───────────
+
+    @Test
+    fun `provision succeeds when manifest parameter is null (no governance stages)`() = runBlocking {
+        val body = "weights".toByteArray()
+        val pipeline = makePipeline(fakeHttp(body = body))
+        val spec = ModelDownloader.DownloadSpec(
+            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            url = "http://fake.local/model.gguf",
+            fileName = ModelAssetManager.MOBILEVLM_FILE
+        )
+
+        // Null manifest: compatibility check and storage pre-check are both skipped.
+        val result = pipeline.provision(spec, manifest = null)
+
+        assertTrue(
+            "Null manifest must not block provisioning — governance stages are skipped",
+            result is ProvisioningResult.Success
+        )
+    }
+
+    @Test
+    fun `provision with explicit manifest from forKnownModel rejects incompatible runtime version`() = runBlocking {
+        val pipeline = makePipeline(fakeHttp())
+        val spec = ModelDownloader.DownloadSpec(
+            modelId = "constrained_model",
+            url = "http://fake.local/m.gguf",
+            fileName = "m.gguf"
+        )
+        val manifest = ModelManifest(
+            modelId = "constrained_model",
+            modelVersion = "1.0",
+            runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
+            minRuntimeVersion = "99.0"
+        )
+
+        val result = pipeline.provision(spec, manifest = manifest, runtimeVersion = "1.0")
+
+        assertTrue(
+            "Manifest with minRuntimeVersion=99.0 must reject runtimeVersion=1.0",
+            result is ProvisioningResult.Failure.IncompatibleAsset
+        )
+    }
+
+    // ── 10. ProvisioningResult new failure type ───────────────────────────────
+
+    @Test
+    fun `ProvisioningResult Failure InsufficientStorage carries all fields`() {
+        val result = ProvisioningResult.Failure.InsufficientStorage(
+            modelId = "m",
+            requiredBytes = 1_000_000L,
+            availableBytes = 500_000L
+        )
+        assertEquals("m", result.modelId)
+        assertEquals(1_000_000L, result.requiredBytes)
+        assertEquals(500_000L, result.availableBytes)
+    }
 }

@@ -59,6 +59,10 @@ sealed class ModelSource {
  * @property checksum            Expected SHA-256 hex string for the primary model file; null = skip.
  * @property quantization        Quantization scheme label (e.g., "Q4_K_M", "INT8"); null = unknown.
  * @property parameterCountM     Approximate parameter count in millions; null = unknown.
+ * @property minDiskSpaceBytes   Minimum free disk space required to download and install this model,
+ *                               in bytes. The provisioning pipeline uses this to decide whether to
+ *                               attempt eviction before downloading. Null means no pre-check is
+ *                               enforced.
  */
 data class ModelManifest(
     val modelId: String,
@@ -68,7 +72,8 @@ data class ModelManifest(
     val minRuntimeVersion: String? = null,
     val checksum: String? = null,
     val quantization: String? = null,
-    val parameterCountM: Long? = null
+    val parameterCountM: Long? = null,
+    val minDiskSpaceBytes: Long? = null
 ) {
 
     /**
@@ -135,7 +140,8 @@ data class ModelManifest(
                 minRuntimeVersion = null,
                 checksum = ModelAssetManager.MOBILEVLM_SHA256,
                 quantization = "Q4_K_M",
-                parameterCountM = 1700L
+                parameterCountM = 1700L,
+                minDiskSpaceBytes = 1_200_000_000L  // ~1.2 GB for Q4_K_M GGUF weights
             )
             ModelAssetManager.MODEL_ID_SEECLICK -> ModelManifest(
                 modelId = ModelAssetManager.MODEL_ID_SEECLICK,
@@ -148,7 +154,8 @@ data class ModelManifest(
                 minRuntimeVersion = null,
                 checksum = ModelAssetManager.SEECLICK_SHA256,
                 quantization = null,
-                parameterCountM = null
+                parameterCountM = null,
+                minDiskSpaceBytes = 50_000_000L  // ~50 MB for NCNN param file
             )
             ModelAssetManager.MODEL_ID_SEECLICK_BIN -> ModelManifest(
                 modelId = ModelAssetManager.MODEL_ID_SEECLICK_BIN,
@@ -161,7 +168,8 @@ data class ModelManifest(
                 minRuntimeVersion = null,
                 checksum = ModelAssetManager.SEECLICK_BIN_SHA256,
                 quantization = null,
-                parameterCountM = null
+                parameterCountM = null,
+                minDiskSpaceBytes = 400_000_000L  // ~400 MB for NCNN bin weights
             )
             else -> null
         }
