@@ -293,6 +293,7 @@ class ModelAssetManager(val modelsDir: File) {
         val knownFileNames = registry.values.map { it.fileName }.toSet()
         var deleted = 0
         modelsDir.listFiles()?.forEach { file ->
+            if (!file.isFile) return@forEach  // skip directories
             val isStale = file.name.endsWith(".tmp") || file.name !in knownFileNames
             if (isStale && file.delete()) {
                 deleted++

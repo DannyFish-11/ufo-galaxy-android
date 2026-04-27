@@ -480,6 +480,19 @@ class LocalInferenceRuntimeRecycleTest {
         assertEquals("No stale files must result in zero deletions", 0, deleted)
     }
 
+    @Test
+    fun `cleanupStaleFiles skips subdirectories`() {
+        val subDir = File(tmpDir, "subdir")
+        subDir.mkdirs()
+        assertTrue("Precondition: subdirectory must exist", subDir.isDirectory)
+
+        val mam = ModelAssetManager(tmpDir)
+        val deleted = mam.cleanupStaleFiles()
+
+        assertTrue("Subdirectory must not be deleted by cleanupStaleFiles", subDir.exists())
+        assertEquals("No files should be deleted when only subdirectories are stale", 0, deleted)
+    }
+
     // ── SeeClick bin file registry tracking ──────────────────────────────────
 
     @Test

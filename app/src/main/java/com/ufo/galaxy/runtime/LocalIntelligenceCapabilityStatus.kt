@@ -54,10 +54,14 @@ enum class LocalIntelligenceCapabilityStatus(val wireValue: String) {
 
     /**
      * The runtime was previously operational but has become temporarily unavailable — e.g.,
-     * after an unexpected runtime crash but before recovery has been initiated.
+     * after an unexpected runtime crash but **before** recovery has been initiated.
      *
      * Distinct from [DISABLED]: [UNAVAILABLE] implies a transient, unintended loss of
      * capability rather than a deliberate shutdown. Consumers may retry after a short delay.
+     *
+     * Distinct from [RECOVERING]: [UNAVAILABLE] is emitted before any recovery cycle begins
+     * (e.g., immediately after detecting a crash). Once [LocalInferenceRuntimeManager.recoverIfUnhealthy]
+     * starts executing, the state advances to [RECOVERING].
      */
     UNAVAILABLE("unavailable"),
 
