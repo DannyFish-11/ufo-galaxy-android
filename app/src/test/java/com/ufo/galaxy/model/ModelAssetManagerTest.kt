@@ -163,13 +163,13 @@ class ModelAssetManagerTest {
     // ── downloadSpecsForMissing ───────────────────────────────────────────────
 
     @Test
-    fun `downloadSpecsForMissing returns empty list when download URLs are not configured`() {
-        // Default URL constants are empty strings; no download should be triggered
-        // even when models are MISSING.
+    fun `downloadSpecsForMissing returns non-empty list when models are MISSING and URLs are configured`() {
+        // MobileVLM and SeeClick download URLs are configured in ModelAssetManager.
+        // All models start as MISSING, so specs should be returned.
         val specs = mam.downloadSpecsForMissing()
         assertTrue(
-            "No download specs expected when URL constants are empty",
-            specs.isEmpty()
+            "Download specs must be returned for MISSING models when URLs are configured",
+            specs.isNotEmpty()
         )
     }
 
