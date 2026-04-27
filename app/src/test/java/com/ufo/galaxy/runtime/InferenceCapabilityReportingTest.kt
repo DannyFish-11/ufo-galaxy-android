@@ -109,7 +109,7 @@ class InferenceCapabilityReportingTest {
 
         assertFalse("Failure result must not be isSuccess", result.isSuccess)
         assertFalse("Failure result must not be isUsable", result.isUsable)
-        assertTrue("state must be Failed", manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue("state must be FailedStartup", manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
         val capabilities = buildCapabilitiesFromResult(result)
         assertFalse(
             "local_model_inference must NOT be advertised when both runtimes have failed",

@@ -106,11 +106,11 @@ class LocalInferenceRuntimeManagerTest {
     }
 
     @Test
-    fun `state is Failed after both warmups fail`() = runBlocking {
+    fun `state is FailedStartup after both warmups fail`() = runBlocking {
         planner.warmupSucceeds = false
         grounding.warmupSucceeds = false
         manager.start()
-        assertTrue(manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue(manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
     }
 
     // ── stop ─────────────────────────────────────────────────────────────────

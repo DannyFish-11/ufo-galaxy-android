@@ -174,11 +174,11 @@ class LocalIntelligenceDegradedFallbackTest {
     }
 
     @Test
-    fun `CapabilityStatus is DISABLED when manager state is Failed`() = runBlocking {
+    fun `CapabilityStatus is DISABLED when manager state is FailedStartup`() = runBlocking {
         planner.warmupSucceeds = false
         grounding.warmupSucceeds = false
         manager.start()
-        assertTrue("State must be Failed", manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed)
+        assertTrue("State must be FailedStartup", manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup)
         val status = LocalIntelligenceCapabilityStatus.from(manager.state.value)
         assertEquals(LocalIntelligenceCapabilityStatus.DISABLED, status)
     }

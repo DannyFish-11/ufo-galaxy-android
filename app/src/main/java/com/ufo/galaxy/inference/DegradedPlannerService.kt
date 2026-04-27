@@ -96,14 +96,17 @@ class DegradedPlannerService(
         /**
          * Builds a [DegradedPlannerService] whose [degradedReason] is derived from [state].
          *
-         * | [LocalInferenceRuntimeManager.ManagerState] | Reason string                           |
-         * |---------------------------------------------|-----------------------------------------|
-         * | [LocalInferenceRuntimeManager.ManagerState.Stopped]   | "runtime not started"                   |
-         * | [LocalInferenceRuntimeManager.ManagerState.Starting]  | "runtime is starting"                   |
-         * | [LocalInferenceRuntimeManager.ManagerState.Failed]    | "runtime failed to start: <reason>"     |
-         * | [LocalInferenceRuntimeManager.ManagerState.SafeMode]  | "runtime is in safe mode"               |
-         * | [LocalInferenceRuntimeManager.ManagerState.Degraded]  | "runtime degraded: <reason>"            |
-         * | [LocalInferenceRuntimeManager.ManagerState.Running]   | "runtime is running (should not degrade)" |
+         * | [LocalInferenceRuntimeManager.ManagerState] | Reason string                                   |
+         * |---------------------------------------------|-------------------------------------------------|
+         * | [LocalInferenceRuntimeManager.ManagerState.Stopped]       | "runtime not started"                   |
+         * | [LocalInferenceRuntimeManager.ManagerState.Starting]      | "runtime is starting"                   |
+         * | [LocalInferenceRuntimeManager.ManagerState.Failed]        | "runtime failed: <reason>"              |
+         * | [LocalInferenceRuntimeManager.ManagerState.FailedStartup] | "runtime failed to start: <reason>"     |
+         * | [LocalInferenceRuntimeManager.ManagerState.SafeMode]      | "runtime is in safe mode"               |
+         * | [LocalInferenceRuntimeManager.ManagerState.Degraded]      | "runtime degraded: <reason>"            |
+         * | [LocalInferenceRuntimeManager.ManagerState.PartialReady]  | "runtime partially ready: <components>" |
+         * | [LocalInferenceRuntimeManager.ManagerState.Unavailable]   | "runtime unavailable: <reason>"         |
+         * | [LocalInferenceRuntimeManager.ManagerState.Running]       | "runtime is running (should not degrade)" |
          */
         fun forState(state: LocalInferenceRuntimeManager.ManagerState): DegradedPlannerService {
             val reason = stateToReason(state)
@@ -112,14 +115,26 @@ class DegradedPlannerService(
 
         internal fun stateToReason(state: LocalInferenceRuntimeManager.ManagerState): String =
             when (state) {
-                is LocalInferenceRuntimeManager.ManagerState.Stopped -> "runtime not started"
-                is LocalInferenceRuntimeManager.ManagerState.Starting -> "runtime is starting"
-                is LocalInferenceRuntimeManager.ManagerState.Recovering -> "runtime is recovering"
-                is LocalInferenceRuntimeManager.ManagerState.Failed -> "runtime failed to start: ${state.reason}"
-                is LocalInferenceRuntimeManager.ManagerState.SafeMode -> "runtime is in safe mode"
-                is LocalInferenceRuntimeManager.ManagerState.Degraded -> "runtime degraded: ${state.reason}"
+                is LocalInferenceRuntimeManager.ManagerState.Stopped ->
+                    "runtime not started"
+                is LocalInferenceRuntimeManager.ManagerState.Starting ->
+                    "runtime is starting"
+                is LocalInferenceRuntimeManager.ManagerState.Recovering ->
+                    "runtime is recovering"
+                is LocalInferenceRuntimeManager.ManagerState.Failed ->
+                    "runtime failed: ${state.reason}"
+                is LocalInferenceRuntimeManager.ManagerState.FailedStartup ->
+                    "runtime failed to start: ${state.reason}"
+                is LocalInferenceRuntimeManager.ManagerState.SafeMode ->
+                    "runtime is in safe mode"
+                is LocalInferenceRuntimeManager.ManagerState.Degraded ->
+                    "runtime degraded: ${state.reason}"
                 is LocalInferenceRuntimeManager.ManagerState.Running ->
                     "runtime is running (unexpected degraded state)"
+                is LocalInferenceRuntimeManager.ManagerState.PartialReady ->
+                    "runtime partially ready: ${state.completedComponents} started, ${state.pendingComponents} pending"
+                is LocalInferenceRuntimeManager.ManagerState.Unavailable ->
+                    "runtime unavailable: ${state.reason}"
             }
     }
 }
