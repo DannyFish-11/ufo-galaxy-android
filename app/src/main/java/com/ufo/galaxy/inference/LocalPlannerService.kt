@@ -7,8 +7,13 @@ package com.ufo.galaxy.inference
  * Model: mtgv/MobileVLM_V2-1.7B (HuggingFace).
  *
  * Implementations must provide load/unload lifecycle hooks to manage on-device model
- * memory. [NoOpPlannerService] is the safe default; it returns a structured error
- * without performing any inference.
+ * memory.
+ *
+ * When the runtime is absent or unhealthy, use [DegradedPlannerService] (not
+ * [NoOpPlannerService]) as the canonical fallback. [DegradedPlannerService] carries
+ * the precise [com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState] that
+ * caused the unavailability and prefixes all error messages with `DEGRADED:` so
+ * consumers can distinguish a degraded-runtime result from a transient inference failure.
  */
 interface LocalPlannerService {
 
@@ -103,9 +108,12 @@ interface LocalPlannerService {
 }
 
 /**
- * Safe default planner that returns a structured error without performing any inference.
- * Use this when the MobileVLM model is not yet loaded or the runtime is unavailable.
- * Provides all interface lifecycle hooks with no-op implementations.
+ * Minimal no-inference planner that returns a structured error without performing any
+ * inference. Retained for backwards compatibility and unit test stubs.
+ *
+ * **Prefer [DegradedPlannerService] in production paths** where a human-readable
+ * degraded reason and runtime-state context are needed. [DegradedPlannerService] replaces
+ * [NoOpPlannerService] as the canonical fallback for runtime-absent scenarios.
  */
 class NoOpPlannerService : LocalPlannerService {
 
