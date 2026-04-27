@@ -9,9 +9,32 @@ on:
 permissions:
   contents: read
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Job dependency graph (all jobs are blocking — failure prevents merge):
+#
+#   build ──┬── protocol-contract-guard ──┐
+#           ├── runtime-regression        ├── ci-gate
+#           ├── all-unit-tests            │
+#           └── lint ─────────────────────┘
+#
+# protocol-contract-guard: AIP v3 device_register / capability_report /
+#   task_result / reconnect protocol contracts.  Failure = protocol regression.
+#
+# runtime-regression: Local intelligence runtime startup/shutdown/state-
+#   transitions/failure/recovery/capability-honesty.  Failure = runtime regression.
+#
+# all-unit-tests: Full test suite; must pass after the dedicated gate jobs.
+#
+# lint: Code-quality gate; must pass before merge.
+#
+# ci-gate: Final aggregation job; PR merge is blocked until this job is green.
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
-  build-and-test:
-    name: Build, Test & Lint
+
+  # ── Build (blocking gate #1) ───────────────────────────────────────────────
+  build:
+    name: "Build [gate 1/5]"
     runs-on: ubuntu-latest
 
     steps:
@@ -28,16 +51,8 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run JVM unit tests
-        run: ./gradlew :app:test
-        continue-on-error: false
-
-      - name: Upload unit test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-results
-          path: app/build/reports/tests/
+      - name: Compile sources
+        run: ./gradlew :app:compileDebugKotlin
 
       - name: Build debug APK
         run: ./gradlew assembleDebug
@@ -48,6 +63,147 @@ jobs:
           name: debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
+  # ── Protocol Contract Guard (blocking gate #2) ────────────────────────────
+  #
+  # Runs only the protocol and E2E-contract test packages.  These tests guard
+  # the AIP v3 wire contracts that V2 enforces on every Android connection:
+  #   - device_register envelope (version, protocol, device_id)
+  #   - capability_report payload (8 required metadata keys, validate())
+  #   - task_result payload (correlation echo, terminal status vocabulary)
+  #   - reconnect / re-register wire values (ReconnectRecoveryState)
+  #
+  # Failure here means a protocol regression that would break V2 ↔ Android
+  # interoperability.  The PR must not merge until this job is green.
+  protocol-contract-guard:
+    name: "Protocol Contract Guard [gate 2/5]"
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run protocol contract tests
+        run: |
+          ./gradlew :app:test \
+            --tests "com.ufo.galaxy.protocol.*" \
+            --tests "com.ufo.galaxy.e2e.*"
+
+      - name: Upload protocol test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: protocol-contract-guard-results
+          path: app/build/reports/tests/
+
+  # ── Runtime Regression (blocking gate #3) ────────────────────────────────
+  #
+  # Runs the runtime, local-loop, and capability test packages.  These tests
+  # guard Android's local-intelligence runtime behaviour as a participant:
+  #   - LocalInferenceRuntimeManager lifecycle (startup/shutdown/state transitions)
+  #   - Failure and recovery paths (restart, safe-mode, clear-safe-mode)
+  #   - Capability honesty (ACTIVE/DEGRADED/DISABLED aligned with runtime state)
+  #   - Reconnect resilience and degraded-fallback behaviour
+  #
+  # Failure here means a runtime regression that would cause V2 to receive
+  # dishonest capability reports or to dispatch tasks onto an unavailable
+  # participant.  The PR must not merge until this job is green.
+  runtime-regression:
+    name: "Runtime Regression [gate 3/5]"
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run runtime and local-loop regression tests
+        run: |
+          ./gradlew :app:test \
+            --tests "com.ufo.galaxy.runtime.*" \
+            --tests "com.ufo.galaxy.local.*" \
+            --tests "com.ufo.galaxy.capability.*"
+
+      - name: Upload runtime regression results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-regression-results
+          path: app/build/reports/tests/
+
+  # ── All Unit Tests (blocking gate #4) ────────────────────────────────────
+  #
+  # Runs the full JVM unit test suite after the two targeted gate jobs pass.
+  # Any test regression anywhere in the codebase is caught here.
+  all-unit-tests:
+    name: "All Unit Tests [gate 4/5]"
+    runs-on: ubuntu-latest
+    needs: [protocol-contract-guard, runtime-regression]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run all JVM unit tests
+        run: ./gradlew :app:test
+
+      - name: Upload full test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-unit-test-results
+          path: app/build/reports/tests/
+
+  # ── Lint (blocking gate #5) ──────────────────────────────────────────────
+  lint:
+    name: "Lint [gate 5/5]"
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
       - name: Run lint
         run: ./gradlew lintDebug
 
@@ -57,3 +213,28 @@ jobs:
         with:
           name: lint-results
           path: app/build/reports/lint-results-debug.html
+
+  # ── CI Gate (final blocking gate — all must be green) ────────────────────
+  #
+  # This job is the single merge-blocking status check.  Configure branch
+  # protection to require "CI Gate" to pass before merging.  Because all
+  # upstream jobs are listed in `needs`, GitHub marks this job as failed if
+  # any upstream job fails, which blocks the PR.
+  ci-gate:
+    name: "CI Gate (all blocking gates must pass)"
+    runs-on: ubuntu-latest
+    needs: [all-unit-tests, lint]
+    if: always()
+
+    steps:
+      - name: Check all gate results
+        run: |
+          echo "Gate results:"
+          echo "  all-unit-tests : ${{ needs.all-unit-tests.result }}"
+          echo "  lint           : ${{ needs.lint.result }}"
+          if [[ "${{ needs.all-unit-tests.result }}" != "success" || \
+                "${{ needs.lint.result }}" != "success" ]]; then
+            echo "::error::One or more CI blocking gates failed. PR merge is blocked."
+            exit 1
+          fi
+          echo "All CI blocking gates passed."
