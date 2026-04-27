@@ -42,7 +42,7 @@ object RecoveryCapabilityAlignmentGuard {
     // ── Alignment check result ────────────────────────────────────────────────
 
     /**
-     * Result of an [checkAlignment] call.
+     * Result of a [checkAlignment] call.
      *
      * @property isAligned              `true` when all advertised capabilities are permitted.
      * @property lifecycleState         The [FormalParticipantLifecycleState] at check time.
