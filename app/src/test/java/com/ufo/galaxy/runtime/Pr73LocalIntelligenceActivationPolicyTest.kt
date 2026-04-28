@@ -660,8 +660,8 @@ class Pr73LocalIntelligenceActivationPolicyTest {
             snapshot.isFullyActive
         )
         assertTrue(
-            "Stopped runtime must not be default-mainline active for guarded capabilities",
-            snapshot.defaultMainlineActive.isEmpty() || snapshot.guardedActive.isEmpty()
+            "Stopped runtime must not be default-mainline or guarded active",
+            snapshot.defaultMainlineActive.isEmpty() && snapshot.guardedActive.isEmpty()
         )
     }
 

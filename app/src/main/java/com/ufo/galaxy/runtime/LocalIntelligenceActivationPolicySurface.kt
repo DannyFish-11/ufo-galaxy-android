@@ -248,6 +248,5 @@ object LocalIntelligenceActivationPolicySurface {
     const val INTRODUCED_PR: Int = 73
 
     /** Human-readable surface name. */
-    const val SURFACE_NAME: String =
-        "LocalIntelligenceActivationPolicySurface: default activation policy runtime surface"
+    const val SURFACE_NAME: String = "LocalIntelligenceActivationPolicySurface: default activation policy runtime surface"
 }
