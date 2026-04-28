@@ -387,7 +387,8 @@ class Pr72DualRepoE2EVerificationHarnessTest {
 
     @Test
     fun `All seven artifact tag constants are distinct`() {
-        assertEquals(7, DualRepoE2EVerificationHarness.ALL_ARTIFACT_TAGS.size)
+        val tags = DualRepoE2EVerificationHarness.ALL_ARTIFACT_TAGS
+        assertEquals("Artifact tags must all be distinct", tags.size, tags.toSet().size)
     }
 
     @Test

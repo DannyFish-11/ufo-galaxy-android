@@ -202,8 +202,8 @@ jobs:
           ./gradlew :app:test \
             --tests "com.ufo.galaxy.runtime.Pr72DualRepoE2EVerificationHarnessTest"
 
-      - name: Generate CI-level E2E verification status artifact
-        if: always()
+      - name: Generate CI-level E2E verification status artifact (tests passed)
+        if: success()
         run: |
           mkdir -p app/build/e2e-verification
           cat > app/build/e2e-verification/ci-e2e-status.json << 'EOFSTATUS'
@@ -220,6 +220,25 @@ jobs:
           }
           EOFSTATUS
           echo "CI E2E verification status artifact generated (e2e_blocked_no_device — honest CI output)."
+
+      - name: Generate CI-level E2E verification status artifact (tests failed)
+        if: failure()
+        run: |
+          mkdir -p app/build/e2e-verification
+          cat > app/build/e2e-verification/ci-e2e-status.json << 'EOFSTATUS'
+          {
+            "schema_version": "1.0",
+            "source": "android-ci",
+            "verification_kind": "no_device",
+            "artifact_tag": "e2e_blocked_no_device",
+            "is_real_device_e2e_verified": false,
+            "is_v2_consumable": false,
+            "blocked_reason": "No physical Android device was present in CI; E2E verification cannot proceed without a device",
+            "harness_tests_passed": false,
+            "note": "Harness unit tests FAILED. The E2E verification harness has a regression. Review the test results artifact for details."
+          }
+          EOFSTATUS
+          echo "CI E2E verification status artifact generated (harness_tests_passed=false — tests failed)."
 
       - name: Upload E2E harness test results
         if: always()
