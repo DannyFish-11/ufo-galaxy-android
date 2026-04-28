@@ -48,7 +48,7 @@ package com.ufo.galaxy.runtime
  *
  * ## Readiness dimensions
  *
- * Six dimensions govern Android participant readiness for release/governance review:
+ * Seven dimensions govern Android participant readiness for release/governance review:
  *
  * | Dimension                                     | Wire value                              | Primary evidence components                            |
  * |-----------------------------------------------|-----------------------------------------|--------------------------------------------------------|
@@ -58,6 +58,7 @@ package com.ufo.galaxy.runtime
  * | [ReadinessDimension.CONTINUITY_RECOVERY_SAFETY]| `continuity_recovery_safety`            | [ContinuityRecoveryDurabilityContract], [AndroidRecoveryParticipationOwner] |
  * | [ReadinessDimension.COMPATIBILITY_SUPPRESSION] | `compatibility_suppression`             | [AndroidCompatLegacyBlockingParticipant], [CompatibilitySurfaceRetirementRegistry] |
  * | [ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY] | `signal_replay_duplicate_safety`   | [EmittedSignalLedger], [AndroidContinuityIntegration]  |
+ * | [ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH] | `participant_lifecycle_truth`         | [ParticipantLifecycleTruthReport], [ParticipantLifecycleTruthReportBuilder] |
  *
  * ## Confidence levels
  *
@@ -103,7 +104,7 @@ object AndroidReadinessEvidenceSurface {
     // ── ReadinessDimension ────────────────────────────────────────────────────
 
     /**
-     * The six readiness dimensions covered by the Android evidence surface.
+     * The seven readiness dimensions covered by the Android evidence surface.
      *
      * @property wireValue Stable string identifier suitable for wire transmission and
      *                     audit log entries.
@@ -160,7 +161,23 @@ object AndroidReadinessEvidenceSurface {
          * Covers whether duplicate or stale signals are suppressed and the emission
          * ledger correctly bounds replay after terminal results.
          */
-        SIGNAL_REPLAY_DUPLICATE_SAFETY("signal_replay_duplicate_safety");
+        SIGNAL_REPLAY_DUPLICATE_SAFETY("signal_replay_duplicate_safety"),
+
+        /**
+         * Participant lifecycle truth dimension (PR-69).
+         *
+         * Covers whether the Android participant's lifecycle state — from initial
+         * registration through active, degraded, recovering, recovered,
+         * re-registering, and capability re-aligned — is formally expressed as a
+         * structured, machine-consumable truth surface that V2 and other cross-repo
+         * systems can consume to make governance and acceptance decisions.
+         *
+         * Evidence in this dimension must distinguish:
+         *  - reconnect from recovered (reconnect alone is NOT sufficient for recovery)
+         *  - capability re-alignment intermediate states (ALIGNMENT_PENDING ≠ ALIGNED)
+         *  - COMPLETE, COMPLETE_WITH_GAPS, STALE, INCOMPLETE, and INCONSISTENT evidence
+         */
+        PARTICIPANT_LIFECYCLE_TRUTH("participant_lifecycle_truth");
 
         companion object {
             /** Returns the dimension matching [wireValue], or `null` if not found. */
@@ -666,6 +683,99 @@ object AndroidReadinessEvidenceSurface {
                 "serialization round-trip, and duplicate detection are validated",
             v2ConsumptionPath = "V2 deduplicates inbound DelegatedExecutionSignal by signalId; " +
                 "Android-side signalId is the primary deduplication key"
+        ),
+
+        // ── PARTICIPANT_LIFECYCLE_TRUTH ────────────────────────────────────────
+
+        EvidenceEntry(
+            evidenceId = "participant_lifecycle_truth_nine_state_model",
+            dimension = ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            confidenceLevel = ConfidenceLevel.CANONICAL,
+            description = "ParticipantLifecycleTruthState provides the nine-state lifecycle " +
+                "truth enum (UNREGISTERED, REGISTERING, ACTIVE, DEGRADED, RECOVERING, " +
+                "RECOVERED, UNAVAILABLE, RE_REGISTERING, CAPABILITY_RE_ALIGNED) with stable " +
+                "wire values for V2 ingestion.  Extends FormalParticipantLifecycleState with " +
+                "cross-repo registration and recovery truth states.  fromFormal() maps the " +
+                "capability-gate-optimised five-state model to the truth model conservatively.  " +
+                "capabilityAdvertisementAllowed() and isRecoveryPhase() provide correct " +
+                "dispatch-gate logic: only ACTIVE and DEGRADED may advertise capabilities; " +
+                "RECOVERING, RECOVERED, and RE_REGISTERING are recovery-phase states that " +
+                "block dispatch.  Prohibits single-boolean health representation.",
+            producedBy = "ParticipantLifecycleTruthState",
+            testEvidence = "Pr69ParticipantLifecycleTruthReportTest: all nine wire values " +
+                "are distinct and round-trip via fromWireValue; fromFormal maps each formal " +
+                "state correctly; capabilityAdvertisementAllowed and isRecoveryPhase return " +
+                "correct values for each of the nine states; ALL_WIRE_VALUES has exactly " +
+                "nine entries",
+            v2ConsumptionPath = "ParticipantLifecycleTruthReport.toWireMap() emits " +
+                "lifecycle_truth_state as a stable wire key; V2 ingests via " +
+                "ParticipantLifecycleTruthReport schema v1.0 to determine participant " +
+                "lifecycle position before making acceptance or governance decisions"
+        ),
+
+        EvidenceEntry(
+            evidenceId = "participant_lifecycle_truth_report_cross_repo_export",
+            dimension = ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            confidenceLevel = ConfidenceLevel.CANONICAL,
+            description = "ParticipantLifecycleTruthReport is the canonical structured " +
+                "lifecycle truth surface that aggregates ParticipantLifecycleTruthState, " +
+                "RegistrationTruthStatus, reconnectObserved, ReRegistrationOutcome, " +
+                "CapabilityAlignmentStatus, recoveredButDegraded, partiallyAligned, and " +
+                "LifecycleEvidenceCompleteness into a single, schema-versioned, V2-consumable " +
+                "report.  toWireMap() (schema v1.0) produces a stable key→value map that " +
+                "V2 can ingest.  isCrossRepoConsumable flags whether the report has " +
+                "sufficient evidence for cross-repo acceptance decisions.  isFullyRecovered " +
+                "requires reconnect observed AND re-registration completed AND capability " +
+                "alignment achieved — reconnect alone is NOT sufficient.  " +
+                "isRecoveredButDegraded captures the intermediate state where recovery " +
+                "completed but runtime health remains impaired.",
+            producedBy = "ParticipantLifecycleTruthReport, ParticipantLifecycleTruthReportBuilder",
+            testEvidence = "Pr69ParticipantLifecycleTruthReportTest: all fields preserved; " +
+                "isCrossRepoConsumable true for ACTIVE/REGISTERED/COMPLETE, false for " +
+                "UNREGISTERED/INCOMPLETE/blank participantId; isFullyRecovered requires " +
+                "reconnect AND COMPLETED re-registration AND aligned capability; " +
+                "isRecoveredButDegraded true only for CAPABILITY_RE_ALIGNED/DEGRADED with " +
+                "recoveredButDegraded flag; toWireMap schema_version is '1.0'; all KEY " +
+                "constants are distinct",
+            v2ConsumptionPath = "ParticipantLifecycleTruthReport.toWireMap() exported via " +
+                "AndroidParticipantRuntimeTruth or ReconciliationSignal; V2 ingests via " +
+                "lifecycle truth ingestion layer, checks isCrossRepoConsumable before use, " +
+                "and classifies participant as ready/degraded/unavailable/recovering based " +
+                "on lifecycleTruthState and capabilityAlignmentStatus wire values"
+        ),
+
+        EvidenceEntry(
+            evidenceId = "participant_lifecycle_truth_report_builder_derivation",
+            dimension = ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            confidenceLevel = ConfidenceLevel.CANONICAL,
+            description = "ParticipantLifecycleTruthReportBuilder.build() derives the " +
+                "correct ParticipantLifecycleTruthState from multi-dimensional runtime " +
+                "context (FormalParticipantLifecycleState × ReconnectRecoveryState × " +
+                "RegistrationTruthStatus × ReRegistrationOutcome × CapabilityAlignmentStatus) " +
+                "using a six-priority derivation chain.  fromAuditSnapshot() bridges the " +
+                "PR-68 AndroidDelegatedRuntimeAuditSnapshot to the PR-69 lifecycle truth " +
+                "model, ensuring both audit and lifecycle surfaces are coherent.  " +
+                "classifyEvidenceCompleteness() enforces STALE (older than 60 s), " +
+                "INCOMPLETE (blank participantId), INCONSISTENT (ACTIVE without REGISTERED, " +
+                "RECOVERED without reconnect, CAPABILITY_RE_ALIGNED without COMPLETED " +
+                "re-registration), COMPLETE, and COMPLETE_WITH_GAPS evidence classifications.  " +
+                "Reconnect alone (without completed re-registration AND capability alignment) " +
+                "does NOT produce a COMPLETE or fully-recovered report.",
+            producedBy = "ParticipantLifecycleTruthReportBuilder",
+            testEvidence = "Pr69ParticipantLifecycleTruthReportTest: registration→active, " +
+                "active→degraded, degraded→recovering→recovered, re-register/capability " +
+                "re-alignment, unavailable/stale/incomplete/inconsistent evidence paths; " +
+                "RECOVERED+PENDING→RE_REGISTERING; RECOVERED+COMPLETED+FULLY_ALIGNED→" +
+                "CAPABILITY_RE_ALIGNED; RECOVERED+FAILED→UNAVAILABLE; fromAuditSnapshot " +
+                "AUDITED→ACTIVE, DEGRADED health→DEGRADED, UNAVAILABLE registration→" +
+                "UNREGISTERED, STALE freshness→STALE, UNKNOWN dimensions→INCOMPLETE; " +
+                "STALE_THRESHOLD_MS is 60000",
+            v2ConsumptionPath = "ParticipantLifecycleTruthReportBuilder.build() is the " +
+                "primary production entry point on Android; fromAuditSnapshot() is the " +
+                "bridge for V2 systems that already hold an AndroidDelegatedRuntimeAuditSnapshot; " +
+                "the resulting report is exported via toWireMap() for V2 ingestion and " +
+                "consumed by lifecycle truth ingestion layer to update participant state " +
+                "in the V2 cross-repo acceptance verdict"
         )
     )
 
@@ -789,10 +899,10 @@ object AndroidReadinessEvidenceSurface {
     // ── Count constants for test assertions ───────────────────────────────────
 
     /** Expected total number of evidence entries at the time of this PR. */
-    const val EVIDENCE_ENTRY_COUNT = 26
+    const val EVIDENCE_ENTRY_COUNT = 29
 
     /** Expected number of CANONICAL confidence-level evidence entries. */
-    const val CANONICAL_EVIDENCE_COUNT = 23
+    const val CANONICAL_EVIDENCE_COUNT = 26
 
     /** Expected number of ADVISORY confidence-level evidence entries. */
     const val ADVISORY_EVIDENCE_COUNT = 2
