@@ -298,7 +298,7 @@ class AndroidDelegatedRuntimeAudit {
      * Checks whether the audit evidence is stale and marks the
      * [AndroidDelegatedRuntimeAuditDimension.EVIDENCE_FRESHNESS] dimension accordingly.
      *
-     * If `currentTimeMs - reportedAtMs > staleness ThresholdMs`, marks
+     * If `currentTimeMs - reportedAtMs > stalenessThresholdMs`, marks
      * [EVIDENCE_FRESHNESS] as [AndroidDelegatedRuntimeAuditSnapshot.DimensionStatus.STALE].
      * Otherwise, marks it as [AndroidDelegatedRuntimeAuditSnapshot.DimensionStatus.AUDITED].
      *
