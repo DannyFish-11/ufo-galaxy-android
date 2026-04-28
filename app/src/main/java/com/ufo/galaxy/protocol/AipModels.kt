@@ -221,7 +221,24 @@ enum class MsgType(val value: String) {
      *  control paths have a reliable Android-side strategy signal.
      *  Payload model: [DeviceStrategyReportPayload].
      *  @status pr-4-android — payload defined; send path present via GalaxyConnectionService. */
-    DEVICE_STRATEGY_REPORT("device_strategy_report");
+    DEVICE_STRATEGY_REPORT("device_strategy_report"),
+
+    // ── PR-68 (Android): Delegated runtime audit evidence uplink ─────────────────────────────
+    // Uplink message that carries the structured Android delegated runtime audit evidence and
+    // per-dimension audit snapshot produced by
+    // [com.ufo.galaxy.runtime.AndroidDelegatedRuntimeAudit].
+    // Enables V2 system_final_acceptance_verdict to resolve the android_participant dimension
+    // by ingesting a structured, cross-repo-consumable evidence payload that classifies
+    // participant registration, availability, execution readiness, health state, capability
+    // honesty, and evidence freshness.
+
+    /** Uplink: Android reports its delegated runtime audit evidence and per-dimension audit
+     *  snapshot to V2.  Emitted on service start (baseline with all dimensions UNKNOWN) and
+     *  after each relevant dimension audit-state change so V2 acceptance, readiness, and
+     *  governance paths have a reliable, structured Android-side runtime audit signal.
+     *  Payload model: [DeviceAuditReportPayload].
+     *  @status pr-68-android — payload defined; wire map consumable by V2 evidence ingestion. */
+    DEVICE_AUDIT_REPORT("device_audit_report");
 
     companion object {
         /**
@@ -1630,4 +1647,77 @@ data class DeviceStrategyReportPayload(
     val dimension_states: Map<String, String> = emptyMap(),
     val first_risk_reason: String? = null,
     val missing_dimensions: List<String> = emptyList()
+)
+
+/**
+ * Uplink payload for [MsgType.DEVICE_AUDIT_REPORT].
+ *
+ * Carries the structured Android delegated runtime audit evidence and per-dimension audit
+ * snapshot produced by [com.ufo.galaxy.runtime.AndroidDelegatedRuntimeAudit] toward V2
+ * acceptance, readiness, and governance layer consumption paths.
+ *
+ * Emitted by Android on service start (baseline — all dimensions UNKNOWN) and after each
+ * relevant dimension audit-state change so V2 always has a current, structured Android-side
+ * runtime audit conclusion available.
+ *
+ * This payload closes the `android_participant unresolved` gap in V2's
+ * `system_final_acceptance_verdict` by providing evidence that is:
+ *  - Structured (not human-readable log only)
+ *  - Classified into named evidence quality states (ready / degraded / unavailable / stale /
+ *    malformed_incomplete / unverified)
+ *  - Backed by explicit capability honesty verification (not just capability advertisement)
+ *  - Freshness-bounded so V2 can detect stale participant state
+ *  - Stable in wire format (schema_version 1.0)
+ *
+ * ## Evidence tag semantics
+ *
+ * [evidence_tag] uses the stable wire-tag constants from
+ * [com.ufo.galaxy.runtime.AndroidDelegatedRuntimeAudit]:
+ *
+ * | [evidence_tag]                            | Meaning                                                                  |
+ * |-------------------------------------------|--------------------------------------------------------------------------|
+ * | `"audit_evidence_ready"`                  | All six dimensions AUDITED and fresh; participant fully operational.      |
+ * | `"audit_evidence_degraded"`               | Some dimensions DEGRADED; participant available with limitations.         |
+ * | `"audit_evidence_unavailable"`            | Participant not reachable or not registered.                             |
+ * | `"audit_evidence_stale"`                  | Evidence is too old; refresh required before V2 consumption.             |
+ * | `"audit_evidence_malformed_incomplete"`   | Evidence is malformed or incomplete; V2 must reject.                     |
+ * | `"audit_evidence_unverified"`             | One or more dimensions have no signal; audit cannot be concluded.        |
+ *
+ * ## V2 evidence ingestion
+ *
+ * V2 code should use [wire_map] for ingestion.  The map has schema_version `"1.0"` and
+ * contains all fields from [com.ufo.galaxy.runtime.AndroidDelegatedRuntimeAuditSnapshot.toWireMap].
+ *
+ * @param evidence_tag          Stable wire-tag of the [com.ufo.galaxy.runtime.AndroidDelegatedRuntimeAuditEvidence].
+ * @param snapshot_id           UUID of this audit snapshot; stable across retransmissions.
+ * @param device_id             Device identifier.
+ * @param session_id            Runtime session ID at emission time; null when not yet established.
+ * @param reported_at_ms        Wall-clock epoch-ms timestamp of evidence production.
+ * @param dimension_states      Per-dimension audit status map: dimension wire-name →
+ *                              status string (`"audited"`, `"degraded"`, `"unavailable"`,
+ *                              `"stale"`, `"malformed"`, or `"unknown"`).
+ * @param dimension_reasons     Per-dimension reason map: dimension wire-name → reason string
+ *                              (only for non-AUDITED states).
+ * @param missing_dimensions    Dimension wire-names that have no audit signal yet; empty when
+ *                              all dimensions have been reported.
+ * @param capability_honesty_audited  `true` when CAPABILITY_HONESTY dimension is AUDITED
+ *                              (i.e. [CapabilityHonestyGuard.isHonest] returned no violations).
+ * @param health_state_audited  `true` when HEALTH_STATE dimension is AUDITED (runtime healthy).
+ * @param participant_registered `true` when PARTICIPANT_REGISTRATION dimension is AUDITED.
+ * @param wire_map              The full [com.ufo.galaxy.runtime.AndroidDelegatedRuntimeAuditSnapshot.toWireMap]
+ *                              output for direct V2 ingestion; schema_version `"1.0"`.
+ */
+data class DeviceAuditReportPayload(
+    val evidence_tag: String,
+    val snapshot_id: String,
+    val device_id: String,
+    val session_id: String?,
+    val reported_at_ms: Long = System.currentTimeMillis(),
+    val dimension_states: Map<String, String> = emptyMap(),
+    val dimension_reasons: Map<String, String> = emptyMap(),
+    val missing_dimensions: List<String> = emptyList(),
+    val capability_honesty_audited: Boolean = false,
+    val health_state_audited: Boolean = false,
+    val participant_registered: Boolean = false,
+    val wire_map: Map<String, Any> = emptyMap()
 )
