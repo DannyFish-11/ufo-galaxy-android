@@ -1701,6 +1701,56 @@ object StabilizationBaseline {
                 "(returns ReRegistrationRequirement when control-plane re-registration is needed). " +
                 "Ensures the control plane never sees stale capability claims after recovery.",
             introducedPr = 14
+        ),
+
+        // ── PR-69: participant lifecycle truth report surfaces ────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "participant-lifecycle-truth-state",
+            displayName = "ParticipantLifecycleTruthState",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantLifecycleTruthState",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-69 formal nine-state participant lifecycle truth enum. Extends " +
+                "FormalParticipantLifecycleState (capability-gate-optimised) with cross-repo " +
+                "truth states: UNREGISTERED, REGISTERING, ACTIVE, DEGRADED, RECOVERING, " +
+                "RECOVERED, UNAVAILABLE, RE_REGISTERING, CAPABILITY_RE_ALIGNED. Provides " +
+                "fromFormal() for conservative mapping, capabilityAdvertisementAllowed(), " +
+                "isRecoveryPhase(), and ALL_WIRE_VALUES. Canonical truth surface for " +
+                "lifecycle state in participant lifecycle truth reports.",
+            introducedPr = 69
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "participant-lifecycle-truth-report",
+            displayName = "ParticipantLifecycleTruthReport",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantLifecycleTruthReport",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-69 structured Android participant lifecycle truth report for " +
+                "cross-repo consumption. Single canonical lifecycle truth surface aggregating " +
+                "ParticipantLifecycleTruthState, RegistrationTruthStatus, reconnectObserved, " +
+                "ReRegistrationOutcome, CapabilityAlignmentStatus, recoveredButDegraded, " +
+                "partiallyAligned, and LifecycleEvidenceCompleteness. Provides toWireMap() " +
+                "(schema v1.0) for V2 ingestion, isCrossRepoConsumable, isInRecoveryPhase, " +
+                "isFullyRecovered, and isRecoveredButDegraded. Prohibits single-boolean health " +
+                "and treats reconnect-alone as insufficient recovery evidence.",
+            introducedPr = 69
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "participant-lifecycle-truth-report-builder",
+            displayName = "ParticipantLifecycleTruthReportBuilder",
+            packagePath = "com.ufo.galaxy.runtime.ParticipantLifecycleTruthReportBuilder",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-69 builder for deriving ParticipantLifecycleTruthReport from " +
+                "multi-dimensional runtime context. Integrates FormalParticipantLifecycleState, " +
+                "ReconnectRecoveryState, RegistrationTruthStatus, ReRegistrationOutcome, and " +
+                "CapabilityAlignmentStatus into the nine-state lifecycle truth model. Provides " +
+                "build() (from runtime context) and fromAuditSnapshot() (from PR-68 " +
+                "AndroidDelegatedRuntimeAuditSnapshot) bridges. Validates evidence completeness " +
+                "including STALE, INCOMPLETE, INCONSISTENT, COMPLETE_WITH_GAPS, and COMPLETE " +
+                "classifications.",
+            introducedPr = 69
         )
     )
 
