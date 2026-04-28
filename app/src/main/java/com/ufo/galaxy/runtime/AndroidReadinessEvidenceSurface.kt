@@ -685,6 +685,32 @@ object AndroidReadinessEvidenceSurface {
                 "Android-side signalId is the primary deduplication key"
         ),
 
+        EvidenceEntry(
+            evidenceId = "offline_queue_replay_ordering_policy",
+            dimension = ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY,
+            confidenceLevel = ConfidenceLevel.ADVISORY,
+            description = "OfflineQueueReplayPolicy provides a machine-consumable five-dimension " +
+                "policy/evidence model for offline queue replay ordering and authority semantics.  " +
+                "Task replay existence is SUPPORTED (OfflineTaskQueue); replay ordering guarantee " +
+                "is DEFERRED (V2-side ordering contract not yet defined); replay authority is " +
+                "NON_AUTHORITATIVE (V2 is the decision authority); duplicate avoidance is " +
+                "PARTIALLY_SUPPORTED (session-bounded, not cross-process persistent); eventual " +
+                "recovery is ACCEPTED_LIMITATION (bounded by queue drop policy and V2 authority).  " +
+                "This surface prevents downstream systems from conflating queue existence with " +
+                "ordering / authority closure, and makes the deferred boundary formally visible " +
+                "to V2 governance and dual-repo recovery audits.",
+            producedBy = "OfflineQueueReplayPolicy",
+            testEvidence = "Pr71OfflineQueueReplayPolicyTest: REPLAY_ORDERING_GUARANTEE is " +
+                "DEFERRED; hasDeferredItems returns true; PARTIALLY_SUPPORTED and " +
+                "NON_AUTHORITATIVE are distinct statuses with distinct wire values; " +
+                "hasFullSupport returns false; toWireMap exports all five dimension statuses; " +
+                "no optimistic upgrade to SUPPORTED without full evidence",
+            v2ConsumptionPath = "OfflineQueueReplayPolicy.buildReport().toWireMap() exports " +
+                "replay_ordering_guarantee_status and replay_authority_status as stable wire " +
+                "values; V2 cross-repo recovery verdicts must check hasDeferredItems() before " +
+                "treating Android replay ordering as fully closed; report is schema v1.0"
+        ),
+
         // ── PARTICIPANT_LIFECYCLE_TRUTH ────────────────────────────────────────
 
         EvidenceEntry(
@@ -875,6 +901,29 @@ object AndroidReadinessEvidenceSurface {
                 "deferred item is a deliberate boundary, not an omission.",
             deferredTo = "V2-side governance PRs (V2 PR-4 through V2 PR-6) implement the " +
                 "final release policy that consumes Android evidence"
+        ),
+
+        DeferredItem(
+            itemId = "offline_queue_replay_ordering_authority_semantics",
+            dimension = ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY,
+            description = "Android offline queue replay ordering guarantee and authority " +
+                "semantics are formally DEFERRED.  OfflineQueueReplayPolicy expresses this " +
+                "explicitly: REPLAY_ORDERING_GUARANTEE is DEFERRED — while OfflineTaskQueue " +
+                "drains in FIFO order within a single drain, the system-level end-to-end " +
+                "ordering guarantee (V2-side processing order, cross-reconnect sequence " +
+                "continuity) has not been formally contracted.  REPLAY_AUTHORITY is " +
+                "NON_AUTHORITATIVE — Android presents queued messages to V2 but V2 is the " +
+                "sole authority on replay decisions.  These are the primary open boundaries " +
+                "in current dual-repo recovery closure for cross-device replay scenarios.",
+            deferralReason = "Requires V2 to publish a formal replay ordering contract " +
+                "specifying whether V2 guarantees FIFO processing of replayed messages, how " +
+                "V2 handles ordering across reconnects, and what authority Android has over " +
+                "replay sequencing.  Until this V2-side contract exists, Android cannot " +
+                "upgrade REPLAY_ORDERING_GUARANTEE from DEFERRED to SUPPORTED or " +
+                "PARTIALLY_SUPPORTED without misrepresenting the system state.",
+            deferredTo = "Post-release V2 replay ordering contract PR; once V2 publishes its " +
+                "replay processing order guarantee, Android can close " +
+                "OfflineQueueReplayPolicy.REPLAY_ORDERING_GUARANTEE and update this deferred item"
         )
     )
 
@@ -899,19 +948,19 @@ object AndroidReadinessEvidenceSurface {
     // ── Count constants for test assertions ───────────────────────────────────
 
     /** Expected total number of evidence entries at the time of this PR. */
-    const val EVIDENCE_ENTRY_COUNT = 29
+    const val EVIDENCE_ENTRY_COUNT = 30
 
     /** Expected number of CANONICAL confidence-level evidence entries. */
     const val CANONICAL_EVIDENCE_COUNT = 26
 
     /** Expected number of ADVISORY confidence-level evidence entries. */
-    const val ADVISORY_EVIDENCE_COUNT = 2
+    const val ADVISORY_EVIDENCE_COUNT = 3
 
     /** Expected number of DEPRECATED_COMPAT confidence-level evidence entries. */
     const val DEPRECATED_COMPAT_EVIDENCE_COUNT = 1
 
     /** Expected number of deferred items at the time of this PR. */
-    const val DEFERRED_ITEM_COUNT = 5
+    const val DEFERRED_ITEM_COUNT = 6
 
     // ── Description constant ──────────────────────────────────────────────────
 
