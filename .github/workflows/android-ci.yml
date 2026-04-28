@@ -15,6 +15,7 @@ permissions:
 #   build ──┬── protocol-contract-guard ──┐
 #           ├── runtime-regression        ├── ci-gate
 #           ├── all-unit-tests            │
+#           ├── e2e-verification-gate ────┤
 #           └── lint ─────────────────────┘
 #
 # protocol-contract-guard: AIP v3 device_register / capability_report /
@@ -24,6 +25,13 @@ permissions:
 #   transitions/failure/recovery/capability-honesty.  Failure = runtime regression.
 #
 # all-unit-tests: Full test suite; must pass after the dedicated gate jobs.
+#
+# e2e-verification-gate: Dual-repo E2E verification harness unit tests (PR-72).
+#   Runs DualRepoE2EVerificationHarness / Stage / Artifact / Report tests.
+#   NOTE: In CI (no real device attached) the harness produces an honest
+#   "e2e_blocked_no_device" artifact and exports it as a structured artifact
+#   for V2 consumption.  The gate never falsely claims real-device E2E
+#   verification when no device is present.  Failure = harness regression.
 #
 # lint: Code-quality gate; must pass before merge.
 #
@@ -151,14 +159,104 @@ jobs:
           name: runtime-regression-results
           path: app/build/reports/tests/
 
-  # ── All Unit Tests (blocking gate #4) ────────────────────────────────────
+  # ── E2E Verification Gate (blocking gate #4) ─────────────────────────────
   #
-  # Runs the full JVM unit test suite after the two targeted gate jobs pass.
+  # Runs the dual-repo E2E verification harness unit tests (PR-72).  These
+  # tests guard the full 7-stage participant lifecycle chain:
+  #   - DualRepoE2EVerificationStage wire values and required-stage set
+  #   - DualRepoE2EVerificationHarness artifact derivation rules
+  #   - DualRepoE2EVerificationReport toWireMap / isRealDeviceE2EVerified
+  #   - Honest no-device output: harness must produce e2e_blocked_no_device
+  #     in CI, never falsely claim real-device verification
+  #   - Bridge wiring: CAPABILITY_REPORT and TASK_RESULT_RETURN are new
+  #     stages not forwarded to the existing bridge
+  #
+  # After tests pass, this job generates an honest CI-level verification
+  # status artifact (e2e_blocked_no_device) for V2 consumption.  This
+  # artifact is intentionally not a verified artifact — it correctly reflects
+  # the absence of a real device in CI.
+  #
+  # Failure here means an E2E harness regression.  The PR must not merge
+  # until this job is green.
+  e2e-verification-gate:
+    name: "E2E Verification Gate [gate 4/6]"
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run E2E verification harness unit tests
+        run: |
+          ./gradlew :app:test \
+            --tests "com.ufo.galaxy.runtime.Pr72DualRepoE2EVerificationHarnessTest"
+
+      - name: Generate CI-level E2E verification status artifact (tests passed)
+        if: success()
+        run: |
+          mkdir -p app/build/e2e-verification
+          cat > app/build/e2e-verification/ci-e2e-status.json << 'EOFSTATUS'
+          {
+            "schema_version": "1.0",
+            "source": "android-ci",
+            "verification_kind": "no_device",
+            "artifact_tag": "e2e_blocked_no_device",
+            "is_real_device_e2e_verified": false,
+            "is_v2_consumable": false,
+            "blocked_reason": "No physical Android device was present in CI; E2E verification cannot proceed without a device",
+            "harness_tests_passed": true,
+            "note": "This artifact honestly reflects the CI environment. Real-device E2E verification requires a physical Android device. The harness unit tests validated all artifact derivation rules and stage classifications."
+          }
+          EOFSTATUS
+          echo "CI E2E verification status artifact generated (e2e_blocked_no_device — honest CI output)."
+
+      - name: Generate CI-level E2E verification status artifact (tests failed)
+        if: failure()
+        run: |
+          mkdir -p app/build/e2e-verification
+          cat > app/build/e2e-verification/ci-e2e-status.json << 'EOFSTATUS'
+          {
+            "schema_version": "1.0",
+            "source": "android-ci",
+            "verification_kind": "no_device",
+            "artifact_tag": "e2e_blocked_no_device",
+            "is_real_device_e2e_verified": false,
+            "is_v2_consumable": false,
+            "blocked_reason": "No physical Android device was present in CI; E2E verification cannot proceed without a device",
+            "harness_tests_passed": false,
+            "note": "Harness unit tests FAILED. The E2E verification harness has a regression. Review the test results artifact for details."
+          }
+          EOFSTATUS
+          echo "CI E2E verification status artifact generated (harness_tests_passed=false — tests failed)."
+
+      - name: Upload E2E harness test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-verification-gate-results
+          path: |
+            app/build/reports/tests/
+            app/build/e2e-verification/
+
+  # ── All Unit Tests (blocking gate #5) ────────────────────────────────────
+  #
+  # Runs the full JVM unit test suite after the three targeted gate jobs pass.
   # Any test regression anywhere in the codebase is caught here.
   all-unit-tests:
-    name: "All Unit Tests [gate 4/5]"
+    name: "All Unit Tests [gate 5/6]"
     runs-on: ubuntu-latest
-    needs: [protocol-contract-guard, runtime-regression]
+    needs: [protocol-contract-guard, runtime-regression, e2e-verification-gate]
 
     steps:
       - name: Checkout repository
@@ -184,9 +282,9 @@ jobs:
           name: all-unit-test-results
           path: app/build/reports/tests/
 
-  # ── Lint (blocking gate #5) ──────────────────────────────────────────────
+  # ── Lint (blocking gate #6) ──────────────────────────────────────────────
   lint:
-    name: "Lint [gate 5/5]"
+    name: "Lint [gate 6/6]"
     runs-on: ubuntu-latest
     needs: build
 
@@ -230,8 +328,8 @@ jobs:
       - name: Check all gate results
         run: |
           echo "Gate results:"
-          echo "  all-unit-tests : ${{ needs.all-unit-tests.result }}"
-          echo "  lint           : ${{ needs.lint.result }}"
+          echo "  all-unit-tests        : ${{ needs.all-unit-tests.result }}"
+          echo "  lint                  : ${{ needs.lint.result }}"
           if [[ "${{ needs.all-unit-tests.result }}" != "success" || \
                 "${{ needs.lint.result }}" != "success" ]]; then
             echo "::error::One or more CI blocking gates failed. PR merge is blocked."
