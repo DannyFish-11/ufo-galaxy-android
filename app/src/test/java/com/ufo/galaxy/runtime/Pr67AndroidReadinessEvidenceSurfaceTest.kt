@@ -55,8 +55,9 @@ import org.junit.Test
  *  - CONTINUITY_RECOVERY_SAFETY wireValue is "continuity_recovery_safety"
  *  - COMPATIBILITY_SUPPRESSION wireValue is "compatibility_suppression"
  *  - SIGNAL_REPLAY_DUPLICATE_SAFETY wireValue is "signal_replay_duplicate_safety"
- *  - All six wire values are distinct
- *  - fromValue round-trips all six wire values correctly
+ *  - PARTICIPANT_LIFECYCLE_TRUTH wireValue is "participant_lifecycle_truth"
+ *  - All seven wire values are distinct
+ *  - fromValue round-trips all seven wire values correctly
  *  - fromValue returns null for unknown value
  *  - fromValue returns null for null
  *
@@ -76,6 +77,7 @@ import org.junit.Test
  *  - CONTINUITY_RECOVERY_SAFETY has at least one CANONICAL entry
  *  - COMPATIBILITY_SUPPRESSION has at least one CANONICAL entry
  *  - SIGNAL_REPLAY_DUPLICATE_SAFETY has at least one CANONICAL entry
+ *  - PARTICIPANT_LIFECYCLE_TRUTH has at least one CANONICAL entry
  *
  * ### Specific evidence entries — spot-checks (AC1: what counts as evidence)
  *  - readiness_evaluator_five_dimension_verdict is present and CANONICAL
@@ -104,6 +106,9 @@ import org.junit.Test
  *  - continuity_integration_duplicate_signal_suppression is present and CANONICAL
  *  - offline_queue_stale_session_discard is present and CANONICAL
  *  - delegated_execution_signal_idempotency_guard is present and CANONICAL
+ *  - participant_lifecycle_truth_nine_state_model is present and CANONICAL
+ *  - participant_lifecycle_truth_report_cross_repo_export is present and CANONICAL
+ *  - participant_lifecycle_truth_report_builder_derivation is present and CANONICAL
  *
  * ### CANONICAL entries V2 consumption paths (AC4: how governance gates can consume evidence)
  *  - all CANONICAL entries have non-blank v2ConsumptionPath
@@ -331,7 +336,15 @@ class Pr67AndroidReadinessEvidenceSurfaceTest {
     }
 
     @Test
-    fun `all six dimension wire values are distinct`() {
+    fun `PARTICIPANT_LIFECYCLE_TRUTH wireValue is participant_lifecycle_truth`() {
+        assertEquals(
+            "participant_lifecycle_truth",
+            AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH.wireValue
+        )
+    }
+
+    @Test
+    fun `all seven dimension wire values are distinct`() {
         val values = AndroidReadinessEvidenceSurface.ReadinessDimension.values()
             .map { it.wireValue }
         assertEquals(values.size, values.toSet().size)
@@ -385,6 +398,16 @@ class Pr67AndroidReadinessEvidenceSurfaceTest {
             AndroidReadinessEvidenceSurface.ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY,
             AndroidReadinessEvidenceSurface.ReadinessDimension.fromValue(
                 "signal_replay_duplicate_safety"
+            )
+        )
+    }
+
+    @Test
+    fun `fromValue round-trips participant_lifecycle_truth`() {
+        assertEquals(
+            AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            AndroidReadinessEvidenceSurface.ReadinessDimension.fromValue(
+                "participant_lifecycle_truth"
             )
         )
     }
@@ -546,6 +569,19 @@ class Pr67AndroidReadinessEvidenceSurfaceTest {
         }
         assertTrue(
             "SIGNAL_REPLAY_DUPLICATE_SAFETY has no CANONICAL entries",
+            entries.isNotEmpty()
+        )
+    }
+
+    @Test
+    fun `PARTICIPANT_LIFECYCLE_TRUTH has at least one CANONICAL entry`() {
+        val entries = surface.evidenceForDimension(
+            AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH
+        ).filter {
+            it.confidenceLevel == AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL
+        }
+        assertTrue(
+            "PARTICIPANT_LIFECYCLE_TRUTH has no CANONICAL entries",
             entries.isNotEmpty()
         )
     }
@@ -811,6 +847,36 @@ class Pr67AndroidReadinessEvidenceSurfaceTest {
     @Test
     fun `delegated_execution_signal_idempotency_guard is present and CANONICAL`() {
         val entry = surface.evidenceFor("delegated_execution_signal_idempotency_guard")
+        assertNotNull(entry)
+        assertEquals(
+            AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL,
+            entry!!.confidenceLevel
+        )
+    }
+
+    @Test
+    fun `participant_lifecycle_truth_nine_state_model is present and CANONICAL`() {
+        val entry = surface.evidenceFor("participant_lifecycle_truth_nine_state_model")
+        assertNotNull(entry)
+        assertEquals(
+            AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL,
+            entry!!.confidenceLevel
+        )
+    }
+
+    @Test
+    fun `participant_lifecycle_truth_report_cross_repo_export is present and CANONICAL`() {
+        val entry = surface.evidenceFor("participant_lifecycle_truth_report_cross_repo_export")
+        assertNotNull(entry)
+        assertEquals(
+            AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL,
+            entry!!.confidenceLevel
+        )
+    }
+
+    @Test
+    fun `participant_lifecycle_truth_report_builder_derivation is present and CANONICAL`() {
+        val entry = surface.evidenceFor("participant_lifecycle_truth_report_builder_derivation")
         assertNotNull(entry)
         assertEquals(
             AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL,
