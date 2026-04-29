@@ -281,7 +281,7 @@ class CrossDeviceSwitchTest {
             offlineQueue = testQueue
         )
         val messageTypes = listOf(
-            "task_submit", "task_result", "goal_result",
+            "task_submit", "task_result", "goal_result", "goal_execution_result",
             "cancel_result", "heartbeat", "capability_report"
         )
         for (type in messageTypes) {
@@ -413,27 +413,6 @@ class CrossDeviceSwitchTest {
         assertEquals("Queue must be empty — blocked before queuing logic", 0, testQueue.size)
     }
 
-    @Test
-    fun `sendJson OFF guard also blocks goal_execution_result without queueing`() {
-        // Verifies the unified cross-device gate covers all result uplink types,
-        // including the canonical goal_execution_result.
-        val testQueue = OfflineTaskQueue(prefs = null)
-        val client = GalaxyWebSocketClient(
-            serverUrl = "ws://localhost:9999",
-            crossDeviceEnabled = false,
-            offlineQueue = testQueue
-        )
-        val messageTypes = listOf(
-            "task_submit", "task_result", "goal_result", "goal_execution_result",
-            "cancel_result", "heartbeat", "capability_report"
-        )
-        for (type in messageTypes) {
-            val json = """{"type":"$type","payload":{}}"""
-            assertFalse("sendJson must block type=$type when cross-device is OFF", client.sendJson(json))
-        }
-        assertEquals("Offline queue must stay empty for all blocked message types", 0, testQueue.size)
-    }
-
     // ── Offline replay: session-scoped authority bounding ─────────────────────
 
     @Test
@@ -459,8 +438,9 @@ class CrossDeviceSwitchTest {
         assertEquals("One stale-session message must be discarded", 1, discarded)
         assertEquals("Only the current-session message must survive", 1, queue.size)
         val remaining = queue.drainAll()
-        assertEquals("t-current", JsonParser.parseString(remaining[0].json)
-            .asJsonObject.getAsJsonObject("payload").get("task_id").asString)
+        val taskId = JsonParser.parseString(remaining[0].json)
+            .asJsonObject?.getAsJsonObject("payload")?.get("task_id")?.asString
+        assertEquals("t-current", taskId)
     }
 
     @Test
