@@ -876,6 +876,37 @@ data class GoalExecutionPayload(
  *                       `null` when the task was executed as a fresh dispatch (non-resumed
  *                       outcomes).  Allows V2 to distinguish resumed executions from fresh
  *                       executions in the uplink result.
+ *
+ * ## Unified result contract fields (single online-result contract)
+ * The following three fields complete the unified result uplink contract so that all
+ * production result paths (success / error / timeout / cancellation / disabled) carry
+ * the same set of identity, classification, and summary fields and V2 can consume them
+ * through a single canonical handler without guessing or fallback mapping.
+ *
+ * @param normalized_status  Canonical result kind derived from [status] by
+ *                       [com.ufo.galaxy.service.GalaxyConnectionService.sendGoalResult] at
+ *                       emission time.  Always set on the outbound wire payload; `null` only
+ *                       for locally-constructed payloads that have not yet been emitted.
+ *                       Stable values: `"final_completion"`, `"cancellation"`,
+ *                       `"disabled"`, `"failure"`.
+ *                       Allows V2 unified result ingress to classify outcomes without
+ *                       raw-status string inspection or per-path guessing.
+ * @param runtime_session_id  Stable per-app-launch session identifier echoed into the
+ *                       payload for replay self-containment.  Set by
+ *                       [com.ufo.galaxy.service.GalaxyConnectionService.sendGoalResult]
+ *                       from [com.ufo.galaxy.UFOGalaxyApplication.runtimeSessionId] at
+ *                       emission time.  When a result is replayed from the offline queue,
+ *                       this field allows the V2 ingress to correlate the replayed result
+ *                       with the originating runtime session without re-querying the device.
+ *                       `null` only for locally-constructed payloads that have not yet
+ *                       been emitted through the canonical send path.
+ * @param result_summary Human-readable one-line outcome description.  Mirrors the same
+ *                       field in [TaskResultPayload] and [HandoffEnvelopeV2ResultPayload]
+ *                       so that all uplink result payloads carry a consistent summary
+ *                       field.  Populated by
+ *                       [com.ufo.galaxy.service.GalaxyConnectionService.sendGoalResult]
+ *                       from the [result] field when not explicitly set by the caller.
+ *                       `null` only for pre-emission / locally-constructed payloads.
  */
 data class GoalResultPayload(
     val task_id: String,
@@ -906,7 +937,17 @@ data class GoalResultPayload(
     // ── PR-5B: structured policy outcome result fields (optional; null for non-policy / legacy paths) ──
     val policy_rejection_detail: String? = null,
     val hold_reason: String? = null,
-    val is_continuation: Boolean? = null
+    val is_continuation: Boolean? = null,
+    // ── Unified result contract: canonical kind + replay identity ──────────────────────────────
+    // Both fields are set by GalaxyConnectionService.sendGoalResult at emission time and are
+    // null only for pre-emission / locally-constructed payloads.
+    val normalized_status: String? = null,
+    val runtime_session_id: String? = null,
+    // ── Unified result contract: normalised result summary ─────────────────────────────────────
+    // Mirrors the result_summary field in TaskResultPayload and HandoffEnvelopeV2ResultPayload
+    // so that all uplink result payloads carry a consistent human-readable one-line outcome.
+    // Populated by GalaxyConnectionService.sendGoalResult from the `result` field when absent.
+    val result_summary: String? = null
 )
 
 /**
