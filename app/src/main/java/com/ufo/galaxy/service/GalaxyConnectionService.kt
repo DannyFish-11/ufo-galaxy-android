@@ -23,6 +23,7 @@ import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
+import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
@@ -181,6 +182,16 @@ class GalaxyConnectionService : Service() {
      */
     private val delegatedRuntimeReceiver = DelegatedRuntimeReceiver()
     private val handoffContractValidator = HandoffContractValidator()
+
+    /**
+     * Canonical continuity authority gate for online execution (PR: unified result + continuity).
+     *
+     * Called inside [handleTaskAssign], [handleGoalExecution], [handleParallelSubtask], and
+     * [handleTakeoverRequest] to block stale-session or stale-identity requests before execution
+     * begins.  This ensures the online execution path and the offline-replay path both enforce
+     * the same [com.ufo.galaxy.runtime.AttachedRuntimeSession] continuity contract.
+     */
+    private val continuityIntegration = AndroidContinuityIntegration()
 
     /**
      * Evaluator for Android delegated-runtime readiness (Android-side signal closure).
@@ -656,7 +667,31 @@ class GalaxyConnectionService : Service() {
                 errorType = "task_payload_parse_error",
                 errorContext = e.message ?: "unknown parse error"
             )
-            sendTaskError(taskId, "bad_payload: ${e.message}", inboundTraceId)
+            val errorTraceId = inboundTraceId?.takeIf { it.isNotBlank() }
+                ?: java.util.UUID.randomUUID().toString()
+            sendGoalError(taskId, null, null, "bad_payload: ${e.message}", errorTraceId)
+            return
+        }
+
+        // Continuity gate: reject execution if no active attached session is present.
+        // This aligns online task_assign with the replay/recovery continuity authority contract
+        // and ensures stale-runtime requests are blocked before any execution begins.
+        val activeSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+        val identityResult = continuityIntegration.validateRuntimeIdentity(
+            unitAttachedSessionId = activeSession?.sessionId ?: "",
+            activeSession = activeSession
+        )
+        if (identityResult is AndroidContinuityIntegration.IdentityValidationResult.NoActiveSession) {
+            Log.w(TAG, "[CONTINUITY] task_assign rejected: no active attached session task_id=$taskId")
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "task_assign_continuity_gate",
+                errorType = AndroidContinuityIntegration.SEMANTIC_REJECT_STALE_IDENTITY,
+                errorContext = "no_active_session"
+            )
+            val gateTraceId = inboundTraceId?.takeIf { it.isNotBlank() }
+                ?: java.util.UUID.randomUUID().toString()
+            sendGoalError(taskId, null, null, "no_active_session", gateTraceId)
             return
         }
 
@@ -894,6 +929,30 @@ class GalaxyConnectionService : Service() {
             return
         }
 
+        // Continuity gate: reject execution if no active attached session is present.
+        // Online goal_execution now enforces the same session continuity authority as the
+        // offline-replay path (discardForDifferentSession), ensuring Android is never
+        // "execution-time unprotected" while replay is fully continuity-gated.
+        val activeSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+        val identityResult = continuityIntegration.validateRuntimeIdentity(
+            unitAttachedSessionId = activeSession?.sessionId ?: "",
+            activeSession = activeSession
+        )
+        if (identityResult is AndroidContinuityIntegration.IdentityValidationResult.NoActiveSession) {
+            Log.w(TAG, "[CONTINUITY] goal_execution rejected: no active attached session task_id=$taskId")
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "goal_execution_continuity_gate",
+                errorType = AndroidContinuityIntegration.SEMANTIC_REJECT_STALE_IDENTITY,
+                errorContext = "no_active_session"
+            )
+            val gateTraceId = inboundTraceId?.takeIf { it.isNotBlank() }
+                ?: java.util.UUID.randomUUID().toString()
+            sendGoalError(taskId, null, null, "no_active_session", gateTraceId, ROUTE_MODE_CROSS_DEVICE)
+            taskCancelRegistry.deregister(taskId)
+            return
+        }
+
         // Pause any running local LoopController session.
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
@@ -986,6 +1045,29 @@ class GalaxyConnectionService : Service() {
                 errorContext = e.message ?: "unknown parse error"
             )
             sendGoalError(taskId, null, null, "bad_payload: ${e.message}", traceId, ROUTE_MODE_CROSS_DEVICE)
+            taskCancelRegistry.deregister(taskId)
+            return
+        }
+
+        // Continuity gate: reject execution if no active attached session is present.
+        // Ensures parallel_subtask online execution is protected by the same continuity
+        // authority as the offline-replay path.
+        val activeSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+        val identityResult = continuityIntegration.validateRuntimeIdentity(
+            unitAttachedSessionId = activeSession?.sessionId ?: "",
+            activeSession = activeSession
+        )
+        if (identityResult is AndroidContinuityIntegration.IdentityValidationResult.NoActiveSession) {
+            Log.w(TAG, "[CONTINUITY] parallel_subtask rejected: no active attached session task_id=$taskId")
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "parallel_subtask_continuity_gate",
+                errorType = AndroidContinuityIntegration.SEMANTIC_REJECT_STALE_IDENTITY,
+                errorContext = "no_active_session"
+            )
+            val gateTraceId = inboundTraceId?.takeIf { it.isNotBlank() }
+                ?: java.util.UUID.randomUUID().toString()
+            sendGoalError(taskId, null, null, "no_active_session", gateTraceId, ROUTE_MODE_CROSS_DEVICE)
             taskCancelRegistry.deregister(taskId)
             return
         }
@@ -2667,6 +2749,56 @@ class GalaxyConnectionService : Service() {
                     "activation_status" to activationRecord.activationStatus.wireValue
                 )
             )
+
+            // Continuity identity gate: re-read the active session at execution time to catch
+            // any session change that occurred between receipt and execution (race condition).
+            // Uses validateRuntimeIdentity — the canonical stale-identity gate — so the
+            // takeover path enforces the same continuity contract as the replay path.
+            val latestSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+            val takeoverIdentityResult = continuityIntegration.validateRuntimeIdentity(
+                unitAttachedSessionId = delegatedUnit.attachedSessionId,
+                activeSession = latestSession
+            )
+            if (takeoverIdentityResult !is AndroidContinuityIntegration.IdentityValidationResult.Valid) {
+                val rejectReason = when (takeoverIdentityResult) {
+                    is AndroidContinuityIntegration.IdentityValidationResult.StaleIdentity ->
+                        "${AndroidContinuityIntegration.SEMANTIC_REJECT_STALE_IDENTITY}: " +
+                            "received=${takeoverIdentityResult.receivedSessionId}"
+                    else -> AndroidContinuityIntegration.SEMANTIC_REJECT_STALE_IDENTITY
+                }
+                Log.w(
+                    TAG,
+                    "[CONTINUITY] takeover rejected: stale identity " +
+                        "takeover_id=${envelope.takeover_id} reason=$rejectReason"
+                )
+                emitRuntimeDiagnostics(
+                    taskId = envelope.task_id,
+                    nodeName = "takeover_continuity_gate",
+                    errorType = "stale_attachment_session",
+                    errorContext = rejectReason
+                )
+                sendTakeoverResponse(
+                    TakeoverResponseEnvelope(
+                        takeover_id = envelope.takeover_id,
+                        task_id = envelope.task_id,
+                        trace_id = envelope.trace_id,
+                        accepted = false,
+                        rejection_reason = rejectReason,
+                        device_id = localDeviceId,
+                        runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                        source_runtime_posture = envelope.source_runtime_posture,
+                        exec_mode = envelope.exec_mode
+                    )
+                )
+                return TakeoverHandlingResult(
+                    takeoverId = envelope.takeover_id,
+                    taskId = envelope.task_id,
+                    traceId = envelope.trace_id,
+                    accepted = false,
+                    reason = rejectReason
+                )
+            }
+
             // PR-14: Record that a delegated execution has been accepted under the current
             // attached session.  This increments the session's delegatedExecutionCount without
             // re-creating the session or changing its identity — multiple tasks can flow
