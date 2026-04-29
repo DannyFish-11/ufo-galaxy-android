@@ -347,7 +347,7 @@ class UnifiedResultAndContinuityContractClosureTest {
     }
 
     @Test
-    fun `StaleIdentity is returned when no active session for takeover`() {
+    fun `NoActiveSession is returned when no active session for takeover`() {
         // If session is invalidated between receipt and execution gate, NoActiveSession
         // is returned, which the gate also treats as a blocking result.
         val identityResult = continuityIntegration.validateRuntimeIdentity(
