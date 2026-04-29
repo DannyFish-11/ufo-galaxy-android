@@ -94,6 +94,15 @@ class OfflineQueueTest {
     }
 
     @Test
+    fun `QUEUEABLE_TYPES contains goal_execution_result`() {
+        assertTrue(
+            "goal_execution_result must be queueable: it is the canonical uplink type " +
+                "for all main production result paths (task_assign / goal_execution / parallel_subtask)",
+            "goal_execution_result" in OfflineTaskQueue.QUEUEABLE_TYPES
+        )
+    }
+
+    @Test
     fun `heartbeat type is NOT in QUEUEABLE_TYPES`() {
         assertFalse("heartbeat" in OfflineTaskQueue.QUEUEABLE_TYPES)
     }
