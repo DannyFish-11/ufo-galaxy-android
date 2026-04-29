@@ -1310,12 +1310,31 @@ class GalaxyWebSocketClient(
     }
 
     /**
-     * Flushes the [offlineQueue] by sending each queued message over the live socket.
+     * Flushes the [offlineQueue] by sending each queued message through [sendJson].
      * Must only be called after [onOpen] confirms the connection is up.
+     *
+     * Before draining, stale-session messages are purged via
+     * [OfflineTaskQueue.discardForDifferentSession] using the current [durableSessionId].
+     * This prevents messages enqueued under an earlier durable session from being
+     * replayed into the new connection.
+     *
+     * All messages are sent through [sendJson] so that the cross-device gate and any
+     * other runtime send constraints are uniformly enforced during replay — the flush
+     * path does not bypass the gate.
+     *
      * Messages that fail to send are logged (with count) but not re-enqueued;
      * the flush is best-effort since re-enqueue on flush failure could cause infinite retry loops.
      */
     private fun flushOfflineQueue() {
+        // Purge messages enqueued under a different durable session before replaying.
+        val tag = durableSessionId
+        if (tag != null) {
+            val discarded = offlineQueue.discardForDifferentSession(tag)
+            if (discarded > 0) {
+                Log.i(TAG, "[WS:OfflineQueue] Discarded $discarded stale-session message(s) before flush (tag=$tag)")
+            }
+        }
+
         val messages = offlineQueue.drainAll()
         if (messages.isEmpty()) return
 
@@ -1323,7 +1342,9 @@ class GalaxyWebSocketClient(
         var sent = 0
         var lost = 0
         for (msg in messages) {
-            val ok = webSocket?.send(msg.json) ?: false
+            // Route through sendJson() so that the cross-device gate is uniformly enforced
+            // during replay — same constraints as every other outbound message.
+            val ok = sendJson(msg.json)
             if (!ok) {
                 lost++
                 Log.w(TAG, "[WS:OfflineQueue] Flush failed for type=${msg.type}; message lost (total lost: $lost)")

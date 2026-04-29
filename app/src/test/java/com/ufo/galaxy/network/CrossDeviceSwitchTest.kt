@@ -1,5 +1,6 @@
 package com.ufo.galaxy.network
 
+import com.google.gson.JsonParser
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.MsgType
@@ -280,7 +281,7 @@ class CrossDeviceSwitchTest {
             offlineQueue = testQueue
         )
         val messageTypes = listOf(
-            "task_submit", "task_result", "goal_result",
+            "task_submit", "task_result", "goal_result", "goal_execution_result",
             "cancel_result", "heartbeat", "capability_report"
         )
         for (type in messageTypes) {
@@ -371,5 +372,89 @@ class CrossDeviceSwitchTest {
         // Confirms that the device_register message sent in sendHandshake() uses
         // the authoritative AIP v3 wire string "device_register".
         assertEquals("device_register", MsgType.DEVICE_REGISTER.value)
+    }
+
+    // ── Offline replay: goal_execution_result (canonical main-result type) ─────
+
+    @Test
+    fun `sendJson when disconnected queues goal_execution_result type`() {
+        // goal_execution_result is the canonical uplink type for all main production
+        // result paths (task_assign / goal_execution / parallel_subtask).  It must be
+        // buffered in the offline queue when the WebSocket is temporarily disconnected
+        // so that results are not silently dropped.
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"goal_execution_result","payload":{"task_id":"t1","status":"success"}}"""
+        val sent = client.sendJson(json)
+        assertFalse("sendJson returns false when not connected", sent)
+        assertEquals("goal_execution_result must be queued when offline", 1, testQueue.size)
+        assertEquals("goal_execution_result", testQueue.drainAll().first().type)
+    }
+
+    @Test
+    fun `sendJson blocks goal_execution_result when crossDeviceEnabled is false`() {
+        // The cross-device gate must block goal_execution_result before the offline
+        // queuing logic is reached.  This verifies that the replay path (flushOfflineQueue
+        // routing through sendJson) also enforces the gate — turning cross-device OFF
+        // prevents both immediate sends and offline enqueuing.
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = false,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"goal_execution_result","payload":{"task_id":"t1","status":"success"}}"""
+        val result = client.sendJson(json)
+        assertFalse("goal_execution_result must be blocked when cross-device is OFF", result)
+        assertEquals("Queue must be empty — blocked before queuing logic", 0, testQueue.size)
+    }
+
+    // ── Offline replay: session-scoped authority bounding ─────────────────────
+
+    @Test
+    fun `discardForDifferentSession removes stale-session goal_execution_result before replay`() {
+        // Verifies that messages tagged with an old durable session are purged from the
+        // queue before drain.  This is the mechanism that prevents cross-session pollution
+        // when flushOfflineQueue calls discardForDifferentSession(durableSessionId) before
+        // draining on reconnect.
+        val queue = OfflineTaskQueue(prefs = null)
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-old","status":"success"}}""",
+            sessionTag = "session-OLD"
+        )
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-current","status":"success"}}""",
+            sessionTag = "session-CURRENT"
+        )
+
+        val discarded = queue.discardForDifferentSession("session-CURRENT")
+
+        assertEquals("One stale-session message must be discarded", 1, discarded)
+        assertEquals("Only the current-session message must survive", 1, queue.size)
+        val remaining = queue.drainAll()
+        val taskId = JsonParser.parseString(remaining[0].json)
+            .asJsonObject?.getAsJsonObject("payload")?.get("task_id")?.asString
+        assertEquals("t-current", taskId)
+    }
+
+    @Test
+    fun `discardForDifferentSession preserves null-tagged goal_execution_result messages`() {
+        // Messages enqueued without a sessionTag (null) must never be discarded by
+        // discardForDifferentSession — they are always forwarded regardless of session.
+        val queue = OfflineTaskQueue(prefs = null)
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-untagged"}}"""
+            // no sessionTag → null
+        )
+        val discarded = queue.discardForDifferentSession("session-NEW")
+        assertEquals("Null-tagged messages must not be discarded", 0, discarded)
+        assertEquals(1, queue.size)
     }
 }
