@@ -91,7 +91,7 @@ import com.ufo.galaxy.network.OfflineTaskQueue
  * - **Principle P2**: No replay bypasses the session/continuity authority filter.
  * - **Principle P5**: Online sends and offline replay use the same result contract
  *   (`goal_execution_result` AIP v3 envelope via the same `sendJson` gate).
- * - **Principal P1**: Replay results enter the same V2 unified result ingress as online results.
+ * - **Principle P1**: Replay results enter the same V2 unified result ingress as online results.
  *
  * @see com.ufo.galaxy.network.GalaxyWebSocketClient
  * @see OfflineTaskQueue
