@@ -1479,28 +1479,21 @@ class GalaxyConnectionService : Service() {
             )
         )
     }
-    private fun sendGoalResult(result: GoalResultPayload) {
-        val envelope = AipMessage(
-            type = MsgType.GOAL_RESULT,
-            payload = result,
-            correlation_id = result.task_id,
-            device_id = result.device_id.ifEmpty { localDeviceId },
-            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = buildIdempotencyKey(result.task_id, MsgType.GOAL_RESULT)
-        )
-        webSocketClient.sendJson(gson.toJson(envelope))
-    }
-
     /**
-     * Sends a [GoalResultPayload] as a [MsgType.GOAL_EXECUTION_RESULT] envelope with
-     * full trace context (trace_id + route_mode).
+     * Sends a [GoalResultPayload] as a [MsgType.GOAL_EXECUTION_RESULT] envelope.
      *
-     * Used for:
-     * - task_assign → GOAL_EXECUTION_RESULT（与 goal_execution / parallel_subtask 统一）
+     * This is the single canonical result-send path for all uplink result types:
+     * - task_assign → GOAL_EXECUTION_RESULT
      * - goal_execution → GOAL_EXECUTION_RESULT
      * - parallel_subtask → GOAL_EXECUTION_RESULT
+     * - error / timeout results → GOAL_EXECUTION_RESULT
+     *
+     * [traceId] and [routeMode] are nullable: when the inbound envelope does not
+     * carry trace context (e.g. legacy callers or parse-error paths), both fields are
+     * omitted from the outbound envelope rather than defaulting to an empty string.
+     * The V2 gateway handler (_handle_goal_execution_result) accepts missing trace context.
      */
-    private fun sendGoalResult(result: GoalResultPayload, traceId: String, routeMode: String) {
+    private fun sendGoalResult(result: GoalResultPayload, traceId: String?, routeMode: String?) {
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
             payload = result,
@@ -1514,7 +1507,7 @@ class GalaxyConnectionService : Service() {
         webSocketClient.sendJson(gson.toJson(envelope))
     }
 
-    /** Sends an error [GoalResultPayload] when payload parsing fails. */
+    /** Sends an error [GoalResultPayload] as [MsgType.GOAL_EXECUTION_RESULT] when payload parsing fails. */
     private fun sendGoalError(
         taskId: String,
         groupId: String?,
@@ -1533,11 +1526,7 @@ class GalaxyConnectionService : Service() {
             latency_ms = 0L,
             device_id = localDeviceId
         )
-        if (traceId != null && routeMode != null) {
-            sendGoalResult(errorResult, traceId, routeMode)
-        } else {
-            sendGoalResult(errorResult)
-        }
+        sendGoalResult(errorResult, traceId, routeMode)
     }
 
     /**

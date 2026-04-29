@@ -27,8 +27,8 @@ import java.util.ArrayDeque
  * not survive process restart — document this limitation in the README.
  *
  * **Types that are queued**: Only messages whose JSON `type` field is listed in
- * [QUEUEABLE_TYPES] ("task_result", "goal_result") are candidates for queuing.
- * Heartbeats, handshakes, and diagnostics are never queued.
+ * [QUEUEABLE_TYPES] ("task_result", "goal_result", "goal_execution_result") are candidates
+ * for queuing.  Heartbeats, handshakes, and diagnostics are never queued.
  *
  * **JVM / unit-test compatible**: no Android framework references other than
  * the optional [SharedPreferences] and [Log] stub (log calls silently compile
@@ -48,8 +48,17 @@ class OfflineTaskQueue(
         /** Messages older than this threshold are discarded when the queue is loaded from prefs. */
         private const val MAX_AGE_MS = 24L * 60 * 60 * 1000
 
-        /** JSON `type` values that should be queued during offline periods. */
-        val QUEUEABLE_TYPES: Set<String> = setOf("task_result", "goal_result")
+        /** JSON `type` values that should be queued during offline periods.
+         *
+         * "goal_execution_result" is the canonical uplink result type used on all main
+         * production paths (task_assign / goal_execution / parallel_subtask).  It must be
+         * queueable so that results produced while the WebSocket is temporarily disconnected
+         * are buffered and retransmitted on reconnect rather than silently dropped.
+         *
+         * "task_result" and "goal_result" are retained for backward-compatibility with legacy
+         * paths and REST-fallback callers.
+         */
+        val QUEUEABLE_TYPES: Set<String> = setOf("task_result", "goal_result", "goal_execution_result")
     }
 
     /**
