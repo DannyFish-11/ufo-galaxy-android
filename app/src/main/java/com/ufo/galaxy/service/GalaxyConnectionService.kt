@@ -828,7 +828,10 @@ class GalaxyConnectionService : Service() {
                 subtask_index = null,
                 latency_ms = 0L,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole
+                device_role = UFOGalaxyApplication.appSettings.deviceRole,
+                // Carry source_runtime_posture from the inbound payload so the error result
+                // has the same context fields as a normal execution result.
+                source_runtime_posture = payload.source_runtime_posture
             )
             sendGoalResult(errorResult, traceId, routeMode)
         } finally {
@@ -1482,39 +1485,100 @@ class GalaxyConnectionService : Service() {
     /**
      * Sends a [GoalResultPayload] as a [MsgType.GOAL_EXECUTION_RESULT] envelope.
      *
-     * This is the single canonical result-send path for all uplink result types:
+     * This is the **single canonical result-send path** for all uplink result types:
      * - task_assign → GOAL_EXECUTION_RESULT
      * - goal_execution → GOAL_EXECUTION_RESULT
      * - parallel_subtask → GOAL_EXECUTION_RESULT
      * - error / timeout results → GOAL_EXECUTION_RESULT
      *
-     * [traceId] and [routeMode] are nullable: when the inbound envelope does not
-     * carry trace context (e.g. legacy callers or parse-error paths), both fields are
-     * omitted from the outbound envelope rather than defaulting to an empty string.
+     * At emission time, this method enriches [result] with three unified-contract fields
+     * that must be set centrally rather than by individual callers:
+     * - [GoalResultPayload.normalized_status]: canonical result kind ("final_completion" /
+     *   "cancellation" / "disabled" / "failure") derived via [canonicalResultKind].  All
+     *   result paths — success, error, timeout, cancellation, disabled — map to one of
+     *   these four stable values so V2 can classify results without raw-status guessing.
+     * - [GoalResultPayload.runtime_session_id]: stable per-app-launch session identifier
+     *   from [UFOGalaxyApplication.runtimeSessionId] echoed into the payload for replay
+     *   self-containment.  When a result is later replayed from the offline queue, V2 can
+     *   correlate it with the originating runtime session without re-querying the device.
+     * - [GoalResultPayload.result_summary]: normalised human-readable one-line summary,
+     *   populated from [GoalResultPayload.result] when not already set by the caller.
+     *   This mirrors the same field in [TaskResultPayload] and [HandoffEnvelopeV2ResultPayload]
+     *   so all uplink result payloads carry a consistent named summary field.
+     *
+     * The AIP v3 envelope also propagates [GoalResultPayload.dispatch_trace_id] and
+     * [GoalResultPayload.source_runtime_posture] so that V2 observability and posture
+     * routing have consistent field values at both the payload and envelope layer.
+     *
+     * [traceId] and [routeMode] are nullable: when the inbound envelope does not carry
+     * trace context (e.g. legacy callers or parse-error paths), both fields are omitted
+     * from the outbound envelope rather than defaulting to an empty string.
      * The V2 gateway handler (_handle_goal_execution_result) accepts missing trace context.
      */
     private fun sendGoalResult(result: GoalResultPayload, traceId: String?, routeMode: String?) {
+        val runtimeSession = UFOGalaxyApplication.runtimeSessionId
+        // ── Enrich payload with unified-contract fields (always set at the single emission layer) ──
+        val enriched = result.copy(
+            normalized_status = canonicalResultKind(result.status),
+            runtime_session_id = runtimeSession,
+            // Populate result_summary from result when not already set, so all result payloads
+            // carry a consistent human-readable summary field regardless of the caller path.
+            result_summary = result.result_summary ?: result.result
+        )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
-            payload = result,
-            correlation_id = result.correlation_id ?: result.task_id,
-            device_id = result.device_id.ifEmpty { localDeviceId },
+            payload = enriched,
+            correlation_id = enriched.correlation_id ?: enriched.task_id,
+            device_id = enriched.device_id.ifEmpty { localDeviceId },
             trace_id = traceId,
             route_mode = routeMode,
-            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = buildIdempotencyKey(result.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId)
+            runtime_session_id = runtimeSession,
+            idempotency_key = buildIdempotencyKey(enriched.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId),
+            // Propagate trace/posture fields from the result payload into the envelope so
+            // V2 observability and posture routing see consistent values at both layers.
+            dispatch_trace_id = enriched.dispatch_trace_id,
+            source_runtime_posture = enriched.source_runtime_posture
         )
         webSocketClient.sendJson(gson.toJson(envelope))
     }
 
-    /** Sends an error [GoalResultPayload] as [MsgType.GOAL_EXECUTION_RESULT] when payload parsing fails. */
+    /**
+     * Maps a raw result [status] string to the canonical result kind for the unified
+     * uplink contract.  Used exclusively by [sendGoalResult] to set
+     * [GoalResultPayload.normalized_status] at emission time.
+     *
+     * | Raw status (after lifecycle normalization) | Canonical kind    |
+     * |--------------------------------------------|-------------------|
+     * | `"success"`                                | `"final_completion"` |
+     * | `"cancelled"`                              | `"cancellation"`  |
+     * | `"disabled"`                               | `"disabled"`      |
+     * | anything else (`"error"`, `"timeout"`, …)  | `"failure"`       |
+     */
+    private fun canonicalResultKind(status: String): String =
+        when (com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment.normalizeLifecycleStatus(status)) {
+            "success" -> "final_completion"
+            "cancelled" -> "cancellation"
+            "disabled" -> "disabled"
+            else -> "failure"
+        }
+
+    /**
+     * Sends an error [GoalResultPayload] as [MsgType.GOAL_EXECUTION_RESULT] when payload
+     * parsing fails or an error occurs before the full inbound payload is available.
+     *
+     * [sourceRuntimePosture] should be passed whenever the caller has extracted it from the
+     * inbound envelope (e.g. during parse-error paths where the payload JSON is available
+     * but invalid).  Passing it keeps the context fields consistent with normal-path results
+     * so V2 sees the same set of fields regardless of the error kind.
+     */
     private fun sendGoalError(
         taskId: String,
         groupId: String?,
         subtaskIndex: Int?,
         errorMsg: String,
         traceId: String? = null,
-        routeMode: String? = null
+        routeMode: String? = null,
+        sourceRuntimePosture: String? = null
     ) {
         val errorResult = GoalResultPayload(
             task_id = taskId,
@@ -1524,7 +1588,8 @@ class GalaxyConnectionService : Service() {
             group_id = groupId,
             subtask_index = subtaskIndex,
             latency_ms = 0L,
-            device_id = localDeviceId
+            device_id = localDeviceId,
+            source_runtime_posture = sourceRuntimePosture
         )
         sendGoalResult(errorResult, traceId, routeMode)
     }
