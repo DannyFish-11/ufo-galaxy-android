@@ -749,10 +749,13 @@ class GalaxyWebSocketClient(
             return false
         }
         if (!isConnected) {
-            // Attempt to queue queueable message types for later delivery
+            // Attempt to queue queueable message types for later delivery.
+            // Tag each queued message with the current durableSessionId so that
+            // flushOfflineQueue's authority filter (discardForDifferentSession) can
+            // block stale-session messages if the session changes before reconnect.
             val msgType = tryExtractType(json)
             if (msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
-                offlineQueue.enqueue(msgType, json)
+                offlineQueue.enqueue(msgType, json, sessionTag = durableSessionId)
                 Log.i(TAG, "[WS:OfflineQueue] Queued offline message type=$msgType queue_size=${offlineQueue.size}")
             } else {
                 Log.w(TAG, "Not connected and message type not queueable (type=$msgType); dropping")
