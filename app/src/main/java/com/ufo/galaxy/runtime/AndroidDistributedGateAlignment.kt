@@ -481,6 +481,20 @@ object AndroidDistributedGateAlignment {
                 "self-authorize continuation."
         ),
 
+        GateMappingEntry(
+            evidenceId = "online_execution_continuity_gate_closure",
+            androidDimension = AndroidReadinessEvidenceSurface.ReadinessDimension.CONTINUITY_RECOVERY_SAFETY,
+            canonicalGateCategory = CanonicalGateCategory.CONTINUITY_RECOVERY_SAFETY,
+            evidenceAuthority = EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME,
+            gateMappingNote = "All online execution entry points (handleTaskAssign, " +
+                "handleGoalExecution, handleParallelSubtask, handleTakeoverRequest, " +
+                "handleHandoffEnvelopeV2) apply validateRuntimeIdentity before starting " +
+                "execution.  handleHandoffEnvelopeV2 adds parity with the other four entry " +
+                "points, closing the split reality.  V2 gate can confirm Android enforces " +
+                "continuity legality on all production online execution paths by inspecting " +
+                "rejection_reason=reject_stale_runtime_identity in RuntimeDiagnostics."
+        ),
+
         // ── COMPATIBILITY_LEGACY_SUPPRESSION ──────────────────────────────────
 
         GateMappingEntry(
@@ -588,10 +602,10 @@ object AndroidDistributedGateAlignment {
     // ── Count constants for test assertions ───────────────────────────────────
 
     /** Expected total number of gate mapping entries at the time of this PR. */
-    const val GATE_MAPPING_COUNT = 26
+    const val GATE_MAPPING_COUNT = 27
 
     /** Expected number of [EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME] mapping entries. */
-    const val STRONG_PARTICIPANT_RUNTIME_COUNT = 23
+    const val STRONG_PARTICIPANT_RUNTIME_COUNT = 24
 
     /** Expected number of [EvidenceAuthority.ADVISORY_OBSERVATION_ONLY] mapping entries. */
     const val ADVISORY_OBSERVATION_ONLY_COUNT = 2

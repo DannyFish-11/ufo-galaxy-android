@@ -545,6 +545,29 @@ object AndroidReadinessEvidenceSurface {
                 "handshake; V2 confirms or overrides continuation based on canonical session state"
         ),
 
+        EvidenceEntry(
+            evidenceId = "online_execution_continuity_gate_closure",
+            dimension = ReadinessDimension.CONTINUITY_RECOVERY_SAFETY,
+            confidenceLevel = ConfidenceLevel.CANONICAL,
+            description = "All online execution entry points (handleTaskAssign, " +
+                "handleGoalExecution, handleParallelSubtask, handleTakeoverRequest, " +
+                "handleHandoffEnvelopeV2) apply AndroidContinuityIntegration." +
+                "validateRuntimeIdentity before starting execution, blocking stale-session " +
+                "or no-active-session requests before any execution begins.  This closes the " +
+                "split reality where replay/recovery paths were continuity-gated but live " +
+                "online execution paths were comparatively permissive.",
+            producedBy = "GalaxyConnectionService, AndroidContinuityIntegration",
+            testEvidence = "UnifiedResultAndContinuityContractClosureTest: NoActiveSession " +
+                "blocks task_assign, goal_execution, parallel_subtask, handoff_envelope_v2; " +
+                "StaleIdentity blocks delegated takeover; Valid allows execution when session " +
+                "is present and IDs match",
+            v2ConsumptionPath = "Blocked requests return GOAL_EXECUTION_RESULT or " +
+                "HANDOFF_ENVELOPE_V2_RESULT with error=no_active_session; rejection_reason=" +
+                "reject_stale_runtime_identity is emitted via RuntimeDiagnostics nodeName=" +
+                "handoff_v2_continuity_gate (or task_assign/goal_execution/parallel_subtask/" +
+                "goal_execution_continuity_gate) so V2 can observe and classify the rejection"
+        ),
+
         // ── COMPATIBILITY_SUPPRESSION ─────────────────────────────────────────
 
         EvidenceEntry(
@@ -948,10 +971,10 @@ object AndroidReadinessEvidenceSurface {
     // ── Count constants for test assertions ───────────────────────────────────
 
     /** Expected total number of evidence entries at the time of this PR. */
-    const val EVIDENCE_ENTRY_COUNT = 30
+    const val EVIDENCE_ENTRY_COUNT = 31
 
     /** Expected number of CANONICAL confidence-level evidence entries. */
-    const val CANONICAL_EVIDENCE_COUNT = 26
+    const val CANONICAL_EVIDENCE_COUNT = 27
 
     /** Expected number of ADVISORY confidence-level evidence entries. */
     const val ADVISORY_EVIDENCE_COUNT = 3
