@@ -57,8 +57,8 @@ import org.junit.Test
  *  - EmitAsAuthoritativeLocalTruth.truthClass is LOCAL_AUTHORITATIVE_ASSERTION
  *
  * ### evaluateEmit — LOCAL_TERMINAL_CLAIM (no suppression)
- *  - Returns EmitAsAuthoritativeLocalTruth for LOCAL_TERMINAL_CLAIM class
- *  - EmitAsAuthoritativeLocalTruth.truthClass is LOCAL_TERMINAL_CLAIM
+ *  - Returns EmitAsExecutionEvidence for LOCAL_TERMINAL_CLAIM class (A4: terminal signals are execution contributions)
+ *  - EmitAsExecutionEvidence.truthClass is LOCAL_TERMINAL_CLAIM
  *
  * ### evaluateEmit — EXECUTION_EVIDENCE (no suppression)
  *  - Returns EmitAsExecutionEvidence for EXECUTION_EVIDENCE class
@@ -513,14 +513,14 @@ class Pr5AndroidLocalTruthOwnershipTest {
     // ── evaluateEmit — LOCAL_TERMINAL_CLAIM ───────────────────────────────────
 
     @Test
-    fun `evaluateEmit returns EmitAsAuthoritativeLocalTruth for LOCAL_TERMINAL_CLAIM`() {
+    fun `evaluateEmit returns EmitAsExecutionEvidence for LOCAL_TERMINAL_CLAIM`() {
         val decision = coordinator.evaluateEmit(terminalClaimContext())
-        assertInstanceOf(LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth::class.java, decision)
+        assertInstanceOf(LocalTruthEmitDecision.EmitAsExecutionEvidence::class.java, decision)
     }
 
     @Test
-    fun `EmitAsAuthoritativeLocalTruth truthClass is LOCAL_TERMINAL_CLAIM when terminal claim`() {
-        val decision = coordinator.evaluateEmit(terminalClaimContext()) as LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth
+    fun `EmitAsExecutionEvidence truthClass is LOCAL_TERMINAL_CLAIM when terminal claim`() {
+        val decision = coordinator.evaluateEmit(terminalClaimContext()) as LocalTruthEmitDecision.EmitAsExecutionEvidence
         assertEquals(
             AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_TERMINAL_CLAIM,
             decision.truthClass

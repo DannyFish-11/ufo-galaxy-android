@@ -47,10 +47,14 @@ sealed class LocalTruthEmitDecision {
      * Android owns this truth and may emit it as an authoritative local assertion.
      *
      * Applies when the truth is classified as
-     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_AUTHORITATIVE_ASSERTION] or
-     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_TERMINAL_CLAIM], the local
-     * execution is not yet terminal, and no posture conflict or central alignment hold is
-     * in effect.
+     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_AUTHORITATIVE_ASSERTION],
+     * the local execution is not yet terminal, and no posture conflict or central alignment
+     * hold is in effect.
+     *
+     * Note (A4): [AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_TERMINAL_CLAIM]
+     * is no longer routed here; terminal signals are now emitted as
+     * [EmitAsExecutionEvidence] to align with the authority boundary closure that
+     * restricts final completion truth to the center.
      *
      * Android-side semantic: [AndroidLocalTruthOwnershipCoordinator.DECISION_EMIT_AS_AUTHORITATIVE_LOCAL_TRUTH].
      *
@@ -74,10 +78,16 @@ sealed class LocalTruthEmitDecision {
      * Android may emit this truth as execution evidence — factual but not a canonical claim.
      *
      * Applies when the truth is classified as
-     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.EXECUTION_EVIDENCE] or
-     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.PARTIAL_RESULT_TRUTH].
+     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.EXECUTION_EVIDENCE],
+     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.PARTIAL_RESULT_TRUTH], or
+     * [AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_TERMINAL_CLAIM].
      * V2 may incorporate the evidence into its canonical model without treating it as an
      * authoritative override.
+     *
+     * Note (A4): [AndroidLocalTruthOwnershipCoordinator.TruthClass.LOCAL_TERMINAL_CLAIM] now
+     * routes here instead of [EmitAsAuthoritativeLocalTruth], ensuring terminal signals from
+     * Android are treated as execution contributions rather than device-owned completion truth.
+     * The center retains final authority for system-level completion interpretation.
      *
      * Android-side semantic: [AndroidLocalTruthOwnershipCoordinator.DECISION_EMIT_AS_EXECUTION_EVIDENCE].
      *

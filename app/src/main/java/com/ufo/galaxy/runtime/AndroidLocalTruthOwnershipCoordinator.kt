@@ -44,7 +44,7 @@ package com.ufo.galaxy.runtime
  * | [TruthClass.LOCAL_AUTHORITATIVE_ASSERTION] | Android owns this truth authoritatively; may be sent as canonical. |
  * | [TruthClass.EXECUTION_EVIDENCE]   | Factual execution data; not a canonical ownership claim.           |
  * | [TruthClass.ADVISORY_LOCAL_TRUTH] | Advisory/informational; V2 may override without coordination.      |
- * | [TruthClass.LOCAL_TERMINAL_CLAIM] | Android is asserting a terminal outcome for the local execution.   |
+ * | [TruthClass.LOCAL_TERMINAL_CLAIM] | Android contributes a terminal outcome signal; emitted as execution evidence for center interpretation (A4). |
  * | [TruthClass.PARTIAL_RESULT_TRUTH] | Partial / intermediate result; not yet final.                      |
  * | [TruthClass.POSTURE_BOUND_TRUTH]  | Truth is valid only while the current posture is unchanged.        |
  *
@@ -82,10 +82,10 @@ package com.ufo.galaxy.runtime
  * |------------------------|-----------------------------------------------|
  * | ACK                    | [TruthClass.LOCAL_AUTHORITATIVE_ASSERTION]    |
  * | PROGRESS               | [TruthClass.EXECUTION_EVIDENCE]               |
- * | RESULT (completed)     | [TruthClass.LOCAL_TERMINAL_CLAIM]             |
- * | RESULT (failed)        | [TruthClass.LOCAL_TERMINAL_CLAIM]             |
- * | RESULT (cancelled)     | [TruthClass.LOCAL_TERMINAL_CLAIM]             |
- * | RESULT (timed_out)     | [TruthClass.LOCAL_TERMINAL_CLAIM]             |
+ * | RESULT (completed)     | [TruthClass.LOCAL_TERMINAL_CLAIM] → [LocalTruthEmitDecision.EmitAsExecutionEvidence] (A4) |
+ * | RESULT (failed)        | [TruthClass.LOCAL_TERMINAL_CLAIM] → [LocalTruthEmitDecision.EmitAsExecutionEvidence] (A4) |
+ * | RESULT (cancelled)     | [TruthClass.LOCAL_TERMINAL_CLAIM] → [LocalTruthEmitDecision.EmitAsExecutionEvidence] (A4) |
+ * | RESULT (timed_out)     | [TruthClass.LOCAL_TERMINAL_CLAIM] → [LocalTruthEmitDecision.EmitAsExecutionEvidence] (A4) |
  * | PARTIAL_RESULT         | [TruthClass.PARTIAL_RESULT_TRUTH]             |
  * | TASK_PHASE             | [TruthClass.EXECUTION_EVIDENCE]               |
  * | POSTURE_CHANGE         | [TruthClass.POSTURE_BOUND_TRUTH]              |
@@ -118,7 +118,7 @@ class AndroidLocalTruthOwnershipCoordinator {
      * | [LOCAL_AUTHORITATIVE_ASSERTION]   | [LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth] |
      * | [EXECUTION_EVIDENCE]              | [LocalTruthEmitDecision.EmitAsExecutionEvidence] |
      * | [ADVISORY_LOCAL_TRUTH]            | [LocalTruthEmitDecision.EmitAsAdvisoryOnly]  |
-     * | [LOCAL_TERMINAL_CLAIM]            | [LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth] |
+     * | [LOCAL_TERMINAL_CLAIM]            | [LocalTruthEmitDecision.EmitAsExecutionEvidence] (A4: terminal signals are execution contributions, not Android-owned completion truth) |
      * | [PARTIAL_RESULT_TRUTH]            | [LocalTruthEmitDecision.EmitAsExecutionEvidence] |
      * | [POSTURE_BOUND_TRUTH]             | [LocalTruthEmitDecision.EmitAsAdvisoryOnly] (posture-matched) or [LocalTruthEmitDecision.SuppressDueToPostureConflict] (posture-changed) |
      */
@@ -145,9 +145,16 @@ class AndroidLocalTruthOwnershipCoordinator {
         ADVISORY_LOCAL_TRUTH("advisory_local_truth"),
 
         /**
-         * Android is asserting that the local execution for the associated unit has
-         * reached a terminal outcome.  V2 must treat this as a finalising claim that
-         * closes the local execution era.
+         * Android is contributing a terminal execution outcome signal for the associated unit.
+         *
+         * This truth is emitted as [LocalTruthEmitDecision.EmitAsExecutionEvidence] — Android
+         * contributes the terminal signal into the center-side execution chain, but the center
+         * retains final authority over whether the system-level execution era is closed.
+         *
+         * Android MUST NOT treat this class as a device-local declaration of system completion
+         * truth.  The center is the sole authority for final completion interpretation.
+         *
+         * @see AndroidAuthorityBoundaryClosure.CenterAuthorityDomain.FINAL_COMPLETION_TRUTH
          */
         LOCAL_TERMINAL_CLAIM("local_terminal_claim"),
 
@@ -262,7 +269,7 @@ class AndroidLocalTruthOwnershipCoordinator {
      *    | TruthClass                         | Default decision                             |
      *    |------------------------------------|----------------------------------------------|
      *    | [TruthClass.LOCAL_AUTHORITATIVE_ASSERTION] | [LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth] |
-     *    | [TruthClass.LOCAL_TERMINAL_CLAIM]  | [LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth] |
+     *    | [TruthClass.LOCAL_TERMINAL_CLAIM]  | [LocalTruthEmitDecision.EmitAsExecutionEvidence] (A4) |
      *    | [TruthClass.EXECUTION_EVIDENCE]    | [LocalTruthEmitDecision.EmitAsExecutionEvidence] |
      *    | [TruthClass.PARTIAL_RESULT_TRUTH]  | [LocalTruthEmitDecision.EmitAsExecutionEvidence] |
      *    | [TruthClass.ADVISORY_LOCAL_TRUTH]  | [LocalTruthEmitDecision.EmitAsAdvisoryOnly]  |
@@ -305,8 +312,7 @@ class AndroidLocalTruthOwnershipCoordinator {
 
         // ── 4. Classification dispatch ────────────────────────────────────────
         return when (context.truthClass) {
-            TruthClass.LOCAL_AUTHORITATIVE_ASSERTION,
-            TruthClass.LOCAL_TERMINAL_CLAIM ->
+            TruthClass.LOCAL_AUTHORITATIVE_ASSERTION ->
                 LocalTruthEmitDecision.EmitAsAuthoritativeLocalTruth(
                     unitId = context.unitId,
                     truthClass = context.truthClass,
@@ -314,6 +320,7 @@ class AndroidLocalTruthOwnershipCoordinator {
                 )
 
             TruthClass.EXECUTION_EVIDENCE,
+            TruthClass.LOCAL_TERMINAL_CLAIM,
             TruthClass.PARTIAL_RESULT_TRUTH ->
                 LocalTruthEmitDecision.EmitAsExecutionEvidence(
                     unitId = context.unitId,

@@ -30,6 +30,17 @@ package com.ufo.galaxy.runtime
  * result.  [RuntimeController] uses this in [RuntimeController.currentDispatchReadiness]
  * to expose an always-current readiness assessment.
  *
+ * ## Contribution role (A4)
+ *
+ * [DispatchReadiness] is a **contribution input** to the center's dispatch-slot authority.
+ * It reports Android's local eligibility conditions (runtime state, session attachment,
+ * rollout flag) so that the center can incorporate them into its dispatch-slot selection
+ * decision.  Android does not own the final dispatch readiness verdict — the center
+ * decides which device(s) receive tasks and when dispatch is actually permitted.
+ *
+ * See [AndroidAuthorityBoundaryClosure.CenterAuthorityDomain.DISPATCH_READINESS_AUTHORITY]
+ * and [AndroidAuthorityBoundaryClosure.DISPATCH_READINESS_CONTRIBUTION_ROLE].
+ *
  * ## Relation to CanonicalDispatchChain
  *
  * [CanonicalDispatchChain.resolveEligiblePathsForState] uses this coordinator's output
@@ -185,4 +196,15 @@ object RuntimeDispatchReadinessCoordinator {
         val allowed = ALLOWED_TRANSITIONS[from::class.java] ?: return false
         return to::class.java in allowed
     }
+
+    // ── A4 authority boundary ─────────────────────────────────────────────────
+
+    /**
+     * Stable wire tag declaring that [DispatchReadiness] is a contribution input to the
+     * center's dispatch-slot authority, not an Android-owned final dispatch verdict.
+     *
+     * Mirrors [AndroidAuthorityBoundaryClosure.DISPATCH_READINESS_CONTRIBUTION_ROLE].
+     */
+    const val CONTRIBUTION_ROLE =
+        "dispatch_eligibility_contribution_input_for_center_dispatch_slot_authority"
 }
