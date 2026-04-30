@@ -1,5 +1,6 @@
 package com.ufo.galaxy.agent
 
+import com.ufo.galaxy.runtime.ParticipantExecutionSignalContract
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 
 /**
@@ -230,7 +231,28 @@ data class TakeoverResponseEnvelope(
     val exec_mode: String = AgentRuntimeBridge.EXEC_MODE_REMOTE,
     val runtime_host_id: String? = null,
     val formation_role: String? = null
-)
+) {
+
+    /**
+     * Canonical participant execution signal class under the unified contract (PR-75).
+     *
+     * Maps this response's [accepted] flag to the single shared
+     * [ParticipantExecutionSignalContract.ExecSignalClass] that applies uniformly across
+     * [TakeoverResponseEnvelope], [com.ufo.galaxy.runtime.DelegatedExecutionSignal], and
+     * [com.ufo.galaxy.runtime.ReconciliationSignal].
+     *
+     *  - `accepted = true`  → [ParticipantExecutionSignalContract.ExecSignalClass.ACK]:
+     *    Android accepted ownership of the takeover; execution has not yet started.
+     *  - `accepted = false` → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]:
+     *    No execution will occur; the request is permanently rejected.
+     *
+     * Callers MUST use this property — not the raw [accepted] boolean — when routing
+     * takeover response signals at the execution lifecycle level, so that takeover signals
+     * are handled identically to the corresponding delegated and reconciliation signals.
+     */
+    val participantExecSignalClass: ParticipantExecutionSignalContract.ExecSignalClass
+        get() = ParticipantExecutionSignalContract.classifyTakeoverResponse(accepted)
+}
 
 /**
  * Outcome of an Android-side takeover request handling.

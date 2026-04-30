@@ -198,6 +198,28 @@ data class ReconciliationSignal(
     val hasRuntimeTruth: Boolean
         get() = kind == Kind.RUNTIME_TRUTH_SNAPSHOT && runtimeTruth != null
 
+    /**
+     * Canonical participant execution signal class under the unified contract (PR-75).
+     *
+     * Maps this signal's [kind] to the single shared [ParticipantExecutionSignalContract.ExecSignalClass]
+     * that applies uniformly across [ReconciliationSignal], [DelegatedExecutionSignal], and
+     * [com.ufo.galaxy.agent.TakeoverResponseEnvelope].
+     *
+     *  - [Kind.TASK_ACCEPTED]          → [ParticipantExecutionSignalContract.ExecSignalClass.ACK]
+     *  - [Kind.TASK_STATUS_UPDATE]     → [ParticipantExecutionSignalContract.ExecSignalClass.NON_TERMINAL]
+     *  - [Kind.TASK_RESULT]            → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *  - [Kind.TASK_CANCELLED]         → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *  - [Kind.TASK_FAILED]            → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *  - [Kind.PARTICIPANT_STATE]      → [ParticipantExecutionSignalContract.ExecSignalClass.RECONCILE_ONLY]
+     *  - [Kind.RUNTIME_TRUTH_SNAPSHOT] → [ParticipantExecutionSignalContract.ExecSignalClass.RECONCILE_ONLY]
+     *
+     * Callers MUST use this property — not raw [kind] comparisons — when routing or reducing
+     * signals at the execution lifecycle level, so that reconciliation signals are handled
+     * identically to the corresponding delegated execution signals.
+     */
+    val participantExecSignalClass: ParticipantExecutionSignalContract.ExecSignalClass
+        get() = ParticipantExecutionSignalContract.classifyReconciliation(kind)
+
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
