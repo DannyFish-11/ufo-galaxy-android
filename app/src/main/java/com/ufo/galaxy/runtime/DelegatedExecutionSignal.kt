@@ -259,6 +259,24 @@ data class DelegatedExecutionSignal(
         get() = kind == Kind.RESULT
 
     /**
+     * Canonical participant execution signal class under the unified contract (PR-75).
+     *
+     * Maps this signal's [kind] to the single shared [ParticipantExecutionSignalContract.ExecSignalClass]
+     * that applies uniformly across [DelegatedExecutionSignal], [ReconciliationSignal], and
+     * [com.ufo.galaxy.agent.TakeoverResponseEnvelope].
+     *
+     *  - [Kind.ACK]      → [ParticipantExecutionSignalContract.ExecSignalClass.ACK]
+     *  - [Kind.PROGRESS] → [ParticipantExecutionSignalContract.ExecSignalClass.NON_TERMINAL]
+     *  - [Kind.RESULT]   → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *
+     * Callers MUST use this property — not the raw [kind] discriminator — when routing or
+     * reducing signals at the execution lifecycle level, so that delegated signals are
+     * handled identically to the corresponding reconciliation signals.
+     */
+    val participantExecSignalClass: ParticipantExecutionSignalContract.ExecSignalClass
+        get() = ParticipantExecutionSignalContract.classifyDelegated(kind)
+
+    /**
      * Alias that makes transfer-layer semantics explicit for convergence work.
      *
      * Delegated transfer continuity is bound to the attached runtime session context and
