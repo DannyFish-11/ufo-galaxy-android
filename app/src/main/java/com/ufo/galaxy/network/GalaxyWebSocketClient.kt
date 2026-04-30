@@ -40,10 +40,13 @@ import kotlin.random.Random
  *  - **Heartbeats**: emitted every [HEARTBEAT_INTERVAL_MS] (30 s) with device_id,
  *    route_mode, and reconnect_attempts for liveness monitoring.
  *  - **Task / goal uplink**: [sendJson] is the single write path for `task_submit`,
- *    `task_result`, `goal_result`, and `cancel_result` envelopes.  Callers must use
+ *    `goal_execution_result`, and `cancel_result` envelopes.  All production result
+ *    paths (task_assign, goal_execution, parallel_subtask, error/parse-failure) emit
+ *    `goal_execution_result` as the canonical result type.  Callers must use
  *    [InputRouter] (or [GalaxyConnectionService] for inbound dispatch) — never bypass
  *    [sendJson] with a separate WebSocket connection.
- *  - **Offline replay**: `task_result` and `goal_result` envelopes are buffered in
+ *  - **Offline replay**: `goal_execution_result` envelopes (and legacy `task_result` /
+ *    `goal_result` envelopes retained for backward compatibility) are buffered in
  *    [offlineQueue] when disconnected and replayed in FIFO order on reconnect.
  *
  * **Lifecycle ownership**: [RuntimeController] is the sole authority for connect /
@@ -60,10 +63,10 @@ import kotlin.random.Random
  *   regardless of connection state, to enforce the local-only mode invariant.
  *
  * **Offline task queue** — when [sendJson] is called while disconnected and the
- *   message type matches [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
- *   "goal_result" / "goal_execution_result"), the payload is enqueued in [offlineQueue] instead of being
- *   dropped.  The queue is flushed automatically when the connection is (re-)
- *   established.  Observable via [queueSize].
+ *   message type matches [OfflineTaskQueue.QUEUEABLE_TYPES] ("goal_execution_result",
+ *   or legacy "task_result" / "goal_result" for backward compatibility), the payload
+ *   is enqueued in [offlineQueue] instead of being dropped.  The queue is flushed
+ *   automatically when the connection is (re-)established.  Observable via [queueSize].
  *
  * **Log tags** — all log lines use the [TAG] constant ("GalaxyWebSocket") which
  *   is prefixed with a contextual marker:

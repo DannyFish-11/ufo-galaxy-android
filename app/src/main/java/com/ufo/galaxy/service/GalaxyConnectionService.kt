@@ -66,7 +66,6 @@ import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
-import com.ufo.galaxy.protocol.TaskResultPayload
 import com.ufo.galaxy.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -635,7 +634,7 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * 处理 task_assign：反序列化 payload、执行本地 EdgeExecutor 或委托 AgentRuntimeBridge、回传 task_result。
+     * 处理 task_assign：反序列化 payload、执行本地 EdgeExecutor 或委托 AgentRuntimeBridge、回传 GOAL_EXECUTION_RESULT。
      * 在 IO 线程中执行；EdgeExecutor 内部所有异常均已捕获并映射为 ERROR 结果。
      *
      * When a task_assign arrives (Round 5 bridge flow):
@@ -651,8 +650,10 @@ class GalaxyConnectionService : Service() {
      *       EdgeExecutor with an explicit error log; no silent swallowing.
      * 2b. If cross-device is OFF or [require_local_agent] is `true`: executes locally via
      *     [EdgeExecutor] as before (full backward compatibility).
-     * 3. Sends back the AIP v3 task_result envelope (for local execution or fallback path);
-     *    the envelope now includes [trace_id] and [route_mode] for full-chain traceability.
+     * 3. Sends back the AIP v3 GOAL_EXECUTION_RESULT envelope (for local execution or
+     *    fallback path); the envelope includes [trace_id] and [route_mode] for full-chain
+     *    traceability.  All error and parse-failure paths also use GOAL_EXECUTION_RESULT
+     *    via [sendGoalError], ensuring a single canonical result contract for every outcome.
      * 4. Notifies [RuntimeController.onRemoteTaskFinished] to unblock local execution.
      * 5. Persists the result to OpenClawd memory.
      */
@@ -773,8 +774,9 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * Executes a task_assign payload locally via [EdgeExecutor] and sends the task_result
-     * back to the Gateway. Both trace_id and route_mode are propagated in the reply envelope.
+     * Executes a task_assign payload locally via [EdgeExecutor] and sends the
+     * GOAL_EXECUTION_RESULT back to the Gateway. Both trace_id and route_mode are propagated
+     * in the reply envelope.
      *
      * Called from:
      *  - The local execution path (cross-device OFF or require_local_agent=true).
@@ -1585,7 +1587,7 @@ class GalaxyConnectionService : Service() {
      *   correlate it with the originating runtime session without re-querying the device.
      * - [GoalResultPayload.result_summary]: normalised human-readable one-line summary,
      *   populated from [GoalResultPayload.result] when not already set by the caller.
-     *   This mirrors the same field in [TaskResultPayload] and [HandoffEnvelopeV2ResultPayload]
+     *   This mirrors the same field in [HandoffEnvelopeV2ResultPayload]
      *   so all uplink result payloads carry a consistent named summary field.
      *
      * The AIP v3 envelope also propagates [GoalResultPayload.dispatch_trace_id] and
@@ -2963,31 +2965,6 @@ class GalaxyConnectionService : Service() {
                 "sent" to sent
             )
         )
-    }
-
-    /**
-     * 回传 task_result 错误（payload 解析失败时使用）。
-     */
-    private fun sendTaskError(taskId: String, errorMsg: String, traceId: String? = null) {
-        val errorResult = TaskResultPayload(
-            task_id = taskId,
-            correlation_id = taskId,
-            status = com.ufo.galaxy.agent.EdgeExecutor.STATUS_ERROR,
-            error = errorMsg,
-            device_id = localDeviceId,
-            trace_id = traceId,
-            result_summary = "error: $errorMsg"
-        )
-        val envelope = AipMessage(
-            type = MsgType.TASK_RESULT,
-            payload = errorResult,
-            correlation_id = taskId,
-            device_id = localDeviceId,
-            trace_id = traceId,
-            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = buildIdempotencyKey(taskId, MsgType.TASK_RESULT, traceId)
-        )
-        webSocketClient.sendJson(gson.toJson(envelope))
     }
 
     /**
