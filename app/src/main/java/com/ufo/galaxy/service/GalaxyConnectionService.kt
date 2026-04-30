@@ -185,10 +185,11 @@ class GalaxyConnectionService : Service() {
     /**
      * Canonical continuity authority gate for online execution (PR: unified result + continuity).
      *
-     * Called inside [handleTaskAssign], [handleGoalExecution], [handleParallelSubtask], and
-     * [handleTakeoverRequest] to block stale-session or stale-identity requests before execution
-     * begins.  This ensures the online execution path and the offline-replay path both enforce
-     * the same [com.ufo.galaxy.runtime.AttachedRuntimeSession] continuity contract.
+     * Called inside [handleTaskAssign], [handleGoalExecution], [handleParallelSubtask],
+     * [handleTakeoverRequest], and [handleHandoffEnvelopeV2] to block stale-session or
+     * stale-identity requests before execution begins.  This ensures the online execution path
+     * and the offline-replay path both enforce the same
+     * [com.ufo.galaxy.runtime.AttachedRuntimeSession] continuity contract.
      */
     private val continuityIntegration = AndroidContinuityIntegration()
 
@@ -1248,21 +1249,30 @@ class GalaxyConnectionService : Service() {
      * [MsgType.HANDOFF_ENVELOPE_V2_RESULT] uplink with the ACK / outcome / failure state.
      *
      * ## Execution path
-     * 1. Send an immediate ACK log entry so V2 knows the envelope was received.
+     * 1. Log the envelope-received event for V2 observability.
      * 2. Parse the raw JSON into [HandoffEnvelopeV2] — reject with "bad_payload" on failure.
-     * 3. Pause the local [com.ufo.galaxy.loop.LoopController] session via
+     * 3. Send an immediate [MsgType.HANDOFF_ENVELOPE_V2_RESULT] ACK (status="ack") so V2
+     *    knows the envelope was consumed on-device.
+     * 4. Continuity gate: reject with a failure result (status="failure",
+     *    error="no_active_session") if no active [com.ufo.galaxy.runtime.AttachedRuntimeSession]
+     *    is present.  Applies the same continuity authority as [handleTaskAssign],
+     *    [handleGoalExecution], [handleParallelSubtask], and [handleTakeoverRequest], closing
+     *    the split reality where those entry points were continuity-gated but
+     *    handoff_envelope_v2 was not.
+     * 5. Pause the local [com.ufo.galaxy.loop.LoopController] session via
      *    [RuntimeController.onRemoteTaskStarted].
-     * 4. Map the envelope to a [GoalExecutionPayload] and delegate to
+     * 6. Map the envelope to a [GoalExecutionPayload] and delegate to
      *    [com.ufo.galaxy.agent.LocalGoalExecutor.executeGoal] (same path as task_assign /
      *    goal_execution for consistency).
-     * 5. Send [MsgType.HANDOFF_ENVELOPE_V2_RESULT] with status, result_summary, and all
+     * 7. Send [MsgType.HANDOFF_ENVELOPE_V2_RESULT] with status, result_summary, and all
      *    echoed identity fields for V2 end-to-end correlation.
-     * 6. Unblock the local loop via [RuntimeController.onRemoteTaskFinished].
+     * 8. Unblock the local loop via [RuntimeController.onRemoteTaskFinished].
      *
      * ## Error / exception handling
-     * - Parse failure: immediate result with status="error" and reason="bad_payload".
-     * - Execution failure: result with status="error" and the exception message.
-     * - Timeout: result with status="timeout".
+     * - Parse failure: immediate failure result with reason="bad_payload".
+     * - Continuity gate failure: failure result with error="no_active_session".
+     * - Execution failure: failure result with the exception message.
+     * - Timeout: failure result with status="timeout".
      * All non-success outcomes are also routed through [emitRuntimeDiagnostics] so the
      * gateway can classify failure types.
      *
@@ -1374,10 +1384,52 @@ class GalaxyConnectionService : Service() {
             traceId
         )
 
-        // ── Step 3: pause local loop ──────────────────────────────────────────────
+        // ── Step 4: continuity gate ───────────────────────────────────────────────
+        // Reject execution if no active attached session is present.
+        // Aligns handoff_envelope_v2 online execution with the replay/recovery continuity
+        // authority enforced on all other execution entry points (task_assign, goal_execution,
+        // parallel_subtask, takeover), closing the split reality where those paths were
+        // continuity-gated but handoff_envelope_v2 was not.
+        val handoffActiveSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+        val handoffIdentityResult = continuityIntegration.validateRuntimeIdentity(
+            unitAttachedSessionId = handoffActiveSession?.sessionId ?: "",
+            activeSession = handoffActiveSession
+        )
+        if (handoffIdentityResult is AndroidContinuityIntegration.IdentityValidationResult.NoActiveSession) {
+            Log.w(TAG, "[CONTINUITY] handoff_envelope_v2 rejected: no active attached session task_id=$taskId trace_id=$traceId")
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "handoff_v2_continuity_gate",
+                errorType = AndroidContinuityIntegration.SEMANTIC_REJECT_STALE_IDENTITY,
+                errorContext = "no_active_session"
+            )
+            sendHandoffEnvelopeV2Result(
+                HandoffEnvelopeV2ResultPayload(
+                    handoff_id = handoffId,
+                    task_id = taskId,
+                    trace_id = traceId,
+                    correlation_id = taskId,
+                    status = HandoffEnvelopeV2ResultPayload.STATUS_FAILURE,
+                    error = "no_active_session",
+                    consumed_at_ms = consumedAtMs,
+                    device_id = localDeviceId,
+                    route_mode = ROUTE_MODE_CROSS_DEVICE,
+                    dispatch_plan_id = envelope.dispatch_plan_id,
+                    continuity_token = envelope.continuity_token,
+                    dispatch_intent = envelope.dispatch_intent,
+                    execution_context = envelope.execution_context,
+                    executor_target_type = envelope.executor_target_type,
+                    source_runtime_posture = envelope.source_runtime_posture
+                ),
+                traceId
+            )
+            return
+        }
+
+        // ── Step 5: pause local loop ──────────────────────────────────────────────
         UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
-        // ── Step 4: build GoalExecutionPayload and execute ────────────────────────
+        // ── Step 6: build GoalExecutionPayload and execute ────────────────────────
         var goalResult: GoalResultPayload? = null
         try {
             Log.i(TAG, "[PR-H:HANDOFF_V2] dispatch start task_id=$taskId trace_id=$traceId")
@@ -1502,7 +1554,7 @@ class GalaxyConnectionService : Service() {
                 traceId
             )
         } finally {
-            // ── Step 6: unblock local loop ────────────────────────────────────────
+            // ── Step 8: unblock local loop ────────────────────────────────────────
             UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
         }
 

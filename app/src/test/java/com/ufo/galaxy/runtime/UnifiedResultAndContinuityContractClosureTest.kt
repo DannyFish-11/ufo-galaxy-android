@@ -34,22 +34,27 @@ import org.junit.Test
  *
  * ## Closure 2 — Continuity authority in online execution
  *
- * Online execution handlers (task_assign, goal_execution, parallel_subtask, takeover)
- * now call [AndroidContinuityIntegration.validateRuntimeIdentity] before starting
- * execution.  This gives online execution the same continuity authority that the
- * offline-replay path has via `discardForDifferentSession()`.
+ * Online execution handlers (task_assign, goal_execution, parallel_subtask, takeover,
+ * handoff_envelope_v2) now call [AndroidContinuityIntegration.validateRuntimeIdentity]
+ * before starting execution.  This gives online execution the same continuity authority
+ * that the offline-replay path has via `discardForDifferentSession()`.
  *
  * ### Tests — stale session gate (NoActiveSession path)
  *  - validateRuntimeIdentity returns NoActiveSession when no session is active
  *  - NoActiveSession is the gate result that blocks online goal_execution
  *  - NoActiveSession is the gate result that blocks online task_assign
  *  - NoActiveSession is the gate result that blocks online parallel_subtask
+ *  - NoActiveSession is the gate result that blocks online handoff_envelope_v2
  *
  * ### Tests — stale attachment gate (StaleIdentity path for takeover)
  *  - validateRuntimeIdentity returns StaleIdentity when session IDs differ
  *  - StaleIdentity carries the expected and received session IDs
  *  - StaleIdentity is the gate result that blocks online takeover
  *  - Valid is returned when session IDs match (takeover proceeds)
+ *
+ * ### Tests — handoff_envelope_v2 continuity gate (new closure)
+ *  - NoActiveSession blocks online handoff_envelope_v2
+ *  - handoff_envelope_v2 proceeds when active session is present
  *
  * ### Tests — replay contract invariant (P5 guard)
  *  - goal_execution_result is still in QUEUEABLE_TYPES (online ≡ replay contract)
@@ -370,6 +375,42 @@ class UnifiedResultAndContinuityContractClosureTest {
         )
         assertTrue(
             "Takeover must proceed when session is stable and IDs match",
+            identityResult is AndroidContinuityIntegration.IdentityValidationResult.Valid
+        )
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // CLOSURE 2 — Continuity authority: handoff_envelope_v2 gate
+    // ════════════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `NoActiveSession is the gate result that blocks online handoff_envelope_v2`() {
+        // Simulates the continuity gate call inside handleHandoffEnvelopeV2.
+        // When attachedSession.value is null (no active session), execution is blocked
+        // before onRemoteTaskStarted() is called, matching the behavior of the other
+        // online execution entry points.
+        val noSession: AttachedRuntimeSession? = null
+        val identityResult = continuityIntegration.validateRuntimeIdentity(
+            unitAttachedSessionId = noSession?.sessionId ?: "",
+            activeSession = noSession
+        )
+        assertTrue(
+            "handoff_envelope_v2 must be blocked when no active session (NoActiveSession gate)",
+            identityResult is AndroidContinuityIntegration.IdentityValidationResult.NoActiveSession
+        )
+    }
+
+    @Test
+    fun `handoff_envelope_v2 proceeds when active session is present`() {
+        // Happy path: an active ATTACHED session is present.
+        // validateRuntimeIdentity returns Valid and handoff_envelope_v2 execution is NOT blocked.
+        val activeSession = attachedSession(sessionId = "session-handoff-xyz")
+        val identityResult = continuityIntegration.validateRuntimeIdentity(
+            unitAttachedSessionId = activeSession.sessionId,
+            activeSession = activeSession
+        )
+        assertTrue(
+            "handoff_envelope_v2 must proceed when active session is present and IDs match",
             identityResult is AndroidContinuityIntegration.IdentityValidationResult.Valid
         )
     }

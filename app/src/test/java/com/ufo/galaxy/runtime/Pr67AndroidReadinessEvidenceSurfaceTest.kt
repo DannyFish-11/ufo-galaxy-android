@@ -97,6 +97,7 @@ import org.junit.Test
  *  - continuity_recovery_durability_contract_coverage is present and CANONICAL
  *  - hybrid_lifecycle_recovery_contract_coverage is present and CANONICAL
  *  - durable_session_continuity_record_rehydration is present and CANONICAL
+ *  - online_execution_continuity_gate_closure is present and CANONICAL
  *  - compat_legacy_blocking_participant_canonical_path_confirmation is present and CANONICAL
  *  - compatibility_surface_retirement_registry is present and CANONICAL
  *  - authoritative_path_alignment_audit is present and CANONICAL
@@ -753,6 +754,16 @@ class Pr67AndroidReadinessEvidenceSurfaceTest {
     @Test
     fun `durable_session_continuity_record_rehydration is present and CANONICAL`() {
         val entry = surface.evidenceFor("durable_session_continuity_record_rehydration")
+        assertNotNull(entry)
+        assertEquals(
+            AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL,
+            entry!!.confidenceLevel
+        )
+    }
+
+    @Test
+    fun `online_execution_continuity_gate_closure is present and CANONICAL`() {
+        val entry = surface.evidenceFor("online_execution_continuity_gate_closure")
         assertNotNull(entry)
         assertEquals(
             AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL,
