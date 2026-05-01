@@ -3,6 +3,7 @@ package com.ufo.galaxy.protocol
 import com.ufo.galaxy.runtime.AttachedRuntimeSession
 import com.ufo.galaxy.runtime.CanonicalSessionFamily
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
+import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import com.ufo.galaxy.runtime.StagedMeshParticipationResult
 import org.junit.Assert.assertEquals
@@ -58,6 +59,7 @@ class Pr12CrossRepoConsistencyGatesTest {
         val reportedSurfaces = report.results.map { it.surface }.toSet()
         // All individually-gated surfaces must appear in the report.
         assertTrue(reportedSurfaces.contains(ProtocolSurface.DELEGATED_EXECUTION_RESULT_KIND))
+        assertTrue(reportedSurfaces.contains(ProtocolSurface.RECONCILIATION_SIGNAL_KIND))
         assertTrue(reportedSurfaces.contains(ProtocolSurface.ATTACHED_SESSION_STATE))
         assertTrue(reportedSurfaces.contains(ProtocolSurface.ATTACHED_SESSION_DETACH_CAUSE))
         assertTrue(reportedSurfaces.contains(ProtocolSurface.RECONNECT_RECOVERY_STATE))
@@ -145,6 +147,99 @@ class Pr12CrossRepoConsistencyGatesTest {
                 value in liveWireValues
             )
         }
+    }
+
+    // ── Reconciliation signal kind gate ───────────────────────────────────────
+
+    @Test
+    fun `reconciliation signal kind gate passes`() {
+        val result = CrossRepoConsistencyGate.checkReconciliationSignalKinds()
+        assertEquals(
+            "Reconciliation signal kind gate failed: ${result.violations.joinToString { it.detail }}",
+            GateOutcome.PASS,
+            result.outcome
+        )
+        assertTrue(result.violations.isEmpty())
+    }
+
+    @Test
+    fun `all ReconciliationSignal Kind wireValues are canonical on RECONCILIATION_SIGNAL_KIND`() {
+        val surface = ProtocolSurface.RECONCILIATION_SIGNAL_KIND
+        for (kind in ReconciliationSignal.Kind.entries) {
+            val checkResult = UgcpProtocolConsistencyRules.checkValue(surface, kind.wireValue)
+            assertEquals(
+                "ReconciliationSignal.Kind.${kind.name} wireValue '${kind.wireValue}' " +
+                    "must be CANONICAL on $surface",
+                ConsistencyCheckStatus.CANONICAL,
+                checkResult.status
+            )
+        }
+    }
+
+    @Test
+    fun `reconciliation signal kind rule has no stale canonical values`() {
+        val surface = ProtocolSurface.RECONCILIATION_SIGNAL_KIND
+        val canonical = UgcpProtocolConsistencyRules.canonicalValuesFor(surface)
+        val liveWireValues = ReconciliationSignal.Kind.entries.map { it.wireValue }.toSet()
+        for (value in canonical) {
+            assertTrue(
+                "Canonical value '$value' on $surface has no corresponding enum entry in " +
+                    "ReconciliationSignal.Kind — the rule may have a stale value",
+                value in liveWireValues
+            )
+        }
+    }
+
+    @Test
+    fun `reconciliation signal kind rule canonical set exactly matches ReconciliationSignal Kind entries`() {
+        val surface = ProtocolSurface.RECONCILIATION_SIGNAL_KIND
+        val canonical = UgcpProtocolConsistencyRules.canonicalValuesFor(surface)
+        val liveWireValues = ReconciliationSignal.Kind.entries.map { it.wireValue }.toSet()
+        assertEquals(
+            "RECONCILIATION_SIGNAL_KIND canonical values must exactly match " +
+                "ReconciliationSignal.Kind wire values",
+            liveWireValues,
+            canonical
+        )
+    }
+
+    @Test
+    fun `reconciliation signal kind surface is classified as canonical`() {
+        assertEquals(
+            ProtocolSurfaceClass.CANONICAL,
+            ProtocolSurface.RECONCILIATION_SIGNAL_KIND.surfaceClass
+        )
+    }
+
+    @Test
+    fun `reconciliation signal kind rule has no transitional aliases`() {
+        val rule = UgcpProtocolConsistencyRules.allRules[ProtocolSurface.RECONCILIATION_SIGNAL_KIND]!!
+        assertTrue(
+            "RECONCILIATION_SIGNAL_KIND must have no transitional aliases — all Kind values are canonical",
+            rule.transitionalAliases.isEmpty()
+        )
+    }
+
+    @Test
+    fun `reconciliation signal kind rule notes are non-blank`() {
+        val rule = UgcpProtocolConsistencyRules.allRules[ProtocolSurface.RECONCILIATION_SIGNAL_KIND]!!
+        assertTrue(
+            "RECONCILIATION_SIGNAL_KIND rule notes must be non-blank",
+            rule.notes.isNotBlank()
+        )
+    }
+
+    @Test
+    fun `unregistered reconciliation kind wireValue is detected as drift candidate`() {
+        val result = UgcpProtocolConsistencyRules.checkValue(
+            ProtocolSurface.RECONCILIATION_SIGNAL_KIND,
+            "unknown_future_kind"
+        )
+        assertEquals(
+            "An unregistered reconciliation kind wireValue must be DRIFT_CANDIDATE",
+            ConsistencyCheckStatus.DRIFT_CANDIDATE,
+            result.status
+        )
     }
 
     // ── Attached session state gate ───────────────────────────────────────────

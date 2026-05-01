@@ -113,7 +113,34 @@ deliberate difference from the general lifecycle status vocabulary (§ 3.1).
 
 ---
 
-### 3.3 Attached session state
+### 3.3 Reconciliation signal kind
+**Surface class:** CANONICAL
+
+The canonical wire discriminator values for all Android→V2 reconciliation/governance signals,
+carried in `ReconciliationSignal.Kind.wireValue` (PR Block 2).  These values are consumed by the
+V2 gateway handler to route each incoming reconciliation message to the correct
+participant-truth reconciliation action.
+
+| Value | Status | Notes |
+|-------|--------|-------|
+| `task_accepted` | CANONICAL | Android accepted a delegated task; V2 marks task as active |
+| `task_status_update` | CANONICAL | Intermediate execution status; V2 updates in-flight view without closing the task |
+| `task_result` | CANONICAL | Task completed successfully; V2 closes task as success |
+| `task_cancelled` | CANONICAL | Task was cancelled; V2 closes task as cancelled |
+| `task_failed` | CANONICAL | Task failed; V2 closes task as failed |
+| `participant_state` | CANONICAL | Participant health/readiness changed; V2 updates canonical participant view |
+| `runtime_truth_snapshot` | CANONICAL | Full reconciliation snapshot; V2 performs full truth pass against the snapshot |
+
+**Drift rule:** All seven values must remain stable across the integrated Android↔V2 protocol
+surface.  Adding, removing, or renaming any value requires explicit cross-repo coordination with
+the V2 gateway handler registration table.
+
+**Authority:** Carried by `ReconciliationSignal.Kind.wireValue`.
+Gated by `CrossRepoConsistencyGate.checkReconciliationSignalKinds()` (included in `runAllGates()`).
+
+---
+
+### 3.4 Attached session state
 **Surface class:** CANONICAL
 
 The lifecycle state values for an Android attached runtime session.
@@ -128,7 +155,7 @@ The lifecycle state values for an Android attached runtime session.
 
 ---
 
-### 3.4 Attached session detach cause
+### 3.5 Attached session detach cause
 **Surface class:** CANONICAL
 
 The cause values for an attached runtime session detachment.
@@ -144,7 +171,7 @@ The cause values for an attached runtime session detachment.
 
 ---
 
-### 3.5 Reconnect recovery state
+### 3.6 Reconnect recovery state
 **Surface class:** CANONICAL
 
 The reconnect recovery lifecycle state values for the Android runtime.
@@ -161,7 +188,7 @@ The reconnect recovery lifecycle state values for the Android runtime.
 
 ---
 
-### 3.6 Session identifier carrier
+### 3.7 Session identifier carrier
 **Surface class:** TRANSITIONAL_COMPATIBILITY
 
 Android session identifier carrier fields and their canonical session family mapping.
@@ -185,7 +212,7 @@ are both deferred naming convergences tracked in `CanonicalSessionAxis`.
 
 ---
 
-### 3.7 Runtime profile descriptor names
+### 3.8 Runtime profile descriptor names
 **Surface class:** CANONICAL
 
 The profile identity strings used to identify Android runtime profiles.
@@ -202,7 +229,7 @@ The profile identity strings used to identify Android runtime profiles.
 
 ---
 
-### 3.8 Capability and readiness descriptor fields
+### 3.9 Capability and readiness descriptor fields
 **Surface class:** CANONICAL
 
 Field names reported in `capability_report` payloads and consumed by center scheduling/selection.
@@ -220,7 +247,7 @@ Do not rename or add fields without coordinating with center capability consumer
 
 ---
 
-### 3.9 Truth-event payload identifier fields
+### 3.10 Truth-event payload identifier fields
 **Surface class:** CANONICAL
 
 Identifier fields that must be present in truth-event payload structures for cross-repo
@@ -237,7 +264,7 @@ correlation, idempotency, and session-truth reconciliation.
 
 ---
 
-### 3.10 Transfer lifecycle vocabulary
+### 3.11 Transfer lifecycle vocabulary
 **Surface class:** CANONICAL
 
 The canonical control-transfer lifecycle event vocabulary.

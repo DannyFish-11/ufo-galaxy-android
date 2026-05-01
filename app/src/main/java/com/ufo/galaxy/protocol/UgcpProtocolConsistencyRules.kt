@@ -40,12 +40,13 @@ package com.ufo.galaxy.protocol
  *
  * ## Scope
  *
- * The twelve load-bearing shared surfaces covered are:
+ * The thirteen load-bearing shared surfaces covered are:
  *
  * | Surface | [ProtocolSurface] |
  * |---------|------------------|
  * | Terminal / lifecycle status vocabulary | [ProtocolSurface.TERMINAL_STATE_VOCABULARY] |
  * | Delegated execution result kinds | [ProtocolSurface.DELEGATED_EXECUTION_RESULT_KIND] |
+ * | Reconciliation signal kind vocabulary | [ProtocolSurface.RECONCILIATION_SIGNAL_KIND] |
  * | Attached session state | [ProtocolSurface.ATTACHED_SESSION_STATE] |
  * | Detach cause | [ProtocolSurface.ATTACHED_SESSION_DETACH_CAUSE] |
  * | Reconnect recovery state | [ProtocolSurface.RECONNECT_RECOVERY_STATE] |
@@ -87,6 +88,23 @@ enum class ProtocolSurface(
     ),
     DELEGATED_EXECUTION_RESULT_KIND(
         description = "Terminal outcome discriminator for DelegatedExecutionSignal.ResultKind",
+        surfaceClass = ProtocolSurfaceClass.CANONICAL
+    ),
+
+    /**
+     * PR Block 2 — Reconciliation signal kind vocabulary.
+     *
+     * Covers the wire discriminator values carried in [com.ufo.galaxy.runtime.ReconciliationSignal.Kind.wireValue]
+     * for all Android→V2 reconciliation/governance signal kinds.  These values are consumed
+     * by the V2 gateway handler to route incoming Android reconciliation messages to the
+     * correct participant-truth reconciliation action.
+     *
+     * Registering this surface as canonical ensures that any future addition or rename of a
+     * [com.ufo.galaxy.runtime.ReconciliationSignal.Kind] entry is caught by the
+     * [CrossRepoConsistencyGate] at CI time before it can silently break V2's reconciliation loop.
+     */
+    RECONCILIATION_SIGNAL_KIND(
+        description = "Android→V2 reconciliation/governance signal kind discriminator values (ReconciliationSignal.Kind)",
         surfaceClass = ProtocolSurfaceClass.CANONICAL
     ),
     ATTACHED_SESSION_STATE(
@@ -295,6 +313,46 @@ object UgcpProtocolConsistencyRules {
             "These values are canonical for the delegated execution surface specifically. " +
             "Do not normalize 'completed' to 'success' on this surface — the distinction matters " +
             "for host-side session-truth reconciliation."
+    )
+
+    /**
+     * PR Block 2 — Reconciliation signal kind vocabulary.
+     *
+     * These are the canonical wire discriminator values carried in
+     * [com.ufo.galaxy.runtime.ReconciliationSignal.Kind.wireValue].  They are consumed
+     * by the V2 gateway handler to route each incoming Android→V2 reconciliation/governance
+     * message to the correct participant-truth reconciliation action.
+     *
+     * Canonical values:
+     *  - `task_accepted`          — Android accepted a delegated task; V2 marks task as active.
+     *  - `task_status_update`     — Intermediate execution status; V2 updates in-flight view.
+     *  - `task_result`            — Task completed successfully; V2 closes task as success.
+     *  - `task_cancelled`         — Task was cancelled; V2 closes task as cancelled.
+     *  - `task_failed`            — Task failed; V2 closes task as failed.
+     *  - `participant_state`      — Participant health/readiness changed; V2 updates canonical view.
+     *  - `runtime_truth_snapshot` — Full reconciliation snapshot; V2 performs full truth pass.
+     *
+     * All seven values must remain stable across the integrated Android↔V2 protocol surface.
+     * Adding, removing, or renaming any value requires explicit cross-repo coordination with
+     * the V2 gateway handler registration table.
+     */
+    val reconciliationSignalKindRule: ConsistencyRule = ConsistencyRule(
+        surface = ProtocolSurface.RECONCILIATION_SIGNAL_KIND,
+        canonicalValues = setOf(
+            "task_accepted",
+            "task_status_update",
+            "task_result",
+            "task_cancelled",
+            "task_failed",
+            "participant_state",
+            "runtime_truth_snapshot"
+        ),
+        transitionalAliases = emptyList(),
+        notes = "Carried by ReconciliationSignal.Kind.wireValue (PR Block 2). " +
+            "These values are the canonical Android→V2 reconciliation/governance signal kind " +
+            "discriminators.  V2 gateway handler registration MUST cover every value here. " +
+            "Do not add, remove, or rename values without updating both the Android " +
+            "ReconciliationSignal.Kind enum and the V2 gateway handler table."
     )
 
     /**
@@ -650,6 +708,7 @@ object UgcpProtocolConsistencyRules {
     val allRules: Map<ProtocolSurface, ConsistencyRule> = mapOf(
         ProtocolSurface.TERMINAL_STATE_VOCABULARY to terminalStateVocabularyRule,
         ProtocolSurface.DELEGATED_EXECUTION_RESULT_KIND to delegatedExecutionResultKindRule,
+        ProtocolSurface.RECONCILIATION_SIGNAL_KIND to reconciliationSignalKindRule,
         ProtocolSurface.ATTACHED_SESSION_STATE to attachedSessionStateRule,
         ProtocolSurface.ATTACHED_SESSION_DETACH_CAUSE to attachedSessionDetachCauseRule,
         ProtocolSurface.RECONNECT_RECOVERY_STATE to reconnectRecoveryStateRule,
