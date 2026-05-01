@@ -66,17 +66,23 @@ When the WS drops while the runtime is `Active`, Android:
 `durableSessionContinuityRecord` already carries the incremented epoch, and
 `V2MultiDeviceLifecycleEvent.DeviceReconnected` has already been emitted.
 
-### Reconnect failure
+### Reconnect failure and watchdog recovery (PR-Block1)
 
-When all reconnect attempts are exhausted:
+When the initial reconnect-attempt ceiling is reached:
 
 1. `reconnectRecoveryState` → `FAILED`
-2. UI shows "Connection failed — please reconnect" CTA
-3. **User action required**: user must explicitly tap reconnect or re-enable cross-device
-4. Android does NOT autonomously restart the runtime after reconnect failure
+2. UI shows "Connection failed — retrying…" indicator
+3. **Android does NOT stop reconnecting**: the WS client enters a watchdog cycle, scheduling
+   further attempts at the capped 30 s backoff interval indefinitely (as long as cross-device is on)
+4. After `RuntimeController.WATCHDOG_RECOVERY_REENTRY_DELAY_MS` (~35 s), the runtime
+   automatically re-enters `RECOVERING` state so the next watchdog attempt is reflected
+5. On watchdog reconnect success: `reconnectRecoveryState` → `RECOVERED`, attached session
+   reopened, continuity epoch incremented, `V2MultiDeviceLifecycleEvent.DeviceReconnected` emitted
 
-**Intentional limitation**: autonomous restart on reconnect failure is out of scope.
-V2 must treat the participant as unavailable until `DeviceConnected` is re-observed.
+**No manual intervention required**: a configured Android participant will continue attempting
+recovery over any period of gateway unavailability solely due to the reconnect-attempt ceiling.
+An explicit `stop()` / `applyKillSwitch()` call, or the user toggling cross-device off, is the
+only way to halt the perpetual recovery cycle.
 
 ### Process recreation
 
@@ -215,9 +221,11 @@ The following are **intentional** and remain out of scope:
 | Full `HYBRID_EXECUTE` executor | Requires dedicated Android hybrid executor component; explicitly deferred |
 | WebRTC peer transport for distributed participant | Not production-ready; minimal-compat stubs only |
 | Barrier/merge coordination participation | Android is not a barrier authority; V2 owns this |
-| Autonomous runtime restart after reconnect failure | User action required; autonomous restart is out of scope |
 | Task state persistence across process recreation | V2 is the canonical task state authority; Android does not duplicate this |
 | Self-authorized session continuation from `lastDurableSessionId` | Android presents hint only; V2 decides whether to restore session |
+
+> **Note (PR-Block1)**: "Autonomous runtime restart after reconnect failure" has been resolved.
+> Android now performs perpetual watchdog recovery without manual intervention (see §2 above).
 
 ---
 

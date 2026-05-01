@@ -192,8 +192,9 @@ object MultiDeviceParticipantOrchestrationState {
             toState = OrchestrationState.DISCONNECTED,
             v2EventEmitted = V2MultiDeviceLifecycleEvent.WIRE_DEVICE_DISCONNECTED,
             trigger = "ws_reconnect_attempts_exhausted",
-            rationale = "Reconnect attempts exhausted; emits DeviceDisconnected and " +
-                "DeviceDegraded (degradationKind=ws_recovery_failed); participant is unavailable."
+            rationale = "Reconnect attempt ceiling reached; emits DeviceDegraded " +
+                "(degradationKind=ws_recovery_failed); WS client enters perpetual watchdog cycle " +
+                "at cap delay — participant will re-enter RECONNECTING automatically (PR-Block1)."
         ),
         TransitionEntry(
             fromState = OrchestrationState.CONNECTED,

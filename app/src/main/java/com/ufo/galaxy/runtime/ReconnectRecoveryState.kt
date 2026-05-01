@@ -64,6 +64,7 @@ package com.ufo.galaxy.runtime
  *  - Active + WS disconnect                          → [RECOVERING]
  *  - [RECOVERING] + WS reconnect (success)           → [RECOVERED]  (epoch already updated)
  *  - [RECOVERING] + WS terminal error                → [FAILED]
+ *  - [FAILED] + watchdog timer fires                 → [RECOVERING]  (perpetual re-entry)
  *  - [stop][RuntimeController.stop] / kill-switch    → [IDLE]   (always)
  *
  * ## V2 field / semantic compatibility
@@ -87,6 +88,16 @@ enum class ReconnectRecoveryState(val wireValue: String) {
      */
     RECOVERED("recovered"),
 
-    /** Reconnect attempts exhausted; user action required to restore connectivity. */
+    /**
+     * All reconnect attempts were exhausted (or the WS emitted a terminal error) while in
+     * [RECOVERING].  The WS client has entered a perpetual watchdog cycle — it will continue
+     * scheduling reconnect attempts at the capped backoff interval indefinitely.  After
+     * [RuntimeController.WATCHDOG_RECOVERY_REENTRY_DELAY_MS] the runtime will automatically
+     * re-enter [RECOVERING] to reflect the next watchdog attempt cycle.
+     *
+     * Surface layers should show a temporary "Connection failed — retrying…" indication
+     * rather than a permanent "manual rescue required" state.  User action is only needed
+     * if the device should be explicitly disconnected (e.g. network is intentionally down).
+     */
     FAILED("failed")
 }
