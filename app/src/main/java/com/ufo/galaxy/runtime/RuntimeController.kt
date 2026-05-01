@@ -10,9 +10,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -686,6 +688,19 @@ class RuntimeController(
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     /**
+     * PR-Block1 — Watchdog recovery job.
+     *
+     * Launched by [permanentWsListener.onError] when the WS client enters a watchdog cycle
+     * (attempt ceiling reached).  The job waits [WATCHDOG_RECOVERY_REENTRY_DELAY_MS] and then
+     * resets [_reconnectRecoveryState] from [ReconnectRecoveryState.FAILED] back to
+     * [ReconnectRecoveryState.RECOVERING] so the UI shows "Recovering…" again for the next
+     * watchdog reconnect attempt rather than remaining stuck on a "failed" banner.
+     *
+     * Cancelled on [stop] so it does not fire after the user explicitly disables cross-device.
+     */
+    private var watchdogRecoveryJob: Job? = null
+
+    /**
      * Permanent WS listener installed once at construction time to handle disconnect /
      * reconnect events while the runtime is in [RuntimeState.Active] (PR-23).
      *
@@ -718,22 +733,37 @@ class RuntimeController(
                 // that whenever a consumer observes RECOVERED, durableSessionContinuityRecord
                 // already holds the new epoch for this reconnect cycle.
                 openAttachedSession(SessionOpenSource.RECONNECT_RECOVERY)
-                // PR-33: Mark recovery as successful if we were in the middle of recovery so
-                // the UI can transition from "Recovering…" to "Connected" / normal state.
-                if (_reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING) {
+                // PR-Block1: Cancel any pending watchdog recovery job — the reconnect
+                // succeeded, so the watchdog re-entry is no longer needed.
+                watchdogRecoveryJob?.cancel()
+                watchdogRecoveryJob = null
+                // PR-33 / PR-Block1: Mark recovery as successful when coming from either
+                // RECOVERING or FAILED state.  The FAILED→RECOVERED path handles the case
+                // where the watchdog perpetual reconnect succeeds after the attempt ceiling
+                // was previously hit — the runtime must re-enter a healthy state without
+                // requiring manual intervention.
+                val prevRecoveryState = _reconnectRecoveryState.value
+                if (prevRecoveryState == ReconnectRecoveryState.RECOVERING ||
+                    prevRecoveryState == ReconnectRecoveryState.FAILED) {
                     _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERED
+                    val transitionLabel = "${prevRecoveryState.wireValue}→recovered"
+                    val watchdogNote = if (prevRecoveryState == ReconnectRecoveryState.FAILED) {
+                        " (watchdog cycle resolved)"
+                    } else {
+                        ""
+                    }
                     GalaxyLogger.log(
                         GalaxyLogger.TAG_RECONNECT_RECOVERY,
                         mapOf(
-                            "transition" to "recovering→recovered",
+                            "transition" to transitionLabel,
                             "trigger" to "ws_reconnected_active"
                         )
                     )
-                    Log.i(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → RECOVERED")
+                    Log.i(TAG, "[RUNTIME] Reconnect recovery: $transitionLabel$watchdogNote")
                     // PR-2: Emit a ParticipantRejoined formation rebalance event so formation
                     // observers know this participant is back and formation can re-evaluate.
                     emitFormationRebalanceForRecovery(
-                        previousRecoveryState = ReconnectRecoveryState.RECOVERING,
+                        previousRecoveryState = prevRecoveryState,
                         newRecoveryState = ReconnectRecoveryState.RECOVERED
                     )
                 }
@@ -771,7 +801,12 @@ class RuntimeController(
         override fun onError(error: String) {
             // PR-33: If a WS error occurs while recovery is in progress (e.g. max reconnect
             // attempts exhausted), mark recovery as failed so the UI can show a "Connection
-            // failed — please reconnect" CTA instead of an indefinite "Recovering…" banner.
+            // failed — retrying…" indicator rather than an indefinite "Recovering…" banner.
+            //
+            // PR-Block1: FAILED is NOT a terminal state.  GalaxyWebSocketClient will
+            // continue scheduling watchdog reconnect attempts at the capped backoff interval.
+            // A [watchdogRecoveryJob] is launched here to re-enter RECOVERING after the
+            // watchdog interval so the recovery state machine tracks the next WS cycle.
             if (_reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING) {
                 _reconnectRecoveryState.value = ReconnectRecoveryState.FAILED
                 GalaxyLogger.log(
@@ -782,13 +817,39 @@ class RuntimeController(
                         "error" to error
                     )
                 )
-                Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error)")
+                Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error) — watchdog scheduled to re-enter RECOVERING")
                 // PR-2: Emit a ReadinessChanged formation rebalance event so formation
                 // observers know this participant has been withdrawn from formation.
                 emitFormationRebalanceForRecovery(
                     previousRecoveryState = ReconnectRecoveryState.RECOVERING,
                     newRecoveryState = ReconnectRecoveryState.FAILED
                 )
+                // PR-Block1: Launch a watchdog recovery job that re-enters RECOVERING
+                // after the cap backoff interval, keeping the state machine in sync with
+                // the perpetual WS reconnect cycle running in GalaxyWebSocketClient.
+                watchdogRecoveryJob?.cancel()
+                watchdogRecoveryJob = controllerScope.launch {
+                    delay(WATCHDOG_RECOVERY_REENTRY_DELAY_MS)
+                    // Only re-enter RECOVERING if we're still in FAILED and the runtime
+                    // is still Active with cross-device intent.  If the user stopped the
+                    // runtime (stop() cancels watchdogRecoveryJob) this branch is skipped.
+                    if (_reconnectRecoveryState.value == ReconnectRecoveryState.FAILED &&
+                        _state.value == RuntimeState.Active) {
+                        _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERING
+                        GalaxyLogger.log(
+                            GalaxyLogger.TAG_RECONNECT_RECOVERY,
+                            mapOf(
+                                "transition" to "failed→recovering",
+                                "trigger" to "watchdog_reentry"
+                            )
+                        )
+                        Log.i(TAG, "[RUNTIME] Watchdog recovery: FAILED → RECOVERING (next cycle)")
+                        emitFormationRebalanceForRecovery(
+                            previousRecoveryState = ReconnectRecoveryState.FAILED,
+                            newRecoveryState = ReconnectRecoveryState.RECOVERING
+                        )
+                    }
+                }
             }
         }
 
@@ -1037,6 +1098,10 @@ class RuntimeController(
         // clean baseline.  Any ongoing "Recovering…" or "Failed" banner should disappear
         // when the user deliberately turns off cross-device or triggers a full reconnect.
         _reconnectRecoveryState.value = ReconnectRecoveryState.IDLE
+        // PR-Block1: Cancel any pending watchdog recovery job so it does not fire after
+        // the user has explicitly stopped the runtime.
+        watchdogRecoveryJob?.cancel()
+        watchdogRecoveryJob = null
         // PR-1: Terminate the durable session era on explicit stop.  The next activation
         // will start a fresh era with a new durableSessionId.
         // PR-7: Also clear the persisted prior-session hint so the next DeviceConnected is
@@ -2868,6 +2933,19 @@ class RuntimeController(
 
         /** Default maximum time to wait for a WS connection during [startWithTimeout]. */
         const val DEFAULT_REGISTRATION_TIMEOUT_MS = 15_000L
+
+        /**
+         * PR-Block1 — Delay (ms) before the watchdog re-enters [ReconnectRecoveryState.RECOVERING]
+         * from [ReconnectRecoveryState.FAILED].
+         *
+         * This must be long enough that the UI has time to show a "failed" banner (UX) and
+         * that we do not storm immediately, but short enough that the participant re-enters
+         * the visible recovery cycle within the next WS watchdog attempt window.
+         * Set to 35 s — slightly longer than the WS cap delay (30 s + up to 1 s jitter)
+         * so the recovery-state transition FAILED → RECOVERING precedes the next watchdog
+         * reconnect attempt in most practical cases.
+         */
+        const val WATCHDOG_RECOVERY_REENTRY_DELAY_MS = 35_000L
 
         /**
          * PR-2 — Buffer capacity for [_formationRebalanceEvent].

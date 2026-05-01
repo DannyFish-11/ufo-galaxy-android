@@ -152,20 +152,27 @@ object AndroidLifecycleRecoveryContract {
     // ── Reconnect failure recovery ────────────────────────────────────────────
 
     /**
-     * What happens when WS reconnect **fails** (all attempts exhausted).
+     * What happens when WS reconnect **attempts** reach the ceiling (PR-Block1 update).
      *
-     * [ReconnectRecoveryState.FAILED] is set; the UI shows a manual-reconnect CTA.
-     * User must explicitly tap reconnect or re-enable cross-device.  Until then:
-     * - Android is in [RuntimeController.RuntimeState.Active] but disconnected
-     * - V2 sees no signal until the user reconnects
-     * - Any in-flight task is considered lost on the Android side
+     * When the ceiling is reached, [ReconnectRecoveryState.FAILED] is set transiently so the
+     * UI can show a "connection failed — retrying…" message.  However, Android immediately
+     * enters a **perpetual watchdog cycle**:
+     *  - [GalaxyWebSocketClient] resets the attempt counter to 0 and schedules a new reconnect
+     *    attempt at the capped 30 s + jitter interval — reconnect attempts never stop.
+     *  - [RuntimeController] launches a watchdog job that re-enters [ReconnectRecoveryState.RECOVERING]
+     *    after [RuntimeController.WATCHDOG_RECOVERY_REENTRY_DELAY_MS] (~35 s) so the state
+     *    machine tracks the next watchdog attempt cycle.
+     *  - When the watchdog reconnect succeeds, the runtime transitions to
+     *    [ReconnectRecoveryState.RECOVERED] and the attached session is re-established.
      *
-     * This is an **explicit intentional limitation**: Android does not autonomously
-     * restart the runtime after a reconnect failure.  User action is required.
+     * **No user action is required** to continue recovery.  The participant will keep trying
+     * over any period of gateway unavailability.  An explicit [RuntimeController.stop] call
+     * (or the user toggling cross-device off) is the only way to halt the watchdog cycle.
      */
-    const val RECONNECT_FAILURE_LIMITATION =
-        "After reconnect failure Android does not autonomously restart — user action required. " +
-            "V2 must treat the participant as unavailable until DeviceConnected is re-observed."
+    const val RECONNECT_FAILURE_BEHAVIOR =
+        "Android enters a perpetual watchdog recovery cycle after the reconnect-attempt ceiling " +
+            "is reached (PR-Block1).  Reconnect attempts never stop permanently; V2 will eventually " +
+            "observe DeviceReconnected when the gateway becomes available again."
 
     // ── Hybrid participant limitations ────────────────────────────────────────
 

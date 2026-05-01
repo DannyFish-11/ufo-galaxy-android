@@ -167,6 +167,9 @@ ReconnectRecoveryState.RECOVERING
         ▼
       ReconnectRecoveryState.FAILED
         emits V2MultiDeviceLifecycleEvent.DeviceDegraded (ws_recovery_failed)
+        ▼
+      [watchdog timer ~35 s] → ReconnectRecoveryState.RECOVERING (perpetual re-entry)
+        WS client continues scheduling watchdog reconnect attempts at cap delay
 ```
 
 ### What Android recovers locally across a WS reconnect

@@ -53,11 +53,15 @@ import kotlin.random.Random
  * disconnect decisions and cross-device enable/disable toggling. No other component
  * should call [connect], [disconnect], or [setCrossDeviceEnabled] directly.
  *
- * **Reconnect strategy** — exponential backoff with jitter:
+ * **Reconnect strategy** — exponential backoff with jitter + perpetual watchdog:
  *   base delays 1 s → 2 s → 4 s → 8 s → 16 s → 30 s (capped), plus up to 1 s
  *   of random jitter.  Attempt counter is reset to 0 on a successful [onOpen].
  *   Calling [connect] while already connected or connecting is a no-op.
  *   Calling [connect] after an explicit [disconnect] restarts the attempt counter.
+ *   Once the attempt ceiling ([MAX_RECONNECT_ATTEMPTS]) is reached, [Listener.onError]
+ *   is emitted (for UI / recovery-state updates) and the counter resets to 0;
+ *   reconnect attempts then continue indefinitely at the capped 30 s interval.
+ *   The device **never** stops reconnecting while [shouldReconnect] is `true`.
  *
  * **Cross-device gate**: [sendJson] is hard-blocked when [crossDeviceEnabled] is `false`,
  *   regardless of connection state, to enforce the local-only mode invariant.
@@ -1277,14 +1281,55 @@ class GalaxyWebSocketClient(
     }
     
     /**
-     * 安排重连 — exponential backoff with jitter.
+     * 安排重连 — exponential backoff with jitter, with perpetual watchdog recovery.
      *
-     * Delay = RECONNECT_BACKOFF_MS[min(attempt, last)] + random jitter [0, RECONNECT_JITTER_MAX_MS).
+     * Normal phase: Delay = RECONNECT_BACKOFF_MS[min(attempt, last)] + random jitter
+     * [0, RECONNECT_JITTER_MAX_MS).
+     *
+     * Watchdog phase: Once [MAX_RECONNECT_ATTEMPTS] is reached, [Listener.onError] is
+     * emitted (so the runtime can update recovery state and UI), the attempt counter is
+     * reset to 0, and a new reconnect is scheduled at the maximum backoff + jitter.
+     * This perpetual watchdog cycle repeats indefinitely — the device **never** stops
+     * attempting to reconnect as long as [shouldReconnect] is `true`.  An explicit
+     * [disconnect] call (which sets [shouldReconnect]=false) is the only way to stop the
+     * cycle (e.g. user disables cross-device or stop() is called).
+     *
+     * This design eliminates the prior terminal dead state where the Android participant
+     * would permanently fall out of the distributed system after 10 consecutive failures.
      */
     private fun scheduleReconnect() {
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.w(TAG, "[WS:RETRY] Max reconnect attempts ($MAX_RECONNECT_ATTEMPTS) reached; giving up")
+            // Notify listeners of the ceiling breach so the runtime can update its
+            // recovery state (RECOVERING → FAILED) and the UI can show a transient
+            // "connection failed" message.  We then reset the counter and fall into
+            // a perpetual watchdog retry at the capped backoff + jitter — no permanent stop.
+            Log.w(
+                TAG,
+                "[WS:RETRY] Attempt ceiling ($MAX_RECONNECT_ATTEMPTS) reached; " +
+                    "entering watchdog recovery cycle (will retry at cap delay indefinitely)"
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_RECONNECT,
+                mapOf(
+                    "event" to "watchdog_cycle_entered",
+                    "attempt_ceiling" to MAX_RECONNECT_ATTEMPTS
+                )
+            )
             listeners.forEach { it.onError("无法连接到服务器") }
+            // Reset the attempt counter so the next watchdog cycle starts from 0
+            // and so the reconnectAttemptCount observable reflects a fresh cycle.
+            reconnectAttempts = 0
+            _reconnectAttemptCount.value = 0
+            // Schedule a single watchdog retry at the capped delay so we do not storm.
+            val watchdogDelay = RECONNECT_BACKOFF_MS.last() + Random.nextLong(RECONNECT_JITTER_MAX_MS)
+            Log.i(TAG, "[WS:RETRY] Watchdog reconnect scheduled in ${watchdogDelay}ms")
+            reconnectJob?.cancel()
+            reconnectJob = scope.launch {
+                delay(watchdogDelay)
+                if (shouldReconnect && !isConnected) {
+                    connect()
+                }
+            }
             return
         }
 
