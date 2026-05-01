@@ -747,6 +747,11 @@ class RuntimeController(
                     prevRecoveryState == ReconnectRecoveryState.FAILED) {
                     _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERED
                     val transitionLabel = "${prevRecoveryState.wireValue}→recovered"
+                    val watchdogNote = if (prevRecoveryState == ReconnectRecoveryState.FAILED) {
+                        " (watchdog cycle resolved)"
+                    } else {
+                        ""
+                    }
                     GalaxyLogger.log(
                         GalaxyLogger.TAG_RECONNECT_RECOVERY,
                         mapOf(
@@ -754,7 +759,7 @@ class RuntimeController(
                             "trigger" to "ws_reconnected_active"
                         )
                     )
-                    Log.i(TAG, "[RUNTIME] Reconnect recovery: $transitionLabel (watchdog cycle resolved)")
+                    Log.i(TAG, "[RUNTIME] Reconnect recovery: $transitionLabel$watchdogNote")
                     // PR-2: Emit a ParticipantRejoined formation rebalance event so formation
                     // observers know this participant is back and formation can re-evaluate.
                     emitFormationRebalanceForRecovery(
@@ -812,7 +817,7 @@ class RuntimeController(
                         "error" to error
                     )
                 )
-                Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error) — watchdog will re-enter RECOVERING")
+                Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error) — watchdog scheduled to re-enter RECOVERING")
                 // PR-2: Emit a ReadinessChanged formation rebalance event so formation
                 // observers know this participant has been withdrawn from formation.
                 emitFormationRebalanceForRecovery(
