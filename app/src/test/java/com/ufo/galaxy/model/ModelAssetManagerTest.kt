@@ -26,7 +26,17 @@ class ModelAssetManagerTest {
     @Before
     fun setUp() {
         modelsDir = tmpFolder.newFolder("models")
-        mam = ModelAssetManager(modelsDir)
+        // Use null checksumOverrides for all models so tests writing fake content work
+        // correctly regardless of the static SHA-256 constants. Tests that specifically
+        // validate checksum enforcement supply their own overrides.
+        mam = ModelAssetManager(
+            modelsDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
     }
 
     // ── verifyModel: MISSING ─────────────────────────────────────────────────
@@ -52,7 +62,7 @@ class ModelAssetManagerTest {
     // ── verifyModel: READY ───────────────────────────────────────────────────
 
     @Test
-    fun `verifyModel returns READY when file exists and no checksum required`() {
+    fun `verifyModel returns READY when file exists and checksum override is null`() {
         File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("fake weights")
         val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
         assertEquals(ModelAssetManager.ModelStatus.READY, status)
@@ -147,14 +157,16 @@ class ModelAssetManagerTest {
         assertTrue("Models directory must be a directory", mam.modelsDir.isDirectory)
     }
 
-    // ── checksum skip (null expected) ─────────────────────────────────────────
+    // ── checksum null override ────────────────────────────────────────────────
 
     @Test
     fun `verifyModel returns READY when file exists and null checksum skips verification`() {
+        // This test exercises the explicit null-override path. The setUp() method already
+        // configures null overrides for all models; the test below confirms the behaviour.
         File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(byteArrayOf(1, 2, 3, 4))
         val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
         assertEquals(
-            "With null expected checksum, any file content should yield READY",
+            "With null checksum override, any file content should yield READY",
             ModelAssetManager.ModelStatus.READY,
             status
         )

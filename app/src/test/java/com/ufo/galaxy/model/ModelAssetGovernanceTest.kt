@@ -44,7 +44,17 @@ class ModelAssetGovernanceTest {
     @Before
     fun setUp() {
         modelsDir = tmpFolder.newFolder("models")
-        mam = ModelAssetManager(modelsDir)
+        // Use null checksumOverrides so tests writing fake content can reach READY state.
+        // Governance tests that specifically validate checksum enforcement supply their
+        // own checksumOverrides inline.
+        mam = ModelAssetManager(
+            modelsDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

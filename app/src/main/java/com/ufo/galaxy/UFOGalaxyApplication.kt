@@ -17,6 +17,7 @@ import com.ufo.galaxy.data.AppConfig
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
 import com.ufo.galaxy.grounding.SeeClickGroundingEngine
+import com.ufo.galaxy.grounding.NcnnGroundingService
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.local.DefaultLocalLoopExecutor
@@ -35,6 +36,7 @@ import com.ufo.galaxy.network.TailscaleAdapter
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.planner.MobileVlmPlanner
+import com.ufo.galaxy.planner.LlamaCppPlannerService
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
@@ -218,6 +220,13 @@ class UFOGalaxyApplication : Application() {
 
         // Initialise structured observability logger (must be first, before any log calls).
         GalaxyLogger.init(this)
+
+        // Attempt to load native inference runtimes (llama.cpp, NCNN).
+        // This is a best-effort load; failures are logged and the app continues in
+        // degraded mode routing inference to the remote V2 service.
+        com.ufo.galaxy.runtime.NativeInferenceLoader.loadAll().also { result ->
+            Log.i(TAG, "Native inference runtimes: llama.cpp=${result.llamaCppAvailable} ncnn=${result.ncnnAvailable}")
+        }
         
         // 初始化配置
         initConfig()
@@ -509,17 +518,45 @@ class UFOGalaxyApplication : Application() {
      * effective settings authority — rather than from [AppConfig] or [BuildConfig] directly.
      */
     private fun initInferenceServices() {
-        plannerService = MobileVlmPlanner(
-            modelPath = modelAssetManager.mobileVlmPath,
-            maxTokens = appSettings.plannerMaxTokens,
-            temperature = appSettings.plannerTemperature,
-            timeoutMs = appSettings.plannerTimeoutMs
-        )
-        groundingService = SeeClickGroundingEngine(
-            modelParamPath = modelAssetManager.seeClickParamPath,
-            modelBinPath = modelAssetManager.seeClickBinPath,
-            timeoutMs = appSettings.groundingTimeoutMs
-        )
+        // Select the planner backend: prefer the native llama.cpp runtime when the
+        // library is present (libllama.so packaged in the APK); fall back to the HTTP
+        // client targeting a separate llama.cpp server process.
+        plannerService = if (com.ufo.galaxy.runtime.NativeInferenceLoader.isLlamaCppAvailable()) {
+            Log.i(TAG, "Using LlamaCppPlannerService (native JNI runtime)")
+            com.ufo.galaxy.planner.LlamaCppPlannerService(
+                modelPath = modelAssetManager.mobileVlmPath,
+                maxTokens = appSettings.plannerMaxTokens,
+                temperature = appSettings.plannerTemperature.toFloat(),
+                timeoutMs = appSettings.plannerTimeoutMs
+            )
+        } else {
+            Log.i(TAG, "llama.cpp native library unavailable — using MobileVlmPlanner (HTTP fallback)")
+            MobileVlmPlanner(
+                modelPath = modelAssetManager.mobileVlmPath,
+                maxTokens = appSettings.plannerMaxTokens,
+                temperature = appSettings.plannerTemperature,
+                timeoutMs = appSettings.plannerTimeoutMs
+            )
+        }
+
+        // Select the grounding backend: prefer the native NCNN runtime when the
+        // library is present (libncnn.so packaged in the APK); fall back to the HTTP
+        // client targeting a separate NCNN server process.
+        groundingService = if (com.ufo.galaxy.runtime.NativeInferenceLoader.isNcnnAvailable()) {
+            Log.i(TAG, "Using NcnnGroundingService (native JNI runtime)")
+            com.ufo.galaxy.grounding.NcnnGroundingService(
+                modelParamPath = modelAssetManager.seeClickParamPath,
+                modelBinPath = modelAssetManager.seeClickBinPath,
+                timeoutMs = appSettings.groundingTimeoutMs
+            )
+        } else {
+            Log.i(TAG, "NCNN native library unavailable — using SeeClickGroundingEngine (HTTP fallback)")
+            SeeClickGroundingEngine(
+                modelParamPath = modelAssetManager.seeClickParamPath,
+                modelBinPath = modelAssetManager.seeClickBinPath,
+                timeoutMs = appSettings.groundingTimeoutMs
+            )
+        }
         edgeExecutor = EdgeExecutor(
             screenshotProvider = AccessibilityScreenshotProvider(),
             plannerService = plannerService,

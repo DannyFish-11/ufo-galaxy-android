@@ -20,6 +20,12 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
+
+        // ABI filters: arm64-v8a for modern 64-bit devices (primary); armeabi-v7a for
+        // legacy 32-bit devices. x86_64 is included for emulators and CI testing.
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
         
         // 构建配置字段
         // NOTE: GALAXY_SERVER_URL is used only as the last-resort runtime fallback for
@@ -75,6 +81,10 @@ android {
     packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+        // Keep all native .so files; do not strip them from the final APK.
+        jniLibs {
+            keepDebugSymbols += '**/*.so'
         }
     }
 
@@ -137,4 +147,15 @@ dependencies {
     // 调试
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
+
+    // ── Local inference native runtimes ───────────────────────────────────────
+    // llama.cpp Android JNI bindings for MobileVLM GGUF inference (libllama.so).
+    // The AAR provides prebuilt arm64-v8a and armeabi-v7a shared libraries.
+    // Build tag b4833 corresponds to a stable llama.cpp release with Android JNI support.
+    implementation 'com.github.ggerganov:llama.cpp:b4833'
+
+    // NCNN Android inference library for SeeClick grounding (libncnn.so).
+    // The AAR provides prebuilt arm64-v8a, armeabi-v7a, and x86_64 shared libraries
+    // compiled with Vulkan and NEON acceleration.
+    implementation 'com.github.nihui:ncnn-android-vulkan:20240410'
 }
