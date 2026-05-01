@@ -1,6 +1,9 @@
 package com.ufo.galaxy.planner
 
 import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonSyntaxException
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.inference.WarmupResult
 import com.ufo.galaxy.runtime.NativeInferenceLoader
@@ -240,18 +243,41 @@ class LlamaCppPlannerService(
         // Extract JSON block from raw model output (may contain markdown fences).
         val json = extractJsonBlock(raw)
         return try {
-            val stepsRe = Regex(""""action_type"\s*:\s*"([^"]+)".*?"intent"\s*:\s*"([^"]+)"""", RegexOption.DOT_MATCHES_ALL)
-            val steps = stepsRe.findAll(json).map { m ->
-                LocalPlannerService.PlanStep(
-                    action_type = m.groupValues[1],
-                    intent = m.groupValues[2]
+            val root = Gson().fromJson(json, JsonObject::class.java)
+            val stepsArray = root?.getAsJsonArray("steps")
+                ?: return LocalPlannerService.PlanResult(
+                    steps = emptyList(),
+                    error = "MobileVLM (llama.cpp): no 'steps' array in model output: $raw"
                 )
-            }.toList()
+            val steps = stepsArray.mapNotNull { el ->
+                try {
+                    val obj = el.asJsonObject
+                    LocalPlannerService.PlanStep(
+                        action_type = obj.get("action_type")?.asString ?: "tap",
+                        intent = obj.get("intent")?.asString ?: "",
+                        parameters = obj.getAsJsonObject("parameters")
+                            ?.entrySet()
+                            ?.associate { (k, v) -> k to v.asString }
+                            ?: emptyMap()
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "parseSteps: skipping malformed step element: ${e.message}")
+                    null
+                }
+            }
             if (steps.isEmpty()) {
-                LocalPlannerService.PlanResult(steps = emptyList(), error = "MobileVLM (llama.cpp): no steps parsed from: $raw")
+                LocalPlannerService.PlanResult(
+                    steps = emptyList(),
+                    error = "MobileVLM (llama.cpp): steps array is empty in: $raw"
+                )
             } else {
                 LocalPlannerService.PlanResult(steps = steps)
             }
+        } catch (e: JsonSyntaxException) {
+            LocalPlannerService.PlanResult(
+                steps = emptyList(),
+                error = "MobileVLM (llama.cpp): JSON parse error: ${e.message}"
+            )
         } catch (e: Exception) {
             LocalPlannerService.PlanResult(
                 steps = emptyList(),

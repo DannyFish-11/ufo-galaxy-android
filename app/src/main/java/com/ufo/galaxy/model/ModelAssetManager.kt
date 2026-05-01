@@ -2,6 +2,9 @@ package com.ufo.galaxy.model
 
 import android.content.Context
 import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonSyntaxException
 import java.io.File
 import java.security.MessageDigest
 
@@ -463,12 +466,14 @@ class ModelAssetManager(
         if (!file.exists()) return
         try {
             val json = file.readText()
-            // Simple JSON parsing: {"key":"value",...}
-            val pattern = Regex(""""([\w]+)"\s*:\s*"([0-9a-fA-F]{64})"""")
-            pattern.findAll(json).forEach { match ->
-                val modelId = match.groupValues[1]
-                val sha256 = match.groupValues[2]
-                persistedChecksums[modelId] = sha256
+            val root = Gson().fromJson(json, JsonObject::class.java) ?: return
+            root.entrySet().forEach { (modelId, element) ->
+                val sha256 = element.asString
+                if (sha256.matches(Regex("[0-9a-fA-F]{64}"))) {
+                    persistedChecksums[modelId] = sha256
+                } else {
+                    Log.w(TAG, "Skipping invalid persisted checksum for '$modelId': $sha256")
+                }
             }
             // Apply persisted checksums to registry entries where the static constant is null
             // and no override was supplied.
@@ -479,6 +484,8 @@ class ModelAssetManager(
                 }
             }
             Log.d(TAG, "Loaded ${persistedChecksums.size} persisted checksum(s) from $CHECKSUMS_FILE")
+        } catch (e: JsonSyntaxException) {
+            Log.w(TAG, "Persisted checksums file is malformed JSON — ignoring: ${e.message}")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load persisted checksums: ${e.message}")
         }
@@ -489,14 +496,9 @@ class ModelAssetManager(
      */
     private fun writePersistedChecksums() {
         try {
-            val json = buildString {
-                append("{")
-                persistedChecksums.entries.joinToString(",") { (k, v) ->
-                    "\"$k\":\"$v\""
-                }.also { append(it) }
-                append("}")
-            }
-            File(modelsDir, CHECKSUMS_FILE).writeText(json)
+            val root = JsonObject()
+            persistedChecksums.forEach { (modelId, sha256) -> root.addProperty(modelId, sha256) }
+            File(modelsDir, CHECKSUMS_FILE).writeText(Gson().toJson(root))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to write persisted checksums: ${e.message}")
         }
