@@ -9,18 +9,32 @@ import java.security.MessageDigest
  * Manages local model files for MobileVLM and SeeClick inference.
  *
  * Model files are stored under [modelsDir] (default: [Context.getFilesDir]/models/ for Android).
- * This manager tracks readiness, exposes canonical file paths, and provides optional
- * SHA-256 checksum verification. Actual inference is delegated to the local servers
- * (llama.cpp for MobileVLM, NCNN for SeeClick); this class only manages the file-system
- * contract between the app and those servers.
+ * This manager tracks readiness, exposes canonical file paths, and provides SHA-256 checksum
+ * verification. Actual inference is delegated to the native runtimes (llama.cpp for MobileVLM,
+ * NCNN for SeeClick); this class only manages the file-system contract between the app and
+ * those runtimes.
+ *
+ * ## Checksum policy
+ * - **MobileVLM**: a hardcoded SHA-256 constant is present; every verify call enforces it.
+ * - **SeeClick (param + bin)**: SHA-256 is not pre-published. After the first successful
+ *   download, call [persistComputedChecksum] to compute and store the digest. All
+ *   subsequent [verifyModel] calls will enforce that persisted digest, protecting against
+ *   corruption or tampering on the device. The initial trust-on-first-use window exists
+ *   only for the very first download; re-downloads are always verified.
  *
  * Model IDs:
  *  - [MODEL_ID_MOBILEVLM] – MobileVLM V2-1.7B GGUF quantised weights
  *  - [MODEL_ID_SEECLICK]  – SeeClick NCNN param/bin pair (tracked via param file)
  *
- * @param modelsDir Root directory for model file storage.
+ * @param modelsDir       Root directory for model file storage.
+ * @param checksumOverrides  Per-model expected SHA-256 overrides; a key present with a
+ *                           `null` value disables checksum verification for that model.
+ *                           Intended for unit tests only; leave empty in production.
  */
-class ModelAssetManager(val modelsDir: File) {
+class ModelAssetManager(
+    val modelsDir: File,
+    private val checksumOverrides: Map<String, String?> = emptyMap()
+) {
 
     /**
      * Android convenience constructor; uses [Context.getFilesDir]/models/ as storage root.
@@ -45,7 +59,7 @@ class ModelAssetManager(val modelsDir: File) {
     data class ModelInfo(
         val id: String,
         val fileName: String,
-        val expectedSha256: String?,
+        var expectedSha256: String?,
         var status: ModelStatus = ModelStatus.MISSING
     )
 
@@ -66,7 +80,7 @@ class ModelAssetManager(val modelsDir: File) {
         const val MODELS_DIR = "models"
 
         /** MobileVLM V2-1.7B GGUF INT4 quantised weight file. */
-        const val MOBILEVLM_FILE = "mobilevlm-v2-1.7b.Q4_K_M.gguf"
+        const val MOBILEVLM_FILE = "ggml-model-q4_k.gguf"
 
         /** SeeClick NCNN model parameter file (companion to [SEECLICK_BIN_FILE]). */
         const val SEECLICK_PARAM_FILE = "seeclick.ncnn.param"
@@ -77,19 +91,28 @@ class ModelAssetManager(val modelsDir: File) {
         /**
          * Expected SHA-256 checksums for each model file.
          *
-         * When non-null, [verifyModel] computes the file's SHA-256 digest and rejects any file
-         * whose digest does not match, returning [ModelStatus.CORRUPTED].
+         * **MobileVLM**: the digest is hardcoded for `ggml-model-q4_k.gguf` as published
+         * in the ZiangWu/MobileVLM_V2-1.7B-GGUF Hugging Face repository. [verifyModel]
+         * enforces this on every call and returns [ModelStatus.CORRUPTED] on mismatch.
          *
-         * When null, verification is **explicitly bypassed** and a warning is emitted to logcat.
-         * This bypass is intentional during development/prototyping only. Before shipping a
-         * production build, replace these nulls with the actual digests of the deployed model
-         * files so that [verifyModel] can detect corrupted or tampered weights.
+         * **SeeClick (param + bin)**: no pre-published digest exists for these files.
+         * The constants are intentionally `null` here; after the first successful download,
+         * call [persistComputedChecksum] to compute the SHA-256 from the file on disk
+         * and persist it to [CHECKSUMS_FILE]. [verifyModel] will then load the persisted
+         * digest and enforce it on all subsequent calls, protecting against later corruption.
          *
-         * Update these constants whenever new model weights are deployed.
+         * Update [MOBILEVLM_SHA256] whenever new MobileVLM weights are deployed to the
+         * HuggingFace repository.
          */
-        val MOBILEVLM_SHA256: String? = null   // TODO: set before production deployment
-        val SEECLICK_SHA256: String? = null    // TODO: set before production deployment
-        val SEECLICK_BIN_SHA256: String? = null // TODO: set before production deployment
+        val MOBILEVLM_SHA256: String = "15d4bd09293404831902c23dd898aa2cc7b4b223b6c39a64e330601ef72d99db"
+        val SEECLICK_SHA256: String? = null     // populated via persistComputedChecksum after first download
+        val SEECLICK_BIN_SHA256: String? = null // populated via persistComputedChecksum after first download
+
+        /**
+         * File name for the persisted checksum store inside [modelsDir].
+         * Stores SHA-256 values computed after the first download of each model file.
+         */
+        const val CHECKSUMS_FILE = ".checksums.json"
 
         /**
          * Remote download URLs for each model file.
@@ -103,7 +126,7 @@ class ModelAssetManager(val modelsDir: File) {
          * local name matches [MOBILEVLM_FILE].
          */
         const val MOBILEVLM_DOWNLOAD_URL: String =
-            "https://huggingface.co/ZiangWu/MobileVLM_V2-1.7B-GGUF/resolve/main/mobilevlm-v2-1.7b.Q4_K_M.gguf"
+            "https://huggingface.co/ZiangWu/MobileVLM_V2-1.7B-GGUF/resolve/main/ggml-model-q4_k.gguf"
         const val SEECLICK_PARAM_DOWNLOAD_URL: String =
             "https://huggingface.co/cckevinn/SeeClick/resolve/main/ncnn/seeclick.ncnn.param"
         const val SEECLICK_BIN_DOWNLOAD_URL: String =
@@ -114,19 +137,40 @@ class ModelAssetManager(val modelsDir: File) {
         MODEL_ID_MOBILEVLM to ModelInfo(
             id = MODEL_ID_MOBILEVLM,
             fileName = MOBILEVLM_FILE,
-            expectedSha256 = MOBILEVLM_SHA256
+            expectedSha256 = resolveChecksum(MODEL_ID_MOBILEVLM, MOBILEVLM_SHA256)
         ),
         MODEL_ID_SEECLICK to ModelInfo(
             id = MODEL_ID_SEECLICK,
             fileName = SEECLICK_PARAM_FILE,
-            expectedSha256 = SEECLICK_SHA256
+            expectedSha256 = resolveChecksum(MODEL_ID_SEECLICK, SEECLICK_SHA256)
         ),
         MODEL_ID_SEECLICK_BIN to ModelInfo(
             id = MODEL_ID_SEECLICK_BIN,
             fileName = SEECLICK_BIN_FILE,
-            expectedSha256 = SEECLICK_BIN_SHA256
+            expectedSha256 = resolveChecksum(MODEL_ID_SEECLICK_BIN, SEECLICK_BIN_SHA256)
         )
     )
+
+    /**
+     * In-memory snapshot of persisted checksums loaded from [CHECKSUMS_FILE].
+     * Updated by [persistComputedChecksum] and written back to disk.
+     */
+    private val persistedChecksums: MutableMap<String, String> = mutableMapOf()
+
+    // Second init block: runs after registry and persistedChecksums are fully initialised.
+    init {
+        loadPersistedChecksums()
+    }
+
+    /**
+     * Resolves the initial expected SHA-256 for a registry entry at construction time.
+     * Priority: [checksumOverrides] (if key present) > [staticDefault].
+     * Persisted checksums are applied separately in [loadPersistedChecksums].
+     */
+    private fun resolveChecksum(modelId: String, staticDefault: String?): String? {
+        if (checksumOverrides.containsKey(modelId)) return checksumOverrides[modelId]
+        return staticDefault
+    }
 
     /** Full absolute path to the MobileVLM GGUF weight file. */
     val mobileVlmPath: String get() = File(modelsDir, MOBILEVLM_FILE).absolutePath
@@ -163,12 +207,13 @@ class ModelAssetManager(val modelsDir: File) {
                 return ModelStatus.CORRUPTED
             }
         } else {
-            // Verification is explicitly bypassed because no expected SHA-256 is configured.
-            // This is acceptable during development but MUST be addressed before production
-            // deployment. Set the corresponding *_SHA256 constant in the companion object to
-            // enable integrity checking.
-            Log.w(TAG, "Model '$modelId' SHA-256 verification SKIPPED — expectedSha256 is null. " +
-                "Set the corresponding SHA-256 constant to enable integrity checking.")
+            // No expected SHA-256 is configured for this model. This is acceptable on the
+            // very first download (trust-on-first-use). Call persistComputedChecksum()
+            // immediately after download to store the digest; all subsequent verify calls
+            // will enforce it. For MobileVLM this branch should never be reached because
+            // MOBILEVLM_SHA256 is always set.
+            Log.w(TAG, "Model '$modelId' SHA-256 not yet available — " +
+                "call persistComputedChecksum() after first download to enable verification.")
         }
         info.status = ModelStatus.READY
         Log.i(TAG, "Model '$modelId' ready at ${file.absolutePath}")
@@ -356,7 +401,8 @@ class ModelAssetManager(val modelsDir: File) {
         var deleted = 0
         modelsDir.listFiles()?.forEach { file ->
             if (!file.isFile) return@forEach  // skip directories
-            val isStale = file.name.endsWith(".tmp") || file.name !in knownFileNames
+            val isStale = file.name.endsWith(".tmp") ||
+                (file.name !in knownFileNames && file.name != CHECKSUMS_FILE)
             if (isStale && file.delete()) {
                 deleted++
                 Log.i(TAG, "Cleaned up stale file: ${file.name}")
@@ -368,7 +414,95 @@ class ModelAssetManager(val modelsDir: File) {
         return deleted
     }
 
-    private fun sha256(file: File): String {
+    /**
+     * Computes the SHA-256 of the model file for [modelId] and persists it to
+     * [CHECKSUMS_FILE] inside [modelsDir]. After this call, [verifyModel] will enforce
+     * the stored digest on every subsequent invocation, protecting against corruption
+     * or tampering. If the model file is absent, this method returns null without
+     * writing anything.
+     *
+     * Call this immediately after a successful first download for any model whose
+     * SHA-256 constant is null (currently SeeClick param and bin).
+     *
+     * @return The computed SHA-256 hex string, or null if the file was not found.
+     */
+    fun persistComputedChecksum(modelId: String): String? {
+        val info = registry[modelId] ?: run {
+            Log.w(TAG, "persistComputedChecksum: unknown model id '$modelId'")
+            return null
+        }
+        val file = File(modelsDir, info.fileName)
+        if (!file.exists()) {
+            Log.w(TAG, "persistComputedChecksum: file absent for '$modelId'")
+            return null
+        }
+        val sha256 = sha256(file)
+        persistedChecksums[modelId] = sha256
+        info.expectedSha256 = sha256
+        writePersistedChecksums()
+        Log.i(TAG, "Persisted checksum for '$modelId': $sha256")
+        return sha256
+    }
+
+    /**
+     * Returns the effective expected SHA-256 for [modelId]: the registry entry value
+     * which reflects the priority order (override > static constant > persisted store).
+     * Returns null if no checksum is currently available (first-download window).
+     */
+    fun effectiveChecksum(modelId: String): String? = registry[modelId]?.expectedSha256
+
+    // ── Persisted checksum store ───────────────────────────────────────────────
+
+    /**
+     * Loads previously-persisted SHA-256 values from [CHECKSUMS_FILE] in [modelsDir]
+     * and applies them to the registry for any model whose static constant is null.
+     * Called once from [init].
+     */
+    private fun loadPersistedChecksums() {
+        val file = File(modelsDir, CHECKSUMS_FILE)
+        if (!file.exists()) return
+        try {
+            val json = file.readText()
+            // Simple JSON parsing: {"key":"value",...}
+            val pattern = Regex(""""([\w]+)"\s*:\s*"([0-9a-fA-F]{64})"""")
+            pattern.findAll(json).forEach { match ->
+                val modelId = match.groupValues[1]
+                val sha256 = match.groupValues[2]
+                persistedChecksums[modelId] = sha256
+            }
+            // Apply persisted checksums to registry entries where the static constant is null
+            // and no override was supplied.
+            for ((modelId, sha256) in persistedChecksums) {
+                val info = registry[modelId] ?: continue
+                if (!checksumOverrides.containsKey(modelId) && info.expectedSha256 == null) {
+                    info.expectedSha256 = sha256
+                }
+            }
+            Log.d(TAG, "Loaded ${persistedChecksums.size} persisted checksum(s) from $CHECKSUMS_FILE")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load persisted checksums: ${e.message}")
+        }
+    }
+
+    /**
+     * Writes [persistedChecksums] to [CHECKSUMS_FILE] in [modelsDir].
+     */
+    private fun writePersistedChecksums() {
+        try {
+            val json = buildString {
+                append("{")
+                persistedChecksums.entries.joinToString(",") { (k, v) ->
+                    "\"$k\":\"$v\""
+                }.also { append(it) }
+                append("}")
+            }
+            File(modelsDir, CHECKSUMS_FILE).writeText(json)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to write persisted checksums: ${e.message}")
+        }
+    }
+
+
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->
             val buffer = ByteArray(8192)

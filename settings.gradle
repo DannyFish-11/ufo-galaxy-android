@@ -12,6 +12,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // JitPack: provides prebuilt AAR for llama.cpp Android JNI bindings
+        maven { url "https://jitpack.io" }
     }
 }
 

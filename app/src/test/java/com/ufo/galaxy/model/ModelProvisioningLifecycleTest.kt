@@ -39,7 +39,16 @@ class ModelProvisioningLifecycleTest {
     @Before
     fun setUp() {
         modelsDir = tmpFolder.newFolder("models")
-        mam = ModelAssetManager(modelsDir)
+        // Use null checksumOverrides so tests writing fake file content work correctly.
+        // Tests that validate checksum enforcement supply their own overrides inline.
+        mam = ModelAssetManager(
+            modelsDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

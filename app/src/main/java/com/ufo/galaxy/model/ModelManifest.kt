@@ -131,7 +131,7 @@ data class ModelManifest(
         fun forKnownModel(modelId: String): ModelManifest? = when (modelId) {
             ModelAssetManager.MODEL_ID_MOBILEVLM -> ModelManifest(
                 modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
-                modelVersion = "v2-1.7b-Q4_K_M",
+                modelVersion = "v2-1.7b-Q4_K",
                 runtimeType = RuntimeType.LLAMA_CPP,
                 source = ModelSource.HuggingFace(
                     repoId = "ZiangWu/MobileVLM_V2-1.7B-GGUF",
@@ -139,9 +139,9 @@ data class ModelManifest(
                 ),
                 minRuntimeVersion = null,
                 checksum = ModelAssetManager.MOBILEVLM_SHA256,
-                quantization = "Q4_K_M",
+                quantization = "Q4_K",
                 parameterCountM = 1700L,
-                minDiskSpaceBytes = 1_200_000_000L  // ~1.2 GB for Q4_K_M GGUF weights
+                minDiskSpaceBytes = 950_000_000L  // ~900 MB for ggml-model-q4_k.gguf + extraction buffer
             )
             ModelAssetManager.MODEL_ID_SEECLICK -> ModelManifest(
                 modelId = ModelAssetManager.MODEL_ID_SEECLICK,
