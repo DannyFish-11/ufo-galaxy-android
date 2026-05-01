@@ -3,6 +3,7 @@ package com.ufo.galaxy.protocol
 import com.ufo.galaxy.runtime.AttachedRuntimeSession
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
+import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.RuntimeObservabilityMetadata
 import com.ufo.galaxy.runtime.StagedMeshParticipationResult
 import com.ufo.galaxy.runtime.CanonicalSessionFamily
@@ -250,6 +251,25 @@ object CrossRepoConsistencyGate {
             surface = ProtocolSurface.DELEGATED_EXECUTION_RESULT_KIND,
             liveWireValues = DelegatedExecutionSignal.ResultKind.entries.map { it.wireValue }.toSet(),
             liveDescription = "DelegatedExecutionSignal.ResultKind"
+        )
+
+    /**
+     * Gate: all [ReconciliationSignal.Kind] wireValues must be covered by the
+     * [ProtocolSurface.RECONCILIATION_SIGNAL_KIND] rule, and the rule must cover exactly
+     * those wireValues (bidirectional check).
+     *
+     * A failure here indicates either:
+     *  - A new [ReconciliationSignal.Kind] entry was added without updating the consistency rule, or
+     *  - The rule declares a canonical kind that is no longer realized by any enum entry.
+     *
+     * Either case represents a cross-repo protocol surface drift that requires coordination
+     * with the V2 gateway handler registration table.
+     */
+    fun checkReconciliationSignalKinds(): GateSurfaceResult =
+        runBidirectionalGate(
+            surface = ProtocolSurface.RECONCILIATION_SIGNAL_KIND,
+            liveWireValues = ReconciliationSignal.Kind.entries.map { it.wireValue }.toSet(),
+            liveDescription = "ReconciliationSignal.Kind"
         )
 
     /**
@@ -535,6 +555,7 @@ object CrossRepoConsistencyGate {
         val results = listOf(
             checkRuleRegistryCompleteness(),
             checkDelegatedExecutionResultKinds(),
+            checkReconciliationSignalKinds(),
             checkAttachedSessionStates(),
             checkAttachedSessionDetachCauses(),
             checkReconnectRecoveryStates(),

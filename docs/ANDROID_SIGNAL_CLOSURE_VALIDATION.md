@@ -37,6 +37,8 @@ right signals from the real runtime paths, not only from standalone model code.
 | Kind RUNTIME_TRUTH_SNAPSHOT with non-null `runtimeTruth` | ✅ Proven | `CrossRepoSignalClosureValidationTest` |
 | `GalaxyConnectionService` collects `RuntimeController.reconciliationSignals` and calls `sendReconciliationSignal()` | ✅ Wired | `GalaxyConnectionService.kt` `onStartCommand` coroutine (PR-06) |
 | AipMessage envelope with `type = "reconciliation_signal"` round-trips through Gson | ✅ Proven | `CrossRepoSignalClosureValidationTest` |
+| `ReconciliationSignal.Kind` wire values registered as canonical `ProtocolSurface.RECONCILIATION_SIGNAL_KIND` | ✅ Proven | `UgcpProtocolConsistencyRules.reconciliationSignalKindRule`; `Pr12CrossRepoConsistencyGatesTest` |
+| `CrossRepoConsistencyGate.checkReconciliationSignalKinds()` gate enforces no wire-value drift at CI time | ✅ Proven | `CrossRepoConsistencyGate.checkReconciliationSignalKinds()`; included in `runAllGates()` |
 | Full integration test (inject signal into real service, confirm wire send) | 🔲 Open | Requires Robolectric / instrumented test environment |
 
 **Send path**: `RuntimeController.reconciliationSignals` (SharedFlow) →
@@ -141,11 +143,14 @@ The following items are confirmed **not covered** by this PR and require follow-
 | Signal Chain | Model Present | Wire Type Present | Send Path Wired | Tested (pure-JVM) | Integration Tested |
 |---|---|---|---|---|---|
 | ReconciliationSignal | ✅ | ✅ | ✅ | ✅ | 🔲 |
+| ReconciliationSignal.Kind canonical gate | ✅ | ✅ | N/A | ✅ | N/A |
 | HandoffEnvelopeV2 round-trip | ✅ | ✅ | ✅ | ✅ | 🔲 |
 | Delegated execution signal loop | ✅ | ✅ | ✅ | ✅ | 🔲 |
 | Device readiness artifact → V2 | ✅ | ✅ | ✅ | ✅ | 🔲 |
 
-All four chains are model-complete, transport-capable, and proven by pure-JVM tests.
+All four signal chains are model-complete, transport-capable, and proven by pure-JVM tests.
+`ReconciliationSignal.Kind` wire values are now registered as `ProtocolSurface.RECONCILIATION_SIGNAL_KIND`
+in the `CrossRepoConsistencyGate` framework, enforcing no wire-value drift at CI time.
 Integration tests remain open (see gaps above).
 
 ---
