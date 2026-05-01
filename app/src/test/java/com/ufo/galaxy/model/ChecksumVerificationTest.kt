@@ -61,7 +61,7 @@ class ChecksumVerificationTest {
     }
 
     @Test
-    fun `MOBILEVLM_FILE is updated to ggml-model-q4_k dot gguf`() {
+    fun `MOBILEVLM_FILE is updated to ggml-model-q4_k gguf`() {
         assertEquals(
             "MobileVLM file must reference the Q4_K quantised GGUF that ships with SHA-256",
             "ggml-model-q4_k.gguf",

@@ -503,6 +503,7 @@ class ModelAssetManager(
     }
 
 
+    private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->
             val buffer = ByteArray(8192)
