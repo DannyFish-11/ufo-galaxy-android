@@ -37,12 +37,21 @@ right signals from the real runtime paths, not only from standalone model code.
 | Kind RUNTIME_TRUTH_SNAPSHOT with non-null `runtimeTruth` | ✅ Proven | `CrossRepoSignalClosureValidationTest` |
 | `GalaxyConnectionService` collects `RuntimeController.reconciliationSignals` and calls `sendReconciliationSignal()` | ✅ Wired | `GalaxyConnectionService.kt` `onStartCommand` coroutine (PR-06) |
 | AipMessage envelope with `type = "reconciliation_signal"` round-trips through Gson | ✅ Proven | `CrossRepoSignalClosureValidationTest` |
+| `AndroidReconciliationSignalWireLayerClosure` closure descriptor — all 7 kinds registered | ✅ Proven | `PrBlock2ReconciliationSignalWireLayerTest` (PR-Block2) |
+| `AndroidReconciliationSignalWireLayerClosure.evaluateClosure()` returns `COMPLETE` | ✅ Proven | `PrBlock2ReconciliationSignalWireLayerTest` (PR-Block2) |
+| All 7 kinds produce valid AipMessage JSON envelopes via the full signal→payload→JSON chain | ✅ Proven | `PrBlock2ReconciliationSignalWireLayerTest` (PR-Block2) |
+| Wire-layer protocol surface closure descriptor registered in `StabilizationBaseline` | ✅ Registered | `StabilizationBaseline` entry `reconciliation-signal-wire-layer-closure` (PR-Block2) |
 | Full integration test (inject signal into real service, confirm wire send) | 🔲 Open | Requires Robolectric / instrumented test environment |
 
 **Send path**: `RuntimeController.reconciliationSignals` (SharedFlow) →
 `GalaxyConnectionService.onStartCommand` collector →
 `GalaxyConnectionService.sendReconciliationSignal()` →
 `GalaxyWebSocketClient.sendJson()`.
+
+**PR-Block2 closure**: `AndroidReconciliationSignalWireLayerClosure.evaluateClosure()` returns
+`COMPLETE` — all seven signal kinds are registered with stable wire descriptors, required
+envelope and payload fields are declared, and the integrated Android↔V2 protocol surface is
+formally closed.
 
 ---
 
@@ -126,6 +135,7 @@ The following items are confirmed **not covered** by this PR and require follow-
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
+| ~~ReconciliationSignal AIP wire-layer protocol closure descriptor~~ | ✅ Closed (PR-Block2) | `AndroidReconciliationSignalWireLayerClosure` added; `evaluateClosure()` returns `COMPLETE`. |
 | Dimension-state population from real runtime events | 🔴 High | Owners (`AndroidRecoveryParticipationOwner`, `AndroidLocalTruthOwnershipCoordinator`, etc.) must call `markDimensionReady` / `markDimensionGap` on the evaluator. Without this, the readiness report is always UNKNOWN at service start. |
 | Follow-up readiness reports after dimension-state changes | 🔴 High | Reactive hook needed so V2 receives an updated readiness artifact whenever dimension state changes during the session. |
 | Takeover executor full implementation (TakeoverEligibilityAssessor → full takeover flow) | 🔴 High | `AipModels.kt` comment still notes full takeover executor deferred. The delegated execution loop is proven but the full takeover path is not. |
@@ -138,15 +148,15 @@ The following items are confirmed **not covered** by this PR and require follow-
 
 ## Coverage Summary
 
-| Signal Chain | Model Present | Wire Type Present | Send Path Wired | Tested (pure-JVM) | Integration Tested |
-|---|---|---|---|---|---|
-| ReconciliationSignal | ✅ | ✅ | ✅ | ✅ | 🔲 |
-| HandoffEnvelopeV2 round-trip | ✅ | ✅ | ✅ | ✅ | 🔲 |
-| Delegated execution signal loop | ✅ | ✅ | ✅ | ✅ | 🔲 |
-| Device readiness artifact → V2 | ✅ | ✅ | ✅ | ✅ | 🔲 |
+| Signal Chain | Model Present | Wire Type Present | Send Path Wired | Tested (pure-JVM) | Wire-Layer Closed (PR-Block2) | Integration Tested |
+|---|---|---|---|---|---|---|
+| ReconciliationSignal | ✅ | ✅ | ✅ | ✅ | ✅ | 🔲 |
+| HandoffEnvelopeV2 round-trip | ✅ | ✅ | ✅ | ✅ | — | 🔲 |
+| Delegated execution signal loop | ✅ | ✅ | ✅ | ✅ | — | 🔲 |
+| Device readiness artifact → V2 | ✅ | ✅ | ✅ | ✅ | — | 🔲 |
 
-All four chains are model-complete, transport-capable, and proven by pure-JVM tests.
-Integration tests remain open (see gaps above).
+PR-Block2 adds the **Wire-Layer Closed** column entry for Chain 1 (ReconciliationSignal):
+`AndroidReconciliationSignalWireLayerClosure.evaluateClosure() == COMPLETE`.
 
 ---
 

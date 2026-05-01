@@ -1751,6 +1751,25 @@ object StabilizationBaseline {
                 "including STALE, INCOMPLETE, INCONSISTENT, COMPLETE_WITH_GAPS, and COMPLETE " +
                 "classifications.",
             introducedPr = 69
+        ),
+
+        // ── PR-Block2: ReconciliationSignal AIP wire-layer closure ────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "reconciliation-signal-wire-layer-closure",
+            displayName = "AndroidReconciliationSignalWireLayerClosure",
+            packagePath = "com.ufo.galaxy.runtime.AndroidReconciliationSignalWireLayerClosure",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-Block2 canonical protocol surface closure descriptor for the Android→V2 " +
+                "ReconciliationSignal AIP wire layer. Registers a WireKindDescriptor for every " +
+                "ReconciliationSignal.Kind (TASK_ACCEPTED, TASK_STATUS_UPDATE, TASK_RESULT, " +
+                "TASK_CANCELLED, TASK_FAILED, PARTICIPANT_STATE, RUNTIME_TRUTH_SNAPSHOT), " +
+                "declares the canonical WireEnvelopeShape (required envelope + payload fields), " +
+                "and evaluateClosure() returns ClosureVerdict.COMPLETE when the full integrated " +
+                "Android↔V2 protocol surface is closed. Closes the RUNNABLE_BUT_CONDITIONAL gap " +
+                "identified by the final integrated audit.",
+            introducedPr = -2
         )
     )
 
