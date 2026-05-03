@@ -1351,6 +1351,10 @@ data class PeerAnnouncePayload(
  * @param task_id              Task this signal belongs to; `null` for participant-state signals.
  * @param correlation_id       Correlation identifier echoed from the originating request; may be `null`.
  * @param session_id           Runtime session identifier at time of emission; may be `null`.
+ * @param durable_session_id   Stable activation-era session identifier; constant across transparent
+ *                             reconnects within the same Android runtime era.
+ * @param session_continuity_epoch Monotone reconnect epoch within [durable_session_id]; enables V2
+ *                             to discard late reconciliation signals from a prior reconnect epoch.
  * @param payload              Signal-specific free-form fields (e.g. `error_detail`, `health_state`).
  *                             Empty map when no additional fields apply.
  * @param runtime_truth        Populated only for `kind = "runtime_truth_snapshot"` signals.
@@ -1368,6 +1372,8 @@ data class ReconciliationSignalPayload(
     val task_id: String? = null,
     val correlation_id: String? = null,
     val session_id: String? = null,
+    val durable_session_id: String? = null,
+    val session_continuity_epoch: Int? = null,
     val payload: Map<String, Any?> = emptyMap(),
     val runtime_truth: Map<String, Any>? = null
 )

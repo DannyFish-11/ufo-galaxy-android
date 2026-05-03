@@ -2,6 +2,7 @@ package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -121,7 +122,8 @@ import org.junit.Test
  * ### Deferred items (AC5: what remains deferred)
  *  - takeover_session_authority_bounding is deferred
  *  - emit_ledger_cross_process_persistence is deferred
- *  - reconciliation_signal_epoch_bounding_after_reconnect is deferred
+ *  - reconciliation_signal_epoch_bounding_after_reconnect is no longer deferred
+ *  - reconciliation_signal_session_epoch_bounding is present and CANONICAL
  *  - instrumented_e2e_readiness_evidence_test is deferred
  *  - final_release_policy_in_android is deferred
  *  - all deferred items have a dimension assigned
@@ -962,10 +964,17 @@ class Pr67AndroidReadinessEvidenceSurfaceTest {
     }
 
     @Test
-    fun `reconciliation_signal_epoch_bounding_after_reconnect is deferred`() {
-        assertNotNull(
+    fun `reconciliation_signal_epoch_bounding_after_reconnect is no longer deferred`() {
+        assertNull(
             surface.deferredItemFor("reconciliation_signal_epoch_bounding_after_reconnect")
         )
+    }
+
+    @Test
+    fun `reconciliation_signal_session_epoch_bounding is present and CANONICAL`() {
+        val entry = surface.evidenceFor("reconciliation_signal_session_epoch_bounding")
+        assertNotNull(entry)
+        assertEquals(AndroidReadinessEvidenceSurface.ConfidenceLevel.CANONICAL, entry!!.confidenceLevel)
     }
 
     @Test

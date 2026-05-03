@@ -288,6 +288,17 @@ object ContinuityRecoveryDurabilityContract {
                 "envelope from being accepted after session change.",
             enforcedBy = "AndroidContinuityIntegration.validateRuntimeIdentity / RejectStaleIdentity",
             suppressionCondition = "inbound sessionId != current activeSession.sessionId"
+        ),
+
+        BoundedEmission(
+            emissionId = "reconciliation_signal_session_epoch_bounding",
+            description = "Outbound ReconciliationSignal emissions carry durable_session_id and " +
+                "session_continuity_epoch from the active durable session record, allowing V2 " +
+                "to reject late signals from a prior reconnect epoch.",
+            enforcedBy = "RuntimeController current durable record → ReconciliationSignal → " +
+                "ReconciliationSignalPayload",
+            suppressionCondition = "V2 ingestion compares durable_session_id and " +
+                "session_continuity_epoch against the current participant session era"
         )
     )
 
@@ -354,18 +365,6 @@ object ContinuityRecoveryDurabilityContract {
                 "to explicit V2 takeover session identifiers.",
             deferredTo = "V2 PR-2 companion work once V2 takeover authority surface is " +
                 "published and Android can reference a stable takeover session wire contract."
-        ),
-
-        DeferredItem(
-            itemId = "reconciliation_signal_epoch_bounding_after_reconnect",
-            description = "ReconciliationSignal emission after reconnect is not yet explicitly " +
-                "gated on the new durable session epoch — a late reconciliation signal from a " +
-                "prior epoch could theoretically reach V2 after a new session has started.",
-            deferralReason = "Requires ReconciliationSignal to carry the current " +
-                "sessionContinuityEpoch as a wire field and V2 to validate it.  Coordinate " +
-                "with V2 PR-5 wire contract before adding the epoch check on Android.",
-            deferredTo = "V2 PR-5 continuity recovery PR, once epoch-stamped reconciliation " +
-                "signals are part of the wire contract."
         )
     )
 
@@ -389,8 +388,8 @@ object ContinuityRecoveryDurabilityContract {
     const val COVERED_BEHAVIOR_COUNT = 13
 
     /** Expected number of bounded emissions at the time of this PR. */
-    const val BOUNDED_EMISSION_COUNT = 6
+    const val BOUNDED_EMISSION_COUNT = 7
 
     /** Expected number of deferred items at the time of this PR. */
-    const val DEFERRED_ITEM_COUNT = 4
+    const val DEFERRED_ITEM_COUNT = 3
 }

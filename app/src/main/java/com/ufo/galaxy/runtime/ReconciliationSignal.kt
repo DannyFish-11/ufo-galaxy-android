@@ -69,6 +69,9 @@ package com.ufo.galaxy.runtime
  * @property signalId         Unique, stable identifier for this signal; used by V2 for deduplication.
  * @property emittedAtMs      Epoch-millisecond timestamp when this signal was emitted.
  * @property reconciliationEpoch Snapshot epoch from the participant's runtime truth clock.
+ * @property durableSessionId Stable activation-era session identifier, when available.
+ * @property sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId], when
+ *                                  available.
  */
 data class ReconciliationSignal(
     val kind: Kind,
@@ -80,7 +83,9 @@ data class ReconciliationSignal(
     val runtimeTruth: AndroidParticipantRuntimeTruth? = null,
     val signalId: String,
     val emittedAtMs: Long,
-    val reconciliationEpoch: Int
+    val reconciliationEpoch: Int,
+    val durableSessionId: String? = null,
+    val sessionContinuityEpoch: Int? = null
 ) {
 
     /**
@@ -250,6 +255,13 @@ data class ReconciliationSignal(
         /** Wire key for [reconciliationEpoch]. */
         const val KEY_RECONCILIATION_EPOCH = "reconciliation_epoch"
 
+        /** Wire key for [durableSessionId]. */
+        const val KEY_DURABLE_SESSION_ID = DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID
+
+        /** Wire key for [sessionContinuityEpoch]. */
+        const val KEY_SESSION_CONTINUITY_EPOCH =
+            DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH
+
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
         /**
@@ -343,13 +355,18 @@ data class ReconciliationSignal(
          * @param correlationId Correlation identifier from the inbound envelope.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun taskAccepted(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
-            reconciliationEpoch: Int = 0
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.TASK_ACCEPTED,
             participantId = participantId,
@@ -358,7 +375,9 @@ data class ReconciliationSignal(
             status = STATUS_RUNNING,
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
-            reconciliationEpoch = reconciliationEpoch
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
         )
 
         /**
@@ -369,13 +388,18 @@ data class ReconciliationSignal(
          * @param correlationId Correlation identifier from the originating request.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun taskCancelled(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
-            reconciliationEpoch: Int = 0
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.TASK_CANCELLED,
             participantId = participantId,
@@ -384,7 +408,9 @@ data class ReconciliationSignal(
             status = STATUS_CANCELLED,
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
-            reconciliationEpoch = reconciliationEpoch
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
         )
 
         /**
@@ -396,6 +422,9 @@ data class ReconciliationSignal(
          * @param errorDetail   Optional human-readable error detail.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun taskFailed(
             participantId: String,
@@ -403,7 +432,9 @@ data class ReconciliationSignal(
             correlationId: String? = null,
             errorDetail: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
-            reconciliationEpoch: Int = 0
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
             val payload = buildMap<String, Any?> {
                 errorDetail?.let { put("error_detail", it) }
@@ -417,7 +448,9 @@ data class ReconciliationSignal(
                 payload = payload,
                 signalId = signalId,
                 emittedAtMs = System.currentTimeMillis(),
-                reconciliationEpoch = reconciliationEpoch
+                reconciliationEpoch = reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
             )
         }
 
@@ -429,13 +462,18 @@ data class ReconciliationSignal(
          * @param correlationId Correlation identifier from the originating request.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun taskResult(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
-            reconciliationEpoch: Int = 0
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.TASK_RESULT,
             participantId = participantId,
@@ -444,7 +482,9 @@ data class ReconciliationSignal(
             status = STATUS_SUCCESS,
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
-            reconciliationEpoch = reconciliationEpoch
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
         )
 
         /**
@@ -459,6 +499,9 @@ data class ReconciliationSignal(
          * @param progressDetail Optional human-readable description of the current progress step.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun taskStatusUpdate(
             participantId: String,
@@ -466,7 +509,9 @@ data class ReconciliationSignal(
             correlationId: String? = null,
             progressDetail: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
-            reconciliationEpoch: Int = 0
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
             val payload = buildMap<String, Any?> {
                 progressDetail?.let { put("progress_detail", it) }
@@ -480,7 +525,9 @@ data class ReconciliationSignal(
                 payload = payload,
                 signalId = signalId,
                 emittedAtMs = System.currentTimeMillis(),
-                reconciliationEpoch = reconciliationEpoch
+                reconciliationEpoch = reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
             )
         }
 
@@ -500,6 +547,9 @@ data class ReconciliationSignal(
          *                       is not being reported in this signal.
          * @param signalId       Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun participantStateSignal(
             participantId: String,
@@ -507,7 +557,9 @@ data class ReconciliationSignal(
             readinessState: ParticipantReadinessState,
             posture: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
-            reconciliationEpoch: Int = 0
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
             val payload = buildMap<String, Any?> {
                 put("health_state", healthState.wireValue)
@@ -523,7 +575,9 @@ data class ReconciliationSignal(
                 payload = payload,
                 signalId = signalId,
                 emittedAtMs = System.currentTimeMillis(),
-                reconciliationEpoch = reconciliationEpoch
+                reconciliationEpoch = reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
             )
         }
 
@@ -532,10 +586,15 @@ data class ReconciliationSignal(
          *
          * @param truth         The [AndroidParticipantRuntimeTruth] snapshot to publish.
          * @param signalId      Unique signal identifier for deduplication.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
          */
         fun runtimeTruthSnapshot(
             truth: AndroidParticipantRuntimeTruth,
-            signalId: String = java.util.UUID.randomUUID().toString()
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
             participantId = truth.participantId,
@@ -545,7 +604,9 @@ data class ReconciliationSignal(
             runtimeTruth = truth,
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
-            reconciliationEpoch = truth.reconciliationEpoch
+            reconciliationEpoch = truth.reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
         )
     }
 }
