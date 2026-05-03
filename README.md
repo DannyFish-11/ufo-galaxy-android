@@ -1,6 +1,6 @@
 # UFO Galaxy Android
 
-**Version: v3.0.0 · Protocol: AIP v3.0**
+**Documentation baseline: v3.0.0 · Android app versionName: 2.0.1 · Protocol: AIP v3.0**
 
 UFO Galaxy Android is an L4-autonomy AI agent client for Android. It operates in two distinct modes:
 
