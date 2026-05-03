@@ -1,6 +1,8 @@
 package com.ufo.galaxy.data
 
 import android.content.Context
+import com.ufo.galaxy.BuildConfig
+import com.ufo.galaxy.network.resolveAllowSelfSigned
 import java.util.Properties
 import org.json.JSONObject
 
@@ -124,11 +126,19 @@ interface AppSettings {
     var useTls: Boolean
 
     /**
-     * When true, OkHttp accepts self-signed TLS certificates.
-     * Only effective when [useTls] is true. **Debug/dev environments only** —
-     * never use in production over public networks.
+     * Raw operator preference for whether debug/dev connections may accept self-signed
+     * TLS certificates. Use [effectiveAllowSelfSigned] when applying runtime policy.
      */
     var allowSelfSigned: Boolean
+
+    /**
+     * Returns the effective self-signed-TLS policy for the current build variant.
+     *
+     * Release / production builds always return `false` even if a caller or persisted
+     * preference requested otherwise.
+     */
+    fun effectiveAllowSelfSigned(isDebugBuild: Boolean = BuildConfig.DEBUG): Boolean =
+        resolveAllowSelfSigned(allowSelfSigned, isDebugBuild)
 
     /**
      * Stable device identifier included in handshake and diagnostics payloads.

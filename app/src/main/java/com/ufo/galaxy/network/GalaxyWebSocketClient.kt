@@ -3,6 +3,7 @@ package com.ufo.galaxy.network
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.ufo.galaxy.BuildConfig
 import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
@@ -155,13 +156,20 @@ class GalaxyWebSocketClient(
          * including self-signed ones. Use this **only** in debug/dev environments on
          * private (e.g. Tailscale) networks — it disables hostname verification.
          */
-        fun buildOkHttpClient(allowSelfSigned: Boolean = false): OkHttpClient {
+        fun buildOkHttpClient(
+            allowSelfSigned: Boolean = false,
+            isDebugBuild: Boolean = BuildConfig.DEBUG
+        ): OkHttpClient {
             val builder = OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .pingInterval(20, TimeUnit.SECONDS)
-            if (allowSelfSigned) {
+            val effectiveAllowSelfSigned = resolveAllowSelfSigned(
+                requested = allowSelfSigned,
+                isDebugBuild = isDebugBuild
+            )
+            if (effectiveAllowSelfSigned) {
                 try {
                     val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
                         override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit

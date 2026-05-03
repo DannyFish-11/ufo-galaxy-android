@@ -130,6 +130,14 @@ class NetworkPrefsTest {
         assertTrue(s.effectiveGatewayWsUrl().startsWith("ws://"))
     }
 
+    @Test
+    fun `effectiveAllowSelfSigned is true only for debug builds`() {
+        val s = InMemoryAppSettings(allowSelfSigned = true)
+        assertTrue(s.allowSelfSigned)
+        assertTrue(s.effectiveAllowSelfSigned(isDebugBuild = true))
+        assertFalse(s.effectiveAllowSelfSigned(isDebugBuild = false))
+    }
+
     // ── Field persistence ─────────────────────────────────────────────────────
 
     @Test
@@ -303,5 +311,12 @@ class OkHttpClientBuilderTest {
     fun `buildOkHttpClient with allowSelfSigned=true succeeds`() {
         val client = GalaxyWebSocketClient.buildOkHttpClient(allowSelfSigned = true)
         assertNotNull(client)
+    }
+
+    @Test
+    fun `resolveAllowSelfSigned disables self signed mode outside debug builds`() {
+        assertTrue(resolveAllowSelfSigned(requested = true, isDebugBuild = true))
+        assertFalse(resolveAllowSelfSigned(requested = true, isDebugBuild = false))
+        assertFalse(resolveAllowSelfSigned(requested = false, isDebugBuild = true))
     }
 }

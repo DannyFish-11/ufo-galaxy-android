@@ -46,7 +46,7 @@ class NetworkDiagnostics(private val settings: AppSettings) {
      * are picked up without recreating the [NetworkDiagnostics] instance.
      */
     private fun buildHttpClient(): OkHttpClient =
-        GalaxyWebSocketClient.buildOkHttpClient(settings.allowSelfSigned)
+        GalaxyWebSocketClient.buildOkHttpClient(settings.effectiveAllowSelfSigned())
             .newBuilder()
             .connectTimeout(HTTP_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(HTTP_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -190,7 +190,7 @@ class NetworkDiagnostics(private val settings: AppSettings) {
         val name = "WS 握手"
         try {
             // Build a short-lived WS client for the probe; close immediately on open.
-            val probeClient = GalaxyWebSocketClient.buildOkHttpClient(settings.allowSelfSigned)
+            val probeClient = GalaxyWebSocketClient.buildOkHttpClient(settings.effectiveAllowSelfSigned())
                 .newBuilder()
                 .connectTimeout(CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .readTimeout(CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
