@@ -8,6 +8,7 @@ import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedExecutionTracker
 import com.ufo.galaxy.runtime.EmittedSignalLedger
+import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -71,9 +72,10 @@ import kotlinx.coroutines.TimeoutCancellationException
  *     logic: [ExecutionOutcome.Completed] carries the [GoalResultPayload] and final
  *     tracker; [ExecutionOutcome.Failed] carries the error message and final tracker.
  *  9. Building and populating a per-execution [EmittedSignalLedger] (PR-18): every
- *     signal emitted via [signalSink] is also recorded in a lightweight in-memory ledger
- *     that is returned in every [ExecutionOutcome].  Callers that need to replay a signal
- *     (e.g. after a send failure or transport reconnect) must use
+ *     signal emitted via [signalSink] is also recorded in a ledger that may be persisted
+ *     through [PersistentEmittedSignalLedgerStore] and is returned in every
+ *     [ExecutionOutcome].  Callers that need to replay a signal (e.g. after a send failure,
+ *     transport reconnect, or process recreation) must use
  *     [EmittedSignalLedger.replaySignal] or [DelegatedExecutionSignal.replayAt] rather
  *     than calling the factory methods again — preserving the original [signalId] and
  *     [emissionSeq] so the host can identify the re-delivery as a duplicate.
@@ -106,10 +108,12 @@ import kotlinx.coroutines.TimeoutCancellationException
  * @param signalSink Receives [DelegatedExecutionSignal] events emitted during the
  *                   execution lifecycle (ACK and RESULT); in production this is wired to
  *                   structured logging and future outbound signal transmission.
+ * @param emittedSignalLedgerStore Optional durable store for per-execution signal ledgers.
  */
 class DelegatedTakeoverExecutor(
     private val pipeline: GoalExecutionPipeline,
-    private val signalSink: DelegatedExecutionSignalSink
+    private val signalSink: DelegatedExecutionSignalSink,
+    private val emittedSignalLedgerStore: PersistentEmittedSignalLedgerStore? = null
 ) {
 
     // ── Outcome types ─────────────────────────────────────────────────────────
@@ -237,13 +241,18 @@ class DelegatedTakeoverExecutor(
         // RESULT — with stable identity (same signalId + emissionSeq) rather than
         // calling the factory methods again and generating a fresh signalId.
         val ledger = EmittedSignalLedger()
+        val ledgerExecutionKey = PersistentEmittedSignalLedgerStore.executionKeyFor(
+            unitId = unit.unitId,
+            taskId = unit.taskId,
+            traceId = unit.traceId
+        )
 
         // ── 1. Create tracker from the accepted PENDING record ────────────────
         var tracker = DelegatedExecutionTracker.create(initialRecord)
 
         // ── 2. Emit ACK signal — host can mark unit as acknowledged ───────────
         val ackSignal = DelegatedExecutionSignal.ack(tracker, nowMs)
-        ledger.recordEmitted(ackSignal)
+        recordEmitted(ledgerExecutionKey, ledger, ackSignal)
         signalSink.onSignal(ackSignal)
 
         Log.d(
@@ -278,7 +287,7 @@ class DelegatedTakeoverExecutor(
         // be emitted per step in future pipeline integrations; this canonical emission
         // at ACTIVE is guaranteed by the executor regardless of pipeline implementation.
         val progressSignal = DelegatedExecutionSignal.progress(tracker, nowMs)
-        ledger.recordEmitted(progressSignal)
+        recordEmitted(ledgerExecutionKey, ledger, progressSignal)
         signalSink.onSignal(progressSignal)
 
         Log.d(
@@ -301,7 +310,7 @@ class DelegatedTakeoverExecutor(
                 tracker = tracker,
                 resultKind = DelegatedExecutionSignal.ResultKind.COMPLETED
             )
-            ledger.recordEmitted(resultSignal)
+            recordEmitted(ledgerExecutionKey, ledger, resultSignal)
             signalSink.onSignal(resultSignal)
 
             Log.d(
@@ -319,7 +328,7 @@ class DelegatedTakeoverExecutor(
             tracker = tracker.advance(DelegatedActivationRecord.ActivationStatus.FAILED)
 
             val timeoutSignal = DelegatedExecutionSignal.timeout(tracker = tracker)
-            ledger.recordEmitted(timeoutSignal)
+            recordEmitted(ledgerExecutionKey, ledger, timeoutSignal)
             signalSink.onSignal(timeoutSignal)
 
             val errorMessage = e.message ?: "execution_timeout"
@@ -338,7 +347,7 @@ class DelegatedTakeoverExecutor(
             tracker = tracker.advance(DelegatedActivationRecord.ActivationStatus.FAILED)
 
             val cancelledSignal = DelegatedExecutionSignal.cancelled(tracker = tracker)
-            ledger.recordEmitted(cancelledSignal)
+            recordEmitted(ledgerExecutionKey, ledger, cancelledSignal)
             signalSink.onSignal(cancelledSignal)
 
             val errorMessage = e.message ?: "execution_cancelled"
@@ -358,7 +367,7 @@ class DelegatedTakeoverExecutor(
                 tracker = tracker,
                 resultKind = DelegatedExecutionSignal.ResultKind.FAILED
             )
-            ledger.recordEmitted(failedSignal)
+            recordEmitted(ledgerExecutionKey, ledger, failedSignal)
             signalSink.onSignal(failedSignal)
 
             val errorMessage = e.message ?: "execution_error"
@@ -371,6 +380,15 @@ class DelegatedTakeoverExecutor(
 
             ExecutionOutcome.Failed(tracker = tracker, error = errorMessage, ledger = ledger)
         }
+    }
+
+    private fun recordEmitted(
+        executionKey: String,
+        ledger: EmittedSignalLedger,
+        signal: DelegatedExecutionSignal
+    ) {
+        ledger.recordEmitted(signal)
+        emittedSignalLedgerStore?.save(executionKey, ledger)
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────

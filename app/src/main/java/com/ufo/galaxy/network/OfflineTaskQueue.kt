@@ -207,6 +207,40 @@ class OfflineTaskQueue(
         return result.first
     }
 
+    /**
+     * Removes all queued messages that carry a non-null session tag when no current
+     * session authority is available.
+     *
+     * This is the load/reconnect recovery guard for persisted queues: a tagged message
+     * proves it belongs to a specific durable session era, so replaying it while Android
+     * cannot identify the current era would bypass authority validation.  Null-tagged
+     * legacy messages remain compatible and are preserved.
+     */
+    fun discardSessionTaggedWithoutAuthority(): Int {
+        val result = synchronized(lock) {
+            val before = queue.size
+            val iter = queue.iterator()
+            while (iter.hasNext()) {
+                if (iter.next().sessionTag != null) {
+                    iter.remove()
+                }
+            }
+            val discarded = before - queue.size
+            val newSize = queue.size
+            if (discarded > 0) {
+                saveToPrefsLocked()
+                Log.i(
+                    TAG,
+                    "[WS:OfflineQueue] Discarded $discarded session-tagged message(s) " +
+                        "because current session authority is unavailable"
+                )
+            }
+            Pair(discarded, newSize)
+        }
+        _sizeFlow.value = result.second
+        return result.first
+    }
+
     // ── Persistence ───────────────────────────────────────────────────────────
 
     /** Must be called while holding [lock]. */

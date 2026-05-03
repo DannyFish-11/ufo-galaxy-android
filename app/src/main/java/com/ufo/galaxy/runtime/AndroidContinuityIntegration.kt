@@ -293,6 +293,11 @@ class AndroidContinuityIntegration {
         object NoActiveSession : IdentityValidationResult()
     }
 
+    sealed class TakeoverRecoveryAuthorityResult {
+        object Valid : TakeoverRecoveryAuthorityResult()
+        data class Rejected(val reason: String) : TakeoverRecoveryAuthorityResult()
+    }
+
     // ── Core API ──────────────────────────────────────────────────────────────
 
     /**
@@ -429,6 +434,61 @@ class AndroidContinuityIntegration {
     }
 
     /**
+     * Validates explicit V2 takeover recovery authority hints against Android's current
+     * attached-session and durable-session authority.
+     *
+     * Legacy non-recovery takeover requests may omit these hints.  Recovery dispatches
+     * (`is_resumable`, `interruption_reason`, or non-empty `recovery_context`) must carry
+     * enough authority metadata for Android to reject stale post-reconnect recovery work.
+     */
+    fun validateTakeoverRecoveryAuthority(
+        recoveryContext: Map<String, String>,
+        activeSession: AttachedRuntimeSession?,
+        durableSession: DurableSessionContinuityRecord?,
+        isRecoveryDispatch: Boolean
+    ): TakeoverRecoveryAuthorityResult {
+        val expectedAttachedSessionId = recoveryContext[KEY_RECOVERY_ATTACHED_SESSION_ID]
+        val expectedDurableSessionId = recoveryContext[KEY_RECOVERY_DURABLE_SESSION_ID]
+        val expectedEpoch = recoveryContext[KEY_RECOVERY_SESSION_CONTINUITY_EPOCH]?.toIntOrNull()
+
+        val hasAuthorityHints = !expectedAttachedSessionId.isNullOrBlank() ||
+            !expectedDurableSessionId.isNullOrBlank() ||
+            expectedEpoch != null
+
+        if (!isRecoveryDispatch && !hasAuthorityHints) {
+            return TakeoverRecoveryAuthorityResult.Valid
+        }
+        if (isRecoveryDispatch && !hasAuthorityHints) {
+            return TakeoverRecoveryAuthorityResult.Rejected(REASON_MISSING_TAKEOVER_RECOVERY_AUTHORITY)
+        }
+        if (activeSession == null) {
+            return TakeoverRecoveryAuthorityResult.Rejected(REASON_NO_ACTIVE_SESSION)
+        }
+        if (!expectedAttachedSessionId.isNullOrBlank() &&
+            expectedAttachedSessionId != activeSession.sessionId
+        ) {
+            return TakeoverRecoveryAuthorityResult.Rejected(REASON_STALE_TAKEOVER_ATTACHED_SESSION)
+        }
+        if (!expectedDurableSessionId.isNullOrBlank()) {
+            if (durableSession == null) {
+                return TakeoverRecoveryAuthorityResult.Rejected(REASON_NO_DURABLE_SESSION)
+            }
+            if (expectedDurableSessionId != durableSession.durableSessionId) {
+                return TakeoverRecoveryAuthorityResult.Rejected(REASON_STALE_TAKEOVER_DURABLE_SESSION)
+            }
+        }
+        if (expectedEpoch != null) {
+            if (durableSession == null) {
+                return TakeoverRecoveryAuthorityResult.Rejected(REASON_NO_DURABLE_SESSION)
+            }
+            if (expectedEpoch != durableSession.sessionContinuityEpoch) {
+                return TakeoverRecoveryAuthorityResult.Rejected(REASON_STALE_TAKEOVER_EPOCH)
+            }
+        }
+        return TakeoverRecoveryAuthorityResult.Valid
+    }
+
+    /**
      * Returns `true` when the signal identified by [signalId] has already been seen in
      * this era and SHOULD be suppressed.
      *
@@ -550,6 +610,17 @@ class AndroidContinuityIntegration {
          * V2 contract alignment: "duplicate signal" suppression.
          */
         const val SEMANTIC_SUPPRESS_DUPLICATE_EMIT = "suppress_duplicate_local_emit"
+
+        const val KEY_RECOVERY_ATTACHED_SESSION_ID = "attached_session_id"
+        const val KEY_RECOVERY_DURABLE_SESSION_ID = "durable_session_id"
+        const val KEY_RECOVERY_SESSION_CONTINUITY_EPOCH = "session_continuity_epoch"
+
+        const val REASON_MISSING_TAKEOVER_RECOVERY_AUTHORITY = "missing_takeover_recovery_authority"
+        const val REASON_NO_ACTIVE_SESSION = "no_active_session"
+        const val REASON_NO_DURABLE_SESSION = "no_durable_session"
+        const val REASON_STALE_TAKEOVER_ATTACHED_SESSION = "stale_takeover_attached_session"
+        const val REASON_STALE_TAKEOVER_DURABLE_SESSION = "stale_takeover_durable_session"
+        const val REASON_STALE_TAKEOVER_EPOCH = "stale_takeover_epoch"
 
         // ── Integration point constants ───────────────────────────────────────
 

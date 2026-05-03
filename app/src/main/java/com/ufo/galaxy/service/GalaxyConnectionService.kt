@@ -34,6 +34,7 @@ import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceSnapshot
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
+import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
 import com.ufo.galaxy.runtime.HybridParticipantCapability
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
@@ -279,7 +280,10 @@ class GalaxyConnectionService : Service() {
             pipeline = GoalExecutionPipeline { payload ->
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
             },
-            signalSink = delegatedSignalSink
+            signalSink = delegatedSignalSink,
+            emittedSignalLedgerStore = PersistentEmittedSignalLedgerStore(
+                prefs = getSharedPreferences("emitted_signal_ledgers", MODE_PRIVATE)
+            )
         )
     }
 
@@ -2852,6 +2856,52 @@ class GalaxyConnectionService : Service() {
                     traceId = envelope.trace_id,
                     accepted = false,
                     reason = rejectReason
+                )
+            }
+
+            val takeoverRecoveryAuthority =
+                continuityIntegration.validateTakeoverRecoveryAuthority(
+                    recoveryContext = envelope.recovery_context,
+                    activeSession = latestSession,
+                    durableSession = UFOGalaxyApplication.runtimeController
+                        .durableSessionContinuityRecord.value,
+                    isRecoveryDispatch = envelope.is_resumable == true ||
+                        !envelope.interruption_reason.isNullOrBlank() ||
+                        envelope.recovery_context.isNotEmpty()
+                )
+            if (takeoverRecoveryAuthority is AndroidContinuityIntegration
+                .TakeoverRecoveryAuthorityResult.Rejected
+            ) {
+                Log.w(
+                    TAG,
+                    "[CONTINUITY] takeover recovery rejected: " +
+                        "takeover_id=${envelope.takeover_id} reason=${takeoverRecoveryAuthority.reason}"
+                )
+                emitRuntimeDiagnostics(
+                    taskId = envelope.task_id,
+                    nodeName = "takeover_recovery_authority_gate",
+                    errorType = "stale_takeover_recovery_authority",
+                    errorContext = takeoverRecoveryAuthority.reason
+                )
+                sendTakeoverResponse(
+                    TakeoverResponseEnvelope(
+                        takeover_id = envelope.takeover_id,
+                        task_id = envelope.task_id,
+                        trace_id = envelope.trace_id,
+                        accepted = false,
+                        rejection_reason = takeoverRecoveryAuthority.reason,
+                        device_id = localDeviceId,
+                        runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                        source_runtime_posture = envelope.source_runtime_posture,
+                        exec_mode = envelope.exec_mode
+                    )
+                )
+                return TakeoverHandlingResult(
+                    takeoverId = envelope.takeover_id,
+                    taskId = envelope.task_id,
+                    traceId = envelope.trace_id,
+                    accepted = false,
+                    reason = takeoverRecoveryAuthority.reason
                 )
             }
 
