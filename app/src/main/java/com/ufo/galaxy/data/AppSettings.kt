@@ -506,10 +506,16 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         set(value) { prefs.edit().putBoolean(KEY_USE_TLS, value).apply() }
 
     override var allowSelfSigned: Boolean
-        get() = resolveAllowSelfSigned(prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false))
+        get() = resolveAllowSelfSigned(
+            requested = prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false),
+            isDebugBuild = BuildConfig.DEBUG
+        )
         set(value) {
             prefs.edit()
-                .putBoolean(KEY_ALLOW_SELF_SIGNED, resolveAllowSelfSigned(value))
+                .putBoolean(
+                    KEY_ALLOW_SELF_SIGNED,
+                    resolveAllowSelfSigned(requested = value, isDebugBuild = BuildConfig.DEBUG)
+                )
                 .apply()
         }
 
