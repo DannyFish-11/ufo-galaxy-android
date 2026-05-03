@@ -69,6 +69,7 @@ import org.junit.Test
  *  - duplicate_signal_cross_execution is bounded
  *  - duplicate_recovery_attempt is bounded
  *  - stale_identity_reception is bounded
+ *  - reconciliation_signal_session_epoch_bounding is bounded
  *
  * ### AndroidRecoveryParticipationOwner — restart/reconnect restoration (AC1)
  *  - process recreation with prior context yields RehydrateThenContinue
@@ -412,6 +413,15 @@ class Pr66ContinuityRecoveryDurabilityTest {
     fun `stale_identity_reception is bounded`() {
         assertNotNull(
             ContinuityRecoveryDurabilityContract.boundedEmissionFor("stale_identity_reception")
+        )
+    }
+
+    @Test
+    fun `reconciliation_signal_session_epoch_bounding is bounded`() {
+        assertNotNull(
+            ContinuityRecoveryDurabilityContract.boundedEmissionFor(
+                "reconciliation_signal_session_epoch_bounding"
+            )
         )
     }
 

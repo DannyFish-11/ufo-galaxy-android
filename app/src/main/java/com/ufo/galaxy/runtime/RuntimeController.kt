@@ -1343,14 +1343,18 @@ class RuntimeController(
                 ReconciliationSignal.taskCancelled(
                     participantId = pid,
                     taskId = taskId,
-                    reconciliationEpoch = nextReconciliationEpoch()
+                    reconciliationEpoch = nextReconciliationEpoch(),
+                    durableSessionId = currentDurableSessionId(),
+                    sessionContinuityEpoch = currentSessionContinuityEpoch()
                 )
             } else {
                 ReconciliationSignal.taskFailed(
                     participantId = pid,
                     taskId = taskId,
                     errorDetail = "${cause.wireValue}: $reason",
-                    reconciliationEpoch = nextReconciliationEpoch()
+                    reconciliationEpoch = nextReconciliationEpoch(),
+                    durableSessionId = currentDurableSessionId(),
+                    sessionContinuityEpoch = currentSessionContinuityEpoch()
                 )
             }
             emitReconciliationSignal(signal)
@@ -1381,6 +1385,14 @@ class RuntimeController(
      * the same participant must be discarded.
      */
     private fun nextReconciliationEpoch(): Int = _reconciliationEpoch.incrementAndGet()
+
+    /** Returns the current durable activation-era session id for reconciliation signals. */
+    private fun currentDurableSessionId(): String? =
+        _durableSessionContinuityRecord.value?.durableSessionId
+
+    /** Returns the current reconnect epoch for reconciliation signals. */
+    private fun currentSessionContinuityEpoch(): Int? =
+        _durableSessionContinuityRecord.value?.sessionContinuityEpoch
 
     /**
      * PR-62 — Clears the active task state ([_activeTaskId] and [_activeTaskStatus]).
@@ -1435,7 +1447,9 @@ class RuntimeController(
                 "participant_id" to signal.participantId,
                 "task_id" to (signal.taskId ?: ""),
                 "signal_id" to signal.signalId,
-                "reconciliation_epoch" to signal.reconciliationEpoch
+                "reconciliation_epoch" to signal.reconciliationEpoch,
+                "durable_session_id" to (signal.durableSessionId ?: ""),
+                "session_continuity_epoch" to (signal.sessionContinuityEpoch ?: -1)
             )
         )
     }
@@ -1838,7 +1852,9 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
-                reconciliationEpoch = nextReconciliationEpoch()
+                reconciliationEpoch = nextReconciliationEpoch(),
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch()
             )
         )
     }
@@ -1869,7 +1885,9 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
-                reconciliationEpoch = nextReconciliationEpoch()
+                reconciliationEpoch = nextReconciliationEpoch(),
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch()
             )
         )
     }
@@ -1911,7 +1929,9 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
-                reconciliationEpoch = nextReconciliationEpoch()
+                reconciliationEpoch = nextReconciliationEpoch(),
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch()
             )
         )
     }
@@ -1967,7 +1987,9 @@ class RuntimeController(
                 taskId = taskId,
                 correlationId = correlationId,
                 progressDetail = progressDetail,
-                reconciliationEpoch = nextReconciliationEpoch()
+                reconciliationEpoch = nextReconciliationEpoch(),
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch()
             )
         )
     }
@@ -2007,7 +2029,13 @@ class RuntimeController(
             activeTaskStatus = activeTaskStatus,
             reconciliationEpoch = epoch
         )
-        emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(truth))
+        emitReconciliationSignal(
+            ReconciliationSignal.runtimeTruthSnapshot(
+                truth,
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch()
+            )
+        )
     }
 
     /**
@@ -2208,7 +2236,13 @@ class RuntimeController(
                     activeTaskStatus = null,
                     reconciliationEpoch = epoch
                 )
-                emitReconciliationSignal(ReconciliationSignal.runtimeTruthSnapshot(idleTruth))
+                emitReconciliationSignal(
+                    ReconciliationSignal.runtimeTruthSnapshot(
+                        idleTruth,
+                        durableSessionId = currentDurableSessionId(),
+                        sessionContinuityEpoch = currentSessionContinuityEpoch()
+                    )
+                )
                 GalaxyLogger.log(
                     GalaxyLogger.TAG_LIVE_EXECUTION,
                     mapOf(
@@ -2268,7 +2302,9 @@ class RuntimeController(
                         participantId = pid,
                         taskId = interruptedTaskId,
                         errorDetail = "session_interrupted: ${cause.wireValue}",
-                        reconciliationEpoch = nextReconciliationEpoch()
+                        reconciliationEpoch = nextReconciliationEpoch(),
+                        durableSessionId = currentDurableSessionId(),
+                        sessionContinuityEpoch = currentSessionContinuityEpoch()
                     )
                 )
             }
@@ -2683,7 +2719,9 @@ class RuntimeController(
                     participantId = pid,
                     healthState = newHealthState,
                     readinessState = readinessState,
-                    reconciliationEpoch = nextReconciliationEpoch()
+                    reconciliationEpoch = nextReconciliationEpoch(),
+                    durableSessionId = currentDurableSessionId(),
+                    sessionContinuityEpoch = currentSessionContinuityEpoch()
                 )
             )
         }

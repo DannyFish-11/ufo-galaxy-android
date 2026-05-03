@@ -466,6 +466,21 @@ object AndroidReadinessEvidenceSurface {
         ),
 
         EvidenceEntry(
+            evidenceId = "reconciliation_signal_session_epoch_bounding",
+            dimension = ReadinessDimension.ARTIFACT_EMISSION_RECONCILIATION,
+            confidenceLevel = ConfidenceLevel.CANONICAL,
+            description = "Every RuntimeController-originated ReconciliationSignal now carries " +
+                "durable_session_id and session_continuity_epoch when a durable session is active, " +
+                "so V2 can reject late signals from a prior reconnect epoch.",
+            producedBy = "RuntimeController, ReconciliationSignal, ReconciliationSignalPayload",
+            testEvidence = "Pr77ReconciliationSignalSessionEpochBoundingTest: factories preserve " +
+                "durable session identity; RuntimeController emissions carry epoch 0 before " +
+                "reconnect and epoch 1 after reconnect; payload exposes the wire fields",
+            v2ConsumptionPath = "ReconciliationSignalPayload.durable_session_id + " +
+                "session_continuity_epoch → V2 participant-truth ingestion staleness guard"
+        ),
+
+        EvidenceEntry(
             evidenceId = "unified_truth_reconciliation_surface_emission",
             dimension = ReadinessDimension.ARTIFACT_EMISSION_RECONCILIATION,
             confidenceLevel = ConfidenceLevel.CANONICAL,
@@ -885,19 +900,6 @@ object AndroidReadinessEvidenceSurface {
         ),
 
         DeferredItem(
-            itemId = "reconciliation_signal_epoch_bounding_after_reconnect",
-            dimension = ReadinessDimension.ARTIFACT_EMISSION_RECONCILIATION,
-            description = "ReconciliationSignal emission after reconnect is not yet explicitly " +
-                "gated on the new durable session epoch — a late reconciliation signal from a " +
-                "prior epoch could theoretically reach V2 after a new session has started.",
-            deferralReason = "Requires ReconciliationSignal to carry the current " +
-                "sessionContinuityEpoch as a wire field and V2 to validate it on ingestion.  " +
-                "Coordinate with V2 PR-5 wire contract before adding the epoch check on Android.",
-            deferredTo = "V2 PR-5 continuity recovery PR, once epoch-stamped reconciliation " +
-                "signals are part of the wire contract"
-        ),
-
-        DeferredItem(
             itemId = "instrumented_e2e_readiness_evidence_test",
             dimension = ReadinessDimension.ARTIFACT_EMISSION_RECONCILIATION,
             description = "Full end-to-end instrumented test that injects a canonical execution " +
@@ -971,10 +973,10 @@ object AndroidReadinessEvidenceSurface {
     // ── Count constants for test assertions ───────────────────────────────────
 
     /** Expected total number of evidence entries at the time of this PR. */
-    const val EVIDENCE_ENTRY_COUNT = 31
+    const val EVIDENCE_ENTRY_COUNT = 32
 
     /** Expected number of CANONICAL confidence-level evidence entries. */
-    const val CANONICAL_EVIDENCE_COUNT = 27
+    const val CANONICAL_EVIDENCE_COUNT = 28
 
     /** Expected number of ADVISORY confidence-level evidence entries. */
     const val ADVISORY_EVIDENCE_COUNT = 3
@@ -983,7 +985,7 @@ object AndroidReadinessEvidenceSurface {
     const val DEPRECATED_COMPAT_EVIDENCE_COUNT = 1
 
     /** Expected number of deferred items at the time of this PR. */
-    const val DEFERRED_ITEM_COUNT = 6
+    const val DEFERRED_ITEM_COUNT = 5
 
     // ── Description constant ──────────────────────────────────────────────────
 

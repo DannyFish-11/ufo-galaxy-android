@@ -934,6 +934,16 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     }
 
     @Test
+    fun `ReconciliationSignal KEY_DURABLE_SESSION_ID is durable_session_id`() {
+        assertEquals("durable_session_id", ReconciliationSignal.KEY_DURABLE_SESSION_ID)
+    }
+
+    @Test
+    fun `ReconciliationSignal KEY_SESSION_CONTINUITY_EPOCH is session_continuity_epoch`() {
+        assertEquals("session_continuity_epoch", ReconciliationSignal.KEY_SESSION_CONTINUITY_EPOCH)
+    }
+
+    @Test
     fun `ReconciliationSignal all key constants are distinct`() {
         val keys = listOf(
             ReconciliationSignal.KEY_KIND,
@@ -943,7 +953,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
             ReconciliationSignal.KEY_STATUS,
             ReconciliationSignal.KEY_SIGNAL_ID,
             ReconciliationSignal.KEY_EMITTED_AT_MS,
-            ReconciliationSignal.KEY_RECONCILIATION_EPOCH
+            ReconciliationSignal.KEY_RECONCILIATION_EPOCH,
+            ReconciliationSignal.KEY_DURABLE_SESSION_ID,
+            ReconciliationSignal.KEY_SESSION_CONTINUITY_EPOCH
         )
         assertEquals(keys.size, keys.toSet().size)
     }

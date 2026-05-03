@@ -1899,6 +1899,8 @@ class GalaxyConnectionService : Service() {
                 task_id = signal.taskId,
                 correlation_id = signal.correlationId,
                 session_id = sessionId,
+                durable_session_id = signal.durableSessionId,
+                session_continuity_epoch = signal.sessionContinuityEpoch,
                 payload = signal.payload,
                 runtime_truth = runtimeTruth
             )
