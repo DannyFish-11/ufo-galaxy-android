@@ -126,9 +126,8 @@ interface AppSettings {
     var useTls: Boolean
 
     /**
-     * When true, OkHttp accepts self-signed TLS certificates.
-     * Only effective when [useTls] is true. **Debug/dev environments only** —
-     * never use in production over public networks.
+     * Raw operator preference for whether debug/dev connections may accept self-signed
+     * TLS certificates. Use [effectiveAllowSelfSigned] when applying runtime policy.
      */
     var allowSelfSigned: Boolean
 
@@ -506,10 +505,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         set(value) { prefs.edit().putBoolean(KEY_USE_TLS, value).apply() }
 
     override var allowSelfSigned: Boolean
-        get() = resolveAllowSelfSigned(
-            requested = prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false),
-            isDebugBuild = BuildConfig.DEBUG
-        )
+        get() = prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false)
         set(value) {
             prefs.edit()
                 .putBoolean(

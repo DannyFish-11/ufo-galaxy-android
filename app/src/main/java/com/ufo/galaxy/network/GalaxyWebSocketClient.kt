@@ -169,9 +169,6 @@ class GalaxyWebSocketClient(
                 requested = allowSelfSigned,
                 isDebugBuild = isDebugBuild
             )
-            if (allowSelfSigned && !isDebugBuild) {
-                Log.w(TAG, "[WS:CONNECT] allowSelfSigned requested but ignored on non-debug build")
-            }
             if (effectiveAllowSelfSigned) {
                 try {
                     val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {

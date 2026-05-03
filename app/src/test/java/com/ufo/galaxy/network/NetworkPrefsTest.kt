@@ -133,6 +133,7 @@ class NetworkPrefsTest {
     @Test
     fun `effectiveAllowSelfSigned is true only for debug builds`() {
         val s = InMemoryAppSettings(allowSelfSigned = true)
+        assertTrue(s.allowSelfSigned)
         assertTrue(s.effectiveAllowSelfSigned(isDebugBuild = true))
         assertFalse(s.effectiveAllowSelfSigned(isDebugBuild = false))
     }
