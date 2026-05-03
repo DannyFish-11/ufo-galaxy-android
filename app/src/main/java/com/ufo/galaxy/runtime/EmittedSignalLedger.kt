@@ -32,12 +32,14 @@ package com.ufo.galaxy.runtime
  * [DelegatedTakeoverExecutor] creates a fresh ledger at the start of [execute] and passes
  * it back to callers via [DelegatedTakeoverExecutor.ExecutionOutcome.ledger], so that
  * callers can later replay any of the three canonical signals without re-invoking the
- * factory methods.
+ * factory methods.  [toSnapshot] and [fromSnapshot] provide the persistence boundary used
+ * by [PersistentEmittedSignalLedgerStore] so stable replay identity can survive process
+ * recreation.
  *
  * ## Non-goals
  *
- * - **Not a persistent resend queue**: signals are stored only in memory and are not
- *   serialised to disk.  Replay across process restarts is out of scope.
+ * - **Not a resend queue by itself**: the ledger stores the last signal per kind; callers
+ *   still decide whether and when a stored signal should be replayed.
  * - **Not thread-safe by design**: [EmittedSignalLedger] is intended to be used on a
  *   single thread (or within a structured-concurrency coroutine scope) that serialises
  *   all emission and replay operations.
@@ -49,6 +51,19 @@ class EmittedSignalLedger {
     private var _ack: DelegatedExecutionSignal? = null
     private var _progress: DelegatedExecutionSignal? = null
     private var _result: DelegatedExecutionSignal? = null
+
+    /**
+     * Durable serialisable snapshot of the ledger's current contents.
+     *
+     * Gson can round-trip this class without a custom adapter because all fields are either
+     * primitives or [DelegatedExecutionSignal], which is itself a plain data class.
+     */
+    data class Snapshot(
+        val ack: DelegatedExecutionSignal? = null,
+        val progress: DelegatedExecutionSignal? = null,
+        val result: DelegatedExecutionSignal? = null,
+        val savedAtMs: Long = System.currentTimeMillis()
+    )
 
     // ── Public API — recording ────────────────────────────────────────────────
 
@@ -68,6 +83,15 @@ class EmittedSignalLedger {
             DelegatedExecutionSignal.Kind.RESULT   -> _result = signal
         }
     }
+
+    /** Returns a serialisable snapshot suitable for durable persistence. */
+    fun toSnapshot(savedAtMs: Long = System.currentTimeMillis()): Snapshot =
+        Snapshot(
+            ack = _ack,
+            progress = _progress,
+            result = _result,
+            savedAtMs = savedAtMs
+        )
 
     // ── Public API — retrieval ────────────────────────────────────────────────
 
@@ -194,5 +218,16 @@ class EmittedSignalLedger {
             return null
         }
         return replaySignal(kind, replayTimestampMs)
+    }
+
+    companion object {
+        /** Rebuilds an [EmittedSignalLedger] from a previously persisted [Snapshot]. */
+        fun fromSnapshot(snapshot: Snapshot?): EmittedSignalLedger {
+            val ledger = EmittedSignalLedger()
+            snapshot?.ack?.let { ledger.recordEmitted(it) }
+            snapshot?.progress?.let { ledger.recordEmitted(it) }
+            snapshot?.result?.let { ledger.recordEmitted(it) }
+            return ledger
+        }
     }
 }

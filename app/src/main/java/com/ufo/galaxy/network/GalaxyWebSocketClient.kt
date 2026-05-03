@@ -1392,6 +1392,11 @@ class GalaxyWebSocketClient(
             if (discarded > 0) {
                 Log.i(TAG, "[WS:OfflineQueue] Discarded $discarded stale-session message(s) before flush (tag=$tag)")
             }
+        } else {
+            val discarded = offlineQueue.discardSessionTaggedWithoutAuthority()
+            if (discarded > 0) {
+                Log.i(TAG, "[WS:OfflineQueue] Discarded $discarded tagged message(s) before flush because session authority is unavailable")
+            }
         }
 
         val messages = offlineQueue.drainAll()
