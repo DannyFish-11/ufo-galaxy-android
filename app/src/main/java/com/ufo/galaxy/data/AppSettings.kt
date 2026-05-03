@@ -514,7 +514,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
             prefs.edit()
                 .putBoolean(
                     KEY_ALLOW_SELF_SIGNED,
-                    resolveAllowSelfSigned(requested = value, isDebugBuild = BuildConfig.DEBUG)
+                    value
                 )
                 .apply()
         }

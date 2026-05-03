@@ -169,7 +169,7 @@ class GalaxyWebSocketClient(
                 requested = allowSelfSigned,
                 isDebugBuild = isDebugBuild
             )
-            if (allowSelfSigned && !effectiveAllowSelfSigned) {
+            if (allowSelfSigned && !isDebugBuild) {
                 Log.w(TAG, "[WS:CONNECT] allowSelfSigned requested but ignored on non-debug build")
             }
             if (effectiveAllowSelfSigned) {
