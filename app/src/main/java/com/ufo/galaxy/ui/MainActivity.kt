@@ -1,6 +1,7 @@
 package com.ufo.galaxy.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -23,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ufo.galaxy.R
@@ -267,7 +270,10 @@ private fun ReadinessBanner(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 issues.forEach { issue ->
-                    TextButton(onClick = { onRecoveryAction(issue.action) }) {
+                    TextButton(
+                        onClick = { onRecoveryAction(issue.action) },
+                        modifier = Modifier.semantics { contentDescription = issue.actionLabel }
+                    ) {
                         Text(issue.actionLabel)
                     }
                 }
@@ -288,23 +294,6 @@ private fun ReadinessBanner(
 fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    fun openSettingsIntent(intent: Intent, failureMessage: String) {
-        try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            Log.w(TAG, "Unable to open settings: ${e.message}")
-            Toast.makeText(context, failureMessage, Toast.LENGTH_SHORT).show()
-        }
-    }
-    fun openOverlaySettings() {
-        openSettingsIntent(
-            Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${context.packageName}")
-            ),
-            "无法打开悬浮窗设置"
-        )
-    }
 
     // Show network settings screen when requested
     if (uiState.showNetworkSettings) {
@@ -465,11 +454,12 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                     viewModel.openNetworkSettings()
                                 ReadinessRecoveryAction.OPEN_ACCESSIBILITY_SETTINGS ->
                                     openSettingsIntent(
+                                        context,
                                         Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
                                         "无法打开无障碍设置"
                                     )
                                 ReadinessRecoveryAction.OPEN_OVERLAY_SETTINGS ->
-                                    openOverlaySettings()
+                                    openOverlaySettings(context)
                             }
                         }
                     )
@@ -503,4 +493,24 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             }
         }
     }
+}
+
+private fun openSettingsIntent(context: Context, intent: Intent, failureMessage: String) {
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Log.w("MainActivity", "Unable to open settings: ${e.message}")
+        Toast.makeText(context, failureMessage, Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun openOverlaySettings(context: Context) {
+    openSettingsIntent(
+        context,
+        Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        ),
+        "无法打开悬浮窗设置"
+    )
 }
