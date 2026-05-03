@@ -249,29 +249,29 @@ private fun ConnectionStatusBar(
 private fun ReadinessBanner(
     modelReady: Boolean,
     accessibilityReady: Boolean,
-    overlayReady: Boolean
+    overlayReady: Boolean,
+    onRecoveryAction: (ReadinessRecoveryAction) -> Unit
 ) {
-    val issues = buildList {
-        if (!modelReady) add("本地模型未就绪")
-        if (!accessibilityReady) add("无障碍服务未启用")
-        if (!overlayReady) add("悬浮窗权限未授予")
-    }
+    val issues = readinessRecoveryIssues(modelReady, accessibilityReady, overlayReady)
     if (issues.isEmpty()) return
 
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
             Text(
-                text = "⚠ 降级模式：${issues.joinToString("、")}",
+                text = "⚠ 降级模式：${issues.joinToString("、") { it.label }}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f)
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                issues.forEach { issue ->
+                    TextButton(onClick = { onRecoveryAction(issue.action) }) {
+                        Text(issue.actionLabel)
+                    }
+                }
+            }
         }
     }
 }
@@ -288,6 +288,14 @@ private fun ReadinessBanner(
 fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    fun openOverlaySettings() {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+        )
+    }
 
     // Show network settings screen when requested
     if (uiState.showNetworkSettings) {
@@ -441,7 +449,17 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                     ReadinessBanner(
                         modelReady = uiState.modelReady,
                         accessibilityReady = uiState.accessibilityReady,
-                        overlayReady = uiState.overlayReady
+                        overlayReady = uiState.overlayReady,
+                        onRecoveryAction = { action ->
+                            when (action) {
+                                ReadinessRecoveryAction.OPEN_MODEL_DIAGNOSTICS ->
+                                    viewModel.openNetworkSettings()
+                                ReadinessRecoveryAction.OPEN_ACCESSIBILITY_SETTINGS ->
+                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                ReadinessRecoveryAction.OPEN_OVERLAY_SETTINGS ->
+                                    openOverlaySettings()
+                            }
+                        }
                     )
                 }
 
