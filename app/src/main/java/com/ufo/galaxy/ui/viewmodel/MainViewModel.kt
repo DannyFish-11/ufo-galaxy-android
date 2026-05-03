@@ -948,6 +948,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         UFOGalaxyApplication.runtimeController.connectIfEnabled()
         // Refresh readiness flags — overlay/accessibility state may have changed while
         // the app was in the background (e.g. user visited settings to grant permissions).
+        // Application.refreshReadiness re-runs the system probes and persists them;
+        // ViewModel.refreshReadiness then copies the persisted snapshot into UI state.
         UFOGalaxyApplication.refreshReadiness()
         refreshReadiness()
         // Refresh health-check fields for the diagnostics panel.

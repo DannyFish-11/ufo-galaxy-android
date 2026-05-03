@@ -288,12 +288,21 @@ private fun ReadinessBanner(
 fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    fun openSettingsIntent(intent: Intent, failureMessage: String) {
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to open settings: ${e.message}")
+            Toast.makeText(context, failureMessage, Toast.LENGTH_SHORT).show()
+        }
+    }
     fun openOverlaySettings() {
-        context.startActivity(
+        openSettingsIntent(
             Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:${context.packageName}")
-            )
+            ),
+            "无法打开悬浮窗设置"
         )
     }
 
@@ -455,7 +464,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                 ReadinessRecoveryAction.OPEN_MODEL_DIAGNOSTICS ->
                                     viewModel.openNetworkSettings()
                                 ReadinessRecoveryAction.OPEN_ACCESSIBILITY_SETTINGS ->
-                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    openSettingsIntent(
+                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                                        "无法打开无障碍设置"
+                                    )
                                 ReadinessRecoveryAction.OPEN_OVERLAY_SETTINGS ->
                                     openOverlaySettings()
                             }
