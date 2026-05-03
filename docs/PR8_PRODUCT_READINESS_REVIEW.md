@@ -552,23 +552,32 @@ There is no in-app guided setup flow.
 `LocalLoopReadinessProvider` blocks execution when permissions are missing. But the user
 is not guided through granting them.
 
-### Gap 4: `HardwareKeyReceiver` class missing (LOW IMPACT — potential crash at boot)
+### Gap 4: ~~`HardwareKeyReceiver` class missing~~ — RESOLVED
 
-**Description:** `AndroidManifest.xml` declares `HardwareKeyReceiver` for `MEDIA_BUTTON`
-intent, but the class file does not appear in the source listing (only `HardwareKeyListener`
-as an accessibility service exists).
+**Update (2026-05-03):** This gap was incorrectly identified. `HardwareKeyReceiver` IS
+present in the codebase at `app/src/main/java/com/ufo/galaxy/service/BootReceiver.kt`
+(class `com.ufo.galaxy.service.HardwareKeyReceiver`), co-located with `BootReceiver` in
+the same file. The `AndroidManifest.xml` declaration `.service.HardwareKeyReceiver`
+resolves correctly to this class. No `ClassNotFoundException` will occur at runtime.
 
-**Current state:** If the `MEDIA_BUTTON` broadcast fires after boot, the system will attempt
-to instantiate `HardwareKeyReceiver` and fail with `ClassNotFoundException`, potentially
-logging an error but not crashing the app.
+**Original description (for reference):** `AndroidManifest.xml` declares `HardwareKeyReceiver`
+for `MEDIA_BUTTON` intent, but the class file was not found in the initial source listing.
 
-**Confidence:** Strongly implied by missing class — not confirmed without runtime test.
+**Resolution:** Class confirmed present — no action required.
 
-### Gap 5: No joint "clone both repos → run system" guide (LOW IMPACT — operator experience)
+### Gap 5: ~~No joint "clone both repos → run system" guide~~ — RESOLVED
 
-**Description:** The V2 `docs/CLONE_TO_USE_REALITY.md` covers the V2 side. The Android
-`docs/` folder covers Android-side mechanisms. There is no single document that walks an
-operator through starting both systems together and connecting them end-to-end.
+**Update (2026-05-03):** `docs/DUAL_REPO_SETUP.md` has been created. It covers:
+1. Starting V2 backend (`python main.py --host <ip> --port 8765`)
+2. Setting the Android gateway URL to `ws://<ip>:8765`
+3. Enabling `crossDeviceEnabled` in the Android app
+4. Granting all required permissions (Accessibility, overlay, notifications)
+5. Verifying the connection (V2 projection + Android connectivity indicator)
+6. Running a first end-to-end task (via overlay or V2 REST API)
+
+**Original description (for reference):** The V2 `docs/CLONE_TO_USE_REALITY.md` covers
+the V2 side. The Android `docs/` folder covers Android-side mechanisms. There was no
+single document that walked an operator through starting both systems end-to-end.
 
 ### Gap 6: Protocol governance/readiness report handling on V2 side (UNCLEAR)
 
@@ -596,9 +605,9 @@ similar typed payloads. These are well-defined on the Android side. Whether V2's
 | **Accessibility action execution** | ⚠️ Partial — permission must be granted first | Verified by code |
 | **Remote VLM via Node_113_AndroidVLM** | ⚠️ Implied — V2 node exists, integration details unclear | Strongly implied |
 | **Guided first-run setup** | ❌ Missing | Absent from code |
-| **Join setup guide (both repos)** | ❌ Missing | Absent from code |
+| **Join setup guide (both repos)** | ✅ Created — `docs/DUAL_REPO_SETUP.md` | Verified |
 | **Production TLS (wss://)** | ⚠️ Risk — trust-all cert manager present | Verified by code |
-| **`HardwareKeyReceiver` class** | ⚠️ Possibly missing — declared in manifest, not found in source | Strongly implied |
+| **`HardwareKeyReceiver` class** | ✅ Present — in `service/BootReceiver.kt` | Verified by code |
 
 ### Overall readiness verdict
 
@@ -641,19 +650,13 @@ Add a guided setup activity that:
 4. Verifies connectivity to V2 before completing setup
 5. Shows clear status for each prerequisite before allowing task execution
 
-### Priority 3: Fix `HardwareKeyReceiver` manifest declaration
+### Priority 3: ~~Fix `HardwareKeyReceiver` manifest declaration~~ — RESOLVED
 
-Either add the `HardwareKeyReceiver` class or remove it from `AndroidManifest.xml`.
+`HardwareKeyReceiver` is present in `service/BootReceiver.kt`. No action required.
 
-### Priority 4: Document the joint setup path
+### Priority 4: ~~Document the joint setup path~~ — RESOLVED
 
-Create a single `docs/DUAL_REPO_SETUP.md` document that covers:
-1. Starting V2 backend (`python main.py --host <ip> --port 8765`)
-2. Setting the Android gateway URL to `ws://<ip>:8765`
-3. Enabling `crossDeviceEnabled` in the Android app
-4. Granting required permissions
-5. Verifying the connection (V2 projection + Android connectivity indicator)
-6. Running a first end-to-end task
+`docs/DUAL_REPO_SETUP.md` has been created, covering all six steps.
 
 ### Priority 5: V2 governance/readiness report handler verification
 
