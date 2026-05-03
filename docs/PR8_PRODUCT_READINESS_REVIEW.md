@@ -3,7 +3,7 @@
 
 **Repositories reviewed:**
 - Primary: `DannyFish-11/ufo-galaxy-android` (this repo)
-- Companion: `DannyFish-11/ufo-galaxy-realization-v2`
+- Companion: `DannyFish-11/ufo-galaxy-realization`
 
 **Review type:** Code-grounded product usability assessment — not an architectural survey  
 **Focus:** Whether the dual-repo system can be run, used, and experienced smoothly from the Android/participant side  
@@ -33,7 +33,7 @@
 
 ## 1. Executive Summary
 
-The dual-repo system (`ufo-galaxy-android` + `ufo-galaxy-realization-v2`) is **architecturally
+The dual-repo system (`ufo-galaxy-android` + `ufo-galaxy-realization`) is **architecturally
 mature and internally consistent** but **not yet turn-key runnable as a single-install product**
 from the Android participant side. The system has all the right structural pieces but requires
 non-trivial operator setup before end-to-end execution actually runs.
@@ -95,7 +95,7 @@ non-trivial operator setup before end-to-end execution actually runs.
               ws://<host>:8765/ws/device/{id}        │  │
                                                      │  │
 ┌────────────────────────────────────────────────────┼──┘
-│         V2 Backend (ufo-galaxy-realization-v2)     │
+│         V2 Backend (ufo-galaxy-realization)        │
 │                                                    │
 │  main.py → unified_launcher.py                     │
 │    ├─ galaxy_gateway/                              │
@@ -690,7 +690,7 @@ The following classification applies throughout this document:
 | MobileVlmPlanner as HTTP client to localhost | Verified by code (`MobileVlmPlanner.kt`) |
 | BootReceiver starts services | Verified by code + manifest |
 | Session-authority-bounded offline queue drain | Verified by code (`discardForDifferentSession`) |
-| `HardwareKeyReceiver` class missing | Strongly implied (not found in source listing) |
+| `HardwareKeyReceiver` class present and manifest-safe | Verified by code (`service/BootReceiver.kt`, `AndroidManifest.xml`) |
 | V2 handles all Android governance report types | Unclear (not confirmed in V2 android_bridge reading) |
 | `Node_113_AndroidVLM` handles Android remote inference | Strongly implied (node listed in V2 README, integration details not read) |
 | Reconnect drain calls `discardForDifferentSession` before `drainAll` | Strongly implied (documented as required pattern) |
@@ -699,6 +699,6 @@ The following classification applies throughout this document:
 ---
 
 *This review was produced by examining the real code bases of `DannyFish-11/ufo-galaxy-android`
-and `DannyFish-11/ufo-galaxy-realization-v2`. All claims are anchored to specific code files,
+and `DannyFish-11/ufo-galaxy-realization`. All claims are anchored to specific code files,
 classes, and line ranges as cited above. Gaps are flagged with their confidence level and
 impact.*
