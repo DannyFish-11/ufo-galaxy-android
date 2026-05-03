@@ -1,6 +1,8 @@
 package com.ufo.galaxy.data
 
 import android.content.Context
+import com.ufo.galaxy.BuildConfig
+import com.ufo.galaxy.network.resolveAllowSelfSigned
 import java.util.Properties
 import org.json.JSONObject
 
@@ -129,6 +131,15 @@ interface AppSettings {
      * never use in production over public networks.
      */
     var allowSelfSigned: Boolean
+
+    /**
+     * Returns the effective self-signed-TLS policy for the current build variant.
+     *
+     * Release / production builds always return `false` even if a caller or persisted
+     * preference requested otherwise.
+     */
+    fun effectiveAllowSelfSigned(isDebugBuild: Boolean = BuildConfig.DEBUG): Boolean =
+        resolveAllowSelfSigned(allowSelfSigned, isDebugBuild)
 
     /**
      * Stable device identifier included in handshake and diagnostics payloads.
@@ -495,8 +506,12 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         set(value) { prefs.edit().putBoolean(KEY_USE_TLS, value).apply() }
 
     override var allowSelfSigned: Boolean
-        get() = prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false)
-        set(value) { prefs.edit().putBoolean(KEY_ALLOW_SELF_SIGNED, value).apply() }
+        get() = resolveAllowSelfSigned(prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false))
+        set(value) {
+            prefs.edit()
+                .putBoolean(KEY_ALLOW_SELF_SIGNED, resolveAllowSelfSigned(value))
+                .apply()
+        }
 
     override var deviceId: String
         get() = prefs.getString(KEY_DEVICE_ID, "") ?: ""
