@@ -34,10 +34,10 @@ import java.util.UUID
  * Android side and the host can observe how many tasks have flowed through this session.
  *
  * The host must **not** assume that one task = one session.  Reuse is valid as long as
- * [isReuseValid] returns `true` (i.e. [state] == [State.ATTACHED]).  Once any of the
- * four termination causes fires — [DetachCause.EXPLICIT_DETACH], [DetachCause.DISCONNECT],
- * [DetachCause.DISABLE], or [DetachCause.INVALIDATION] — [isReuseValid] becomes `false`
- * and no further delegated units should be directed at this session.
+ * [isReuseValid] returns `true` (i.e. [state] == [State.ATTACHED]).  Once any of the five
+ * termination causes fires — [DetachCause.EXPLICIT_DETACH], [DetachCause.DISCONNECT],
+ * [DetachCause.DISABLE], [DetachCause.INVALIDATION], or [DetachCause.NORMAL] — [isReuseValid]
+ * becomes `false` and no further delegated units should be directed at this session.
  *
  * ## Lifecycle
  *
@@ -52,11 +52,12 @@ import java.util.UUID
  *         └────────────────── detachedWith(cause) (abrupt) ────────────────────────────┘
  * ```
  *
- * Four termination causes are recognised:
+ * Five termination causes are recognised:
  *  - [DetachCause.EXPLICIT_DETACH]  — operator or user explicitly detached this device.
  *  - [DetachCause.DISCONNECT]       — underlying WebSocket connection was lost.
  *  - [DetachCause.DISABLE]          — cross-device was disabled (user toggled off).
  *  - [DetachCause.INVALIDATION]     — session invalidated (auth expired, identity change, etc.).
+ *  - [DetachCause.NORMAL]           — normal lifecycle transition with no fault condition.
  *
  * ## Immutability
  * [AttachedRuntimeSession] is immutable.  Use [beginDetaching] and [detachedWith] to
@@ -180,7 +181,16 @@ data class AttachedRuntimeSession(
          * change, authentication expiry, protocol version mismatch, or any other
          * condition that makes the current session no longer trustworthy.
          */
-        INVALIDATION("invalidation");
+        INVALIDATION("invalidation"),
+
+        /**
+         * The session ended through a normal, expected lifecycle transition — not due
+         * to a network fault, administrative disable, or identity invalidation.
+         *
+         * Use this cause when the session is closed as part of ordinary operation
+         * (e.g., the participation era completed cleanly and no reconnect is needed).
+         */
+        NORMAL("normal");
 
         companion object {
             /**
