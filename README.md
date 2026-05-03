@@ -168,11 +168,13 @@ ufo-galaxy-android/
 | [`docs/architecture.md`](docs/architecture.md) | System overview, canonical component index, legacy components, authority model |
 | [`docs/execution-flows.md`](docs/execution-flows.md) | Local and cross-device execution flow maps, gateway task dispatch, runtime lifecycle |
 | [`docs/maintainer-guide.md`](docs/maintainer-guide.md) | Onboarding guide, canonical vs deprecated API, configuration model, build guidance |
+| [`docs/DUAL_REPO_SETUP.md`](docs/DUAL_REPO_SETUP.md) | **Joint setup guide** — clone both repos, start V2 backend, configure Android, grant permissions, run first task |
 | [`docs/ugcp/ANDROID_UGCP_CONSTITUTION.md`](docs/ugcp/ANDROID_UGCP_CONSTITUTION.md) | Android-side UGCP Runtime WS Profile declaration, constitution, canonical vocabulary, and control-plane phase/field alignment |
 | [`docs/PR_FIX_WORKFLOW.md`](docs/PR_FIX_WORKFLOW.md) | Standard workflow for bug-fix / regression-fix PRs |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Logging, metrics, tracing |
 | [`docs/LOCAL_LOOP_TESTING.md`](docs/LOCAL_LOOP_TESTING.md) | Local loop test harness |
 | [`docs/DEPLOYMENT_GUIDE.md`](docs/DEPLOYMENT_GUIDE.md) | Deployment reference |
+| [`docs/SYSTEM_ANALYSIS_ZH.md`](docs/SYSTEM_ANALYSIS_ZH.md) | Full Chinese-language system analysis — architecture, problems, and completion assessment |
 
 ---
 
