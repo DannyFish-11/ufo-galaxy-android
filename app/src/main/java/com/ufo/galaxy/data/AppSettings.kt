@@ -506,14 +506,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
     override var allowSelfSigned: Boolean
         get() = prefs.getBoolean(KEY_ALLOW_SELF_SIGNED, false)
-        set(value) {
-            prefs.edit()
-                .putBoolean(
-                    KEY_ALLOW_SELF_SIGNED,
-                    value
-                )
-                .apply()
-        }
+        set(value) { prefs.edit().putBoolean(KEY_ALLOW_SELF_SIGNED, value).apply() }
 
     override var deviceId: String
         get() = prefs.getString(KEY_DEVICE_ID, "") ?: ""
