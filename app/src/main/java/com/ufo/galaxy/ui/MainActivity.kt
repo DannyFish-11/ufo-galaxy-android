@@ -1,6 +1,7 @@
 package com.ufo.galaxy.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -23,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ufo.galaxy.R
@@ -249,29 +252,32 @@ private fun ConnectionStatusBar(
 private fun ReadinessBanner(
     modelReady: Boolean,
     accessibilityReady: Boolean,
-    overlayReady: Boolean
+    overlayReady: Boolean,
+    onRecoveryAction: (ReadinessRecoveryAction) -> Unit
 ) {
-    val issues = buildList {
-        if (!modelReady) add("本地模型未就绪")
-        if (!accessibilityReady) add("无障碍服务未启用")
-        if (!overlayReady) add("悬浮窗权限未授予")
-    }
+    val issues = readinessRecoveryIssues(modelReady, accessibilityReady, overlayReady)
     if (issues.isEmpty()) return
 
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
             Text(
-                text = "⚠ 降级模式：${issues.joinToString("、")}",
+                text = "⚠ 降级模式：${issues.joinToString("、") { it.label }}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f)
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                issues.forEach { issue ->
+                    TextButton(
+                        onClick = { onRecoveryAction(issue.action) },
+                        modifier = Modifier.semantics { contentDescription = issue.actionLabel }
+                    ) {
+                        Text(issue.actionLabel)
+                    }
+                }
+            }
         }
     }
 }
@@ -441,7 +447,21 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                     ReadinessBanner(
                         modelReady = uiState.modelReady,
                         accessibilityReady = uiState.accessibilityReady,
-                        overlayReady = uiState.overlayReady
+                        overlayReady = uiState.overlayReady,
+                        onRecoveryAction = { action ->
+                            when (action) {
+                                ReadinessRecoveryAction.OPEN_MODEL_DIAGNOSTICS ->
+                                    viewModel.openNetworkSettings()
+                                ReadinessRecoveryAction.OPEN_ACCESSIBILITY_SETTINGS ->
+                                    openSettingsIntent(
+                                        context,
+                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                                        "无法打开无障碍设置"
+                                    )
+                                ReadinessRecoveryAction.OPEN_OVERLAY_SETTINGS ->
+                                    openOverlaySettings(context)
+                            }
+                        }
                     )
                 }
 
@@ -473,4 +493,24 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             }
         }
     }
+}
+
+private fun openSettingsIntent(context: Context, intent: Intent, failureMessage: String) {
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Log.w("MainActivity", "Unable to open settings: ${e.message}")
+        Toast.makeText(context, failureMessage, Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun openOverlaySettings(context: Context) {
+    openSettingsIntent(
+        context,
+        Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        ),
+        "无法打开悬浮窗设置"
+    )
 }
