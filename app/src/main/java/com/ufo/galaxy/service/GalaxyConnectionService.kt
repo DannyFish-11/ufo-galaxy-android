@@ -2153,8 +2153,10 @@ class GalaxyConnectionService : Service() {
                 mobilevlmStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
             val seeClickPresent = seeClickStatus != null &&
                 seeClickStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
-            // checksum_ok: true when all known models are READY (checksum-verified) or LOADED
-            val checksumOk = modelStatuses.values.isNotEmpty() && modelStatuses.values.all {
+            // checksum_ok: true only when all known models are READY (checksum-verified) or LOADED.
+            // Returns false when the registry is empty (no models registered), because an
+            // empty registry cannot confirm checksum validity.
+            val checksumOk = modelStatuses.isNotEmpty() && modelStatuses.values.all {
                 it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
                     it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
             }
@@ -2165,14 +2167,13 @@ class GalaxyConnectionService : Service() {
             // null when the model is not yet present (awaiting first download or missing).
             val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM else null
             // pending_first_download: true when no model has been successfully downloaded
-            // (neither mobilevlm nor seeclick is present on disk, and none is LOADED/READY).
-            // Uses the full READY/LOADED status rather than the simple "present" flag to
-            // ensure the sentinel is not set to true when a file exists but is corrupted.
+            // (no model in the registry is READY or LOADED).  This is the canonical condition:
+            // a device awaiting its first download has no READY/LOADED models.
             val anyModelReady = modelStatuses.values.any {
                 it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
                     it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
             }
-            val pendingFirstDownload = !mobilevlmPresent && !seeClickPresent && !anyModelReady
+            val pendingFirstDownload = !anyModelReady
 
             // ── Local loop config ─────────────────────────────────────────────
             val localLoopConfigMap: Map<String, Any>? = try {
@@ -2217,8 +2218,11 @@ class GalaxyConnectionService : Service() {
                 // model_id is null when the primary model is not yet present on disk, so V2
                 // can distinguish "no model installed" from "mobilevlm installed".
                 model_id = modelId,
-                // runtime_type mirrors active_runtime_type so V2 can use either field; both
-                // are set to the same value so there is no ambiguity between the two.
+                // runtime_type mirrors active_runtime_type so V2 can use either field without
+                // ambiguity. When no native runtime is loaded, both fields report "CENTER",
+                // indicating execution routes through the center (V2 remote) rather than
+                // local inference. V2's _parse_state_snapshot accepts "CENTER" as a valid
+                // runtime_type value for this state.
                 runtime_type = activeRuntimeType,
                 checksum_ok = checksumOk,
                 mobilevlm_present = mobilevlmPresent,
