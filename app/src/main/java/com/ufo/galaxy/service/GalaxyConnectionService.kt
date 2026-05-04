@@ -2161,8 +2161,18 @@ class GalaxyConnectionService : Service() {
             // mobilevlm_checksum_ok follows the same READY/LOADED check for the mobilevlm model
             val mobilevlmChecksumOk = mobilevlmStatus == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
                 mobilevlmStatus == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
-            // pending_first_download: true when at least one model is still MISSING and no model is LOADED/READY
-            val pendingFirstDownload = !mobilevlmPresent && !seeClickPresent
+            // model_id: the canonical identifier of the primary on-device model when present;
+            // null when the model is not yet present (awaiting first download or missing).
+            val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM else null
+            // pending_first_download: true when no model has been successfully downloaded
+            // (neither mobilevlm nor seeclick is present on disk, and none is LOADED/READY).
+            // Uses the full READY/LOADED status rather than the simple "present" flag to
+            // ensure the sentinel is not set to true when a file exists but is corrupted.
+            val anyModelReady = modelStatuses.values.any {
+                it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
+                    it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
+            }
+            val pendingFirstDownload = !mobilevlmPresent && !seeClickPresent && !anyModelReady
 
             // ── Local loop config ─────────────────────────────────────────────
             val localLoopConfigMap: Map<String, Any>? = try {
@@ -2204,8 +2214,12 @@ class GalaxyConnectionService : Service() {
                 overlay_ready = overlayReady,
                 local_loop_ready = localLoopReady,
                 degraded_reasons = degradedReasons,
-                model_id = com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM,
-                runtime_type = if (llamaCppAvailable) "LLAMA_CPP" else if (ncnnAvailable) "NCNN" else null,
+                // model_id is null when the primary model is not yet present on disk, so V2
+                // can distinguish "no model installed" from "mobilevlm installed".
+                model_id = modelId,
+                // runtime_type mirrors active_runtime_type so V2 can use either field; both
+                // are set to the same value so there is no ambiguity between the two.
+                runtime_type = activeRuntimeType,
                 checksum_ok = checksumOk,
                 mobilevlm_present = mobilevlmPresent,
                 mobilevlm_checksum_ok = mobilevlmChecksumOk,

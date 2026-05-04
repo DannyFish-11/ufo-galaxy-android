@@ -96,8 +96,8 @@ class PrRtDeviceStateSnapshotEmissionTest {
             overlay_ready = true,
             local_loop_ready = true,
             degraded_reasons = emptyList(),
-            model_id = "mobilevlm_v2_1.7b",
-            runtime_type = "LLAMA_CPP",
+            model_id = "mobilevlm",
+            runtime_type = "HYBRID",
             checksum_ok = true,
             mobilevlm_present = true,
             mobilevlm_checksum_ok = true,
@@ -194,6 +194,17 @@ class PrRtDeviceStateSnapshotEmissionTest {
     }
 
     @Test
+    fun `runtime_type mirrors active_runtime_type for consistency`() {
+        val snap = fullyReadySnapshot()
+        val json = gson.toJsonTree(snap).asJsonObject
+        assertEquals(
+            "runtime_type must equal active_runtime_type to avoid V2 field ambiguity",
+            json.get("active_runtime_type").asString,
+            json.get("runtime_type").asString
+        )
+    }
+
+    @Test
     fun `model_ready field round-trips through Gson`() {
         val snap = fullyReadySnapshot()
         val json = gson.toJsonTree(snap).asJsonObject
@@ -247,7 +258,7 @@ class PrRtDeviceStateSnapshotEmissionTest {
     fun `model_id field round-trips through Gson`() {
         val snap = fullyReadySnapshot()
         val json = gson.toJsonTree(snap).asJsonObject
-        assertEquals("mobilevlm_v2_1.7b", json.get("model_id").asString)
+        assertEquals("mobilevlm", json.get("model_id").asString)
     }
 
     @Test
@@ -290,6 +301,15 @@ class PrRtDeviceStateSnapshotEmissionTest {
         val snap = pendingDownloadSnapshot()
         val json = gson.toJsonTree(snap).asJsonObject
         assertTrue(json.get("pending_first_download").asBoolean)
+    }
+
+    @Test
+    fun `model_id is null when models are not present`() {
+        val snap = pendingDownloadSnapshot()
+        assertNull(
+            "model_id must be null when mobilevlm is not present on disk",
+            snap.model_id
+        )
     }
 
     @Test
