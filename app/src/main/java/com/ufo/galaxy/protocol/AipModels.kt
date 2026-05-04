@@ -238,7 +238,26 @@ enum class MsgType(val value: String) {
      *  governance paths have a reliable, structured Android-side runtime audit signal.
      *  Payload model: [DeviceAuditReportPayload].
      *  @status pr-68-android — payload defined; wire map consumable by V2 evidence ingestion. */
-    DEVICE_AUDIT_REPORT("device_audit_report");
+    DEVICE_AUDIT_REPORT("device_audit_report"),
+
+    // ── PR-RT: Android runtime-state snapshot uplink ──────────────────────────────────────────
+    // Uplink message that carries a complete structured snapshot of the Android device runtime
+    // state emitted on the canonical Android→V2 control-plane WebSocket path.
+    //
+    // V2 side: absorbed by galaxy_gateway/android/handlers/device_state_snapshot.py into
+    // core.android_device_state_store, and surfaced at:
+    //   GET /api/v1/operator/devices/ecosystem
+    //   GET /api/v1/operator/devices/ecosystem/{device_id}
+
+    /** Uplink: Android emits a complete runtime-state snapshot to V2.
+     *  Carries: native-runtime availability (llama.cpp / NCNN), model readiness, model
+     *  identity, accessibility / overlay readiness, local-loop readiness, offline-queue depth,
+     *  fallback tier, warmup result, and runtime health.
+     *  Emitted after device registration, after reconnect/recovery, and on readiness changes.
+     *  Payload model: [DeviceStateSnapshotPayload].
+     *  V2 absorbed by: core.android_device_state_store.absorb_device_state_snapshot().
+     *  @status pr-rt — payload defined; send path wired in GalaxyConnectionService. */
+    DEVICE_STATE_SNAPSHOT("device_state_snapshot");
 
     companion object {
         /**
@@ -1767,4 +1786,89 @@ data class DeviceAuditReportPayload(
     val health_state_audited: Boolean = false,
     val participant_registered: Boolean = false,
     val wire_map: Map<String, Any> = emptyMap()
+)
+
+// ── PR-RT: Android runtime-state snapshot uplink payload ─────────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.DEVICE_STATE_SNAPSHOT] (PR-RT).
+ *
+ * Carries a complete structured snapshot of the Android device runtime state emitted on the
+ * canonical Android→V2 control-plane WebSocket path. V2 absorbs this payload via
+ * `core.android_device_state_store.absorb_device_state_snapshot()`, which makes the data
+ * available at the V2 operator/ecosystem surfaces.
+ *
+ * Field names use snake_case to match the V2 `_parse_state_snapshot` function's primary
+ * keys (the V2 parser also accepts camelCase aliases).
+ *
+ * @param device_id             Identity of the Android device (from `Build.MANUFACTURER_Build.MODEL`).
+ * @param snapshot_ts           Unix epoch-ms timestamp of snapshot production.
+ *
+ * Native runtime availability:
+ * @param llama_cpp_available   Whether libllama.so loaded successfully ([NativeInferenceLoader.isLlamaCppAvailable]).
+ * @param ncnn_available        Whether libncnn.so loaded successfully ([NativeInferenceLoader.isNcnnAvailable]).
+ * @param active_runtime_type   Current primary inference runtime (`"LLAMA_CPP"`, `"NCNN"`, `"HYBRID"`, `"CENTER"`).
+ *
+ * Readiness state (from [AppSettings] and [LocalLoopReadinessProvider]):
+ * @param model_ready           Whether local model files are present and verified.
+ * @param accessibility_ready   Whether the Accessibility Service is active and ready.
+ * @param overlay_ready         Whether the overlay permission is granted and active.
+ * @param local_loop_ready      Whether the full local-loop pipeline is ready for execution.
+ * @param degraded_reasons      Human-readable list of active degradation reasons, if any.
+ *
+ * Model identity (from [ModelAssetManager]):
+ * @param model_id              Canonical model identifier (e.g. `"mobilevlm_v2_1.7b"`).
+ * @param runtime_type          Model runtime type string (e.g. `"LLAMA_CPP"`).
+ * @param checksum_ok           Whether the model checksum passed verification.
+ * @param mobilevlm_present     Whether the MobileVLM model file exists on device.
+ * @param mobilevlm_checksum_ok Whether the MobileVLM checksum passed verification.
+ * @param seeclick_present      Whether the SeeClick model files (param+bin) exist on device.
+ * @param pending_first_download Whether the device is still awaiting its first model download.
+ *
+ * Local loop config (from [UFOGalaxyApplication.localLoopConfig]):
+ * @param local_loop_config     Active LocalLoopConfig as a map, or null when not yet initialised.
+ *
+ * Runtime health (from [LocalInferenceRuntimeManager.state]):
+ * @param warmup_result         Warmup result string (`"ok"`, `"degraded"`, `"failed"`, `"not_started"`, `"unavailable"`).
+ * @param runtime_health_snapshot Planner + grounding component health map, or null.
+ *
+ * Queue / fallback state:
+ * @param offline_queue_depth   Current depth of the offline task queue ([GalaxyWebSocketClient.queueSize]).
+ * @param current_fallback_tier Current fallback tier string derived from rollout-control state.
+ */
+data class DeviceStateSnapshotPayload(
+    val device_id: String,
+    val snapshot_ts: Long = System.currentTimeMillis(),
+
+    // Native runtime availability
+    val llama_cpp_available: Boolean?,
+    val ncnn_available: Boolean?,
+    val active_runtime_type: String?,
+
+    // Readiness state
+    val model_ready: Boolean?,
+    val accessibility_ready: Boolean?,
+    val overlay_ready: Boolean?,
+    val local_loop_ready: Boolean?,
+    val degraded_reasons: List<String> = emptyList(),
+
+    // Model identity
+    val model_id: String?,
+    val runtime_type: String?,
+    val checksum_ok: Boolean?,
+    val mobilevlm_present: Boolean?,
+    val mobilevlm_checksum_ok: Boolean?,
+    val seeclick_present: Boolean?,
+    val pending_first_download: Boolean?,
+
+    // Local loop config
+    val local_loop_config: Map<String, Any>? = null,
+
+    // Runtime health
+    val warmup_result: String?,
+    val runtime_health_snapshot: Map<String, Any>? = null,
+
+    // Queue / fallback
+    val offline_queue_depth: Int?,
+    val current_fallback_tier: String?
 )
