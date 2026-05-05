@@ -64,6 +64,8 @@ import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
 import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
 import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
 import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
+import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
+import com.ufo.galaxy.runtime.NativeInferenceLoader
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
@@ -354,6 +356,13 @@ class GalaxyConnectionService : Service() {
             override fun onConnected() {
                 Log.d(TAG, "已连接到 Galaxy")
                 updateNotification("已连接")
+                // PR-RT: emit a device_state_snapshot on every WS connect / reconnect so V2
+                // always has a fresh runtime-state projection immediately after the connection
+                // is established.  This covers both the initial connect and reconnect/recovery
+                // paths so V2 never operates on stale snapshot data after a transparent WS drop.
+                serviceScope.launch {
+                    sendDeviceStateSnapshot()
+                }
             }
             
             override fun onDisconnected() {
@@ -605,6 +614,15 @@ class GalaxyConnectionService : Service() {
         // states change.
         serviceScope.launch {
             sendDeviceReadinessReport()
+        }
+
+        // PR-RT: emit the baseline device_state_snapshot so V2's android_device_state_store
+        // has a real runtime-state projection for this device immediately on service start.
+        // The snapshot is built from real current local state sources (NativeInferenceLoader,
+        // LocalInferenceRuntimeManager, AppSettings, LocalLoopReadinessProvider,
+        // ModelAssetManager, offlineQueue, rolloutControlSnapshot).
+        serviceScope.launch {
+            sendDeviceStateSnapshot()
         }
 
         // PR-4 (Android): emit baseline governance / acceptance / strategy reports on service
@@ -2028,6 +2046,233 @@ class GalaxyConnectionService : Service() {
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "device_readiness_report_error",
+                    "error" to (e.message ?: "unknown")
+                )
+            )
+        }
+    }
+
+    // ── PR-RT: Device runtime-state snapshot uplink ───────────────────────────
+
+    /**
+     * Builds a [DeviceStateSnapshotPayload] from the current real local runtime state sources
+     * and transmits it as a [MsgType.DEVICE_STATE_SNAPSHOT] AIP v3 uplink message on the
+     * canonical Android→V2 control-plane WebSocket path.
+     *
+     * All fields are sourced exclusively from real Android local state:
+     *  - [NativeInferenceLoader]: llama.cpp / NCNN native library availability.
+     *  - [UFOGalaxyApplication.localInferenceRuntimeManager]: active runtime type, warmup
+     *    result, and runtime health snapshot.
+     *  - [UFOGalaxyApplication.appSettings]: model/accessibility/overlay readiness flags and
+     *    pending-first-download sentinel.
+     *  - [UFOGalaxyApplication.localLoopReadinessProvider]: full local-loop pipeline readiness
+     *    (six subsystems: model files, planner, grounding, accessibility, screenshot, action
+     *    executor) and degraded-reason list.
+     *  - [UFOGalaxyApplication.modelAssetManager]: per-model file presence and checksum state.
+     *  - [UFOGalaxyApplication.localLoopConfig]: active LocalLoopConfig serialised as a map.
+     *  - [GalaxyWebSocketClient.queueSize]: current offline queue depth.
+     *  - [UFOGalaxyApplication.runtimeController.rolloutControlSnapshot]: fallback tier.
+     *
+     * V2 absorbs this payload via `core.android_device_state_store.absorb_device_state_snapshot()`
+     * and makes it available at:
+     *  - `GET /api/v1/operator/devices/ecosystem`
+     *  - `GET /api/v1/operator/devices/ecosystem/{device_id}`
+     *
+     * Emission points:
+     *  - Service start (baseline) — in [onStartCommand].
+     *  - WS reconnect / recovery — in [wsListener.onConnected].
+     *
+     * Send failure never throws — any error is caught and logged with
+     * [GalaxyLogger.TAG_DEVICE_STATE_SNAPSHOT].
+     */
+    private fun sendDeviceStateSnapshot() {
+        try {
+            val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: run {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] skipped — localDeviceId is blank")
+                return
+            }
+            val settings = UFOGalaxyApplication.appSettings
+
+            // ── Native runtime availability ───────────────────────────────────
+            val llamaCppAvailable = NativeInferenceLoader.isLlamaCppAvailable()
+            val ncnnAvailable = NativeInferenceLoader.isNcnnAvailable()
+
+            // ── Local inference runtime state ─────────────────────────────────
+            val managerState = UFOGalaxyApplication.localInferenceRuntimeManager.state.value
+            val activeRuntimeType: String = when {
+                llamaCppAvailable && ncnnAvailable -> "HYBRID"
+                llamaCppAvailable -> "LLAMA_CPP"
+                ncnnAvailable -> "NCNN"
+                else -> "CENTER"
+            }
+            val warmupResult: String = when (managerState) {
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running -> "ok"
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded -> "degraded"
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.FailedStartup -> "failed"
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed -> "failed"
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Starting -> "not_started"
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Recovering -> "not_started"
+                else -> "unavailable"
+            }
+            val runtimeHealthMap: Map<String, Any>? = when (managerState) {
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running ->
+                    mapOf(
+                        "planner_health" to managerState.snapshot.plannerHealth.name,
+                        "grounding_health" to managerState.snapshot.groundingHealth.name
+                    )
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded ->
+                    mapOf(
+                        "planner_health" to managerState.snapshot.plannerHealth.name,
+                        "grounding_health" to managerState.snapshot.groundingHealth.name,
+                        "reason" to managerState.reason
+                    )
+                else -> null
+            }
+
+            // ── Readiness flags from AppSettings (persisted by ReadinessChecker) ──
+            val modelReady = settings.modelReady
+            val accessibilityReady = settings.accessibilityReady
+            val overlayReady = settings.overlayReady
+
+            // ── Full local-loop readiness (six-subsystem) ─────────────────────
+            val loopReadiness = try {
+                UFOGalaxyApplication.localLoopReadinessProvider.getReadiness()
+            } catch (e: Exception) {
+                Log.d(TAG, "[DEVICE_STATE_SNAPSHOT] could not read loop readiness: ${e.message}")
+                null
+            }
+            val localLoopReady = loopReadiness?.isFullyReady ?: false
+            val degradedReasons: List<String> = loopReadiness?.blockers?.map { it.name } ?: emptyList()
+
+            // ── Model identity from ModelAssetManager ────────────────────────
+            val assetManager = UFOGalaxyApplication.modelAssetManager
+            val modelStatuses = try { assetManager.verifyAll() } catch (e: Exception) { emptyMap() }
+            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM]
+            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK]
+            val mobilevlmPresent = mobilevlmStatus != null &&
+                mobilevlmStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
+            val seeClickPresent = seeClickStatus != null &&
+                seeClickStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
+            // checksum_ok: true only when all known models are READY (checksum-verified) or LOADED.
+            // Returns false when the registry is empty (no models registered), because an
+            // empty registry cannot confirm checksum validity.
+            val checksumOk = modelStatuses.isNotEmpty() && modelStatuses.values.all {
+                it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
+                    it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
+            }
+            // mobilevlm_checksum_ok follows the same READY/LOADED check for the mobilevlm model
+            val mobilevlmChecksumOk = mobilevlmStatus == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
+                mobilevlmStatus == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
+            // model_id: the canonical identifier of the primary on-device model when present;
+            // null when the model is not yet present (awaiting first download or missing).
+            val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM else null
+            // pending_first_download: true when no model has been successfully downloaded
+            // (no model in the registry is READY or LOADED).  This is the canonical condition:
+            // a device awaiting its first download has no READY/LOADED models.
+            val anyModelReady = modelStatuses.values.any {
+                it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.READY ||
+                    it == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
+            }
+            val pendingFirstDownload = !anyModelReady
+
+            // ── Local loop config ─────────────────────────────────────────────
+            val localLoopConfigMap: Map<String, Any>? = try {
+                UFOGalaxyApplication.localLoopConfig?.let { cfg ->
+                    mapOf(
+                        "max_steps" to cfg.maxSteps,
+                        "max_retries_per_step" to cfg.maxRetriesPerStep,
+                        "step_timeout_ms" to cfg.stepTimeoutMs,
+                        "goal_timeout_ms" to cfg.goalTimeoutMs,
+                        "enable_planner_fallback" to cfg.fallback.enablePlannerFallback,
+                        "enable_grounding_fallback" to cfg.fallback.enableGroundingFallback,
+                        "enable_remote_handoff" to cfg.fallback.enableRemoteHandoff
+                    )
+                }
+            } catch (e: Exception) {
+                null
+            }
+
+            // ── Offline queue depth ───────────────────────────────────────────
+            val offlineQueueDepth = webSocketClient.queueSize.value
+
+            // ── Fallback tier derived from rollout-control snapshot ───────────
+            val rolloutSnapshot = UFOGalaxyApplication.runtimeController.rolloutControlSnapshot.value
+            val currentFallbackTier: String = when {
+                !rolloutSnapshot.goalExecutionAllowed -> "no_execution"
+                !rolloutSnapshot.crossDeviceAllowed && !rolloutSnapshot.delegatedExecutionAllowed -> "local_only"
+                !rolloutSnapshot.delegatedExecutionAllowed -> "local_only"
+                rolloutSnapshot.fallbackToLocalAllowed -> "center_delegated_with_local_fallback"
+                else -> "center_delegated"
+            }
+
+            val payload = DeviceStateSnapshotPayload(
+                device_id = deviceId,
+                llama_cpp_available = llamaCppAvailable,
+                ncnn_available = ncnnAvailable,
+                active_runtime_type = activeRuntimeType,
+                model_ready = modelReady,
+                accessibility_ready = accessibilityReady,
+                overlay_ready = overlayReady,
+                local_loop_ready = localLoopReady,
+                degraded_reasons = degradedReasons,
+                // model_id is null when the primary model is not yet present on disk, so V2
+                // can distinguish "no model installed" from "mobilevlm installed".
+                model_id = modelId,
+                // runtime_type mirrors active_runtime_type so V2 can use either field without
+                // ambiguity. When no native runtime is loaded, both fields report "CENTER",
+                // indicating execution routes through the center (V2 remote) rather than
+                // local inference. V2's _parse_state_snapshot accepts "CENTER" as a valid
+                // runtime_type value for this state.
+                runtime_type = activeRuntimeType,
+                checksum_ok = checksumOk,
+                mobilevlm_present = mobilevlmPresent,
+                mobilevlm_checksum_ok = mobilevlmChecksumOk,
+                seeclick_present = seeClickPresent,
+                pending_first_download = pendingFirstDownload,
+                local_loop_config = localLoopConfigMap,
+                warmup_result = warmupResult,
+                runtime_health_snapshot = runtimeHealthMap,
+                offline_queue_depth = offlineQueueDepth,
+                current_fallback_tier = currentFallbackTier
+            )
+
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_STATE_SNAPSHOT,
+                payload = payload,
+                device_id = deviceId,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(deviceId, MsgType.DEVICE_STATE_SNAPSHOT)
+            )
+
+            val sent = webSocketClient.sendJson(gson.toJson(envelope))
+            Log.i(
+                TAG,
+                "[DEVICE_STATE_SNAPSHOT] device_id=$deviceId model_ready=$modelReady " +
+                    "local_loop_ready=$localLoopReady active_runtime=$activeRuntimeType " +
+                    "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier sent=$sent"
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_DEVICE_STATE_SNAPSHOT, mapOf(
+                    "event" to "device_state_snapshot_sent",
+                    "device_id" to deviceId,
+                    "model_ready" to modelReady,
+                    "accessibility_ready" to accessibilityReady,
+                    "overlay_ready" to overlayReady,
+                    "local_loop_ready" to localLoopReady,
+                    "active_runtime_type" to activeRuntimeType,
+                    "warmup_result" to warmupResult,
+                    "offline_queue_depth" to offlineQueueDepth,
+                    "current_fallback_tier" to currentFallbackTier,
+                    "llama_cpp_available" to llamaCppAvailable,
+                    "ncnn_available" to ncnnAvailable,
+                    "sent" to sent
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_STATE_SNAPSHOT] unexpected error: ${e.message}", e)
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_DEVICE_STATE_SNAPSHOT, mapOf(
+                    "event" to "device_state_snapshot_error",
                     "error" to (e.message ?: "unknown")
                 )
             )

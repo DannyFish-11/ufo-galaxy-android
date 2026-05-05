@@ -67,6 +67,7 @@ import kotlin.concurrent.withLock
  * | `GALAXY:DISPATCH:DECISION`   | Android dispatch decision with observability context (PR-G) |
  * | `GALAXY:LIFECYCLE:OBSERVE`   | Device lifecycle event forwarded to V2 observability model (PR-G) |
  * | `GALAXY:RECOVERY:OBSERVE`    | Recovery execution event with cross-system tracing context (PR-G) |
+ * | `GALAXY:DEVICE:STATE:SNAPSHOT` | Android runtime-state snapshot emitted to V2 (PR-RT)       |
  *
  * ## Log-entry format (one JSON object per line)
  * ```json
@@ -657,6 +658,31 @@ object GalaxyLogger {
      * ```
      */
     const val TAG_LIVE_EXECUTION = "GALAXY:LIVE:EXECUTION"
+
+    // ── PR-RT: Device runtime-state snapshot observability tag ───────────────
+
+    /**
+     * PR-RT — Fired when a [com.ufo.galaxy.protocol.DeviceStateSnapshotPayload] is built and
+     * sent to V2 on the canonical Android→V2 control-plane WebSocket path.
+     *
+     * Emitted by [com.ufo.galaxy.service.GalaxyConnectionService.sendDeviceStateSnapshot] at
+     * every real lifecycle point: service start (baseline), WS reconnect/recovery, and any
+     * explicit state refresh requested by runtime transitions.
+     *
+     * Required fields: `event` (one of `"device_state_snapshot_sent"`,
+     * `"device_state_snapshot_send_failed"`, `"device_state_snapshot_error"`),
+     * `device_id`.
+     *
+     * Optional fields: `model_ready`, `accessibility_ready`, `overlay_ready`,
+     * `local_loop_ready`, `active_runtime_type`, `offline_queue_depth`,
+     * `current_fallback_tier`, `warmup_result`, `sent`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:DEVICE:STATE:SNAPSHOT","fields":{"event":"device_state_snapshot_sent","device_id":"Pixel_8","model_ready":true,"active_runtime_type":"LLAMA_CPP","sent":true}}
+     * ```
+     */
+    const val TAG_DEVICE_STATE_SNAPSHOT = "GALAXY:DEVICE:STATE:SNAPSHOT"
 
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
