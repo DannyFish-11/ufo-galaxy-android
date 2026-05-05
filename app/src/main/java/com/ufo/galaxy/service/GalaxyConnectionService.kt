@@ -2462,6 +2462,7 @@ class GalaxyConnectionService : Service() {
                     if (cfg.fallback.enablePlannerFallback) "active" else "disabled"
                 }
             } catch (e: Exception) {
+                Log.d(TAG, "[DEVICE_STATE_SNAPSHOT] could not read planner fallback tier: ${e.message}")
                 null
             }
             val groundingFallbackTier: String? = try {
@@ -2469,6 +2470,7 @@ class GalaxyConnectionService : Service() {
                     if (cfg.fallback.enableGroundingFallback) "active" else "disabled"
                 }
             } catch (e: Exception) {
+                Log.d(TAG, "[DEVICE_STATE_SNAPSHOT] could not read grounding fallback tier: ${e.message}")
                 null
             }
 
