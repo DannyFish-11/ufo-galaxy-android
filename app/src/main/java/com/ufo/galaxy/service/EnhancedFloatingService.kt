@@ -75,6 +75,21 @@ class EnhancedFloatingService : Service() {
         // 状态
         var isExpanded = false
             private set
+
+        /**
+         * Non-null while [EnhancedFloatingService] is running (between [onCreate] and
+         * [onDestroy]).  Follows the same pattern as
+         * [com.ufo.galaxy.service.HardwareKeyListener.instance].
+         *
+         * Consumers may read this field to determine whether the local interaction surface
+         * (floating island overlay) is currently active without requiring an Android Context
+         * or a bound Service reference.
+         *
+         * Cleared to `null` in [onDestroy] so the reference cannot outlive the service.
+         */
+        @Volatile
+        var instance: EnhancedFloatingService? = null
+            internal set
     }
     
     private lateinit var windowManager: WindowManager
@@ -168,6 +183,7 @@ class EnhancedFloatingService : Service() {
     
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Log.i(TAG, "增强版悬浮窗服务创建")
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -237,6 +253,7 @@ class EnhancedFloatingService : Service() {
     
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         Log.i(TAG, "增强版悬浮窗服务销毁")
         serviceScope.cancel()
         unregisterReceiver(wakeUpReceiver)

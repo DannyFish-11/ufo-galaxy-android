@@ -405,6 +405,32 @@ class RuntimeController(
         _lifecycleTransitionEvents.asSharedFlow()
 
     /**
+     * PR-8 (Android) — Last observed app-level lifecycle transition.
+     *
+     * Tracks the most recent [AndroidAppLifecycleTransition] delivered to
+     * [onAppLifecycleTransition].  This is the real Android carrier foreground/background
+     * state — backed exclusively by the existing [onAppLifecycleTransition] dispatch path.
+     *
+     * `null` when [onAppLifecycleTransition] has not yet been called in the current process
+     * lifetime (i.e. before the first Activity/Service lifecycle event).  No fake placeholder
+     * value is ever set; the field is populated only when a real lifecycle transition occurs.
+     *
+     * Consumed by [sendDeviceStateSnapshot][com.ufo.galaxy.service.GalaxyConnectionService.sendDeviceStateSnapshot]
+     * to emit `app_lifecycle_state` as a manifestation/carrier presence hint in the uplink
+     * [com.ufo.galaxy.protocol.DeviceStateSnapshotPayload].
+     */
+    private val _lastAppLifecycleTransition =
+        MutableStateFlow<AndroidAppLifecycleTransition?>(null)
+
+    /**
+     * Observable last app-level lifecycle transition (PR-8 Android).
+     *
+     * @see _lastAppLifecycleTransition
+     */
+    val lastAppLifecycleTransition: StateFlow<AndroidAppLifecycleTransition?> =
+        _lastAppLifecycleTransition.asStateFlow()
+
+    /**
      * PR-37 — Concurrency guard for [start].
      *
      * Prevents two concurrent callers from both passing the Active-guard in [start] and
@@ -1575,6 +1601,8 @@ class RuntimeController(
             )
         )
         Log.d(TAG, "[RUNTIME] App lifecycle transition: ${transition.wireValue} (runtime=$runtimeState)")
+        // PR-8 Android: record the last observed lifecycle transition for carrier presence hints.
+        _lastAppLifecycleTransition.value = transition
         when (transition) {
             AndroidAppLifecycleTransition.FOREGROUND ->
                 // Restore WS if cross-device is enabled; no-op if already Active.
