@@ -380,6 +380,29 @@ class RuntimeController(
         _reconnectRecoveryState.asStateFlow()
 
     /**
+     * PR-8 (Android companion) — Whether the app is currently in the foreground.
+     *
+     * Backed exclusively by [onAppLifecycleTransition]: set to `true` on
+     * [AndroidAppLifecycleTransition.FOREGROUND] and to `false` on
+     * [AndroidAppLifecycleTransition.BACKGROUND].  Starts as `false` (unknown until
+     * the first explicit lifecycle transition is delivered).
+     *
+     * This is a **carrier presence hint**: when `true`, Android is visibly present to
+     * the user and can act as an active interaction surface.  When `false`, Android is
+     * a background runtime carrier — still capable of accepting delegated tasks but not
+     * directly visible.
+     *
+     * No fake value is ever emitted: `false` represents both "backgrounded" and "not
+     * yet observed", which is the correct safe default for an unknown foreground state.
+     *
+     * V2 observes this field through [DeviceStateSnapshotPayload.carrier_foreground_visible]
+     * and [DeviceExecutionEventPayload.carrier_foreground_visible] on the existing
+     * Android→V2 uplink paths.
+     */
+    private val _appForegroundVisible = MutableStateFlow(false)
+    val appForegroundVisible: StateFlow<Boolean> = _appForegroundVisible.asStateFlow()
+
+    /**
      * PR-37 — Observable runtime lifecycle state transition event stream.
      *
      * Emits a [RuntimeLifecycleTransitionEvent] for every state change driven by
@@ -1576,12 +1599,18 @@ class RuntimeController(
         )
         Log.d(TAG, "[RUNTIME] App lifecycle transition: ${transition.wireValue} (runtime=$runtimeState)")
         when (transition) {
-            AndroidAppLifecycleTransition.FOREGROUND ->
+            AndroidAppLifecycleTransition.FOREGROUND -> {
+                // PR-8: mark carrier as foreground-visible (interaction surface active).
+                _appForegroundVisible.value = true
                 // Restore WS if cross-device is enabled; no-op if already Active.
                 connectIfEnabled()
-            AndroidAppLifecycleTransition.BACKGROUND ->
+            }
+            AndroidAppLifecycleTransition.BACKGROUND -> {
+                // PR-8: carrier is no longer foreground-visible; background execution continues.
+                _appForegroundVisible.value = false
                 // Intentional no-op: preserve WS connection for background execution.
                 Log.d(TAG, "[RUNTIME] Background: WS connection preserved for background execution")
+            }
             AndroidAppLifecycleTransition.PROCESS_RECREATED ->
                 // New process: restore from persisted settings; new attachment era.
                 connectIfEnabled()
