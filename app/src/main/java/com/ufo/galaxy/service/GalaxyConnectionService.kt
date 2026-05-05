@@ -2632,7 +2632,7 @@ class GalaxyConnectionService : Service() {
                     "ncnn_available" to ncnnAvailable,
                     // PR-8 Android: carrier/manifestation presence hints
                     "carrier_runtime_state" to carrierRuntimeState,
-                    "app_lifecycle_state" to (appLifecycleState ?: ""),
+                    "app_lifecycle_state" to appLifecycleState,
                     "local_interaction_surface_active" to localInteractionSurfaceActive,
                     "sent" to sent
                 )
