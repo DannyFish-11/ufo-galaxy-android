@@ -445,6 +445,27 @@ class GalaxyWebSocketClient(
     internal fun getRuntimeAttachmentSessionId(): String? = runtimeAttachmentSessionId
 
     /**
+     * Returns the current [durableSessionId] held by this client (PR-1 / PR-G).
+     *
+     * Exposed for testing so assertions can verify that [RuntimeController] propagated the
+     * correct durable session identity to the WS client before the reconnect handshake.
+     * This value is included in `device_register` and `capability_report` messages as the
+     * `durable_session_id` wire field when non-null.
+     */
+    internal fun getDurableSessionId(): String? = durableSessionId
+
+    /**
+     * Returns the current [sessionContinuityEpoch] held by this client (PR-1 / PR-G).
+     *
+     * Exposed for testing so assertions can verify that [RuntimeController] propagated the
+     * correct continuity epoch to the WS client after each reconnect.  `0` at first attach;
+     * increments by one per transparent reconnect within the same activation era.
+     * This value is included in `device_register` and `capability_report` messages as the
+     * `session_continuity_epoch` wire field when [durableSessionId] is non-null.
+     */
+    internal fun getSessionContinuityEpoch(): Int? = sessionContinuityEpoch
+
+    /**
      * Additional action capabilities reported when models are loaded.
      * Update via [setModelCapabilities] when planner/grounding services become ready.
      */
