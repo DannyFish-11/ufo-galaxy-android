@@ -571,8 +571,11 @@ class Pr2DeviceExecutionEventEmissionTest {
     // ── Fallback transition event shape ───────────────────────────────────────
 
     @Test fun `fallback event carries phase fallback_transition and blocking_reason`() {
+        // flow_id can differ from task_id when the fallback transitions from a delegated
+        // flow (identified by a flow-level ID) back to local execution for the originating
+        // task.  Using distinct values here demonstrates that flexibility.
         val p = DeviceExecutionEventPayload(
-            flow_id = "task-1",
+            flow_id = "flow-delegated-1",
             task_id = "task-1",
             phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
             blocking_reason = "bridge_handoff_failed"
@@ -580,6 +583,8 @@ class Pr2DeviceExecutionEventEmissionTest {
         assertEquals(DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION, p.phase)
         assertEquals("bridge_handoff_failed", p.blocking_reason)
         assertFalse(p.is_blocking)
+        // flow_id and task_id are independent identifiers
+        assertNotEquals(p.flow_id, p.task_id)
     }
 
     // ── Takeover milestone event shape ────────────────────────────────────────
