@@ -830,6 +830,8 @@ class GalaxyConnectionService : Service() {
                     errorContext = handoffResult.error ?: "unknown handoff failure"
                 )
                 // ── PR-2: emit fallback_transition when delegated path falls back ─────
+                // PR-6: capture session identity at fallback emission point.
+                val _durFallback = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
                 deviceExecutionEventSink.onEvent(
                     DeviceExecutionEventPayload(
                         flow_id = taskId,
@@ -837,7 +839,11 @@ class GalaxyConnectionService : Service() {
                         phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
                         blocking_reason = handoffResult.error ?: "bridge_handoff_failed",
                         device_id = localDeviceId,
-                        source_component = "GalaxyConnectionService.handleTaskAssign"
+                        source_component = "GalaxyConnectionService.handleTaskAssign",
+                        durable_session_id = _durFallback?.durableSessionId,
+                        session_continuity_epoch = _durFallback?.sessionContinuityEpoch,
+                        runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                        attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                     )
                 )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
@@ -905,13 +911,19 @@ class GalaxyConnectionService : Service() {
             )
 
             // ── PR-2 (Android): emit execution_started before LocalGoalExecutor ─────
+            // PR-6: capture session identity at event emission.
+            val _durLocalStart = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             deviceExecutionEventSink.onEvent(
                 DeviceExecutionEventPayload(
                     flow_id = taskId,
                     task_id = taskId,
                     phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
                     device_id = localDeviceId,
-                    source_component = "GalaxyConnectionService.executeLocalTaskAssign"
+                    source_component = "GalaxyConnectionService.executeLocalTaskAssign",
+                    durable_session_id = _durLocalStart?.durableSessionId,
+                    session_continuity_epoch = _durLocalStart?.sessionContinuityEpoch,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                 )
             )
 
@@ -968,6 +980,8 @@ class GalaxyConnectionService : Service() {
             )
             sendGoalResult(errorResult, traceId, routeMode)
             // ── PR-2: emit failed event on exception ─────────────────────────────────
+            // PR-6: capture session identity at error emission.
+            val _durLocalFail = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             deviceExecutionEventSink.onEvent(
                 DeviceExecutionEventPayload(
                     flow_id = taskId,
@@ -976,7 +990,11 @@ class GalaxyConnectionService : Service() {
                     is_blocking = true,
                     blocking_reason = err.message ?: "execution_exception",
                     device_id = localDeviceId,
-                    source_component = "GalaxyConnectionService.executeLocalTaskAssign"
+                    source_component = "GalaxyConnectionService.executeLocalTaskAssign",
+                    durable_session_id = _durLocalFail?.durableSessionId,
+                    session_continuity_epoch = _durLocalFail?.sessionContinuityEpoch,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                 )
             )
         } finally {
@@ -1074,13 +1092,19 @@ class GalaxyConnectionService : Service() {
         var finalResult: GoalResultPayload? = null
 
         // ── PR-2 (Android): emit execution_started before entering the pipeline ──────
+        // PR-6: capture session identity at event emission.
+        val _durGoalStart = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
         deviceExecutionEventSink.onEvent(
             DeviceExecutionEventPayload(
                 flow_id = taskId,
                 task_id = taskId,
                 phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
                 device_id = localDeviceId,
-                source_component = "GalaxyConnectionService.handleGoalExecution"
+                source_component = "GalaxyConnectionService.handleGoalExecution",
+                durable_session_id = _durGoalStart?.durableSessionId,
+                session_continuity_epoch = _durGoalStart?.sessionContinuityEpoch,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
             )
         )
 
@@ -1121,6 +1145,8 @@ class GalaxyConnectionService : Service() {
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
             // ── PR-2: emit failed event on timeout ────────────────────────────────────
+            // PR-6: capture session identity at timeout emission.
+            val _durGoalTimeout = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             deviceExecutionEventSink.onEvent(
                 DeviceExecutionEventPayload(
                     flow_id = taskId,
@@ -1129,7 +1155,11 @@ class GalaxyConnectionService : Service() {
                     is_blocking = true,
                     blocking_reason = "timeout_ms=$timeoutMs",
                     device_id = localDeviceId,
-                    source_component = "GalaxyConnectionService.handleGoalExecution"
+                    source_component = "GalaxyConnectionService.handleGoalExecution",
+                    durable_session_id = _durGoalTimeout?.durableSessionId,
+                    session_continuity_epoch = _durGoalTimeout?.sessionContinuityEpoch,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                 )
             )
         } finally {
@@ -1228,13 +1258,19 @@ class GalaxyConnectionService : Service() {
         var finalResult: GoalResultPayload? = null
 
         // ── PR-2 (Android): emit execution_started before parallel pipeline ───────
+        // PR-6: capture session identity at event emission.
+        val _durParallelStart = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
         deviceExecutionEventSink.onEvent(
             DeviceExecutionEventPayload(
                 flow_id = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId,
                 task_id = taskId,
                 phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
                 device_id = localDeviceId,
-                source_component = "GalaxyConnectionService.handleParallelSubtask"
+                source_component = "GalaxyConnectionService.handleParallelSubtask",
+                durable_session_id = _durParallelStart?.durableSessionId,
+                session_continuity_epoch = _durParallelStart?.sessionContinuityEpoch,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
             )
         )
 
@@ -1314,6 +1350,8 @@ class GalaxyConnectionService : Service() {
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
             // ── PR-2: emit failed event on parallel subtask timeout ───────────────────
+            // PR-6: capture session identity at timeout emission.
+            val _durParallelTimeout = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             deviceExecutionEventSink.onEvent(
                 DeviceExecutionEventPayload(
                     flow_id = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId,
@@ -1322,7 +1360,11 @@ class GalaxyConnectionService : Service() {
                     is_blocking = true,
                     blocking_reason = "timeout_ms=$timeoutMs",
                     device_id = localDeviceId,
-                    source_component = "GalaxyConnectionService.handleParallelSubtask"
+                    source_component = "GalaxyConnectionService.handleParallelSubtask",
+                    durable_session_id = _durParallelTimeout?.durableSessionId,
+                    session_continuity_epoch = _durParallelTimeout?.sessionContinuityEpoch,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                 )
             )
         } finally {
@@ -1634,13 +1676,19 @@ class GalaxyConnectionService : Service() {
             )
 
             // ── PR-2: emit execution_started before handoff_v2 pipeline ─────────────
+            // PR-6: capture session identity at event emission.
+            val _durHandoffStart = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             deviceExecutionEventSink.onEvent(
                 DeviceExecutionEventPayload(
                     flow_id = taskId,
                     task_id = taskId,
                     phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
                     device_id = localDeviceId,
-                    source_component = "GalaxyConnectionService.handleHandoffEnvelopeV2"
+                    source_component = "GalaxyConnectionService.handleHandoffEnvelopeV2",
+                    durable_session_id = _durHandoffStart?.durableSessionId,
+                    session_continuity_epoch = _durHandoffStart?.sessionContinuityEpoch,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                 )
             )
 
@@ -2127,6 +2175,10 @@ class GalaxyConnectionService : Service() {
             }
         }
 
+        // PR-6: capture session identity at terminal event build time so V2 can correlate
+        // this execution outcome with the ongoing session axis.
+        val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
+
         return DeviceExecutionEventPayload(
             flow_id = flowId,
             task_id = taskId,
@@ -2136,7 +2188,12 @@ class GalaxyConnectionService : Service() {
             blocking_reason = blockingReason,
             stagnation_detected = stagnationDetected,
             device_id = localDeviceId,
-            source_component = source
+            source_component = source,
+            // PR-6: session identity continuity fields — null when no durable era is active.
+            durable_session_id = durableRecord?.durableSessionId,
+            session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
         )
     }
 
@@ -2474,6 +2531,13 @@ class GalaxyConnectionService : Service() {
                 null
             }
 
+            // ── PR-6: Session/invocation identity continuity fields ───────────────────────
+            // Read atomically so the snapshot carries a consistent view of session identity.
+            // All four values are null when the backing Android state is not yet active —
+            // no fake placeholder values are emitted.
+            val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
+            val snapshotAttachedSessionId = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2504,7 +2568,14 @@ class GalaxyConnectionService : Service() {
                 offline_queue_depth = offlineQueueDepth,
                 current_fallback_tier = currentFallbackTier,
                 planner_fallback_tier = plannerFallbackTier,
-                grounding_fallback_tier = groundingFallbackTier
+                grounding_fallback_tier = groundingFallbackTier,
+                // PR-6: propagate session identity so V2 can correlate this snapshot with the
+                // ongoing session axis.  All four fields are null when no durable era or attached
+                // session is currently active — null is the correct value, not a placeholder.
+                durable_session_id = durableRecord?.durableSessionId,
+                session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                attached_session_id = snapshotAttachedSessionId
             )
 
             val envelope = AipMessage(
@@ -3471,13 +3542,19 @@ class GalaxyConnectionService : Service() {
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
             // ── PR-2: emit takeover_milestone at execution start ──────────────────────
+            // PR-6: capture session identity at milestone emission.
+            val _durTakeover = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             deviceExecutionEventSink.onEvent(
                 DeviceExecutionEventPayload(
                     flow_id = envelope.takeover_id,
                     task_id = envelope.task_id,
                     phase = DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
                     device_id = localDeviceId,
-                    source_component = "GalaxyConnectionService.handleTakeoverRequest"
+                    source_component = "GalaxyConnectionService.handleTakeoverRequest",
+                    durable_session_id = _durTakeover?.durableSessionId,
+                    session_continuity_epoch = _durTakeover?.sessionContinuityEpoch,
+                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                 )
             )
 
@@ -3527,6 +3604,8 @@ class GalaxyConnectionService : Service() {
                                 errorContext = outcome.error
                             )
                             // ── PR-2: emit failed event on takeover execution failure ────
+                            // PR-6: capture session identity at failure emission.
+                            val _durTakeoverFail = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
                             val failurePhase = when (outcome.ledger.lastResult?.resultKind) {
                                 DelegatedExecutionSignal.ResultKind.CANCELLED ->
                                     DeviceExecutionEventPayload.PHASE_CANCELLED
@@ -3540,7 +3619,11 @@ class GalaxyConnectionService : Service() {
                                     is_blocking = failurePhase == DeviceExecutionEventPayload.PHASE_FAILED,
                                     blocking_reason = outcome.error,
                                     device_id = localDeviceId,
-                                    source_component = "GalaxyConnectionService.handleTakeoverRequest"
+                                    source_component = "GalaxyConnectionService.handleTakeoverRequest",
+                                    durable_session_id = _durTakeoverFail?.durableSessionId,
+                                    session_continuity_epoch = _durTakeoverFail?.sessionContinuityEpoch,
+                                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —
