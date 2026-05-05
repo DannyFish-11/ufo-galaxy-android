@@ -39,6 +39,7 @@ import com.ufo.galaxy.runtime.HybridParticipantCapability
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.runtime.toOutboundPayload
+import com.ufo.galaxy.runtime.wireLabel
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
@@ -78,6 +79,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -666,6 +668,22 @@ class GalaxyConnectionService : Service() {
             sendDeviceStateSnapshot()
         }
 
+        // PR-10: Re-emit a device_state_snapshot whenever the carrier's foreground-visibility
+        // state changes (FOREGROUND / BACKGROUND lifecycle transitions) so V2's
+        // android_device_state_store always holds a fresh carrier_foreground_visible value
+        // and is not left with stale foreground state after the app enters the background.
+        //
+        // drop(1) avoids emitting a duplicate snapshot at service start (the baseline snapshot
+        // above already captures the initial value).  The send is a no-op when the WS is
+        // not connected (sendJson drops it) so this path is safe to trigger unconditionally.
+        serviceScope.launch {
+            UFOGalaxyApplication.runtimeController.appForegroundVisible
+                .drop(1)
+                .collect {
+                    sendDeviceStateSnapshot()
+                }
+        }
+
         // PR-4 (Android): emit baseline governance / acceptance / strategy reports on service
         // start so V2 post-graduation governance, graduation gate, and program strategy paths
         // each have a structured Android-side baseline artifact immediately on connection.
@@ -847,7 +865,9 @@ class GalaxyConnectionService : Service() {
                         // PR-8: carrier manifestation/presence hints at fallback point.
                         carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                         interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                            UFOGalaxyApplication.appSettings.overlayReady
+                            UFOGalaxyApplication.appSettings.overlayReady,
+                        // PR-10: carrier runtime state at fallback point.
+                        carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                     )
                 )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
@@ -931,7 +951,9 @@ class GalaxyConnectionService : Service() {
                     // PR-8: carrier manifestation/presence hints at local-start emission.
                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                        UFOGalaxyApplication.appSettings.overlayReady
+                        UFOGalaxyApplication.appSettings.overlayReady,
+                    // PR-10: carrier runtime state at local-start emission.
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                 )
             )
 
@@ -1006,7 +1028,9 @@ class GalaxyConnectionService : Service() {
                     // PR-8: carrier manifestation/presence hints at exception point.
                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                        UFOGalaxyApplication.appSettings.overlayReady
+                        UFOGalaxyApplication.appSettings.overlayReady,
+                    // PR-10: carrier runtime state at exception point.
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                 )
             )
         } finally {
@@ -1120,7 +1144,9 @@ class GalaxyConnectionService : Service() {
                 // PR-8: carrier manifestation/presence hints at goal-start emission.
                 carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                 interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                    UFOGalaxyApplication.appSettings.overlayReady
+                    UFOGalaxyApplication.appSettings.overlayReady,
+                // PR-10: carrier runtime state at goal-start emission.
+                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
             )
         )
 
@@ -1179,7 +1205,9 @@ class GalaxyConnectionService : Service() {
                     // PR-8: carrier manifestation/presence hints at timeout point.
                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                        UFOGalaxyApplication.appSettings.overlayReady
+                        UFOGalaxyApplication.appSettings.overlayReady,
+                    // PR-10: carrier runtime state at timeout point.
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                 )
             )
         } finally {
@@ -1294,7 +1322,9 @@ class GalaxyConnectionService : Service() {
                 // PR-8: carrier manifestation/presence hints at parallel-start emission.
                 carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                 interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                    UFOGalaxyApplication.appSettings.overlayReady
+                    UFOGalaxyApplication.appSettings.overlayReady,
+                // PR-10: carrier runtime state at parallel-start emission.
+                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
             )
         )
 
@@ -1392,7 +1422,9 @@ class GalaxyConnectionService : Service() {
                     // PR-8: carrier manifestation/presence hints at parallel timeout.
                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                        UFOGalaxyApplication.appSettings.overlayReady
+                        UFOGalaxyApplication.appSettings.overlayReady,
+                    // PR-10: carrier runtime state at parallel timeout.
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                 )
             )
         } finally {
@@ -1720,7 +1752,9 @@ class GalaxyConnectionService : Service() {
                     // PR-8: carrier manifestation/presence hints at handoff-start emission.
                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                        UFOGalaxyApplication.appSettings.overlayReady
+                        UFOGalaxyApplication.appSettings.overlayReady,
+                    // PR-10: carrier runtime state at handoff-start emission.
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                 )
             )
 
@@ -2216,6 +2250,9 @@ class GalaxyConnectionService : Service() {
         val interactionSurfaceReady = UFOGalaxyApplication.appSettings.accessibilityReady &&
             UFOGalaxyApplication.appSettings.overlayReady
 
+        // PR-10: capture carrier runtime state for coherent event-snapshot alignment.
+        val carrierRuntimeState = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+
         return DeviceExecutionEventPayload(
             flow_id = flowId,
             task_id = taskId,
@@ -2233,7 +2270,9 @@ class GalaxyConnectionService : Service() {
             attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
             // PR-8: carrier manifestation/presence hints — backed by real Android state.
             carrier_foreground_visible = carrierForegroundVisible,
-            interaction_surface_ready = interactionSurfaceReady
+            interaction_surface_ready = interactionSurfaceReady,
+            // PR-10: carrier runtime state for coherent carrier status in every event.
+            carrier_runtime_state = carrierRuntimeState
         )
     }
 
@@ -2587,6 +2626,16 @@ class GalaxyConnectionService : Service() {
             // TakeoverEligibilityAssessor.assess().
             val interactionSurfaceReady = accessibilityReady == true && overlayReady == true
 
+            // ── PR-10: Final carrier consolidation — cross-cutting carrier state fields ─────
+            // carrier_runtime_state: always populated from the real RuntimeController state so
+            // V2 can distinguish snapshots emitted from an Active carrier from those emitted
+            // during local-only or startup state.
+            // reconnect_recovery_state: always populated so V2 can contextualise snapshots
+            // emitted during a reconnect recovery cycle.
+            val carrierRuntimeState = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+            val reconnectRecoveryState =
+                UFOGalaxyApplication.runtimeController.reconnectRecoveryState.value.wireValue
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2627,7 +2676,10 @@ class GalaxyConnectionService : Service() {
                 attached_session_id = snapshotAttachedSessionId,
                 // PR-8: carrier manifestation/presence hints backed by real Android state.
                 carrier_foreground_visible = carrierForegroundVisible,
-                interaction_surface_ready = interactionSurfaceReady
+                interaction_surface_ready = interactionSurfaceReady,
+                // PR-10: cross-cutting carrier state backed by real RuntimeController state.
+                carrier_runtime_state = carrierRuntimeState,
+                reconnect_recovery_state = reconnectRecoveryState
             )
 
             val envelope = AipMessage(
@@ -3610,7 +3662,9 @@ class GalaxyConnectionService : Service() {
                     // PR-8: carrier manifestation/presence hints at takeover start.
                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                        UFOGalaxyApplication.appSettings.overlayReady
+                        UFOGalaxyApplication.appSettings.overlayReady,
+                    // PR-10: carrier runtime state at takeover start.
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                 )
             )
 
@@ -3683,7 +3737,9 @@ class GalaxyConnectionService : Service() {
                                     // PR-8: carrier manifestation/presence hints at takeover failure.
                                     carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
                                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                                        UFOGalaxyApplication.appSettings.overlayReady
+                                        UFOGalaxyApplication.appSettings.overlayReady,
+                                    // PR-10: carrier runtime state at takeover failure.
+                                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —
