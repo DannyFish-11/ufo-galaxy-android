@@ -65,6 +65,8 @@ import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
 import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
 import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
+import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import com.ufo.galaxy.runtime.DeviceExecutionEventSink
 import com.ufo.galaxy.runtime.NativeInferenceLoader
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
@@ -266,6 +268,45 @@ class GalaxyConnectionService : Service() {
     private val delegatedSignalSink = DelegatedExecutionSignalSink { signal ->
         GalaxyLogger.log(TAG, signal.toMetadataMap())
         sendDelegatedExecutionSignal(signal)
+    }
+
+    // ── PR-2 (Android): Device execution-event sink ───────────────────────────
+
+    /**
+     * Sink for real Android execution-phase events on the canonical Android→V2 path (PR-2).
+     *
+     * Receives [DeviceExecutionEventPayload] events from the execution lifecycle entry points
+     * in this service ([handleGoalExecution], [executeLocalTaskAssign], [handleParallelSubtask],
+     * [handleHandoffEnvelopeV2], [handleTakeoverRequest]), logs each event via
+     * [GalaxyLogger.TAG_DEVICE_EXECUTION_EVENT], and transmits it as a
+     * [MsgType.DEVICE_EXECUTION_EVENT] AIP v3 uplink message via [webSocketClient].
+     *
+     * Send failure **never interrupts the execution lifecycle** — any error is caught
+     * inside [webSocketClient.sendDeviceExecutionEvent] and logged for diagnostics.
+     */
+    private val deviceExecutionEventSink = DeviceExecutionEventSink { payload ->
+        try {
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_DEVICE_EXECUTION_EVENT,
+                mapOf(
+                    "event" to "device_execution_event_sent",
+                    "device_id" to localDeviceId,
+                    "task_id" to payload.task_id,
+                    "phase" to payload.phase,
+                    "flow_id" to payload.flow_id,
+                    "step_index" to payload.step_index,
+                    "is_blocking" to payload.is_blocking,
+                    "blocking_reason" to payload.blocking_reason,
+                    "stagnation_detected" to payload.stagnation_detected,
+                    "fallback_tier" to (payload.fallback_tier ?: ""),
+                    "event_id" to payload.event_id,
+                    "source_component" to payload.source_component
+                )
+            )
+            webSocketClient.sendDeviceExecutionEvent(payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_EXEC_EVENT] sink error task_id=${payload.task_id} phase=${payload.phase}: ${e.message}", e)
+        }
     }
 
     /**
@@ -788,6 +829,17 @@ class GalaxyConnectionService : Service() {
                     errorType = "bridge_handoff_failed",
                     errorContext = handoffResult.error ?: "unknown handoff failure"
                 )
+                // ── PR-2: emit fallback_transition when delegated path falls back ─────
+                deviceExecutionEventSink.onEvent(
+                    DeviceExecutionEventPayload(
+                        flow_id = taskId,
+                        task_id = taskId,
+                        phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
+                        blocking_reason = handoffResult.error ?: "bridge_handoff_failed",
+                        device_id = localDeviceId,
+                        source_component = "GalaxyConnectionService.handleTaskAssign"
+                    )
+                )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
             }
         } else {
@@ -851,6 +903,18 @@ class GalaxyConnectionService : Service() {
                 // ── PR-D: propagate V2 source dispatch metadata into goal execution ──
                 execution_context = payload.execution_context
             )
+
+            // ── PR-2 (Android): emit execution_started before LocalGoalExecutor ─────
+            deviceExecutionEventSink.onEvent(
+                DeviceExecutionEventPayload(
+                    flow_id = taskId,
+                    task_id = taskId,
+                    phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+                    device_id = localDeviceId,
+                    source_component = "GalaxyConnectionService.executeLocalTaskAssign"
+                )
+            )
+
             val rawResult = UFOGalaxyApplication.localGoalExecutor.executeGoal(goalPayload)
             goalResult = rawResult.copy(
                 correlation_id = taskId,
@@ -871,6 +935,15 @@ class GalaxyConnectionService : Service() {
                     "trace_id=$traceId route_mode=$routeMode"
             )
             updateNotification("任务 ${taskId.take(8)}: ${goalResult.status}")
+            // ── PR-2: emit terminal execution event from task_assign result ──────────
+            deviceExecutionEventSink.onEvent(
+                buildTerminalExecutionEvent(
+                    taskId = taskId,
+                    result = goalResult,
+                    stepIndex = goalResult.steps.size - 1,
+                    source = "GalaxyConnectionService.executeLocalTaskAssign"
+                )
+            )
         } catch (err: Exception) {
             Log.e(TAG, "executeLocalTaskAssign 执行失败 task_id=$taskId", err)
             emitRuntimeDiagnostics(
@@ -894,6 +967,18 @@ class GalaxyConnectionService : Service() {
                 source_runtime_posture = payload.source_runtime_posture
             )
             sendGoalResult(errorResult, traceId, routeMode)
+            // ── PR-2: emit failed event on exception ─────────────────────────────────
+            deviceExecutionEventSink.onEvent(
+                DeviceExecutionEventPayload(
+                    flow_id = taskId,
+                    task_id = taskId,
+                    phase = DeviceExecutionEventPayload.PHASE_FAILED,
+                    is_blocking = true,
+                    blocking_reason = err.message ?: "execution_exception",
+                    device_id = localDeviceId,
+                    source_component = "GalaxyConnectionService.executeLocalTaskAssign"
+                )
+            )
         } finally {
             // Unblock local loop: always called even if edgeExecutor throws.
             UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
@@ -987,6 +1072,18 @@ class GalaxyConnectionService : Service() {
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
+
+        // ── PR-2 (Android): emit execution_started before entering the pipeline ──────
+        deviceExecutionEventSink.onEvent(
+            DeviceExecutionEventPayload(
+                flow_id = taskId,
+                task_id = taskId,
+                phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+                device_id = localDeviceId,
+                source_component = "GalaxyConnectionService.handleGoalExecution"
+            )
+        )
+
         try {
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
@@ -998,6 +1095,15 @@ class GalaxyConnectionService : Service() {
                 sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
                 finalResult = enriched
                 Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${enriched.status} latency=${enriched.latency_ms}ms trace_id=$traceId")
+                // ── PR-2: emit terminal execution event from goal_execution result ─────
+                deviceExecutionEventSink.onEvent(
+                    buildTerminalExecutionEvent(
+                        taskId = taskId,
+                        result = enriched,
+                        stepIndex = enriched.steps.size - 1,
+                        source = "GalaxyConnectionService.handleGoalExecution"
+                    )
+                )
             }
         } catch (e: TimeoutCancellationException) {
             GalaxyLogger.log(
@@ -1014,6 +1120,18 @@ class GalaxyConnectionService : Service() {
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
+            // ── PR-2: emit failed event on timeout ────────────────────────────────────
+            deviceExecutionEventSink.onEvent(
+                DeviceExecutionEventPayload(
+                    flow_id = taskId,
+                    task_id = taskId,
+                    phase = DeviceExecutionEventPayload.PHASE_FAILED,
+                    is_blocking = true,
+                    blocking_reason = "timeout_ms=$timeoutMs",
+                    device_id = localDeviceId,
+                    source_component = "GalaxyConnectionService.handleGoalExecution"
+                )
+            )
         } finally {
             taskCancelRegistry.deregister(taskId)
             // Unblock local loop.
@@ -1108,6 +1226,18 @@ class GalaxyConnectionService : Service() {
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
+
+        // ── PR-2 (Android): emit execution_started before parallel pipeline ───────
+        deviceExecutionEventSink.onEvent(
+            DeviceExecutionEventPayload(
+                flow_id = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId,
+                task_id = taskId,
+                phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+                device_id = localDeviceId,
+                source_component = "GalaxyConnectionService.handleParallelSubtask"
+            )
+        )
+
         try {
             if (meshId != null) {
                 meshJoined = webSocketClient.sendMeshJoin(
@@ -1149,6 +1279,16 @@ class GalaxyConnectionService : Service() {
                         latencyMs = enriched.latency_ms ?: 0L
                     )
                 }
+                // ── PR-2: emit terminal execution event from parallel result ──────────
+                deviceExecutionEventSink.onEvent(
+                    buildTerminalExecutionEvent(
+                        taskId = taskId,
+                        result = enriched,
+                        stepIndex = enriched.steps.size - 1,
+                        source = "GalaxyConnectionService.handleParallelSubtask",
+                        flowId = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId
+                    )
+                )
             }
         } catch (e: TimeoutCancellationException) {
             GalaxyLogger.log(
@@ -1173,6 +1313,18 @@ class GalaxyConnectionService : Service() {
             val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
+            // ── PR-2: emit failed event on parallel subtask timeout ───────────────────
+            deviceExecutionEventSink.onEvent(
+                DeviceExecutionEventPayload(
+                    flow_id = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId,
+                    task_id = taskId,
+                    phase = DeviceExecutionEventPayload.PHASE_FAILED,
+                    is_blocking = true,
+                    blocking_reason = "timeout_ms=$timeoutMs",
+                    device_id = localDeviceId,
+                    source_component = "GalaxyConnectionService.handleParallelSubtask"
+                )
+            )
         } finally {
             if (meshId != null && meshJoined) {
                 val leaveReason = when (finalResult?.status) {
@@ -1481,6 +1633,17 @@ class GalaxyConnectionService : Service() {
                 source_dispatch_strategy = envelope.source_dispatch_strategy
             )
 
+            // ── PR-2: emit execution_started before handoff_v2 pipeline ─────────────
+            deviceExecutionEventSink.onEvent(
+                DeviceExecutionEventPayload(
+                    flow_id = taskId,
+                    task_id = taskId,
+                    phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+                    device_id = localDeviceId,
+                    source_component = "GalaxyConnectionService.handleHandoffEnvelopeV2"
+                )
+            )
+
             val rawResult = UFOGalaxyApplication.localGoalExecutor.executeGoal(goalPayload)
             goalResult = rawResult.copy(
                 correlation_id = taskId,
@@ -1508,6 +1671,15 @@ class GalaxyConnectionService : Service() {
                 )
             )
             updateNotification("HandoffV2 ${taskId.take(8)}: ${goalResult.status}")
+            // ── PR-2: emit terminal execution event from handoff_v2 result ───────────
+            deviceExecutionEventSink.onEvent(
+                buildTerminalExecutionEvent(
+                    taskId = taskId,
+                    result = goalResult,
+                    stepIndex = goalResult.steps.size - 1,
+                    source = "GalaxyConnectionService.handleHandoffEnvelopeV2"
+                )
+            )
 
             sendHandoffEnvelopeV2Result(
                 HandoffEnvelopeV2ResultPayload(
@@ -1892,6 +2064,81 @@ class GalaxyConnectionService : Service() {
     }
 
     // ── PR-06: Reconciliation signal uplink ───────────────────────────────────
+
+    // ── PR-2 (Android): Terminal execution-event builder helper ──────────────
+
+    /**
+     * Builds a [DeviceExecutionEventPayload] for a terminal execution result.
+     *
+     * Derives the correct [DeviceExecutionEventPayload.phase] from the [GoalResultPayload]
+     * status and available stop-reason metadata, so callers never need to duplicate the
+     * phase-derivation logic:
+     *
+     * - `status="success"` → [DeviceExecutionEventPayload.PHASE_COMPLETED]
+     * - `status="cancelled"` → [DeviceExecutionEventPayload.PHASE_CANCELLED]
+     * - `stop_reason` contains `"stagnation"` → [DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED]
+     *   with `is_blocking=true` and `stagnation_detected=true`
+     * - `status="error"/"timeout"/other` → [DeviceExecutionEventPayload.PHASE_FAILED]
+     *   with `is_blocking=true` and `blocking_reason` from `result.error`
+     *
+     * @param taskId   Task identifier for correlation.
+     * @param result   Terminal [GoalResultPayload] from which to derive phase and metadata.
+     * @param stepIndex Zero-based index of the last executed step (use `result.steps.size - 1`).
+     * @param source   Canonical name of the originating component for traceability.
+     * @param flowId   Delegated flow identifier; defaults to [taskId] when absent.
+     */
+    private fun buildTerminalExecutionEvent(
+        taskId: String,
+        result: GoalResultPayload,
+        stepIndex: Int,
+        source: String,
+        flowId: String = taskId
+    ): DeviceExecutionEventPayload {
+        val phase: String
+        val isBlocking: Boolean
+        val blockingReason: String
+        val stagnationDetected: Boolean
+
+        when {
+            result.status == EdgeExecutor.STATUS_SUCCESS -> {
+                phase = DeviceExecutionEventPayload.PHASE_COMPLETED
+                isBlocking = false
+                blockingReason = ""
+                stagnationDetected = false
+            }
+            result.status == EdgeExecutor.STATUS_CANCELLED -> {
+                phase = DeviceExecutionEventPayload.PHASE_CANCELLED
+                isBlocking = false
+                blockingReason = ""
+                stagnationDetected = false
+            }
+            result.details?.contains("stagnation") == true ||
+                result.error?.contains("stagnation") == true -> {
+                phase = DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED
+                isBlocking = true
+                blockingReason = result.error ?: "stagnation_detected"
+                stagnationDetected = true
+            }
+            else -> {
+                phase = DeviceExecutionEventPayload.PHASE_FAILED
+                isBlocking = true
+                blockingReason = result.error ?: result.status
+                stagnationDetected = false
+            }
+        }
+
+        return DeviceExecutionEventPayload(
+            flow_id = flowId,
+            task_id = taskId,
+            phase = phase,
+            step_index = stepIndex,
+            is_blocking = isBlocking,
+            blocking_reason = blockingReason,
+            stagnation_detected = stagnationDetected,
+            device_id = localDeviceId,
+            source_component = source
+        )
+    }
 
     /**
      * Transmits a [ReconciliationSignal] as a [MsgType.RECONCILIATION_SIGNAL] AIP v3
@@ -3198,6 +3445,18 @@ class GalaxyConnectionService : Service() {
             // outcome.  PR-13 adds PROGRESS signal emission at ACTIVE and distinguishes
             // TIMEOUT/CANCELLED outcomes from generic FAILED.
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+
+            // ── PR-2: emit takeover_milestone at execution start ──────────────────────
+            deviceExecutionEventSink.onEvent(
+                DeviceExecutionEventPayload(
+                    flow_id = envelope.takeover_id,
+                    task_id = envelope.task_id,
+                    phase = DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                    device_id = localDeviceId,
+                    source_component = "GalaxyConnectionService.handleTakeoverRequest"
+                )
+            )
+
             serviceScope.launch {
                 try {
                     val outcome = delegatedTakeoverExecutor.execute(delegatedUnit, activationRecord)
@@ -3214,6 +3473,16 @@ class GalaxyConnectionService : Service() {
                                     "trace_id=${envelope.trace_id} " +
                                     "attached_session_id=${delegatedUnit.attachedSessionId} " +
                                     "steps=${outcome.tracker.stepCount}"
+                            )
+                            // ── PR-2: emit terminal takeover execution event on completion ─
+                            deviceExecutionEventSink.onEvent(
+                                buildTerminalExecutionEvent(
+                                    taskId = envelope.task_id,
+                                    result = enriched,
+                                    stepIndex = outcome.tracker.stepCount - 1,
+                                    source = "GalaxyConnectionService.handleTakeoverRequest",
+                                    flowId = envelope.takeover_id
+                                )
                             )
                         }
                         is DelegatedTakeoverExecutor.ExecutionOutcome.Failed -> {
@@ -3232,6 +3501,23 @@ class GalaxyConnectionService : Service() {
                                 nodeName = "takeover_execution",
                                 errorType = "takeover_execution_failed",
                                 errorContext = outcome.error
+                            )
+                            // ── PR-2: emit failed event on takeover execution failure ────
+                            val failurePhase = when (outcome.ledger.lastResult?.resultKind) {
+                                DelegatedExecutionSignal.ResultKind.CANCELLED ->
+                                    DeviceExecutionEventPayload.PHASE_CANCELLED
+                                else -> DeviceExecutionEventPayload.PHASE_FAILED
+                            }
+                            deviceExecutionEventSink.onEvent(
+                                DeviceExecutionEventPayload(
+                                    flow_id = envelope.takeover_id,
+                                    task_id = envelope.task_id,
+                                    phase = failurePhase,
+                                    is_blocking = failurePhase == DeviceExecutionEventPayload.PHASE_FAILED,
+                                    blocking_reason = outcome.error,
+                                    device_id = localDeviceId,
+                                    source_component = "GalaxyConnectionService.handleTakeoverRequest"
+                                )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —
                             // so all surface layers can clear stale "active" or "in-control"

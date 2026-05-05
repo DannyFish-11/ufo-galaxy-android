@@ -684,6 +684,30 @@ object GalaxyLogger {
      */
     const val TAG_DEVICE_STATE_SNAPSHOT = "GALAXY:DEVICE:STATE:SNAPSHOT"
 
+    // ── PR-2 (Android): Device execution-event emission observability tag ─────
+
+    /**
+     * PR-2 (Android) — Fired when a [com.ufo.galaxy.protocol.DeviceExecutionEventPayload] is
+     * built and sent to V2 on the canonical Android→V2 control-plane WebSocket path.
+     *
+     * Emitted by [com.ufo.galaxy.service.GalaxyConnectionService] at every real execution
+     * lifecycle point: execution_started, execution_progress, completed, failed,
+     * stagnation_detected, cancelled, fallback_transition, and takeover_milestone.
+     *
+     * Required fields: `event` (one of `"device_execution_event_sent"`,
+     * `"device_execution_event_send_failed"`, `"device_execution_event_error"`),
+     * `device_id`, `task_id`, `phase`.
+     *
+     * Optional fields: `flow_id`, `step_index`, `is_blocking`, `blocking_reason`,
+     * `stagnation_detected`, `fallback_tier`, `sent`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:DEVICE:EXEC:EVENT","fields":{"event":"device_execution_event_sent","device_id":"Pixel_8","task_id":"t-1","phase":"completed","step_index":3,"sent":true}}
+     * ```
+     */
+    const val TAG_DEVICE_EXECUTION_EVENT = "GALAXY:DEVICE:EXEC:EVENT"
+
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
     private const val MAX_MEMORY_ENTRIES = 500
