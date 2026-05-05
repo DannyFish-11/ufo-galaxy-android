@@ -1883,6 +1883,29 @@ data class DeviceAuditReportPayload(
  *                                   [com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId].
  *                                   Created per attach event; stable across transitions.
  *                                   `null` when no session is currently attached.
+ *
+ * Manifestation / carrier presence hints (PR-8 Android):
+ * These three fields expose real Android carrier and interaction-surface state through the
+ * existing snapshot uplink path.  They are derived strictly from real Android runtime state;
+ * `null` is emitted whenever the backing state is not yet active — no fake placeholder values
+ * are ever set.  Android does not claim a full desktop-style shell model; only the anchors
+ * below are backed by current implementation reality.
+ * @param carrier_runtime_state      Wire-label of the current [com.ufo.galaxy.runtime.RuntimeController.RuntimeState]
+ *                                   (e.g. `"idle"`, `"starting"`, `"active"`, `"failed"`, `"local_only"`).
+ *                                   Backed by [com.ufo.galaxy.runtime.RuntimeController.state] and the
+ *                                   [wireLabel] extension on [com.ufo.galaxy.runtime.RuntimeController.RuntimeState].
+ *                                   Always non-null when the snapshot is produced (a runtime state is always set).
+ * @param app_lifecycle_state        Wire-value of the last [com.ufo.galaxy.runtime.AndroidAppLifecycleTransition]
+ *                                   delivered to [com.ufo.galaxy.runtime.RuntimeController.onAppLifecycleTransition]
+ *                                   (e.g. `"foreground"`, `"background"`).
+ *                                   Backed by [com.ufo.galaxy.runtime.RuntimeController.lastAppLifecycleTransition].
+ *                                   `null` when [onAppLifecycleTransition] has not yet been called in this process.
+ * @param local_interaction_surface_active `true` when the local interaction-surface overlay
+ *                                   ([com.ufo.galaxy.service.EnhancedFloatingService]) is currently running
+ *                                   **and** the overlay (SYSTEM_ALERT_WINDOW) permission is granted.
+ *                                   Backed by [com.ufo.galaxy.service.EnhancedFloatingService.instance] (non-null
+ *                                   while the service is alive) and [com.ufo.galaxy.data.AppSettings.overlayReady].
+ *                                   `null` when neither backing condition can be evaluated at snapshot time.
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -1931,7 +1954,16 @@ data class DeviceStateSnapshotPayload(
     val durable_session_id: String? = null,
     val session_continuity_epoch: Int? = null,
     val runtime_session_id: String? = null,
-    val attached_session_id: String? = null
+    val attached_session_id: String? = null,
+
+    // PR-8 Android: Manifestation / carrier presence hints.
+    // Derived strictly from real Android runtime state; null when the backing source is not
+    // yet active.  Android does not claim a full desktop-style shell model — only these three
+    // anchors are backed by current implementation reality.
+    // See DeviceStateSnapshotPayload KDoc for full field contracts.
+    val carrier_runtime_state: String? = null,
+    val app_lifecycle_state: String? = null,
+    val local_interaction_surface_active: Boolean? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────

@@ -42,6 +42,7 @@ import com.ufo.galaxy.runtime.toOutboundPayload
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.wireLabel
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -2538,6 +2539,22 @@ class GalaxyConnectionService : Service() {
             val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             val snapshotAttachedSessionId = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
 
+            // ── PR-8 Android: Manifestation / carrier presence hints ──────────────────────
+            // Derived exclusively from real Android runtime state; null when the backing
+            // source is not yet active.  No fake placeholder manifestation values are set.
+            //
+            // carrier_runtime_state: backed by RuntimeController.state (always set → always non-null)
+            val carrierRuntimeState: String = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+            // app_lifecycle_state: backed by RuntimeController.lastAppLifecycleTransition
+            // (null until onAppLifecycleTransition has been called at least once)
+            val appLifecycleState: String? =
+                UFOGalaxyApplication.runtimeController.lastAppLifecycleTransition.value?.wireValue
+            // local_interaction_surface_active: backed by EnhancedFloatingService.instance
+            // (non-null while the service is alive) AND AppSettings.overlayReady.
+            // Only true when both real conditions are met; null if overlayReady cannot be read.
+            val localInteractionSurfaceActive: Boolean =
+                EnhancedFloatingService.instance != null && settings.overlayReady
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2575,7 +2592,11 @@ class GalaxyConnectionService : Service() {
                 durable_session_id = durableRecord?.durableSessionId,
                 session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                attached_session_id = snapshotAttachedSessionId
+                attached_session_id = snapshotAttachedSessionId,
+                // PR-8 Android: carrier presence hints — real state only, no fabrication.
+                carrier_runtime_state = carrierRuntimeState,
+                app_lifecycle_state = appLifecycleState,
+                local_interaction_surface_active = localInteractionSurfaceActive
             )
 
             val envelope = AipMessage(
@@ -2591,7 +2612,9 @@ class GalaxyConnectionService : Service() {
                 TAG,
                 "[DEVICE_STATE_SNAPSHOT] device_id=$deviceId model_ready=$modelReady " +
                     "local_loop_ready=$localLoopReady active_runtime=$activeRuntimeType " +
-                    "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier sent=$sent"
+                    "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier " +
+                    "carrier_runtime_state=$carrierRuntimeState app_lifecycle_state=$appLifecycleState " +
+                    "local_interaction_surface_active=$localInteractionSurfaceActive sent=$sent"
             )
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_STATE_SNAPSHOT, mapOf(
@@ -2607,6 +2630,10 @@ class GalaxyConnectionService : Service() {
                     "current_fallback_tier" to currentFallbackTier,
                     "llama_cpp_available" to llamaCppAvailable,
                     "ncnn_available" to ncnnAvailable,
+                    // PR-8 Android: carrier/manifestation presence hints
+                    "carrier_runtime_state" to carrierRuntimeState,
+                    "app_lifecycle_state" to (appLifecycleState ?: ""),
+                    "local_interaction_surface_active" to localInteractionSurfaceActive,
                     "sent" to sent
                 )
             )

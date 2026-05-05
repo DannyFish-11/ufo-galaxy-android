@@ -678,6 +678,11 @@ object GalaxyLogger {
      * `current_fallback_tier`, `planner_fallback_tier`, `grounding_fallback_tier`,
      * `warmup_result`, `sent`.
      *
+     * PR-8 Android manifestation/carrier presence hint fields (real-backed, not fabricated):
+     * `carrier_runtime_state` (e.g. `"active"`, `"idle"`, `"local_only"`),
+     * `app_lifecycle_state` (e.g. `"foreground"`, `"background"`; null before first lifecycle event),
+     * `local_interaction_surface_active` (`true` when [EnhancedFloatingService] is running and overlay-ready).
+     *
      * Example:
      * ```json
      * {"ts":…,"tag":"GALAXY:DEVICE:STATE:SNAPSHOT","fields":{"event":"device_state_snapshot_sent","device_id":"Pixel_8","model_ready":true,"active_runtime_type":"LLAMA_CPP","sent":true}}
