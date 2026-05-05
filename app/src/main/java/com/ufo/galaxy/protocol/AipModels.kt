@@ -1899,6 +1899,20 @@ data class DeviceAuditReportPayload(
  *                                   same pre-flight condition used by
  *                                   [com.ufo.galaxy.runtime.CrossDeviceEnablementError] and
  *                                   [com.ufo.galaxy.agent.TakeoverEligibilityAssessor].
+ *
+ * Final Android carrier consolidation fields (PR-10):
+ * @param carrier_runtime_state      Wire label of [com.ufo.galaxy.runtime.RuntimeController.state]
+ *                                   at snapshot time.  Values: `"idle"` | `"starting"` | `"active"` |
+ *                                   `"failed"` | `"local_only"`.  Allows V2 to distinguish snapshots
+ *                                   emitted from an Active (cross-device) carrier from those emitted
+ *                                   during local-only or startup state.  `null` only when the runtime
+ *                                   state cannot be read (defensive default; should never occur in
+ *                                   practice since [RuntimeController.RuntimeState] is always defined).
+ * @param reconnect_recovery_state   Wire value of [com.ufo.galaxy.runtime.RuntimeController.reconnectRecoveryState]
+ *                                   at snapshot time.  Values: `"idle"` | `"recovering"` |
+ *                                   `"recovered"` | `"failed"`.  Contextualizes snapshots emitted
+ *                                   during a reconnect recovery cycle so V2 can handle them
+ *                                   correctly.  `null` only as a defensive default (same as above).
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -1966,7 +1980,24 @@ data class DeviceStateSnapshotPayload(
     //   is null.  Matches the same pre-flight condition checked by
     //   CrossDeviceEnablementError and TakeoverEligibilityAssessor.
     val carrier_foreground_visible: Boolean? = null,
-    val interaction_surface_ready: Boolean? = null
+    val interaction_surface_ready: Boolean? = null,
+
+    // PR-10: Final Android carrier consolidation — cross-cutting carrier state fields.
+    //
+    // carrier_runtime_state: wire label of RuntimeController.state at snapshot time.
+    //   Values: "idle" | "starting" | "active" | "failed" | "local_only".
+    //   Allows V2 to distinguish a snapshot emitted from an Active (cross-device) carrier
+    //   from one emitted during local-only or startup state.  Null is the safe default
+    //   only; in practice this field is always populated at the sendDeviceStateSnapshot()
+    //   call site from the live RuntimeController state.
+    //
+    // reconnect_recovery_state: wire value of RuntimeController.reconnectRecoveryState at
+    //   snapshot time.  Values: "idle" | "recovering" | "recovered" | "failed".
+    //   Contextualizes snapshots emitted during recovery cycles so V2 can handle them
+    //   correctly (e.g. ignore stale snapshots tagged "recovering").  Null is the safe
+    //   default only; in practice this field is always populated at emit time.
+    val carrier_runtime_state: String? = null,
+    val reconnect_recovery_state: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2028,6 +2059,12 @@ data class DeviceStateSnapshotPayload(
  * @param attached_session_id  Attached runtime session UUID from
  *                             [com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId];
  *                             stable within one attach event.  `null` when no session is attached.
+ * @param carrier_runtime_state Wire label of [com.ufo.galaxy.runtime.RuntimeController.state]
+ *                             at event emission time.  Values: `"idle"` | `"starting"` |
+ *                             `"active"` | `"failed"` | `"local_only"`.  Provides V2 with the
+ *                             carrier's cross-device participation mode at the precise moment an
+ *                             execution event is emitted, enabling coherent event correlation.
+ *                             `null` only as a defensive default (PR-10).
  *
  * ## PR-3 schema alignment note
  *
@@ -2066,7 +2103,14 @@ data class DeviceExecutionEventPayload(
     // interaction_surface_ready: accessibility_ready && overlay_ready at event time.
     // null when the backing state is unavailable; no fake values emitted.
     val carrier_foreground_visible: Boolean? = null,
-    val interaction_surface_ready: Boolean? = null
+    val interaction_surface_ready: Boolean? = null,
+
+    // PR-10: Final carrier consolidation — runtime state included in every execution event
+    // so V2 can correlate event emission with the carrier's cross-device participation mode.
+    // carrier_runtime_state: RuntimeController.state.wireLabel at event time.
+    // Values: "idle" | "starting" | "active" | "failed" | "local_only".
+    // null only as a defensive default; should never be null at a real emission point.
+    val carrier_runtime_state: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
