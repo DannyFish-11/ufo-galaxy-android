@@ -843,7 +843,11 @@ class GalaxyConnectionService : Service() {
                         durable_session_id = durFallback?.durableSessionId,
                         session_continuity_epoch = durFallback?.sessionContinuityEpoch,
                         runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                        attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                        attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                        // PR-8: carrier manifestation/presence hints at fallback point.
+                        carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                        interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                            UFOGalaxyApplication.appSettings.overlayReady
                     )
                 )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
@@ -923,7 +927,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = durLocalStart?.durableSessionId,
                     session_continuity_epoch = durLocalStart?.sessionContinuityEpoch,
                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                    // PR-8: carrier manifestation/presence hints at local-start emission.
+                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                        UFOGalaxyApplication.appSettings.overlayReady
                 )
             )
 
@@ -994,7 +1002,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = durLocalFail?.durableSessionId,
                     session_continuity_epoch = durLocalFail?.sessionContinuityEpoch,
                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                    // PR-8: carrier manifestation/presence hints at exception point.
+                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                        UFOGalaxyApplication.appSettings.overlayReady
                 )
             )
         } finally {
@@ -1104,7 +1116,11 @@ class GalaxyConnectionService : Service() {
                 durable_session_id = durGoalStart?.durableSessionId,
                 session_continuity_epoch = durGoalStart?.sessionContinuityEpoch,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                // PR-8: carrier manifestation/presence hints at goal-start emission.
+                carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                    UFOGalaxyApplication.appSettings.overlayReady
             )
         )
 
@@ -1159,7 +1175,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = durGoalTimeout?.durableSessionId,
                     session_continuity_epoch = durGoalTimeout?.sessionContinuityEpoch,
                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                    // PR-8: carrier manifestation/presence hints at timeout point.
+                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                        UFOGalaxyApplication.appSettings.overlayReady
                 )
             )
         } finally {
@@ -1270,7 +1290,11 @@ class GalaxyConnectionService : Service() {
                 durable_session_id = durParallelStart?.durableSessionId,
                 session_continuity_epoch = durParallelStart?.sessionContinuityEpoch,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                // PR-8: carrier manifestation/presence hints at parallel-start emission.
+                carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                    UFOGalaxyApplication.appSettings.overlayReady
             )
         )
 
@@ -1364,7 +1388,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = durParallelTimeout?.durableSessionId,
                     session_continuity_epoch = durParallelTimeout?.sessionContinuityEpoch,
                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                    // PR-8: carrier manifestation/presence hints at parallel timeout.
+                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                        UFOGalaxyApplication.appSettings.overlayReady
                 )
             )
         } finally {
@@ -1688,7 +1716,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = durHandoffStart?.durableSessionId,
                     session_continuity_epoch = durHandoffStart?.sessionContinuityEpoch,
                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                    // PR-8: carrier manifestation/presence hints at handoff-start emission.
+                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                        UFOGalaxyApplication.appSettings.overlayReady
                 )
             )
 
@@ -2179,6 +2211,11 @@ class GalaxyConnectionService : Service() {
         // this execution outcome with the ongoing session axis.
         val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
 
+        // PR-8: capture carrier manifestation/presence hints at event build time.
+        val carrierForegroundVisible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value
+        val interactionSurfaceReady = UFOGalaxyApplication.appSettings.accessibilityReady &&
+            UFOGalaxyApplication.appSettings.overlayReady
+
         return DeviceExecutionEventPayload(
             flow_id = flowId,
             task_id = taskId,
@@ -2193,7 +2230,10 @@ class GalaxyConnectionService : Service() {
             durable_session_id = durableRecord?.durableSessionId,
             session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+            attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+            // PR-8: carrier manifestation/presence hints — backed by real Android state.
+            carrier_foreground_visible = carrierForegroundVisible,
+            interaction_surface_ready = interactionSurfaceReady
         )
     }
 
@@ -2538,6 +2578,15 @@ class GalaxyConnectionService : Service() {
             val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             val snapshotAttachedSessionId = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
 
+            // ── PR-8: Carrier manifestation/presence hints ────────────────────────────────
+            // Both values are sourced from existing real Android state; null is emitted when
+            // the backing state is unavailable — no fake placeholder values.
+            val carrierForegroundVisible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value
+            // interaction_surface_ready = true only when BOTH overlay and accessibility are
+            // ready, matching the pre-flight condition in CrossDeviceEnablementError and
+            // TakeoverEligibilityAssessor.assess().
+            val interactionSurfaceReady = accessibilityReady == true && overlayReady == true
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2575,7 +2624,10 @@ class GalaxyConnectionService : Service() {
                 durable_session_id = durableRecord?.durableSessionId,
                 session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                attached_session_id = snapshotAttachedSessionId
+                attached_session_id = snapshotAttachedSessionId,
+                // PR-8: carrier manifestation/presence hints backed by real Android state.
+                carrier_foreground_visible = carrierForegroundVisible,
+                interaction_surface_ready = interactionSurfaceReady
             )
 
             val envelope = AipMessage(
@@ -3554,7 +3606,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = durTakeover?.durableSessionId,
                     session_continuity_epoch = durTakeover?.sessionContinuityEpoch,
                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                    // PR-8: carrier manifestation/presence hints at takeover start.
+                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                        UFOGalaxyApplication.appSettings.overlayReady
                 )
             )
 
@@ -3623,7 +3679,11 @@ class GalaxyConnectionService : Service() {
                                     durable_session_id = durTakeoverFail?.durableSessionId,
                                     session_continuity_epoch = durTakeoverFail?.sessionContinuityEpoch,
                                     runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+                                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                                    // PR-8: carrier manifestation/presence hints at takeover failure.
+                                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
+                                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
+                                        UFOGalaxyApplication.appSettings.overlayReady
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —

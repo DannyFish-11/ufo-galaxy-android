@@ -1883,6 +1883,22 @@ data class DeviceAuditReportPayload(
  *                                   [com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId].
  *                                   Created per attach event; stable across transitions.
  *                                   `null` when no session is currently attached.
+ *
+ * Carrier manifestation/presence hints (PR-8):
+ * @param carrier_foreground_visible Whether the app is currently in the foreground, backed by
+ *                                   [com.ufo.galaxy.runtime.RuntimeController.appForegroundVisible].
+ *                                   `true` = Android is visibly present to the user (active
+ *                                   interaction surface); `false` = backgrounded runtime carrier;
+ *                                   `null` = foreground state not yet observed (safe default).
+ *                                   No fake value is ever emitted.
+ * @param interaction_surface_ready  Whether the full local interaction surface is operational:
+ *                                   `accessibility_ready && overlay_ready`.  `true` when Android
+ *                                   can both display a floating overlay and interact with the
+ *                                   screen; `false` when either capability is missing; `null`
+ *                                   when either underlying flag is unavailable.  Matches the
+ *                                   same pre-flight condition used by
+ *                                   [com.ufo.galaxy.runtime.CrossDeviceEnablementError] and
+ *                                   [com.ufo.galaxy.agent.TakeoverEligibilityAssessor].
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -1931,7 +1947,26 @@ data class DeviceStateSnapshotPayload(
     val durable_session_id: String? = null,
     val session_continuity_epoch: Int? = null,
     val runtime_session_id: String? = null,
-    val attached_session_id: String? = null
+    val attached_session_id: String? = null,
+
+    // PR-8: Carrier manifestation/presence hints.
+    // Both fields are derived exclusively from existing real Android state — no fake
+    // placeholder values are emitted when the backing state is unavailable.
+    //
+    // carrier_foreground_visible: true when the app is currently in the foreground
+    //   (RuntimeController.appForegroundVisible); false when backgrounded; null before
+    //   the first explicit lifecycle transition is received.  This is the canonical
+    //   carrier-visibility hint: when true, Android is an active interactive surface
+    //   visible to the user; when false, it is a background runtime carrier.
+    //
+    // interaction_surface_ready: true when BOTH accessibility_ready AND overlay_ready
+    //   are true, meaning Android can display a floating window (overlay) and interact
+    //   with the screen (accessibility) — i.e. the full local interaction surface is
+    //   operational.  Derived from AppSettings at snapshot time; null when either flag
+    //   is null.  Matches the same pre-flight condition checked by
+    //   CrossDeviceEnablementError and TakeoverEligibilityAssessor.
+    val carrier_foreground_visible: Boolean? = null,
+    val interaction_surface_ready: Boolean? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2023,7 +2058,15 @@ data class DeviceExecutionEventPayload(
     val durable_session_id: String? = null,
     val session_continuity_epoch: Int? = null,
     val runtime_session_id: String? = null,
-    val attached_session_id: String? = null
+    val attached_session_id: String? = null,
+
+    // PR-8: Carrier manifestation/presence hints — same semantics as
+    // DeviceStateSnapshotPayload; sourced from real Android state at emission time.
+    // carrier_foreground_visible: RuntimeController.appForegroundVisible at event time.
+    // interaction_surface_ready: accessibility_ready && overlay_ready at event time.
+    // null when the backing state is unavailable; no fake values emitted.
+    val carrier_foreground_visible: Boolean? = null,
+    val interaction_surface_ready: Boolean? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
