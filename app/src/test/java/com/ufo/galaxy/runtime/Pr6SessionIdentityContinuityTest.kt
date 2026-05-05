@@ -1,10 +1,10 @@
 package com.ufo.galaxy.runtime
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,6 +93,9 @@ class Pr6SessionIdentityContinuityTest {
 
     private val gson = Gson()
 
+    /** Serialise [obj] to JSON and parse back as a [JsonObject] for field inspection. */
+    private fun toJsonObject(obj: Any): JsonObject = gson.fromJson(gson.toJson(obj), JsonObject::class.java)
+
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
@@ -177,27 +180,27 @@ class Pr6SessionIdentityContinuityTest {
     @Test fun `durable_session_id round-trips through Gson`() {
         val durableId = "durable-era-abc123"
         val snapshot = baseSnapshot(durableSessionId = durableId)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertEquals(durableId, json.get("durable_session_id")?.asString)
     }
 
     @Test fun `session_continuity_epoch round-trips through Gson`() {
         val snapshot = baseSnapshot(durableSessionId = "dur-1", sessionContinuityEpoch = 3)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertEquals(3, json.get("session_continuity_epoch")?.asInt)
     }
 
     @Test fun `runtime_session_id round-trips through Gson (snapshot field)`() {
         val rtId = "rt-session-xyz"
         val snapshot = baseSnapshot(runtimeSessionId = rtId)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertEquals(rtId, json.get("runtime_session_id")?.asString)
     }
 
     @Test fun `attached_session_id round-trips through Gson`() {
         val attachedId = "attached-sess-789"
         val snapshot = baseSnapshot(attachedSessionId = attachedId)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertEquals(attachedId, json.get("attached_session_id")?.asString)
     }
 
@@ -208,7 +211,7 @@ class Pr6SessionIdentityContinuityTest {
             runtimeSessionId = "rt-all",
             attachedSessionId = "att-all"
         )
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue("durable_session_id missing", json.has("durable_session_id"))
         assertTrue("session_continuity_epoch missing", json.has("session_continuity_epoch"))
         assertTrue("runtime_session_id missing", json.has("runtime_session_id"))
@@ -221,7 +224,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `durable_session_id is null in JSON when not backed by real state`() {
         val snapshot = baseSnapshot(durableSessionId = null)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue(
             "durable_session_id must be JSON null, not absent",
             json.has("durable_session_id") && json.get("durable_session_id").isJsonNull
@@ -230,7 +233,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `session_continuity_epoch is null in JSON when not backed by real state`() {
         val snapshot = baseSnapshot(sessionContinuityEpoch = null)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue(
             "session_continuity_epoch must be JSON null, not absent",
             json.has("session_continuity_epoch") && json.get("session_continuity_epoch").isJsonNull
@@ -239,7 +242,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `runtime_session_id is null in JSON (snapshot field) when not backed by real state`() {
         val snapshot = baseSnapshot(runtimeSessionId = null)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue(
             "runtime_session_id must be JSON null, not absent",
             json.has("runtime_session_id") && json.get("runtime_session_id").isJsonNull
@@ -248,7 +251,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `attached_session_id is null in JSON when not backed by real state`() {
         val snapshot = baseSnapshot(attachedSessionId = null)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue(
             "attached_session_id must be JSON null, not absent",
             json.has("attached_session_id") && json.get("attached_session_id").isJsonNull
@@ -286,27 +289,27 @@ class Pr6SessionIdentityContinuityTest {
     @Test fun `durable_session_id round-trips through Gson (event)`() {
         val durableId = "durable-event-abc"
         val event = baseExecutionEvent(durableSessionId = durableId)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertEquals(durableId, json.get("durable_session_id")?.asString)
     }
 
     @Test fun `session_continuity_epoch round-trips through Gson (event)`() {
         val event = baseExecutionEvent(durableSessionId = "dur-ev", sessionContinuityEpoch = 5)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertEquals(5, json.get("session_continuity_epoch")?.asInt)
     }
 
     @Test fun `runtime_session_id round-trips through Gson (event field)`() {
         val rtId = "rt-event-session"
         val event = baseExecutionEvent(runtimeSessionId = rtId)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertEquals(rtId, json.get("runtime_session_id")?.asString)
     }
 
     @Test fun `attached_session_id round-trips through Gson (event)`() {
         val attachedId = "att-event-sess"
         val event = baseExecutionEvent(attachedSessionId = attachedId)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertEquals(attachedId, json.get("attached_session_id")?.asString)
     }
 
@@ -317,7 +320,7 @@ class Pr6SessionIdentityContinuityTest {
             runtimeSessionId = "rt-ev-all",
             attachedSessionId = "att-ev-all"
         )
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue("durable_session_id missing from event", json.has("durable_session_id"))
         assertTrue("session_continuity_epoch missing from event", json.has("session_continuity_epoch"))
         assertTrue("runtime_session_id missing from event", json.has("runtime_session_id"))
@@ -330,7 +333,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `durable_session_id is null in JSON when not backed by real state (event)`() {
         val event = baseExecutionEvent(durableSessionId = null)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue(
             "durable_session_id must be JSON null, not absent",
             json.has("durable_session_id") && json.get("durable_session_id").isJsonNull
@@ -339,7 +342,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `session_continuity_epoch is null in JSON when not backed by real state (event)`() {
         val event = baseExecutionEvent(sessionContinuityEpoch = null)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue(
             "session_continuity_epoch must be JSON null, not absent",
             json.has("session_continuity_epoch") && json.get("session_continuity_epoch").isJsonNull
@@ -348,7 +351,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `runtime_session_id is null in JSON (event field) when not backed by real state`() {
         val event = baseExecutionEvent(runtimeSessionId = null)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue(
             "runtime_session_id must be JSON null, not absent",
             json.has("runtime_session_id") && json.get("runtime_session_id").isJsonNull
@@ -357,7 +360,7 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `attached_session_id is null in JSON when not backed by real state (event)`() {
         val event = baseExecutionEvent(attachedSessionId = null)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue(
             "attached_session_id must be JSON null, not absent",
             json.has("attached_session_id") && json.get("attached_session_id").isJsonNull
@@ -438,49 +441,49 @@ class Pr6SessionIdentityContinuityTest {
 
     @Test fun `snapshot durable_session_id wire key is durable_session_id`() {
         val snapshot = baseSnapshot(durableSessionId = "dur-wk")
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue("wire key must be 'durable_session_id'", json.has("durable_session_id"))
     }
 
     @Test fun `snapshot session_continuity_epoch wire key is session_continuity_epoch`() {
         val snapshot = baseSnapshot(durableSessionId = "d", sessionContinuityEpoch = 0)
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue("wire key must be 'session_continuity_epoch'", json.has("session_continuity_epoch"))
     }
 
     @Test fun `snapshot runtime_session_id wire key is runtime_session_id`() {
         val snapshot = baseSnapshot(runtimeSessionId = "rt-wk")
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue("wire key must be 'runtime_session_id'", json.has("runtime_session_id"))
     }
 
     @Test fun `snapshot attached_session_id wire key is attached_session_id`() {
         val snapshot = baseSnapshot(attachedSessionId = "att-wk")
-        val json = gson.fromJson(gson.toJson(snapshot), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(snapshot)
         assertTrue("wire key must be 'attached_session_id'", json.has("attached_session_id"))
     }
 
     @Test fun `execution event durable_session_id wire key is durable_session_id`() {
         val event = baseExecutionEvent(durableSessionId = "dur-ev-wk")
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue("wire key must be 'durable_session_id'", json.has("durable_session_id"))
     }
 
     @Test fun `execution event session_continuity_epoch wire key is session_continuity_epoch`() {
         val event = baseExecutionEvent(durableSessionId = "d", sessionContinuityEpoch = 0)
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue("wire key must be 'session_continuity_epoch'", json.has("session_continuity_epoch"))
     }
 
     @Test fun `execution event runtime_session_id wire key is runtime_session_id`() {
         val event = baseExecutionEvent(runtimeSessionId = "rt-ev-wk")
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue("wire key must be 'runtime_session_id'", json.has("runtime_session_id"))
     }
 
     @Test fun `execution event attached_session_id wire key is attached_session_id`() {
         val event = baseExecutionEvent(attachedSessionId = "att-ev-wk")
-        val json = gson.fromJson(gson.toJson(event), com.google.gson.JsonObject::class.java)
+        val json = toJsonObject(event)
         assertTrue("wire key must be 'attached_session_id'", json.has("attached_session_id"))
     }
 
