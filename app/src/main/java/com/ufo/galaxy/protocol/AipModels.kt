@@ -1894,7 +1894,10 @@ data class DeviceAuditReportPayload(
  *                                   (e.g. `"idle"`, `"starting"`, `"active"`, `"failed"`, `"local_only"`).
  *                                   Backed by [com.ufo.galaxy.runtime.RuntimeController.state] and the
  *                                   [wireLabel] extension on [com.ufo.galaxy.runtime.RuntimeController.RuntimeState].
- *                                   Always non-null when the snapshot is produced (a runtime state is always set).
+ *                                   Always a non-null String when produced by
+ *                                   [com.ufo.galaxy.service.GalaxyConnectionService.sendDeviceStateSnapshot]
+ *                                   (a runtime state is always set); `null` only at the data-class level when
+ *                                   the field is not explicitly provided in a manually-constructed payload.
  * @param app_lifecycle_state        Wire-value of the last [com.ufo.galaxy.runtime.AndroidAppLifecycleTransition]
  *                                   delivered to [com.ufo.galaxy.runtime.RuntimeController.onAppLifecycleTransition]
  *                                   (e.g. `"foreground"`, `"background"`).
@@ -1905,7 +1908,10 @@ data class DeviceAuditReportPayload(
  *                                   **and** the overlay (SYSTEM_ALERT_WINDOW) permission is granted.
  *                                   Backed by [com.ufo.galaxy.service.EnhancedFloatingService.instance] (non-null
  *                                   while the service is alive) and [com.ufo.galaxy.data.AppSettings.overlayReady].
- *                                   `null` when neither backing condition can be evaluated at snapshot time.
+ *                                   `false` when either condition is not met; `null` only when this field is not
+ *                                   populated in a manually-constructed payload (i.e. at data-class level).
+ *                                   Always a real `Boolean` value (never fake) when produced by
+ *                                   [com.ufo.galaxy.service.GalaxyConnectionService.sendDeviceStateSnapshot].
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
