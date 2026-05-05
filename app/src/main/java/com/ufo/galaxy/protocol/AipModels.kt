@@ -1852,8 +1852,20 @@ data class DeviceAuditReportPayload(
  * @param runtime_health_snapshot Planner + grounding component health map, or null.
  *
  * Queue / fallback state:
- * @param offline_queue_depth   Current depth of the offline task queue ([GalaxyWebSocketClient.queueSize]).
- * @param current_fallback_tier Current fallback tier string derived from rollout-control state.
+ * @param offline_queue_depth        Current depth of the offline task queue ([GalaxyWebSocketClient.queueSize]).
+ * @param current_fallback_tier      Current fallback tier string derived from rollout-control state.
+ * @param planner_fallback_tier      Active planner fallback tier string derived from
+ *                                   [com.ufo.galaxy.config.FallbackConfig.enablePlannerFallback]:
+ *                                   `"active"` when the local planner fallback ladder is enabled,
+ *                                   `"disabled"` when it is disabled, `null` when the config is
+ *                                   not yet available.  V2 `_parse_state_snapshot` accepts this
+ *                                   field under the primary key `planner_fallback_tier`.
+ * @param grounding_fallback_tier    Active grounding fallback tier string derived from
+ *                                   [com.ufo.galaxy.config.FallbackConfig.enableGroundingFallback]:
+ *                                   `"active"` when the local grounding fallback ladder is enabled,
+ *                                   `"disabled"` when it is disabled, `null` when the config is
+ *                                   not yet available.  V2 `_parse_state_snapshot` accepts this
+ *                                   field under the primary key `grounding_fallback_tier`.
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -1889,7 +1901,12 @@ data class DeviceStateSnapshotPayload(
 
     // Queue / fallback
     val offline_queue_depth: Int?,
-    val current_fallback_tier: String?
+    val current_fallback_tier: String?,
+
+    // PR-3: Per-subsystem fallback tier fields accepted by V2 _parse_state_snapshot.
+    // Derived from LocalLoopConfig.fallback; null when the config is not yet initialised.
+    val planner_fallback_tier: String? = null,
+    val grounding_fallback_tier: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -1940,6 +1957,14 @@ data class DeviceStateSnapshotPayload(
  *                             (e.g. `"GalaxyConnectionService"`, `"LoopController"`).
  * @param timestamp_ms         Epoch-ms production timestamp.
  *
+ * ## PR-3 schema alignment note
+ *
+ * [event_ts] is a V2-compatible seconds-epoch timestamp derived from [timestamp_ms].
+ * V2's `_parse_execution_event` extracts `event_ts` / `eventTs` / `timestamp` (seconds)
+ * to populate `DeviceExecutionEvent.event_ts`; it does **not** read `timestamp_ms`.
+ * Adding [event_ts] as a backed field closes this gap without removing [timestamp_ms],
+ * which remains the canonical Android-side timestamp field.
+ *
  * @see MsgType.DEVICE_EXECUTION_EVENT
  */
 data class DeviceExecutionEventPayload(
@@ -1956,6 +1981,18 @@ data class DeviceExecutionEventPayload(
     val source_component: String = "",
     val timestamp_ms: Long = System.currentTimeMillis()
 ) {
+    /**
+     * PR-3: V2-compatible event timestamp in seconds since epoch.
+     *
+     * V2's `_parse_execution_event` reads `event_ts` / `eventTs` / `timestamp` (seconds)
+     * to populate `DeviceExecutionEvent.event_ts`.  Android's canonical timestamp field
+     * [timestamp_ms] is in milliseconds and is not currently read by V2's `event_ts`
+     * extractor — this backed field closes that gap.
+     *
+     * Computed automatically from [timestamp_ms]; no caller action required.
+     */
+    val event_ts: Double = timestamp_ms / 1000.0
+
     companion object {
         /** Phase value: execution pipeline invoked; awaiting first step. */
         const val PHASE_EXECUTION_STARTED = "execution_started"
