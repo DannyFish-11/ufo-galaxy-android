@@ -2452,6 +2452,26 @@ class GalaxyConnectionService : Service() {
                 else -> "center_delegated"
             }
 
+            // ── PR-3: Per-subsystem fallback tier fields (V2 _parse_state_snapshot) ────────
+            // planner_fallback_tier and grounding_fallback_tier are derived from the active
+            // LocalLoopConfig fallback flags, which are the real Android-side source of truth
+            // for each subsystem's fallback ladder state.  V2's _parse_state_snapshot accepts
+            // these as separate fields alongside current_fallback_tier.
+            val plannerFallbackTier: String? = try {
+                UFOGalaxyApplication.localLoopConfig?.let { cfg ->
+                    if (cfg.fallback.enablePlannerFallback) "active" else "disabled"
+                }
+            } catch (e: Exception) {
+                null
+            }
+            val groundingFallbackTier: String? = try {
+                UFOGalaxyApplication.localLoopConfig?.let { cfg ->
+                    if (cfg.fallback.enableGroundingFallback) "active" else "disabled"
+                }
+            } catch (e: Exception) {
+                null
+            }
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2480,7 +2500,9 @@ class GalaxyConnectionService : Service() {
                 warmup_result = warmupResult,
                 runtime_health_snapshot = runtimeHealthMap,
                 offline_queue_depth = offlineQueueDepth,
-                current_fallback_tier = currentFallbackTier
+                current_fallback_tier = currentFallbackTier,
+                planner_fallback_tier = plannerFallbackTier,
+                grounding_fallback_tier = groundingFallbackTier
             )
 
             val envelope = AipMessage(

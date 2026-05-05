@@ -675,7 +675,8 @@ object GalaxyLogger {
      *
      * Optional fields: `model_ready`, `accessibility_ready`, `overlay_ready`,
      * `local_loop_ready`, `active_runtime_type`, `offline_queue_depth`,
-     * `current_fallback_tier`, `warmup_result`, `sent`.
+     * `current_fallback_tier`, `planner_fallback_tier`, `grounding_fallback_tier`,
+     * `warmup_result`, `sent`.
      *
      * Example:
      * ```json
