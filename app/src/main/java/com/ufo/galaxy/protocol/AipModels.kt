@@ -1899,6 +1899,19 @@ data class DeviceAuditReportPayload(
  *                                   same pre-flight condition used by
  *                                   [com.ufo.galaxy.runtime.CrossDeviceEnablementError] and
  *                                   [com.ufo.galaxy.agent.TakeoverEligibilityAssessor].
+ *
+ * Carrier lifecycle state (PR-10):
+ * @param carrier_lifecycle_state    The Android carrier's current runtime lifecycle state,
+ *                                   backed by [com.ufo.galaxy.runtime.RuntimeController.state]
+ *                                   via the [com.ufo.galaxy.runtime.wireLabel] extension.
+ *                                   One of: `"idle"`, `"starting"`, `"active"`, `"failed"`,
+ *                                   `"local_only"`.  `"active"` means the carrier is
+ *                                   connected to V2 with cross-device enabled; `"local_only"`
+ *                                   means cross-device is off but the local loop is running;
+ *                                   `null` when the state is unavailable.  V2 can use this
+ *                                   field to distinguish an active connected carrier from a
+ *                                   local-only runtime node without inspecting orthogonal
+ *                                   connection signals.  No fake value is ever emitted.
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -1966,7 +1979,15 @@ data class DeviceStateSnapshotPayload(
     //   is null.  Matches the same pre-flight condition checked by
     //   CrossDeviceEnablementError and TakeoverEligibilityAssessor.
     val carrier_foreground_visible: Boolean? = null,
-    val interaction_surface_ready: Boolean? = null
+    val interaction_surface_ready: Boolean? = null,
+
+    // PR-10: Carrier lifecycle state.
+    // Backed by RuntimeController.state via the wireLabel extension ("idle", "starting",
+    // "active", "failed", "local_only").  null when the backing state is unavailable.
+    // No fake placeholder value is ever emitted.  V2 can use this to distinguish an
+    // active connected carrier ("active") from a local-only runtime node ("local_only")
+    // without inspecting orthogonal connection signals.
+    val carrier_lifecycle_state: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2028,6 +2049,15 @@ data class DeviceStateSnapshotPayload(
  * @param attached_session_id  Attached runtime session UUID from
  *                             [com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId];
  *                             stable within one attach event.  `null` when no session is attached.
+ * @param carrier_lifecycle_state The Android carrier's current runtime lifecycle state at
+ *                             event emission time, backed by
+ *                             [com.ufo.galaxy.runtime.RuntimeController.state] via the
+ *                             [com.ufo.galaxy.runtime.wireLabel] extension.  One of:
+ *                             `"idle"`, `"starting"`, `"active"`, `"failed"`,
+ *                             `"local_only"`.  `null` when unavailable.  Matches the
+ *                             same field in [DeviceStateSnapshotPayload]; V2 can use
+ *                             both surfaces to confirm Android's operational mode at
+ *                             the time of execution.  No fake value is ever emitted.
  *
  * ## PR-3 schema alignment note
  *
@@ -2066,7 +2096,12 @@ data class DeviceExecutionEventPayload(
     // interaction_surface_ready: accessibility_ready && overlay_ready at event time.
     // null when the backing state is unavailable; no fake values emitted.
     val carrier_foreground_visible: Boolean? = null,
-    val interaction_surface_ready: Boolean? = null
+    val interaction_surface_ready: Boolean? = null,
+
+    // PR-10: Carrier lifecycle state — same semantics as DeviceStateSnapshotPayload.
+    // Backed by RuntimeController.state.wireLabel at event emission time.
+    // null when the backing state is unavailable; no fake value emitted.
+    val carrier_lifecycle_state: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
