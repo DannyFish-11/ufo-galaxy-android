@@ -1866,6 +1866,23 @@ data class DeviceAuditReportPayload(
  *                                   `"disabled"` when it is disabled, `null` when the config is
  *                                   not yet available.  V2 `_parse_state_snapshot` accepts this
  *                                   field under the primary key `grounding_fallback_tier`.
+ *
+ * Session / invocation identity continuity (PR-6):
+ * @param durable_session_id         The durable session era identifier from
+ *                                   [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.durableSessionId].
+ *                                   Stable across all WS reconnects within the same activation era.
+ *                                   `null` when no durable era is active (not yet started or already stopped).
+ * @param session_continuity_epoch   Monotonically increasing reconnect counter within the durable era from
+ *                                   [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.sessionContinuityEpoch].
+ *                                   `null` when [durable_session_id] is `null`.
+ * @param runtime_session_id         Per-app-launch runtime session UUID from
+ *                                   [com.ufo.galaxy.UFOGalaxyApplication.runtimeSessionId].
+ *                                   Stable within one app process; distinct from [durable_session_id].
+ *                                   `null` when the session is not yet initialised.
+ * @param attached_session_id        The attached runtime session UUID from
+ *                                   [com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId].
+ *                                   Created per attach event; stable across transitions.
+ *                                   `null` when no session is currently attached.
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -1906,7 +1923,15 @@ data class DeviceStateSnapshotPayload(
     // PR-3: Per-subsystem fallback tier fields accepted by V2 _parse_state_snapshot.
     // Derived from LocalLoopConfig.fallback; null when the config is not yet initialised.
     val planner_fallback_tier: String? = null,
-    val grounding_fallback_tier: String? = null
+    val grounding_fallback_tier: String? = null,
+
+    // PR-6: Session/invocation identity continuity fields.
+    // All four fields are derived from real Android runtime state; null when the backing
+    // state is not yet active.  No fake placeholder values are ever set.
+    val durable_session_id: String? = null,
+    val session_continuity_epoch: Int? = null,
+    val runtime_session_id: String? = null,
+    val attached_session_id: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -1956,6 +1981,18 @@ data class DeviceStateSnapshotPayload(
  * @param source_component     Name of the Android component that produced this event
  *                             (e.g. `"GalaxyConnectionService"`, `"LoopController"`).
  * @param timestamp_ms         Epoch-ms production timestamp.
+ * @param durable_session_id   Durable session era identifier from
+ *                             [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.durableSessionId],
+ *                             stable across WS reconnects.  `null` when no durable era is active.
+ * @param session_continuity_epoch Reconnect counter within the durable era from
+ *                             [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.sessionContinuityEpoch].
+ *                             `null` when [durable_session_id] is `null`.
+ * @param runtime_session_id   Per-app-launch runtime session UUID; allows V2 to correlate
+ *                             events to a specific WS connection cycle.  `null` when not yet
+ *                             initialised.
+ * @param attached_session_id  Attached runtime session UUID from
+ *                             [com.ufo.galaxy.runtime.AttachedRuntimeSession.sessionId];
+ *                             stable within one attach event.  `null` when no session is attached.
  *
  * ## PR-3 schema alignment note
  *
@@ -1979,7 +2016,14 @@ data class DeviceExecutionEventPayload(
     val device_id: String = "",
     val event_id: String = java.util.UUID.randomUUID().toString(),
     val source_component: String = "",
-    val timestamp_ms: Long = System.currentTimeMillis()
+    val timestamp_ms: Long = System.currentTimeMillis(),
+    // PR-6: Session/invocation identity continuity fields.
+    // All four fields are sourced from real Android runtime state; null when the backing
+    // state is not yet active.  No fake placeholder values are ever set.
+    val durable_session_id: String? = null,
+    val session_continuity_epoch: Int? = null,
+    val runtime_session_id: String? = null,
+    val attached_session_id: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
