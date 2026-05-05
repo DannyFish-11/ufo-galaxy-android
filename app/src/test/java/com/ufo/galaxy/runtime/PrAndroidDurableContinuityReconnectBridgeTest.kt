@@ -440,7 +440,11 @@ class PrAndroidDurableContinuityReconnectBridgeTest {
         val (controller, client) = buildController()
         controller.setActiveForTest()
 
-        assertNotNull("Precondition: sessionContinuityEpoch must be set before stop", client.getSessionContinuityEpoch())
+        assertEquals(
+            "Precondition: sessionContinuityEpoch must be 0 before stop (initial activation, no reconnect)",
+            0,
+            client.getSessionContinuityEpoch()
+        )
 
         controller.stop()
 
@@ -498,7 +502,11 @@ class PrAndroidDurableContinuityReconnectBridgeTest {
         val (controller, client) = buildController()
         controller.setActiveForTest()
 
-        assertNotNull("Precondition: sessionContinuityEpoch must be set before invalidation", client.getSessionContinuityEpoch())
+        assertEquals(
+            "Precondition: sessionContinuityEpoch must be 0 before invalidation (initial activation, no reconnect)",
+            0,
+            client.getSessionContinuityEpoch()
+        )
 
         controller.invalidateSession()
 
