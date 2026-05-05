@@ -257,7 +257,26 @@ enum class MsgType(val value: String) {
      *  Payload model: [DeviceStateSnapshotPayload].
      *  V2 absorbed by: core.android_device_state_store.absorb_device_state_snapshot().
      *  @status pr-rt — payload defined; send path wired in GalaxyConnectionService. */
-    DEVICE_STATE_SNAPSHOT("device_state_snapshot");
+    DEVICE_STATE_SNAPSHOT("device_state_snapshot"),
+
+    // ── PR-2 (Android): Execution-event uplink ────────────────────────────────────────────
+    // Uplink message emitted by Android during and after delegated flow execution.
+    // Carries per-step and phase-transition execution events (planning, grounding, execution,
+    // stagnation, fallback, completed, failed) so V2 FlowLevelOperatorSurface can observe
+    // live cross-device execution state and project it through the operator/flow surfaces.
+    //
+    // V2 side: absorbed by core.android_device_state_store.absorb_execution_event() and
+    // forwarded to core.flow_level_operator_surface via _forward_execution_event_to_flow_surface.
+
+    /** Uplink: Android emits a structured execution-phase event to V2 during delegated execution.
+     *  Carries flow_id, task_id, phase, step_index, is_blocking, blocking_reason,
+     *  stagnation_detected, and fallback_tier.  Emitted at real execution lifecycle points
+     *  (execution_started, execution_progress, completed, failed, stagnation_detected,
+     *  fallback_transition, takeover_milestone) so V2 can track live flow state.
+     *  Payload model: [DeviceExecutionEventPayload].
+     *  V2 absorbed by: core.android_device_state_store.absorb_device_execution_event().
+     *  @status pr-2-android — payload defined; send path wired in GalaxyConnectionService. */
+    DEVICE_EXECUTION_EVENT("device_execution_event");
 
     companion object {
         /**
@@ -1872,3 +1891,87 @@ data class DeviceStateSnapshotPayload(
     val offline_queue_depth: Int?,
     val current_fallback_tier: String?
 )
+
+// ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
+
+/**
+ * Uplink payload for [MsgType.DEVICE_EXECUTION_EVENT] (PR-2 Android companion).
+ *
+ * Carries a single structured execution-phase event emitted by Android during a delegated
+ * or local execution flow.  V2 absorbs this payload via
+ * `core.android_device_state_store.absorb_device_execution_event()`, which stores and
+ * forwards it to the FlowLevelOperatorSurface so the V2 operator plane can observe live
+ * Android-side execution state.
+ *
+ * Field names use snake_case to match the V2 `_parse_execution_event` primary keys
+ * (V2 also accepts camelCase aliases `flowId`, `taskId`, `stepIndex`, `isBlocking`,
+ * `blockingReason`, `stagnationDetected`, `fallbackTier`).
+ *
+ * ## Phase values
+ *
+ * The [phase] field maps to the canonical Android execution lifecycle:
+ *
+ * | Phase string              | When emitted                                               |
+ * |---------------------------|------------------------------------------------------------|
+ * | `"execution_started"`     | Immediately before the execution pipeline is invoked.      |
+ * | `"execution_progress"`    | After each successfully executed step.                     |
+ * | `"completed"`             | After a successful terminal result (status=success).       |
+ * | `"failed"`                | After a failure terminal result (status=error/timeout).    |
+ * | `"stagnation_detected"`   | When the loop terminates due to stagnation.                |
+ * | `"cancelled"`             | When the task is cancelled.                                |
+ * | `"fallback_transition"`   | When a delegated path falls back to local execution.       |
+ * | `"takeover_milestone"`    | When a takeover execution lifecycle event is emitted.      |
+ *
+ * @param flow_id              Delegated flow identifier (= task_id for most paths).
+ * @param task_id              Originating task identifier.
+ * @param phase                Execution phase string; one of the phase values above.
+ * @param step_index           Zero-based index of the current step, or -1 if unknown /
+ *                             not applicable (e.g. for start / terminal events).
+ * @param is_blocking          `true` when this event represents a blocking or terminal
+ *                             failure condition that prevents further execution.
+ * @param blocking_reason      Human-readable reason for blocking; empty string when
+ *                             [is_blocking] is `false`.
+ * @param stagnation_detected  `true` when the terminal event is caused by stagnation.
+ * @param fallback_tier        Active fallback tier at the time of emission, or `null`
+ *                             when not applicable.
+ * @param device_id            Android device identifier.
+ * @param event_id             UUID idempotency key for this specific emission.
+ * @param source_component     Name of the Android component that produced this event
+ *                             (e.g. `"GalaxyConnectionService"`, `"LoopController"`).
+ * @param timestamp_ms         Epoch-ms production timestamp.
+ *
+ * @see MsgType.DEVICE_EXECUTION_EVENT
+ */
+data class DeviceExecutionEventPayload(
+    val flow_id: String,
+    val task_id: String,
+    val phase: String,
+    val step_index: Int = -1,
+    val is_blocking: Boolean = false,
+    val blocking_reason: String = "",
+    val stagnation_detected: Boolean = false,
+    val fallback_tier: String? = null,
+    val device_id: String = "",
+    val event_id: String = java.util.UUID.randomUUID().toString(),
+    val source_component: String = "",
+    val timestamp_ms: Long = System.currentTimeMillis()
+) {
+    companion object {
+        /** Phase value: execution pipeline invoked; awaiting first step. */
+        const val PHASE_EXECUTION_STARTED = "execution_started"
+        /** Phase value: a single step completed successfully. */
+        const val PHASE_EXECUTION_PROGRESS = "execution_progress"
+        /** Phase value: terminal success — all steps completed. */
+        const val PHASE_COMPLETED = "completed"
+        /** Phase value: terminal failure — error / timeout / max_steps. */
+        const val PHASE_FAILED = "failed"
+        /** Phase value: terminal — stagnation guard triggered. */
+        const val PHASE_STAGNATION_DETECTED = "stagnation_detected"
+        /** Phase value: terminal — task cancelled. */
+        const val PHASE_CANCELLED = "cancelled"
+        /** Phase value: delegated path fell back to local execution. */
+        const val PHASE_FALLBACK_TRANSITION = "fallback_transition"
+        /** Phase value: takeover lifecycle milestone. */
+        const val PHASE_TAKEOVER_MILESTONE = "takeover_milestone"
+    }
+}

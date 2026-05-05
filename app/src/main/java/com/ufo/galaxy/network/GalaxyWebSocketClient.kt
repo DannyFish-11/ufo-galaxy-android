@@ -15,6 +15,7 @@ import com.ufo.galaxy.protocol.MeshJoinPayload
 import com.ufo.galaxy.protocol.MeshLeavePayload
 import com.ufo.galaxy.protocol.MeshResultPayload
 import com.ufo.galaxy.protocol.MeshSubtaskResult
+import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.protocol.MsgType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1108,9 +1109,61 @@ class GalaxyWebSocketClient(
     }
 
     /**
-     * 处理收到的消息
+     * Sends a [MsgType.DEVICE_EXECUTION_EVENT] uplink message to V2.
+     *
+     * Encodes [payload] into an [AipMessage] envelope and routes it through [sendJson]
+     * so the cross-device gate and connection check are uniformly enforced.
+     *
+     * ## V2 ingestion
+     * V2 absorbs the event via
+     * `core.android_device_state_store.absorb_device_execution_event(device_id, payload_dict)`,
+     * which:
+     *  1. Parses the payload into a `DeviceExecutionEvent` dataclass.
+     *  2. Appends it to the in-process execution-event ring buffer.
+     *  3. Forwards the event to `FlowLevelOperatorSurface` (when `flow_id` is non-empty)
+     *     so live cross-device execution state is visible at the V2 operator surface.
+     *
+     * Send failure **never throws** — any exception is caught and logged so the caller's
+     * execution lifecycle progression is not interrupted.
+     *
+     * @param payload The [DeviceExecutionEventPayload] describing the execution phase event.
+     * @return `true` if the message was sent immediately; `false` if blocked, disconnected,
+     *         or an exception occurred.
      */
-    private fun handleMessage(text: String) {
+    fun sendDeviceExecutionEvent(payload: DeviceExecutionEventPayload): Boolean {
+        return try {
+            val deviceId = getDeviceId()
+            val enrichedPayload = payload.copy(
+                device_id = payload.device_id.ifBlank { deviceId }
+            )
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_EXECUTION_EVENT,
+                payload = enrichedPayload,
+                device_id = deviceId,
+                correlation_id = payload.task_id,
+                trace_id = sessionTraceId,
+                runtime_session_id = runtimeSessionId,
+                idempotency_key = payload.event_id
+            )
+            val sent = sendJson(gson.toJson(envelope))
+            if (sent) {
+                Log.d(
+                    TAG, "[DEVICE_EXEC_EVENT] sent event_id=${payload.event_id} " +
+                        "task_id=${payload.task_id} phase=${payload.phase} " +
+                        "step=${payload.step_index} is_blocking=${payload.is_blocking}"
+                )
+            } else {
+                Log.w(
+                    TAG, "[DEVICE_EXEC_EVENT] send blocked/failed event_id=${payload.event_id} " +
+                        "task_id=${payload.task_id} phase=${payload.phase}"
+                )
+            }
+            sent
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_EXEC_EVENT] unexpected error sending event task_id=${payload.task_id}: ${e.message}", e)
+            false
+        }
+    }
         try {
             val json = gson.fromJson(text, JsonObject::class.java)
             
