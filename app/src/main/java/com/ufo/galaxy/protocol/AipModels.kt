@@ -1982,6 +1982,16 @@ data class DeviceStateSnapshotPayload(
     val carrier_foreground_visible: Boolean? = null,
     val interaction_surface_ready: Boolean? = null,
 
+    // Authoritative Android-side mode/governance state signals.
+    // mode_state: "local_only" | "cross_device".
+    // mode_readiness_state: "ready" | "degraded".
+    // *_eligibility: coherent gate outcomes derived from cross_device_enabled and feature flags.
+    val mode_state: String? = null,
+    val mode_readiness_state: String? = null,
+    val cross_device_eligibility: Boolean? = null,
+    val goal_execution_eligibility: Boolean? = null,
+    val parallel_execution_eligibility: Boolean? = null,
+
     // PR-10: Final Android carrier consolidation — cross-cutting carrier state fields.
     //
     // carrier_runtime_state: wire label of RuntimeController.state at snapshot time.
@@ -2104,6 +2114,16 @@ data class DeviceExecutionEventPayload(
     // null when the backing state is unavailable; no fake values emitted.
     val carrier_foreground_visible: Boolean? = null,
     val interaction_surface_ready: Boolean? = null,
+
+    // Authoritative Android-side mode/governance state signals.
+    // mode_state: "local_only" | "cross_device".
+    // mode_readiness_state: "ready" | "degraded".
+    // *_eligibility: coherent gate outcomes derived from cross_device_enabled and feature flags.
+    val mode_state: String? = null,
+    val mode_readiness_state: String? = null,
+    val cross_device_eligibility: Boolean? = null,
+    val goal_execution_eligibility: Boolean? = null,
+    val parallel_execution_eligibility: Boolean? = null,
 
     // PR-10: Final carrier consolidation — runtime state included in every execution event
     // so V2 can correlate event emission with the carrier's cross-device participation mode.

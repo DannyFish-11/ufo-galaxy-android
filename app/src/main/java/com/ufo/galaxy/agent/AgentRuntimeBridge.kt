@@ -189,6 +189,7 @@ class AgentRuntimeBridge(
     suspend fun handoff(request: HandoffRequest): HandoffResult {
         // ── Span lifecycle ────────────────────────────────────────────────────
         val spanId = request.spanId.ifBlank { TraceContext.startSpan() }
+        val modeState = settings.authoritativeModeState()
 
         // ── Dispatcher selection log ──────────────────────────────────────────
         GalaxyLogger.log(
@@ -201,13 +202,18 @@ class AgentRuntimeBridge(
                 if (!request.capability.isNullOrBlank()) put("capability", request.capability)
                 if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
                 put("cross_device_on", settings.crossDeviceEnabled)
+                put("mode_state", modeState.modeState)
+                put("mode_readiness_state", modeState.modeReadinessState)
+                put("cross_device_eligibility", modeState.crossDeviceEligibility)
+                put("goal_execution_eligibility", modeState.goalExecutionEligibility)
+                put("parallel_execution_eligibility", modeState.parallelExecutionEligibility)
                 if (!request.sourceRuntimePosture.isNullOrBlank()) put("source_runtime_posture", request.sourceRuntimePosture)
             }
         )
 
         try {
         // ── OFF guard: cross-device switch must be ON ─────────────────────────
-        if (!settings.crossDeviceEnabled) {
+        if (!modeState.crossDeviceEligibility) {
             Log.d(TAG, "[BRIDGE] cross_device=OFF — skipping handoff trace_id=${request.traceId}")
             GalaxyLogger.log(
                 TAG, mapOf(
@@ -215,7 +221,9 @@ class AgentRuntimeBridge(
                     "reason" to "cross_device_off",
                     "trace_id" to request.traceId,
                     "span_id" to spanId,
-                    "task_id" to request.taskId
+                    "task_id" to request.taskId,
+                    "mode_state" to modeState.modeState,
+                    "mode_readiness_state" to modeState.modeReadinessState
                 )
             )
             return localResult(request, "cross_device_off")

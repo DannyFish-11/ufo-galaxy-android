@@ -288,24 +288,32 @@ class GalaxyConnectionService : Service() {
      */
     private val deviceExecutionEventSink = DeviceExecutionEventSink { payload ->
         try {
+            val modeState = UFOGalaxyApplication.appSettings.authoritativeModeState()
+            val enrichedPayload = payload.copy(
+                mode_state = modeState.modeState,
+                mode_readiness_state = modeState.modeReadinessState,
+                cross_device_eligibility = modeState.crossDeviceEligibility,
+                goal_execution_eligibility = modeState.goalExecutionEligibility,
+                parallel_execution_eligibility = modeState.parallelExecutionEligibility
+            )
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_EXECUTION_EVENT,
                 mapOf(
                     "event" to "device_execution_event_sent",
                     "device_id" to localDeviceId,
-                    "task_id" to payload.task_id,
-                    "phase" to payload.phase,
-                    "flow_id" to payload.flow_id,
-                    "step_index" to payload.step_index,
-                    "is_blocking" to payload.is_blocking,
-                    "blocking_reason" to payload.blocking_reason,
-                    "stagnation_detected" to payload.stagnation_detected,
-                    "fallback_tier" to (payload.fallback_tier ?: ""),
-                    "event_id" to payload.event_id,
-                    "source_component" to payload.source_component
+                    "task_id" to enrichedPayload.task_id,
+                    "phase" to enrichedPayload.phase,
+                    "flow_id" to enrichedPayload.flow_id,
+                    "step_index" to enrichedPayload.step_index,
+                    "is_blocking" to enrichedPayload.is_blocking,
+                    "blocking_reason" to enrichedPayload.blocking_reason,
+                    "stagnation_detected" to enrichedPayload.stagnation_detected,
+                    "fallback_tier" to (enrichedPayload.fallback_tier ?: ""),
+                    "event_id" to enrichedPayload.event_id,
+                    "source_component" to enrichedPayload.source_component
                 )
             )
-            webSocketClient.sendDeviceExecutionEvent(payload)
+            webSocketClient.sendDeviceExecutionEvent(enrichedPayload)
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_EXEC_EVENT] sink error task_id=${payload.task_id} phase=${payload.phase}: ${e.message}", e)
         }
@@ -2635,6 +2643,7 @@ class GalaxyConnectionService : Service() {
             val carrierRuntimeState = UFOGalaxyApplication.runtimeController.state.value.wireLabel
             val reconnectRecoveryState =
                 UFOGalaxyApplication.runtimeController.reconnectRecoveryState.value.wireValue
+            val modeState = settings.authoritativeModeState()
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -2677,6 +2686,11 @@ class GalaxyConnectionService : Service() {
                 // PR-8: carrier manifestation/presence hints backed by real Android state.
                 carrier_foreground_visible = carrierForegroundVisible,
                 interaction_surface_ready = interactionSurfaceReady,
+                mode_state = modeState.modeState,
+                mode_readiness_state = modeState.modeReadinessState,
+                cross_device_eligibility = modeState.crossDeviceEligibility,
+                goal_execution_eligibility = modeState.goalExecutionEligibility,
+                parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 // PR-10: cross-cutting carrier state backed by real RuntimeController state.
                 carrier_runtime_state = carrierRuntimeState,
                 reconnect_recovery_state = reconnectRecoveryState
@@ -2695,7 +2709,9 @@ class GalaxyConnectionService : Service() {
                 TAG,
                 "[DEVICE_STATE_SNAPSHOT] device_id=$deviceId model_ready=$modelReady " +
                     "local_loop_ready=$localLoopReady active_runtime=$activeRuntimeType " +
-                    "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier sent=$sent"
+                    "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier " +
+                    "mode_state=${modeState.modeState} mode_readiness_state=${modeState.modeReadinessState} " +
+                    "cross_device_eligibility=${modeState.crossDeviceEligibility} sent=$sent"
             )
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_STATE_SNAPSHOT, mapOf(
@@ -2709,6 +2725,11 @@ class GalaxyConnectionService : Service() {
                     "warmup_result" to warmupResult,
                     "offline_queue_depth" to offlineQueueDepth,
                     "current_fallback_tier" to currentFallbackTier,
+                    "mode_state" to modeState.modeState,
+                    "mode_readiness_state" to modeState.modeReadinessState,
+                    "cross_device_eligibility" to modeState.crossDeviceEligibility,
+                    "goal_execution_eligibility" to modeState.goalExecutionEligibility,
+                    "parallel_execution_eligibility" to modeState.parallelExecutionEligibility,
                     "llama_cpp_available" to llamaCppAvailable,
                     "ncnn_available" to ncnnAvailable,
                     "sent" to sent

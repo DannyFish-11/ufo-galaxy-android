@@ -343,8 +343,52 @@ interface AppSettings {
         "overlay_ready" to overlayReady
     )
 
+    /**
+     * Returns the authoritative Android-side mode/governance state used by
+     * runtime gates and uplink observability payloads.
+     *
+     * This is the canonical relation between:
+     * - [crossDeviceEnabled]
+     * - [goalExecutionEnabled]
+     * - [parallelExecutionEnabled]
+     */
+    fun authoritativeModeState(): AuthoritativeModeState {
+        val modeState = if (crossDeviceEnabled) {
+            AuthoritativeModeState.MODE_CROSS_DEVICE
+        } else {
+            AuthoritativeModeState.MODE_LOCAL_ONLY
+        }
+        val modeReadinessState = if (degradedMode) {
+            AuthoritativeModeState.READINESS_DEGRADED
+        } else {
+            AuthoritativeModeState.READINESS_READY
+        }
+        return AuthoritativeModeState(
+            modeState = modeState,
+            modeReadinessState = modeReadinessState,
+            crossDeviceEligibility = crossDeviceEnabled,
+            goalExecutionEligibility = crossDeviceEnabled && goalExecutionEnabled,
+            parallelExecutionEligibility = crossDeviceEnabled && parallelExecutionEnabled
+        )
+    }
+
     companion object {
         const val CANONICAL_WS_DEVICE_PATH_TEMPLATE = "/ws/device/{device_id}"
+    }
+}
+
+data class AuthoritativeModeState(
+    val modeState: String,
+    val modeReadinessState: String,
+    val crossDeviceEligibility: Boolean,
+    val goalExecutionEligibility: Boolean,
+    val parallelExecutionEligibility: Boolean
+) {
+    companion object {
+        const val MODE_LOCAL_ONLY = "local_only"
+        const val MODE_CROSS_DEVICE = "cross_device"
+        const val READINESS_READY = "ready"
+        const val READINESS_DEGRADED = "degraded"
     }
 }
 
