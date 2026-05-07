@@ -24,6 +24,7 @@ import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
+import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
@@ -1085,6 +1086,26 @@ class GalaxyConnectionService : Service() {
      * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
      */
     private suspend fun handleGoalExecution(taskId: String, payloadJson: String, inboundTraceId: String?) {
+        val governanceDecision = AndroidExecutionGovernanceContract.evaluateAcceptance(
+            executionType = AndroidExecutionGovernanceContract.ExecutionType.GOAL_EXECUTION,
+            context = AndroidExecutionGovernanceContract.AcceptanceContext(
+                activeTakeoverId = activeTakeoverId
+            )
+        )
+        if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
+            val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
+                ?: java.util.UUID.randomUUID().toString()
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "goal_execution_governance_gate",
+                errorType = "execution_conflict",
+                errorContext = governanceDecision.reason
+            )
+            sendGoalError(taskId, null, null, governanceDecision.reason, traceId, ROUTE_MODE_CROSS_DEVICE)
+            taskCancelRegistry.deregister(taskId)
+            return
+        }
+
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
@@ -1262,6 +1283,26 @@ class GalaxyConnectionService : Service() {
      * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
      */
     private suspend fun handleParallelSubtask(taskId: String, payloadJson: String, inboundTraceId: String?) {
+        val governanceDecision = AndroidExecutionGovernanceContract.evaluateAcceptance(
+            executionType = AndroidExecutionGovernanceContract.ExecutionType.PARALLEL_SUBTASK,
+            context = AndroidExecutionGovernanceContract.AcceptanceContext(
+                activeTakeoverId = activeTakeoverId
+            )
+        )
+        if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
+            val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
+                ?: java.util.UUID.randomUUID().toString()
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "parallel_subtask_governance_gate",
+                errorType = "execution_conflict",
+                errorContext = governanceDecision.reason
+            )
+            sendGoalError(taskId, null, null, governanceDecision.reason, traceId, ROUTE_MODE_CROSS_DEVICE)
+            taskCancelRegistry.deregister(taskId)
+            return
+        }
+
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
@@ -3420,6 +3461,7 @@ class GalaxyConnectionService : Service() {
         // Capture the existing active takeover before setting the new one.
         // The assessor uses the captured value to detect concurrent takeovers.
         val existingActiveTakeoverId = activeTakeoverId
+        var takeoverExecutionStarted = false
         // Mark this request as in-flight so any concurrent inbound request is blocked.
         activeTakeoverId = envelope.takeover_id
         try {
@@ -3711,6 +3753,7 @@ class GalaxyConnectionService : Service() {
                 )
             )
 
+            takeoverExecutionStarted = true
             serviceScope.launch {
                 try {
                     val outcome = delegatedTakeoverExecutor.execute(delegatedUnit, activationRecord)
@@ -3805,6 +3848,9 @@ class GalaxyConnectionService : Service() {
                     }
                 } finally {
                     UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+                    if (activeTakeoverId == envelope.takeover_id) {
+                        activeTakeoverId = null
+                    }
                 }
             }
 
@@ -3816,9 +3862,9 @@ class GalaxyConnectionService : Service() {
                 reason = "accepted"
             )
         } finally {
-            // Always clear the active takeover ID once we have sent our response so
-            // subsequent requests are not incorrectly blocked.
-            activeTakeoverId = null
+            if (!takeoverExecutionStarted && activeTakeoverId == envelope.takeover_id) {
+                activeTakeoverId = null
+            }
         }
     }
 
