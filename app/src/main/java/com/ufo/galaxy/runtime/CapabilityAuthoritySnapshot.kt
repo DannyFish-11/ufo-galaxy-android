@@ -92,9 +92,21 @@ data class CapabilityAuthoritySnapshot(
         /**
          * Stable schema version for this contract.
          *
-         * Increment this value (and update the schema documentation) whenever a
-         * breaking or additive change is made to [CapabilityAuthoritySnapshot].
-         * V2 uses this to detect Android-side schema drift without field inference.
+         * V2 reads this field to detect Android-side schema drift without field inference.
+         *
+         * **When to increment:**
+         * - Increment for any **breaking change**: removing a field, renaming a field,
+         *   changing a field's type, or changing the semantics of an existing value.
+         * - Increment for any **additive change** that V2 must handle conditionally
+         *   (e.g. a new authority label value that older V2 versions do not understand).
+         *
+         * **When NOT to increment:**
+         * - Pure comment/documentation changes.
+         * - Adding fields that V2 can safely ignore when absent (V2 must tolerate
+         *   unknown fields gracefully if this is the strategy chosen).
+         *
+         * After incrementing, update this comment block and update any V2-side schema
+         * version checks accordingly.
          */
         const val SCHEMA_VERSION: String = "1"
 
@@ -112,16 +124,18 @@ data class CapabilityAuthoritySnapshot(
         /** Device is still warming up; capability signals are not yet stable. */
         const val AUTHORITY_LABEL_PENDING: String = "pending"
 
-        // ── Base capability constants (mirroring CapabilityHonestyGuard) ─────
+        // ── Base capability constants — single source of truth via CapabilityHonestyGuard ─
 
-        private val BASE_CAPABILITY_LIST: List<String> = listOf(
-            "autonomous_goal_execution",
-            "local_task_planning",
-            "local_ui_reasoning",
-            "cross_device_coordination"
-        )
+        /**
+         * The base capability list derived from [CapabilityHonestyGuard.BASE_CAPABILITIES].
+         * Using the guard as the canonical source avoids string duplication and ensures
+         * [CapabilityAuthoritySnapshot] and [CapabilityHonestyGuard] are always consistent.
+         */
+        private val BASE_CAPABILITY_LIST: List<String> =
+            CapabilityHonestyGuard.BASE_CAPABILITIES.toList()
 
-        private const val CAPABILITY_LOCAL_MODEL_INFERENCE: String = "local_model_inference"
+        private const val CAPABILITY_LOCAL_MODEL_INFERENCE: String =
+            CapabilityHonestyGuard.CAPABILITY_LOCAL_MODEL_INFERENCE
 
         // ── Builder from ManagerState ─────────────────────────────────────────
 

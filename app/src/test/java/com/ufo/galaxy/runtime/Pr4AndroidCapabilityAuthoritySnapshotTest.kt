@@ -93,6 +93,13 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
         groundingHealth = RuntimeHealthSnapshot.ComponentHealth.UNHEALTHY
     )
 
+    /** Helper to construct PartialReady with a consistent component name pair. */
+    private fun partialReadyState() =
+        LocalInferenceRuntimeManager.ManagerState.PartialReady(
+            completedComponents = listOf("planner"),
+            pendingComponents   = listOf("grounding")
+        )
+
     private fun build(
         state: LocalInferenceRuntimeManager.ManagerState,
         checksumValid: Boolean = true
@@ -174,7 +181,7 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
 
     @Test
     fun `PartialReady gives plannerReady=true groundingReady=false`() {
-        val snap = build(LocalInferenceRuntimeManager.ManagerState.PartialReady(listOf("planner"), listOf("grounding")))
+        val snap = build(partialReadyState())
         assertTrue("plannerReady must be true in PartialReady (planner loaded)", snap.plannerReady)
         assertFalse("groundingReady must be false in PartialReady (grounding still starting)",
             snap.groundingReady)
@@ -243,7 +250,7 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
 
     @Test
     fun `PartialReady gives local_intelligence_status = degraded`() {
-        val snap = build(LocalInferenceRuntimeManager.ManagerState.PartialReady(listOf("planner"), listOf("grounding")))
+        val snap = build(partialReadyState())
         assertEquals("degraded", snap.localIntelligenceStatus)
     }
 
@@ -438,7 +445,7 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
     @Test
     fun `PartialReady gives pending label`() {
         assertEquals(CapabilityAuthoritySnapshot.AUTHORITY_LABEL_PENDING,
-            build(LocalInferenceRuntimeManager.ManagerState.PartialReady(listOf("planner"), listOf("grounding"))).authorityLabel)
+            build(partialReadyState()).authorityLabel)
     }
 
     // ── 7. Capability list consistency ────────────────────────────────────────
@@ -471,12 +478,8 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
 
     @Test
     fun `base capabilities always present regardless of inference readiness`() {
-        val baseExpected = listOf(
-            "autonomous_goal_execution",
-            "local_task_planning",
-            "local_ui_reasoning",
-            "cross_device_coordination"
-        )
+        // Use CapabilityHonestyGuard.BASE_CAPABILITIES as canonical source of base capabilities.
+        val baseExpected = CapabilityHonestyGuard.BASE_CAPABILITIES
         // Check for a fully healthy Running state
         val runningSnap = build(
             LocalInferenceRuntimeManager.ManagerState.Running(healthySnapshot()),
@@ -595,7 +598,7 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
         val pendingStates = listOf(
             LocalInferenceRuntimeManager.ManagerState.Starting,
             LocalInferenceRuntimeManager.ManagerState.Recovering,
-            LocalInferenceRuntimeManager.ManagerState.PartialReady(listOf("planner"), listOf("grounding"))
+            partialReadyState()
         )
         for (state in pendingStates) {
             val snap = build(state, checksumValid = true)
@@ -621,7 +624,7 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
                 com.ufo.galaxy.runtime.RuntimeStartResult.StartStage.HEALTH_CHECK
             ),
             LocalInferenceRuntimeManager.ManagerState.Unavailable("gone"),
-            LocalInferenceRuntimeManager.ManagerState.PartialReady(listOf("planner"), listOf("grounding")),
+            partialReadyState(),
             LocalInferenceRuntimeManager.ManagerState.Degraded(plannerUnhealthySnapshot(), "partial"),
             LocalInferenceRuntimeManager.ManagerState.Running(healthySnapshot())
         )
@@ -677,7 +680,7 @@ class Pr4AndroidCapabilityAuthoritySnapshotTest {
             LocalInferenceRuntimeManager.ManagerState.Failed("x") to true,
             LocalInferenceRuntimeManager.ManagerState.Starting to true,
             LocalInferenceRuntimeManager.ManagerState.Recovering to true,
-            LocalInferenceRuntimeManager.ManagerState.PartialReady(listOf("planner"), listOf("grounding")) to true
+            partialReadyState() to true
         )
 
         for ((state, checksum) in allStates) {
