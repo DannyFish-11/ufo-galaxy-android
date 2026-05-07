@@ -3,6 +3,7 @@ package com.ufo.galaxy.runtime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -83,6 +84,39 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     @Test
+    fun `LocalCollaborationAgent scope explicitly declares ownership and non ownership boundaries`() {
+        val scope = AndroidMeshParticipationContract.LOCAL_COLLABORATION_AGENT_SCOPE
+
+        assertEquals("LocalCollaborationAgent", scope["owner"])
+        val owns = scope["owns"] as List<*>
+        val doesNotOwn = scope["does_not_own"] as List<*>
+        assertTrue(owns.contains("parallel_subtask_payload_execution"))
+        assertTrue(owns.contains("group_id_subtask_index_result_echo"))
+        assertTrue(doesNotOwn.contains("mesh_session_join_leave_lifecycle"))
+        assertTrue(doesNotOwn.contains("barrier_coordination"))
+    }
+
+    @Test
+    fun `mesh state and result semantics define partial deferred boundary explicitly`() {
+        val stateSemantics = AndroidMeshParticipationContract.MESH_STATE_SEMANTICS
+        val resultSemantics = AndroidMeshParticipationContract.MESH_RESULT_SEMANTICS
+        val deferredScope = AndroidMeshParticipationContract.MESH_PARTIAL_DEFERRED_SCOPE
+
+        assertNotEquals(
+            stateSemantics[AndroidMeshParticipationContract.ReadinessLevel.PARTIAL.wireValue],
+            stateSemantics[AndroidMeshParticipationContract.ReadinessLevel.READY.wireValue]
+        )
+        assertTrue(resultSemantics.containsKey("parallel_subtask_success"))
+        assertTrue(resultSemantics.containsKey("parallel_subtask_error"))
+        assertTrue(resultSemantics.containsKey("staged_mesh_blocked"))
+        assertTrue(
+            deferredScope.contains(
+                "android_participates_as_execution_participant_not_mesh_coordinator"
+            )
+        )
+    }
+
+    @Test
     fun `toWireMap exposes readiness and constrained observability keys`() {
         val report = AndroidMeshParticipationContract.evaluate(
             orchestration = createHealthyOrchestrationRecord(),
@@ -99,6 +133,22 @@ class Pr8AndroidMeshParticipationContractTest {
             wireMap[AndroidMeshParticipationContract.KEY_RELATIONSHIP_GRAPH_VERSION]
         )
         assertNotNull(wireMap[AndroidMeshParticipationContract.KEY_CONSTRAINED_REASONS])
+        assertEquals(
+            AndroidMeshParticipationContract.LOCAL_COLLABORATION_AGENT_SCOPE,
+            wireMap[AndroidMeshParticipationContract.KEY_LOCAL_COLLABORATION_AGENT_SCOPE]
+        )
+        assertEquals(
+            AndroidMeshParticipationContract.MESH_STATE_SEMANTICS,
+            wireMap[AndroidMeshParticipationContract.KEY_MESH_STATE_SEMANTICS]
+        )
+        assertEquals(
+            AndroidMeshParticipationContract.MESH_RESULT_SEMANTICS,
+            wireMap[AndroidMeshParticipationContract.KEY_MESH_RESULT_SEMANTICS]
+        )
+        assertEquals(
+            AndroidMeshParticipationContract.MESH_PARTIAL_DEFERRED_SCOPE,
+            wireMap[AndroidMeshParticipationContract.KEY_MESH_PARTIAL_DEFERRED_SCOPE]
+        )
     }
 
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
