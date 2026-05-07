@@ -2,6 +2,7 @@ package com.ufo.galaxy.input
 
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,8 +39,6 @@ import com.ufo.galaxy.local.LocalLoopResult
 class InputRouterPostureTest {
 
     // ── Fakes ─────────────────────────────────────────────────────────────────
-
-    private val gson = Gson()
 
     private class FakeGatewayClient(
         var connected: Boolean = true,
@@ -262,6 +261,40 @@ class InputRouterPostureTest {
         assertEquals("Payload and envelope posture must match", envelopePosture, payloadPosture)
     }
 
+    @Test
+    fun `cross-device route includes NL source carrier and V2 semantic authority metadata in payload context`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("open maps", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
+
+        val envelope = JSONObject(gateway.sentMessages.first())
+        val extra = envelope
+            .getJSONObject("payload")
+            .getJSONObject("context")
+            .getJSONObject("extra")
+        assertEquals(
+            AndroidNlSemanticContract.SOURCE_ANDROID_LOCAL_INPUT,
+            extra.getString(AndroidNlSemanticContract.KEY_NL_SOURCE)
+        )
+        assertEquals(
+            AndroidNlSemanticContract.CARRIER_ANDROID,
+            extra.getString(AndroidNlSemanticContract.KEY_NL_CARRIER)
+        )
+        assertEquals(
+            AndroidNlSemanticContract.PATH_ANDROID_HANDOFF_TO_V2,
+            extra.getString(AndroidNlSemanticContract.KEY_NL_PATH)
+        )
+        assertEquals(
+            AndroidNlSemanticContract.SEMANTIC_AUTHORITY_V2,
+            extra.getString(AndroidNlSemanticContract.KEY_SEMANTIC_AUTHORITY)
+        )
+        assertEquals(
+            AndroidNlSemanticContract.LOCAL_NL_LAYER_ROLE,
+            extra.getString(AndroidNlSemanticContract.KEY_LOCAL_NL_LAYER_ROLE)
+        )
+    }
+
     // ── Local path: posture forwarded in LocalLoopOptions ─────────────────────
 
     @Test
@@ -310,6 +343,30 @@ class InputRouterPostureTest {
             "Unknown posture must be normalised to control_only for local executor",
             SourceRuntimePosture.CONTROL_ONLY,
             capturing.capturedOptions.first().sourceRuntimePosture
+        )
+    }
+
+    @Test
+    fun `local route logs Android local NL path with non-system semantic authority`() {
+        GalaxyLogger.clear()
+        val router = buildLocalRouter()
+
+        router.route("open settings", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
+
+        val routeLocalEntry = GalaxyLogger.getEntries().last {
+            it.tag == "InputRouter" && it.fields["event"] == "route_local"
+        }
+        assertEquals(
+            AndroidNlSemanticContract.PATH_ANDROID_LOCAL_NL,
+            routeLocalEntry.fields[AndroidNlSemanticContract.KEY_NL_PATH]
+        )
+        assertEquals(
+            AndroidNlSemanticContract.SEMANTIC_AUTHORITY_ANDROID_LOCAL,
+            routeLocalEntry.fields[AndroidNlSemanticContract.KEY_SEMANTIC_AUTHORITY]
+        )
+        assertEquals(
+            AndroidNlSemanticContract.LOCAL_NL_LAYER_ROLE,
+            routeLocalEntry.fields[AndroidNlSemanticContract.KEY_LOCAL_NL_LAYER_ROLE]
         )
     }
 

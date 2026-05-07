@@ -12,6 +12,7 @@ import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.protocol.TaskSubmitContext
 import com.ufo.galaxy.protocol.TaskSubmitPayload
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
@@ -33,9 +34,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - [AppSettings.crossDeviceEnabled] = false →
  *    **always** local; [LocalLoopExecutor.execute] is launched in [coroutineScope];
  *    result delivered to [onLocalResult]. Task-submit uplink is strictly forbidden.
+ *    This is the Android-local NL path (device-local execution semantics).
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS connected →
  *    wraps [text] in a [TaskSubmitPayload] AIP v3 envelope and sends it uplink via
  *    [GatewayClient]. Result arrives later via the WS task_assign/goal_result flow.
+ *    This is the Android handoff-to-V2 path where Android is source/carrier and V2
+ *    remains semantic authority.
  *  - [AppSettings.crossDeviceEnabled] = true **and** WS NOT connected →
  *    [onError] is invoked with a human-readable reason; does NOT silently fall back to local.
  *
@@ -145,7 +149,11 @@ class InputRouter(
         return when {
             !crossDevice -> {
                 Log.i(TAG, "[ROUTE] route_mode=local task_id=$taskId device_id=$deviceId posture=$posture")
-                GalaxyLogger.log(TAG, mapOf("event" to "route_local", "task_id" to taskId, "posture" to posture))
+                GalaxyLogger.log(
+                    TAG,
+                    mapOf("event" to "route_local", "task_id" to taskId, "posture" to posture) +
+                        AndroidNlSemanticContract.localRouteMetadata(posture)
+                )
                 launchLocal(trimmed, posture)
                 RouteMode.LOCAL
             }
@@ -218,6 +226,9 @@ class InputRouter(
             device_id = deviceId,
             session_id = conversationSessionId,
             task_id = taskId,
+            context = TaskSubmitContext(
+                extra = AndroidNlSemanticContract.handoffToV2Metadata(posture)
+            ),
             source_runtime_posture = posture
         )
         if (!payload.validate()) {
@@ -249,7 +260,7 @@ class InputRouter(
                     "task_id" to taskId,
                     "session_id" to conversationSessionId,
                     "posture" to posture
-                )
+                ) + AndroidNlSemanticContract.handoffToV2Metadata(posture)
             )
             RouteMode.CROSS_DEVICE
         } else {

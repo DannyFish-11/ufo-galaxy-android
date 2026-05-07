@@ -18,6 +18,10 @@ package com.ufo.galaxy.nlp
  * it can be used for display and logging without any information loss.
  * [NormalizedGoal.normalizedText] is the safe planner-ready form.
  *
+ * Boundary note: this component performs deterministic local text normalization only.
+ * It is not a semantic-decision authority and must not be treated as a system-level
+ * replacement for V2 LLM semantic reasoning.
+ *
  * This normalizer is stateless and thread-safe.
  */
 object GoalNormalizer {
