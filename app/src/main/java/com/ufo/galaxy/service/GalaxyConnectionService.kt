@@ -174,6 +174,27 @@ class GalaxyConnectionService : Service() {
      */
     @Volatile
     private var activeTakeoverId: String? = null
+    private val activeTakeoverLock = Any()
+
+    private fun currentActiveTakeoverId(): String? =
+        synchronized(activeTakeoverLock) { activeTakeoverId }
+
+    private fun updateActiveTakeoverId(value: String?) {
+        synchronized(activeTakeoverLock) {
+            activeTakeoverId = value
+        }
+    }
+
+    private fun clearActiveTakeoverIdIfMatches(expectedTakeoverId: String) {
+        synchronized(activeTakeoverLock) {
+            if (activeTakeoverId == expectedTakeoverId) {
+                activeTakeoverId = null
+            }
+        }
+    }
+
+    private fun resolveExecutionTraceId(inboundTraceId: String?): String =
+        inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
 
     /** Canonical assessor that evaluates takeover eligibility based on device readiness. */
     private val takeoverEligibilityAssessor: TakeoverEligibilityAssessor by lazy {
@@ -1089,12 +1110,11 @@ class GalaxyConnectionService : Service() {
         val governanceDecision = AndroidExecutionGovernanceContract.evaluateAcceptance(
             executionType = AndroidExecutionGovernanceContract.ExecutionType.GOAL_EXECUTION,
             context = AndroidExecutionGovernanceContract.AcceptanceContext(
-                activeTakeoverId = activeTakeoverId
+                activeTakeoverId = currentActiveTakeoverId()
             )
         )
         if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
-            val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
-                ?: java.util.UUID.randomUUID().toString()
+            val traceId = resolveExecutionTraceId(inboundTraceId)
             emitRuntimeDiagnostics(
                 taskId = taskId,
                 nodeName = "goal_execution_governance_gate",
@@ -1286,12 +1306,11 @@ class GalaxyConnectionService : Service() {
         val governanceDecision = AndroidExecutionGovernanceContract.evaluateAcceptance(
             executionType = AndroidExecutionGovernanceContract.ExecutionType.PARALLEL_SUBTASK,
             context = AndroidExecutionGovernanceContract.AcceptanceContext(
-                activeTakeoverId = activeTakeoverId
+                activeTakeoverId = currentActiveTakeoverId()
             )
         )
         if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
-            val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
-                ?: java.util.UUID.randomUUID().toString()
+            val traceId = resolveExecutionTraceId(inboundTraceId)
             emitRuntimeDiagnostics(
                 taskId = taskId,
                 nodeName = "parallel_subtask_governance_gate",
@@ -3460,10 +3479,10 @@ class GalaxyConnectionService : Service() {
         // ── Eligibility assessment (canonical PR-3 path) ──────────────────────
         // Capture the existing active takeover before setting the new one.
         // The assessor uses the captured value to detect concurrent takeovers.
-        val existingActiveTakeoverId = activeTakeoverId
+        val existingActiveTakeoverId = currentActiveTakeoverId()
         var takeoverExecutionStarted = false
         // Mark this request as in-flight so any concurrent inbound request is blocked.
-        activeTakeoverId = envelope.takeover_id
+        updateActiveTakeoverId(envelope.takeover_id)
         try {
             val eligibility = takeoverEligibilityAssessor.assess(
                 envelope = envelope,
@@ -3848,9 +3867,7 @@ class GalaxyConnectionService : Service() {
                     }
                 } finally {
                     UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
-                    if (activeTakeoverId == envelope.takeover_id) {
-                        activeTakeoverId = null
-                    }
+                    clearActiveTakeoverIdIfMatches(envelope.takeover_id)
                 }
             }
 
@@ -3862,8 +3879,8 @@ class GalaxyConnectionService : Service() {
                 reason = "accepted"
             )
         } finally {
-            if (!takeoverExecutionStarted && activeTakeoverId == envelope.takeover_id) {
-                activeTakeoverId = null
+            if (!takeoverExecutionStarted) {
+                clearActiveTakeoverIdIfMatches(envelope.takeover_id)
             }
         }
     }
