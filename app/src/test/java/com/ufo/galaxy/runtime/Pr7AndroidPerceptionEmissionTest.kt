@@ -259,7 +259,7 @@ class Pr7AndroidPerceptionEmissionTest {
     }
 
     @Test
-    fun `TAG_DEVICE_PERCEPTION_EMISSION value is GALAXY colon DEVICE colon PERCEPTION`() {
+    fun `TAG_DEVICE_PERCEPTION_EMISSION has expected format`() {
         assertEquals("GALAXY:DEVICE:PERCEPTION", GalaxyLogger.TAG_DEVICE_PERCEPTION_EMISSION)
     }
 }
