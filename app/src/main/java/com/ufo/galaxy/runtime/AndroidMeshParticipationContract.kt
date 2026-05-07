@@ -113,6 +113,7 @@ object AndroidMeshParticipationContract {
             if (!meshSubtaskExecutable) add(REASON_MESH_SUBTASK_NOT_EXECUTABLE)
             if (!delegatedTakeoverExecutable) add(REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE)
             deferredRequiredCapabilities.forEach { capability ->
+                // Always serialize deferred capability identity with stable wireValue (not enum name).
                 add("$REASON_DEFERRED_CAPABILITY_PREFIX:${capability.wireValue}")
             }
         }

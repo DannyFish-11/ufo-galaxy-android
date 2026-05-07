@@ -11,7 +11,7 @@ class Pr8AndroidMeshParticipationContractTest {
     @Test
     fun `evaluate returns PARTIAL when mesh subtask and delegated takeover are executable but full mesh is deferred`() {
         val report = AndroidMeshParticipationContract.evaluate(
-            orchestration = connectedRecord(),
+            orchestration = createHealthyOrchestrationRecord(),
             rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
         )
 
@@ -85,7 +85,7 @@ class Pr8AndroidMeshParticipationContractTest {
     @Test
     fun `toWireMap exposes readiness and constrained observability keys`() {
         val report = AndroidMeshParticipationContract.evaluate(
-            orchestration = connectedRecord(),
+            orchestration = createHealthyOrchestrationRecord(),
             rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
         )
 
@@ -101,7 +101,7 @@ class Pr8AndroidMeshParticipationContractTest {
         assertNotNull(wireMap[AndroidMeshParticipationContract.KEY_CONSTRAINED_REASONS])
     }
 
-    private fun connectedRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
+    private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
         MultiDeviceParticipantOrchestrationState.from(
             healthState = ParticipantHealthState.HEALTHY,
             reconnectState = ReconnectRecoveryState.IDLE,
