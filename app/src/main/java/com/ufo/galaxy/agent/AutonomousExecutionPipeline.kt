@@ -155,11 +155,18 @@ class AutonomousExecutionPipeline(
      * so V2 can correlate the result with its originating durable continuity context.
      */
     fun handleGoalExecution(payload: GoalExecutionPayload): GoalResultPayload {
-        if (!settings.crossDeviceEnabled) {
+        val modeState = settings.authoritativeModeState()
+        Log.i(
+            TAG,
+            "goal_execution gate_state mode=${modeState.modeState} readiness=${modeState.modeReadinessState} " +
+                "cross_device_eligibility=${modeState.crossDeviceEligibility} " +
+                "goal_execution_eligibility=${modeState.goalExecutionEligibility} task_id=${payload.task_id}"
+        )
+        if (!modeState.crossDeviceEligibility) {
             Log.i(TAG, "goal_execution blocked: cross-device runtime inactive; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "cross_device_enabled is false")
         }
-        if (!settings.goalExecutionEnabled) {
+        if (!modeState.goalExecutionEligibility) {
             Log.i(TAG, "goal_execution disabled by settings; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "goal_execution_enabled is false")
         }
@@ -276,11 +283,18 @@ class AutonomousExecutionPipeline(
      * [PolicyRoutingContext.RoutingOutcome.RESUMED].
      */
     fun handleParallelSubtask(payload: GoalExecutionPayload): GoalResultPayload {
-        if (!settings.crossDeviceEnabled) {
+        val modeState = settings.authoritativeModeState()
+        Log.i(
+            TAG,
+            "parallel_subtask gate_state mode=${modeState.modeState} readiness=${modeState.modeReadinessState} " +
+                "cross_device_eligibility=${modeState.crossDeviceEligibility} " +
+                "parallel_execution_eligibility=${modeState.parallelExecutionEligibility} task_id=${payload.task_id}"
+        )
+        if (!modeState.crossDeviceEligibility) {
             Log.i(TAG, "parallel_subtask blocked: cross-device runtime inactive; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "cross_device_enabled is false")
         }
-        if (!settings.parallelExecutionEnabled) {
+        if (!modeState.parallelExecutionEligibility) {
             Log.i(TAG, "parallel_subtask disabled by settings; task_id=${payload.task_id}")
             return buildDisabledResult(payload, "parallel_execution_enabled is false")
         }

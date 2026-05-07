@@ -148,7 +148,12 @@ class Pr10AndroidCarrierConsolidationTest {
         carrierRuntimeState: String? = null,
         reconnectRecoveryState: String? = null,
         carrierForegroundVisible: Boolean? = null,
-        interactionSurfaceReady: Boolean? = null
+        interactionSurfaceReady: Boolean? = null,
+        modeState: String? = null,
+        modeReadinessState: String? = null,
+        crossDeviceEligibility: Boolean? = null,
+        goalExecutionEligibility: Boolean? = null,
+        parallelExecutionEligibility: Boolean? = null
     ): DeviceStateSnapshotPayload = DeviceStateSnapshotPayload(
         device_id = "test_device_pr10",
         snapshot_ts = 1_700_000_000_000L,
@@ -171,6 +176,11 @@ class Pr10AndroidCarrierConsolidationTest {
         current_fallback_tier = "center_delegated_with_local_fallback",
         carrier_foreground_visible = carrierForegroundVisible,
         interaction_surface_ready = interactionSurfaceReady,
+        mode_state = modeState,
+        mode_readiness_state = modeReadinessState,
+        cross_device_eligibility = crossDeviceEligibility,
+        goal_execution_eligibility = goalExecutionEligibility,
+        parallel_execution_eligibility = parallelExecutionEligibility,
         carrier_runtime_state = carrierRuntimeState,
         reconnect_recovery_state = reconnectRecoveryState
     )
@@ -180,7 +190,12 @@ class Pr10AndroidCarrierConsolidationTest {
         phase: String = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
         carrierRuntimeState: String? = null,
         carrierForegroundVisible: Boolean? = null,
-        interactionSurfaceReady: Boolean? = null
+        interactionSurfaceReady: Boolean? = null,
+        modeState: String? = null,
+        modeReadinessState: String? = null,
+        crossDeviceEligibility: Boolean? = null,
+        goalExecutionEligibility: Boolean? = null,
+        parallelExecutionEligibility: Boolean? = null
     ): DeviceExecutionEventPayload = DeviceExecutionEventPayload(
         flow_id = "flow-pr10",
         task_id = "task-pr10",
@@ -189,6 +204,11 @@ class Pr10AndroidCarrierConsolidationTest {
         source_component = "Pr10AndroidCarrierConsolidationTest",
         carrier_foreground_visible = carrierForegroundVisible,
         interaction_surface_ready = interactionSurfaceReady,
+        mode_state = modeState,
+        mode_readiness_state = modeReadinessState,
+        cross_device_eligibility = crossDeviceEligibility,
+        goal_execution_eligibility = goalExecutionEligibility,
+        parallel_execution_eligibility = parallelExecutionEligibility,
         carrier_runtime_state = carrierRuntimeState
     )
 
@@ -341,6 +361,23 @@ class Pr10AndroidCarrierConsolidationTest {
         )
     }
 
+    @Test
+    fun `snapshot mode governance fields round-trip with stable wire keys`() {
+        val snapshot = baseSnapshot(
+            modeState = "cross_device",
+            modeReadinessState = "ready",
+            crossDeviceEligibility = true,
+            goalExecutionEligibility = true,
+            parallelExecutionEligibility = false
+        )
+        val json = toJsonObject(snapshot)
+        assertEquals("cross_device", json.get("mode_state")?.asString)
+        assertEquals("ready", json.get("mode_readiness_state")?.asString)
+        assertEquals(true, json.get("cross_device_eligibility")?.asBoolean)
+        assertEquals(true, json.get("goal_execution_eligibility")?.asBoolean)
+        assertEquals(false, json.get("parallel_execution_eligibility")?.asBoolean)
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // DeviceExecutionEventPayload — PR-10 field defaults
     // ─────────────────────────────────────────────────────────────────────────
@@ -394,6 +431,23 @@ class Pr10AndroidCarrierConsolidationTest {
             "carrier_runtime_state wire key must be exactly 'carrier_runtime_state'",
             json.has("carrier_runtime_state")
         )
+    }
+
+    @Test
+    fun `execution event mode governance fields round-trip with stable wire keys`() {
+        val event = baseExecutionEvent(
+            modeState = "local_only",
+            modeReadinessState = "degraded",
+            crossDeviceEligibility = false,
+            goalExecutionEligibility = false,
+            parallelExecutionEligibility = false
+        )
+        val json = toJsonObject(event)
+        assertEquals("local_only", json.get("mode_state")?.asString)
+        assertEquals("degraded", json.get("mode_readiness_state")?.asString)
+        assertEquals(false, json.get("cross_device_eligibility")?.asBoolean)
+        assertEquals(false, json.get("goal_execution_eligibility")?.asBoolean)
+        assertEquals(false, json.get("parallel_execution_eligibility")?.asBoolean)
     }
 
     // ─────────────────────────────────────────────────────────────────────────

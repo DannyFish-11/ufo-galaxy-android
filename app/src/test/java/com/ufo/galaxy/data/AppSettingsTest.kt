@@ -185,6 +185,37 @@ class AppSettingsTest {
         assertTrue(settings.toMetadataMap()["cross_device_enabled"] as Boolean)
     }
 
+    @Test
+    fun `authoritativeModeState defaults to local_only with disabled eligibilities`() {
+        val settings = InMemoryAppSettings()
+        val state = settings.authoritativeModeState()
+
+        assertEquals(AuthoritativeModeState.MODE_LOCAL_ONLY, state.modeState)
+        assertEquals(AuthoritativeModeState.READINESS_DEGRADED, state.modeReadinessState)
+        assertFalse(state.crossDeviceEligibility)
+        assertFalse(state.goalExecutionEligibility)
+        assertFalse(state.parallelExecutionEligibility)
+    }
+
+    @Test
+    fun `authoritativeModeState composes feature eligibilities under cross-device mode`() {
+        val settings = InMemoryAppSettings(
+            crossDeviceEnabled = true,
+            goalExecutionEnabled = true,
+            parallelExecutionEnabled = false,
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = true
+        )
+        val state = settings.authoritativeModeState()
+
+        assertEquals(AuthoritativeModeState.MODE_CROSS_DEVICE, state.modeState)
+        assertEquals(AuthoritativeModeState.READINESS_READY, state.modeReadinessState)
+        assertTrue(state.crossDeviceEligibility)
+        assertTrue(state.goalExecutionEligibility)
+        assertFalse(state.parallelExecutionEligibility)
+    }
+
     // ── SharedPrefsAppSettings key constants ──────────────────────────────────
 
     @Test
