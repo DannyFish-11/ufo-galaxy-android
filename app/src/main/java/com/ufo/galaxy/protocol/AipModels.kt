@@ -276,7 +276,15 @@ enum class MsgType(val value: String) {
      *  Payload model: [DeviceExecutionEventPayload].
      *  V2 absorbed by: core.android_device_state_store.absorb_device_execution_event().
      *  @status pr-2-android — payload defined; send path wired in GalaxyConnectionService. */
-    DEVICE_EXECUTION_EVENT("device_execution_event");
+    DEVICE_EXECUTION_EVENT("device_execution_event"),
+
+    /** Uplink: Android emits a structured perception artifact to V2.
+     *  Distinguishes a one-shot vision request from a multimodal participation signal while
+     *  keeping screenshot / vision / grounding / local-perception payloads under one stable
+     *  Android-side contract for V2 multimodal ingress.
+     *  Payload model: [DevicePerceptionEmissionPayload].
+     *  @status pr-7-android — payload defined; send path wired in GalaxyConnectionService. */
+    DEVICE_PERCEPTION_EMISSION("device_perception_emission");
 
     companion object {
         /**
@@ -2201,5 +2209,112 @@ data class DeviceExecutionEventPayload(
         const val PHASE_FALLBACK_TRANSITION = "fallback_transition"
         /** Phase value: takeover lifecycle milestone. */
         const val PHASE_TAKEOVER_MILESTONE = "takeover_milestone"
+    }
+}
+
+// ── PR-7 (Android): Unified perception / vision emission payload ───────────────────────────
+
+/**
+ * Structured Android-side vision request contract nested inside [DevicePerceptionEmissionPayload].
+ *
+ * This block carries the actual perception prompt semantics independently from whether the
+ * surrounding emission is a one-shot vision request or a multimodal participation signal.
+ */
+data class DeviceVisionPayload(
+    val contract_kind: String = "android_vision",
+    val prompt_text: String? = null,
+    val request_reason: String? = null,
+    val screenshot_ref: String? = null,
+    val image_width: Int? = null,
+    val image_height: Int? = null
+)
+
+/**
+ * Structured Android-side grounding contract nested inside [DevicePerceptionEmissionPayload].
+ */
+data class DeviceGroundingPayload(
+    val contract_kind: String = "android_grounding",
+    val intent: String,
+    val input_width: Int,
+    val input_height: Int,
+    val result_x: Int? = null,
+    val result_y: Int? = null,
+    val confidence: Float? = null,
+    val element_description: String? = null,
+    val error: String? = null
+)
+
+/**
+ * Structured Android-side local-perception contract nested inside [DevicePerceptionEmissionPayload].
+ */
+data class DeviceLocalPerceptionPayload(
+    val contract_kind: String = "android_local_perception",
+    val screen_width: Int? = null,
+    val screen_height: Int? = null,
+    val capture_present: Boolean = false,
+    val planner_participated: Boolean = false,
+    val grounding_participated: Boolean = false
+)
+
+/**
+ * Uplink payload for [MsgType.DEVICE_PERCEPTION_EMISSION].
+ *
+ * Formalises Android's perception emission semantics for V2 multimodal ingestion by:
+ *  1. Separating **one-shot vision requests** from **multimodal participation signals**
+ *     via [emission_kind], [carrier_semantics], and [participation_semantics].
+ *  2. Unifying screenshot / vision / grounding / local-perception data into one stable
+ *     contract using [screenshot], [vision_payload], [grounding_payload], and
+ *     [local_perception_payload].
+ *  3. Carrying trace, carrier, and session metadata on every emission so V2 can correlate
+ *     Android perception with the main multimodal chain.
+ */
+data class DevicePerceptionEmissionPayload(
+    val flow_id: String,
+    val task_id: String,
+    val emission_kind: String,
+    val perception_stage: String,
+    val carrier_semantics: String,
+    val participation_semantics: String,
+    val participates_in_multimodal_main_chain: Boolean,
+    val step_index: Int = -1,
+    val screenshot: Snapshot? = null,
+    val vision_payload: DeviceVisionPayload? = null,
+    val grounding_payload: DeviceGroundingPayload? = null,
+    val local_perception_payload: DeviceLocalPerceptionPayload? = null,
+    val trace_id: String? = null,
+    val dispatch_trace_id: String? = null,
+    val device_id: String = "",
+    val emission_id: String = java.util.UUID.randomUUID().toString(),
+    val source_component: String = "",
+    val timestamp_ms: Long = System.currentTimeMillis(),
+    val durable_session_id: String? = null,
+    val session_continuity_epoch: Int? = null,
+    val runtime_session_id: String? = null,
+    val attached_session_id: String? = null,
+    val carrier_foreground_visible: Boolean? = null,
+    val interaction_surface_ready: Boolean? = null,
+    val mode_state: String? = null,
+    val mode_readiness_state: String? = null,
+    val cross_device_eligibility: Boolean? = null,
+    val goal_execution_eligibility: Boolean? = null,
+    val parallel_execution_eligibility: Boolean? = null,
+    val carrier_runtime_state: String? = null
+) {
+    /** V2-compatible seconds-epoch timestamp derived from [timestamp_ms]. */
+    val event_ts: Double = timestamp_ms / 1000.0
+
+    companion object {
+        const val EMISSION_KIND_ONE_SHOT_VISION_REQUEST = "one_shot_vision_request"
+        const val EMISSION_KIND_MULTIMODAL_PARTICIPATION_SIGNAL =
+            "multimodal_participation_signal"
+
+        const val STAGE_PLANNING = "planning"
+        const val STAGE_GROUNDING = "grounding"
+
+        const val CARRIER_SEMANTICS_VISION_PROBE = "vision_probe"
+        const val CARRIER_SEMANTICS_MULTIMODAL_MAIN_CHAIN = "multimodal_main_chain"
+
+        const val PARTICIPATION_SEMANTICS_ONE_SHOT_REQUEST = "one_shot_request"
+        const val PARTICIPATION_SEMANTICS_MAIN_CHAIN_INPUT = "main_chain_input"
     }
 }

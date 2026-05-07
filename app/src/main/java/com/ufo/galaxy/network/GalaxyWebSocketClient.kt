@@ -16,6 +16,7 @@ import com.ufo.galaxy.protocol.MeshLeavePayload
 import com.ufo.galaxy.protocol.MeshResultPayload
 import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
 import com.ufo.galaxy.protocol.MsgType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1182,6 +1183,55 @@ class GalaxyWebSocketClient(
             sent
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_EXEC_EVENT] unexpected error sending event task_id=${payload.task_id}: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Sends a [MsgType.DEVICE_PERCEPTION_EMISSION] uplink message to V2.
+     *
+     * This is the canonical Android-side multimodal ingress contract for screenshot / vision /
+     * grounding / local-perception emissions. The payload itself distinguishes one-shot vision
+     * requests from multimodal main-chain participation signals.
+     */
+    fun sendDevicePerceptionEmission(payload: DevicePerceptionEmissionPayload): Boolean {
+        return try {
+            val deviceId = getDeviceId()
+            val traceId = payload.trace_id?.takeIf { it.isNotBlank() } ?: sessionTraceId
+            val enrichedPayload = payload.copy(
+                device_id = payload.device_id.ifBlank { deviceId },
+                trace_id = traceId
+            )
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_PERCEPTION_EMISSION,
+                payload = enrichedPayload,
+                device_id = deviceId,
+                correlation_id = payload.task_id,
+                trace_id = traceId,
+                runtime_session_id = runtimeSessionId,
+                idempotency_key = payload.emission_id
+            )
+            val sent = sendJson(gson.toJson(envelope))
+            if (sent) {
+                Log.d(
+                    TAG,
+                    "[DEVICE_PERCEPTION] sent emission_id=${payload.emission_id} task_id=${payload.task_id} " +
+                        "kind=${payload.emission_kind} stage=${payload.perception_stage}"
+                )
+            } else {
+                Log.w(
+                    TAG,
+                    "[DEVICE_PERCEPTION] send blocked/failed emission_id=${payload.emission_id} " +
+                        "task_id=${payload.task_id} kind=${payload.emission_kind}"
+                )
+            }
+            sent
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "[DEVICE_PERCEPTION] unexpected error sending emission task_id=${payload.task_id}: ${e.message}",
+                e
+            )
             false
         }
     }

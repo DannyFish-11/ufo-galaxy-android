@@ -69,6 +69,7 @@ import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.runtime.DeviceExecutionEventSink
+import com.ufo.galaxy.runtime.DevicePerceptionEmissionSink
 import com.ufo.galaxy.runtime.NativeInferenceLoader
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
@@ -342,6 +343,61 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
+     * Sink for structured Android perception emissions on the canonical Android→V2 path.
+     *
+     * Enriches EdgeExecutor-produced perception payloads with real runtime carrier/session state,
+     * then logs and forwards them as [MsgType.DEVICE_PERCEPTION_EMISSION] uplinks.
+     */
+    private val devicePerceptionEmissionSink = DevicePerceptionEmissionSink { payload ->
+        try {
+            val modeState = UFOGalaxyApplication.appSettings.authoritativeModeState()
+            val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
+            val attachedSession = UFOGalaxyApplication.runtimeController.attachedSession.value
+            val foregroundVisible = runCatching {
+                UFOGalaxyApplication.runtimeController.appForegroundVisible.value
+            }.getOrNull()
+            val interactionSurfaceReady = runCatching {
+                val settings = UFOGalaxyApplication.appSettings
+                settings.accessibilityReady && settings.overlayReady
+            }.getOrNull()
+            val enrichedPayload = payload.copy(
+                device_id = payload.device_id.ifBlank { localDeviceId },
+                durable_session_id = durableRecord?.durableSessionId,
+                session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                attached_session_id = attachedSession?.sessionId,
+                carrier_foreground_visible = foregroundVisible,
+                interaction_surface_ready = interactionSurfaceReady,
+                mode_state = modeState.modeState,
+                mode_readiness_state = modeState.modeReadinessState,
+                cross_device_eligibility = modeState.crossDeviceEligibility,
+                goal_execution_eligibility = modeState.goalExecutionEligibility,
+                parallel_execution_eligibility = modeState.parallelExecutionEligibility,
+                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_DEVICE_PERCEPTION_EMISSION,
+                mapOf(
+                    "event" to "device_perception_emission_sent",
+                    "device_id" to localDeviceId,
+                    "task_id" to enrichedPayload.task_id,
+                    "flow_id" to enrichedPayload.flow_id,
+                    "emission_kind" to enrichedPayload.emission_kind,
+                    "perception_stage" to enrichedPayload.perception_stage,
+                    "participates_in_multimodal_main_chain" to enrichedPayload.participates_in_multimodal_main_chain,
+                    "carrier_semantics" to enrichedPayload.carrier_semantics,
+                    "participation_semantics" to enrichedPayload.participation_semantics,
+                    "trace_id" to (enrichedPayload.trace_id ?: ""),
+                    "dispatch_trace_id" to (enrichedPayload.dispatch_trace_id ?: "")
+                )
+            )
+            webSocketClient.sendDevicePerceptionEmission(enrichedPayload)
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_PERCEPTION] sink error task_id=${payload.task_id}: ${e.message}", e)
+        }
+    }
+
+    /**
      * Canonical binding from accepted delegated receipt into local takeover execution (PR-12).
      *
      * [DelegatedTakeoverExecutor] manages the full lifecycle of an accepted
@@ -423,6 +479,7 @@ class GalaxyConnectionService : Service() {
         Log.i(TAG, "服务创建")
         
         webSocketClient = UFOGalaxyApplication.webSocketClient
+        UFOGalaxyApplication.edgeExecutor.setPerceptionEmissionSink(devicePerceptionEmissionSink)
         
         // 设置监听器：处理连接状态和 task_assign 路由
         wsListener = object : GalaxyWebSocketClient.Listener {
@@ -739,6 +796,7 @@ class GalaxyConnectionService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "服务销毁")
+        UFOGalaxyApplication.edgeExecutor.setPerceptionEmissionSink(null)
         webSocketClient.removeListener(wsListener)
         webSocketClient.disconnect()
         unloadModels()
