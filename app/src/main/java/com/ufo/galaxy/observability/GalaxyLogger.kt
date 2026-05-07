@@ -709,6 +709,9 @@ object GalaxyLogger {
      */
     const val TAG_DEVICE_EXECUTION_EVENT = "GALAXY:DEVICE:EXEC:EVENT"
 
+    /** Fired when Android emits a structured perception payload toward V2 multimodal ingress. */
+    const val TAG_DEVICE_PERCEPTION_EMISSION = "GALAXY:DEVICE:PERCEPTION"
+
     private const val ANDROID_TAG     = "GalaxyLogger"
     const val LOG_FILE_NAME           = "galaxy_observability.log"
     private const val MAX_MEMORY_ENTRIES = 500

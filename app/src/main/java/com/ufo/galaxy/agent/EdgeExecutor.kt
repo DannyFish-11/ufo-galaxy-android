@@ -3,11 +3,17 @@ package com.ufo.galaxy.agent
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.observability.TraceContext
 import com.ufo.galaxy.protocol.CommandResultPayload
+import com.ufo.galaxy.protocol.DeviceGroundingPayload
+import com.ufo.galaxy.protocol.DeviceLocalPerceptionPayload
+import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
+import com.ufo.galaxy.protocol.DeviceVisionPayload
 import com.ufo.galaxy.protocol.Snapshot
 import com.ufo.galaxy.protocol.StepResult
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskResultPayload
+import com.ufo.galaxy.runtime.DevicePerceptionEmissionSink
 import java.util.Base64
 
 /**
@@ -45,7 +51,8 @@ class EdgeExecutor(
     private val groundingService: LocalGroundingService,
     private val accessibilityExecutor: AccessibilityExecutor,
     private val imageScaler: ImageScaler = NoOpImageScaler(),
-    private val scaledMaxEdge: Int = 720
+    private val scaledMaxEdge: Int = 720,
+    private var perceptionEmissionSink: DevicePerceptionEmissionSink? = null
 ) {
 
     /**
@@ -72,6 +79,10 @@ class EdgeExecutor(
         const val STATUS_CANCELLED = "cancelled"
         /** Returned when the task exceeded its configured [GoalExecutionPayload.effectiveTimeoutMs]. */
         const val STATUS_TIMEOUT = "timeout"
+    }
+
+    fun setPerceptionEmissionSink(sink: DevicePerceptionEmissionSink?) {
+        perceptionEmissionSink = sink
     }
 
     /**
@@ -126,6 +137,35 @@ class EdgeExecutor(
             )
         val (initialFullBytes, initW, initH) = initialCapture
         val initialBase64 = Base64.getEncoder().encodeToString(initialFullBytes)
+        emitPerception(
+            DevicePerceptionEmissionPayload(
+                flow_id = taskAssign.task_id,
+                task_id = taskAssign.task_id,
+                emission_kind = DevicePerceptionEmissionPayload.EMISSION_KIND_ONE_SHOT_VISION_REQUEST,
+                perception_stage = DevicePerceptionEmissionPayload.STAGE_PLANNING,
+                carrier_semantics = DevicePerceptionEmissionPayload.CARRIER_SEMANTICS_VISION_PROBE,
+                participation_semantics = DevicePerceptionEmissionPayload.PARTICIPATION_SEMANTICS_ONE_SHOT_REQUEST,
+                participates_in_multimodal_main_chain = false,
+                screenshot = makeSnapshot(initialBase64, initW, initH),
+                vision_payload = DeviceVisionPayload(
+                    prompt_text = taskAssign.goal,
+                    request_reason = "planner_context",
+                    screenshot_ref = "planning_${taskAssign.task_id.take(8)}",
+                    image_width = initW,
+                    image_height = initH
+                ),
+                local_perception_payload = DeviceLocalPerceptionPayload(
+                    screen_width = initW,
+                    screen_height = initH,
+                    capture_present = true,
+                    planner_participated = true,
+                    grounding_participated = false
+                ),
+                trace_id = TraceContext.currentTraceId(),
+                dispatch_trace_id = TraceContext.currentDispatchTraceId(),
+                source_component = "EdgeExecutor"
+            )
+        )
 
         // Initial planning uses the full-resolution screenshot for best context.
         val planResult = plannerService.plan(
@@ -197,7 +237,44 @@ class EdgeExecutor(
                 width = scaledForGrounding.scaledWidth,
                 height = scaledForGrounding.scaledHeight
             )
+            val screenshotRef = "step${stepId}_${taskAssign.task_id.take(8)}"
             if (grounding.error != null) {
+                emitPerception(
+                    DevicePerceptionEmissionPayload(
+                        flow_id = taskAssign.task_id,
+                        task_id = taskAssign.task_id,
+                        emission_kind = DevicePerceptionEmissionPayload.EMISSION_KIND_MULTIMODAL_PARTICIPATION_SIGNAL,
+                        perception_stage = DevicePerceptionEmissionPayload.STAGE_GROUNDING,
+                        carrier_semantics = DevicePerceptionEmissionPayload.CARRIER_SEMANTICS_MULTIMODAL_MAIN_CHAIN,
+                        participation_semantics = DevicePerceptionEmissionPayload.PARTICIPATION_SEMANTICS_MAIN_CHAIN_INPUT,
+                        participates_in_multimodal_main_chain = true,
+                        step_index = stepsConsumed,
+                        screenshot = makeSnapshot(fullBase64, screenW, screenH),
+                        vision_payload = DeviceVisionPayload(
+                            prompt_text = step.intent,
+                            request_reason = "grounding_resolution",
+                            screenshot_ref = screenshotRef,
+                            image_width = screenW,
+                            image_height = screenH
+                        ),
+                        grounding_payload = DeviceGroundingPayload(
+                            intent = step.intent,
+                            input_width = scaledForGrounding.scaledWidth,
+                            input_height = scaledForGrounding.scaledHeight,
+                            error = grounding.error
+                        ),
+                        local_perception_payload = DeviceLocalPerceptionPayload(
+                            screen_width = screenW,
+                            screen_height = screenH,
+                            capture_present = true,
+                            planner_participated = true,
+                            grounding_participated = true
+                        ),
+                        trace_id = TraceContext.currentTraceId(),
+                        dispatch_trace_id = TraceContext.currentDispatchTraceId(),
+                        source_component = "EdgeExecutor"
+                    )
+                )
                 accumulatedSteps.add(
                     StepResult(step_id = stepId, action = step.action_type, success = false,
                         error = grounding.error,
@@ -218,6 +295,45 @@ class EdgeExecutor(
             val fullResX = remapCoord(grounding.x, scaledForGrounding.scaledWidth, screenW)
             val fullResY = remapCoord(grounding.y, scaledForGrounding.scaledHeight, screenH)
             val remappedGrounding = grounding.copy(x = fullResX, y = fullResY)
+            emitPerception(
+                DevicePerceptionEmissionPayload(
+                    flow_id = taskAssign.task_id,
+                    task_id = taskAssign.task_id,
+                    emission_kind = DevicePerceptionEmissionPayload.EMISSION_KIND_MULTIMODAL_PARTICIPATION_SIGNAL,
+                    perception_stage = DevicePerceptionEmissionPayload.STAGE_GROUNDING,
+                    carrier_semantics = DevicePerceptionEmissionPayload.CARRIER_SEMANTICS_MULTIMODAL_MAIN_CHAIN,
+                    participation_semantics = DevicePerceptionEmissionPayload.PARTICIPATION_SEMANTICS_MAIN_CHAIN_INPUT,
+                    participates_in_multimodal_main_chain = true,
+                    step_index = stepsConsumed,
+                    screenshot = makeSnapshot(fullBase64, screenW, screenH),
+                    vision_payload = DeviceVisionPayload(
+                        prompt_text = step.intent,
+                        request_reason = "grounding_resolution",
+                        screenshot_ref = screenshotRef,
+                        image_width = screenW,
+                        image_height = screenH
+                    ),
+                    grounding_payload = DeviceGroundingPayload(
+                        intent = step.intent,
+                        input_width = scaledForGrounding.scaledWidth,
+                        input_height = scaledForGrounding.scaledHeight,
+                        result_x = fullResX,
+                        result_y = fullResY,
+                        confidence = grounding.confidence,
+                        element_description = grounding.element_description
+                    ),
+                    local_perception_payload = DeviceLocalPerceptionPayload(
+                        screen_width = screenW,
+                        screen_height = screenH,
+                        capture_present = true,
+                        planner_participated = true,
+                        grounding_participated = true
+                    ),
+                    trace_id = TraceContext.currentTraceId(),
+                    dispatch_trace_id = TraceContext.currentDispatchTraceId(),
+                    source_component = "EdgeExecutor"
+                )
+            )
 
             // Execute accessibility action with full-resolution coordinates
             val actionSuccess = try {
@@ -347,6 +463,13 @@ class EdgeExecutor(
     private fun makeSnapshot(base64: String?, width: Int, height: Int): Snapshot? {
         if (base64 == null) return null
         return Snapshot(data = base64, width = width, height = height)
+    }
+
+    private fun emitPerception(payload: DevicePerceptionEmissionPayload) {
+        try {
+            perceptionEmissionSink?.onEmission(payload)
+        } catch (_: Exception) {
+        }
     }
 
     private fun buildResult(
