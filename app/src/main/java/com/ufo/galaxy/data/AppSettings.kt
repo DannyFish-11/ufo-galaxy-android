@@ -366,9 +366,6 @@ interface AppSettings {
         return AuthoritativeModeState(
             modeState = modeState,
             modeReadinessState = modeReadinessState,
-            crossDeviceEnabled = crossDeviceEnabled,
-            goalExecutionEnabled = goalExecutionEnabled,
-            parallelExecutionEnabled = parallelExecutionEnabled,
             crossDeviceEligibility = crossDeviceEnabled,
             goalExecutionEligibility = crossDeviceEnabled && goalExecutionEnabled,
             parallelExecutionEligibility = crossDeviceEnabled && parallelExecutionEnabled
@@ -383,9 +380,6 @@ interface AppSettings {
 data class AuthoritativeModeState(
     val modeState: String,
     val modeReadinessState: String,
-    val crossDeviceEnabled: Boolean,
-    val goalExecutionEnabled: Boolean,
-    val parallelExecutionEnabled: Boolean,
     val crossDeviceEligibility: Boolean,
     val goalExecutionEligibility: Boolean,
     val parallelExecutionEligibility: Boolean

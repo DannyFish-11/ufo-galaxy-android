@@ -201,7 +201,7 @@ class AgentRuntimeBridge(
                 put("route_mode", request.routeMode)
                 if (!request.capability.isNullOrBlank()) put("capability", request.capability)
                 if (!request.sessionId.isNullOrBlank()) put("session_id", request.sessionId)
-                put("cross_device_on", modeState.crossDeviceEnabled)
+                put("cross_device_on", settings.crossDeviceEnabled)
                 put("mode_state", modeState.modeState)
                 put("mode_readiness_state", modeState.modeReadinessState)
                 put("cross_device_eligibility", modeState.crossDeviceEligibility)

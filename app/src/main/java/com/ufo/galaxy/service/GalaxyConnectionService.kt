@@ -310,12 +310,7 @@ class GalaxyConnectionService : Service() {
                     "stagnation_detected" to enrichedPayload.stagnation_detected,
                     "fallback_tier" to (enrichedPayload.fallback_tier ?: ""),
                     "event_id" to enrichedPayload.event_id,
-                    "source_component" to enrichedPayload.source_component,
-                    "mode_state" to modeState.modeState,
-                    "mode_readiness_state" to modeState.modeReadinessState,
-                    "cross_device_eligibility" to modeState.crossDeviceEligibility,
-                    "goal_execution_eligibility" to modeState.goalExecutionEligibility,
-                    "parallel_execution_eligibility" to modeState.parallelExecutionEligibility
+                    "source_component" to enrichedPayload.source_component
                 )
             )
             webSocketClient.sendDeviceExecutionEvent(enrichedPayload)
