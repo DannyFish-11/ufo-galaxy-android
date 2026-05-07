@@ -16,6 +16,9 @@ import com.ufo.galaxy.observability.GalaxyLogger
  * Grounding (SeeClick) is intentionally **not** performed here; it runs per-step inside
  * [ExecutorBridge] so that each step uses the freshest possible screenshot.
  *
+ * Boundary note: this planner is a local decomposition stage for Android execution only.
+ * It does not own global semantic authority and must not be treated as a V2 semantic core.
+ *
  * @param plannerService MobileVLM V2-1.7B planner backend ([LocalPlannerService]).
  */
 class LocalPlanner(

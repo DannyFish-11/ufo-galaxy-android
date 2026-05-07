@@ -14,6 +14,10 @@ package com.ufo.galaxy.inference
  * the precise [com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState] that
  * caused the unavailability and prefixes all error messages with `DEGRADED:` so
  * consumers can distinguish a degraded-runtime result from a transient inference failure.
+ *
+ * Boundary note: [LocalPlannerService] is limited to local task decomposition/planning
+ * for Android execution. It is not the system-level semantic authority; centralized
+ * semantic authority remains in V2 for cross-device semantic decisions.
  */
 interface LocalPlannerService {
 
