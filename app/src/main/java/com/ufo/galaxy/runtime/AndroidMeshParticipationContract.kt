@@ -47,7 +47,11 @@ object AndroidMeshParticipationContract {
             KEY_DELEGATED_TAKEOVER_EXECUTABLE to delegatedTakeoverExecutable,
             KEY_FULL_MESH_RUNTIME_EXECUTABLE to fullMeshRuntimeExecutable,
             KEY_CONSTRAINED_REASONS to constrainedReasons,
-            KEY_RELATIONSHIP_GRAPH_VERSION to RELATIONSHIP_GRAPH_VERSION
+            KEY_RELATIONSHIP_GRAPH_VERSION to RELATIONSHIP_GRAPH_VERSION,
+            KEY_LOCAL_COLLABORATION_AGENT_SCOPE to LOCAL_COLLABORATION_AGENT_SCOPE,
+            KEY_MESH_STATE_SEMANTICS to MESH_STATE_SEMANTICS,
+            KEY_MESH_RESULT_SEMANTICS to MESH_RESULT_SEMANTICS,
+            KEY_MESH_PARTIAL_DEFERRED_SCOPE to MESH_PARTIAL_DEFERRED_SCOPE
         )
     }
 
@@ -76,6 +80,61 @@ object AndroidMeshParticipationContract {
             to = "parallel_subtask",
             semantic = "governance conflict rule rejects parallel_subtask while takeover is active"
         )
+    )
+
+    /**
+     * Explicit runtime ownership boundary for LocalCollaborationAgent.
+     *
+     * Android executes assigned subtask payloads and echoes result identity fields,
+     * but does not own mesh session lifecycle, barrier coordination, or final mesh
+     * convergence authority.
+     */
+    val LOCAL_COLLABORATION_AGENT_SCOPE: Map<String, Any> = mapOf(
+        "owner" to "LocalCollaborationAgent",
+        "responsibility" to "execute_assigned_parallel_subtask_via_local_goal_executor",
+        "owns" to listOf(
+            "parallel_subtask_payload_execution",
+            "group_id_subtask_index_result_echo",
+            "local_pipeline_terminal_status_emission"
+        ),
+        "does_not_own" to listOf(
+            "mesh_session_join_leave_lifecycle",
+            "barrier_coordination",
+            "global_mesh_result_convergence_authority"
+        )
+    )
+
+    /**
+     * Canonical mesh participation state semantics exported to V2-facing evidence.
+     */
+    val MESH_STATE_SEMANTICS: Map<String, String> = mapOf(
+        ReadinessLevel.READY.wireValue to
+            "android_can_execute_mesh_subtask_and_delegated_takeover_without_capability_gaps",
+        ReadinessLevel.PARTIAL.wireValue to
+            "android_can_execute_some_mesh_paths_but_full_mesh_runtime_is_scope_constrained",
+        ReadinessLevel.DEFERRED.wireValue to
+            "android_mesh_runtime_execution_is_not_currently_available"
+    )
+
+    /**
+     * Canonical result semantics for Android-side mesh collaboration paths.
+     */
+    val MESH_RESULT_SEMANTICS: Map<String, String> = mapOf(
+        "parallel_subtask_success" to
+            "returns_status_success_with_task_id_group_id_subtask_index_echo",
+        "parallel_subtask_error" to
+            "returns_status_error_with_task_id_group_id_subtask_index_echo",
+        "staged_mesh_blocked" to
+            "returns_status_blocked_with_explicit_reason_cross_device_disabled"
+    )
+
+    /**
+     * Explicit partial/deferred scope constraints when full mesh runtime is not closed.
+     */
+    val MESH_PARTIAL_DEFERRED_SCOPE: List<String> = listOf(
+        "full_mesh_runtime_execution_deferred_until_hybrid_execute_full_is_available",
+        "barrier_coordination_deferred_until_cross_repo_runtime_contract_is_closed",
+        "android_participates_as_execution_participant_not_mesh_coordinator"
     )
 
     private val REQUIRED_FULL_MESH_CAPABILITIES = setOf(
@@ -145,4 +204,8 @@ object AndroidMeshParticipationContract {
     const val KEY_FULL_MESH_RUNTIME_EXECUTABLE = "full_mesh_runtime_executable"
     const val KEY_CONSTRAINED_REASONS = "mesh_participation_constrained_reasons"
     const val KEY_RELATIONSHIP_GRAPH_VERSION = "mesh_runtime_relationship_graph_version"
+    const val KEY_LOCAL_COLLABORATION_AGENT_SCOPE = "local_collaboration_agent_scope"
+    const val KEY_MESH_STATE_SEMANTICS = "mesh_state_semantics"
+    const val KEY_MESH_RESULT_SEMANTICS = "mesh_result_semantics"
+    const val KEY_MESH_PARTIAL_DEFERRED_SCOPE = "mesh_partial_deferred_scope"
 }

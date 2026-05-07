@@ -3,6 +3,7 @@ package com.ufo.galaxy.agent
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.protocol.GoalExecutionPayload
+import com.ufo.galaxy.runtime.StagedMeshParticipationResult
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -233,6 +234,68 @@ class LocalGoalExecutorTest {
         assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
         assertEquals("grp-parallel", result.group_id)
         assertEquals(0, result.subtask_index)
+    }
+
+    @Test
+    fun `mesh simulation success proves LocalCollaborationAgent subtask can become staged mesh contribution`() {
+        val meshId = "mesh-android-proof-1"
+        val subtaskId = "mesh-subtask-1"
+        val goalExec = LocalGoalExecutor(buildExecutor(), "dev-009")
+        val agent = LocalCollaborationAgent(goalExecutor = goalExec)
+
+        val result = agent.handleParallelSubtask(
+            buildGoalPayload(
+                taskId = "sub-003",
+                goal = "open camera",
+                groupId = "grp-mesh-proof",
+                subtaskIndex = 3
+            )
+        )
+
+        val staged = StagedMeshParticipationResult.fromGoalResult(
+            meshId = meshId,
+            subtaskId = subtaskId,
+            result = result
+        )
+
+        assertEquals(EdgeExecutor.STATUS_SUCCESS, result.status)
+        assertEquals("grp-mesh-proof", result.group_id)
+        assertEquals(3, result.subtask_index)
+        assertEquals(StagedMeshParticipationResult.ExecutionStatus.SUCCESS, staged.executionStatus)
+        assertEquals(meshId, staged.meshId)
+        assertEquals(subtaskId, staged.subtaskId)
+        assertEquals("sub-003", staged.taskId)
+    }
+
+    @Test
+    fun `mesh simulation error preserves subtask identity for convergence semantics`() {
+        val meshId = "mesh-android-proof-2"
+        val subtaskId = "mesh-subtask-2"
+        val goalExec = LocalGoalExecutor(buildExecutor(planner = NotLoadedPlanner()), "dev-010")
+        val agent = LocalCollaborationAgent(goalExecutor = goalExec)
+
+        val result = agent.handleParallelSubtask(
+            buildGoalPayload(
+                taskId = "sub-004",
+                goal = "open maps",
+                groupId = "grp-mesh-proof",
+                subtaskIndex = 4
+            )
+        )
+
+        val staged = StagedMeshParticipationResult.fromGoalResult(
+            meshId = meshId,
+            subtaskId = subtaskId,
+            result = result
+        )
+
+        assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
+        assertEquals("grp-mesh-proof", result.group_id)
+        assertEquals(4, result.subtask_index)
+        assertEquals(StagedMeshParticipationResult.ExecutionStatus.FAILURE, staged.executionStatus)
+        assertEquals(meshId, staged.meshId)
+        assertEquals(subtaskId, staged.subtaskId)
+        assertEquals("sub-004", staged.taskId)
     }
 
     // ── legacy task_assign still works ───────────────────────────────────────
