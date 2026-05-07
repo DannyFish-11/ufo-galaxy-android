@@ -18,6 +18,39 @@ data class DualRepoE2EStageOutcome(
 )
 
 /**
+ * Verification-hook kinds used by [DualRepoE2EVerificationHarness] to expose Android-side
+ * roundtrip evidence beyond stage pass/fail status.
+ */
+enum class DualRepoE2EVerificationHookKind(val wireValue: String) {
+    EXECUTION_RECEIVED("execution_received"),
+    SIGNAL_EMITTED("signal_emitted"),
+    RESULT_FEEDBACK("result_feedback"),
+    STATE_CORRELATED("state_correlated");
+
+    companion object {
+        val REQUIRED_HOOKS: Set<DualRepoE2EVerificationHookKind> = setOf(
+            EXECUTION_RECEIVED,
+            SIGNAL_EMITTED,
+            RESULT_FEEDBACK,
+            STATE_CORRELATED
+        )
+    }
+}
+
+/**
+ * Android-side roundtrip verification-hook record used for cross-device correlation checks.
+ */
+data class DualRepoE2EVerificationHookRecord(
+    val kind: DualRepoE2EVerificationHookKind,
+    val outcomeStatus: ScenarioOutcomeStatus,
+    val traceId: String? = null,
+    val runtimeSessionId: String? = null,
+    val taskId: String? = null,
+    val delegatedSignalKind: String? = null,
+    val reason: String? = null
+)
+
+/**
  * PR-72 (Android) — Structured dual-repo E2E verification report for cross-repo consumption
  * by V2 readiness / acceptance systems.
  *
@@ -93,6 +126,7 @@ data class DualRepoE2EVerificationReport(
     val participantId: String,
     val verificationKind: RealDeviceVerificationKind,
     val stageOutcomes: Map<DualRepoE2EVerificationStage, DualRepoE2EStageOutcome>,
+    val verificationHooks: Map<DualRepoE2EVerificationHookKind, DualRepoE2EVerificationHookRecord>,
     val overallArtifact: DualRepoE2EVerificationArtifact,
     val bridgeReport: RealDeviceParticipantVerificationReport,
     val lifecycleTruthState: ParticipantLifecycleTruthState?,
@@ -123,6 +157,37 @@ data class DualRepoE2EVerificationReport(
         get() = RealDeviceVerificationKind.isUsableEvidence(verificationKind)
             && overallArtifact !is DualRepoE2EVerificationArtifact.E2EAbsent
             && deviceId.isNotBlank()
+
+    /** True when all canonical verification hooks are present and PASSED. */
+    val hasCanonicalRoundTripHooks: Boolean
+        get() = DualRepoE2EVerificationHookKind.REQUIRED_HOOKS.all { kind ->
+            verificationHooks[kind]?.outcomeStatus == ScenarioOutcomeStatus.PASSED
+        }
+
+    /** Correlated trace id when all hook-level non-blank values agree; null otherwise. */
+    val correlatedTraceId: String?
+        get() = verificationHooks.values
+            .mapNotNull { it.traceId?.takeIf(String::isNotBlank) }
+            .distinct()
+            .singleOrNull()
+
+    /** Correlated runtime session id when all hook-level non-blank values agree; null otherwise. */
+    val correlatedRuntimeSessionId: String?
+        get() = verificationHooks.values
+            .mapNotNull { it.runtimeSessionId?.takeIf(String::isNotBlank) }
+            .distinct()
+            .singleOrNull()
+
+    /** Correlated task id when all hook-level non-blank values agree; null otherwise. */
+    val correlatedTaskId: String?
+        get() = verificationHooks.values
+            .mapNotNull { it.taskId?.takeIf(String::isNotBlank) }
+            .distinct()
+            .singleOrNull()
+
+    /** True when trace/runtime_session/task identifiers are all non-null and correlated. */
+    val isIdentityCorrelated: Boolean
+        get() = correlatedTraceId != null && correlatedRuntimeSessionId != null && correlatedTaskId != null
 
     /**
      * Produces a stable, V2-consumable key-value map for cross-repo serialization.
@@ -157,6 +222,29 @@ data class DualRepoE2EVerificationReport(
             .filter { it.value.reason != null }
             .mapKeys { it.key.wireValue }
             .mapValues { it.value.reason!! }
+        val verificationHooksWire: Map<String, String> = verificationHooks
+            .mapKeys { it.key.wireValue }
+            .mapValues { it.value.outcomeStatus.wireValue }
+        val verificationHookReasonsWire: Map<String, String> = verificationHooks
+            .filter { it.value.reason != null }
+            .mapKeys { it.key.wireValue }
+            .mapValues { it.value.reason!! }
+        val verificationHookTraceIdsWire: Map<String, String> = verificationHooks
+            .filter { !it.value.traceId.isNullOrBlank() }
+            .mapKeys { it.key.wireValue }
+            .mapValues { it.value.traceId!! }
+        val verificationHookRuntimeSessionIdsWire: Map<String, String> = verificationHooks
+            .filter { !it.value.runtimeSessionId.isNullOrBlank() }
+            .mapKeys { it.key.wireValue }
+            .mapValues { it.value.runtimeSessionId!! }
+        val verificationHookTaskIdsWire: Map<String, String> = verificationHooks
+            .filter { !it.value.taskId.isNullOrBlank() }
+            .mapKeys { it.key.wireValue }
+            .mapValues { it.value.taskId!! }
+        val delegatedSignalKindsWire: Map<String, String> = verificationHooks
+            .filter { !it.value.delegatedSignalKind.isNullOrBlank() }
+            .mapKeys { it.key.wireValue }
+            .mapValues { it.value.delegatedSignalKind!! }
         return mapOf(
             "schema_version" to schemaVersion,
             "report_id" to reportId,
@@ -168,8 +256,19 @@ data class DualRepoE2EVerificationReport(
             "reported_at_ms" to reportedAtMs,
             "is_real_device_e2e_verified" to isRealDeviceE2EVerified,
             "is_v2_consumable" to isV2Consumable,
+            "has_canonical_roundtrip_hooks" to hasCanonicalRoundTripHooks,
+            "is_identity_correlated" to isIdentityCorrelated,
+            "correlated_trace_id" to correlatedTraceId,
+            "correlated_runtime_session_id" to correlatedRuntimeSessionId,
+            "correlated_task_id" to correlatedTaskId,
             "stage_outcomes" to stageOutcomesWire,
             "stage_reasons" to stageReasonsWire,
+            "verification_hooks" to verificationHooksWire,
+            "verification_hook_reasons" to verificationHookReasonsWire,
+            "verification_hook_trace_ids" to verificationHookTraceIdsWire,
+            "verification_hook_runtime_session_ids" to verificationHookRuntimeSessionIdsWire,
+            "verification_hook_task_ids" to verificationHookTaskIdsWire,
+            "verification_hook_delegated_signal_kinds" to delegatedSignalKindsWire,
             "bridge_artifact_tag" to bridgeReport.overallVerificationArtifact.artifactTag,
             "bridge_is_real_device_verified" to bridgeReport.isRealDeviceVerified
         )
