@@ -2645,6 +2645,21 @@ class GalaxyConnectionService : Service() {
                 UFOGalaxyApplication.runtimeController.reconnectRecoveryState.value.wireValue
             val modeState = settings.authoritativeModeState()
 
+            // ── PR-4: Capability authority snapshot ────────────────────────────────────────
+            // Build the authoritative capability authority snapshot from live runtime state.
+            // This collapses the scattered grounding/planning/inference/checksum signals into
+            // a single, versioned, testable structure that V2 can consume for dispatch scoring
+            // without cross-referencing multiple fields.
+            val capabilityAuthority = try {
+                com.ufo.galaxy.runtime.CapabilityAuthoritySnapshot.from(
+                    managerState  = managerState,
+                    checksumValid = checksumOk ?: false
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not build capability authority snapshot: ${e.message}")
+                null
+            }
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2693,7 +2708,14 @@ class GalaxyConnectionService : Service() {
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 // PR-10: cross-cutting carrier state backed by real RuntimeController state.
                 carrier_runtime_state = carrierRuntimeState,
-                reconnect_recovery_state = reconnectRecoveryState
+                reconnect_recovery_state = reconnectRecoveryState,
+                // PR-4: authoritative capability authority fields.
+                // These are derived from CapabilityAuthoritySnapshot so the field relationship
+                // logic is centralised, versioned, and independently testable.
+                capability_schema_version = capabilityAuthority?.schemaVersion,
+                local_intelligence_status = capabilityAuthority?.localIntelligenceStatus,
+                planner_ready = capabilityAuthority?.plannerReady,
+                grounding_ready = capabilityAuthority?.groundingReady
             )
 
             val envelope = AipMessage(

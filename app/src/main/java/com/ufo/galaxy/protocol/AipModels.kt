@@ -1913,6 +1913,27 @@ data class DeviceAuditReportPayload(
  *                                   `"recovered"` | `"failed"`.  Contextualizes snapshots emitted
  *                                   during a reconnect recovery cycle so V2 can handle them
  *                                   correctly.  `null` only as a defensive default (same as above).
+ *
+ * PR-4: Authoritative capability authority fields.
+ * These four fields are the stable, first-class projection of the
+ * [com.ufo.galaxy.runtime.CapabilityAuthoritySnapshot] that V2 can use for dispatch
+ * scoring without parsing opaque maps or cross-referencing multiple sub-fields.
+ * @param capability_schema_version  Stable schema version string for V2 drift detection.
+ *                                   Matches [com.ufo.galaxy.runtime.CapabilityAuthoritySnapshot.SCHEMA_VERSION].
+ *                                   Allows V2 to detect Android-side schema changes across releases.
+ * @param local_intelligence_status  Wire value of [com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus]
+ *                                   at snapshot time.  Values: `"active"` | `"degraded"` | `"disabled"` |
+ *                                   `"unavailable"` | `"recovering"`.  This is the canonical single-field
+ *                                   signal for local inference availability; V2 does not need to
+ *                                   infer it from `warmup_result` or `runtime_health_snapshot`.
+ * @param planner_ready              `true` when the planner runtime component is healthy/ready at
+ *                                   snapshot time.  Derived from [RuntimeHealthSnapshot.plannerHealth].
+ *                                   Distinct from `planner_fallback_tier` (which reflects fallback
+ *                                   ladder config, not live health).
+ * @param grounding_ready            `true` when the grounding runtime component is healthy/ready at
+ *                                   snapshot time.  Derived from [RuntimeHealthSnapshot.groundingHealth].
+ *                                   Distinct from `grounding_fallback_tier` (which reflects fallback
+ *                                   ladder config, not live health).
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -2007,7 +2028,26 @@ data class DeviceStateSnapshotPayload(
     //   correctly (e.g. ignore stale snapshots tagged "recovering").  Null is the safe
     //   default only; in practice this field is always populated at emit time.
     val carrier_runtime_state: String? = null,
-    val reconnect_recovery_state: String? = null
+    val reconnect_recovery_state: String? = null,
+
+    // PR-4: Authoritative capability authority fields.
+    // These four fields are the stable, first-class projection for V2 dispatch scoring.
+    // They are derived from CapabilityAuthoritySnapshot so the derivation logic lives
+    // in one place and is independently testable.
+    //
+    // capability_schema_version: matches CapabilityAuthoritySnapshot.SCHEMA_VERSION.
+    //   Null only when the snapshot builder could not run (defensive default).
+    //
+    // local_intelligence_status: canonical single-field inference availability signal.
+    //   V2 uses this instead of inferring from warmup_result or runtime_health_snapshot.
+    //
+    // planner_ready / grounding_ready: explicit per-subsystem health booleans.
+    //   Distinct from planner_fallback_tier / grounding_fallback_tier (which reflect
+    //   FallbackConfig state, not live component health).
+    val capability_schema_version: String? = null,
+    val local_intelligence_status: String? = null,
+    val planner_ready: Boolean? = null,
+    val grounding_ready: Boolean? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
