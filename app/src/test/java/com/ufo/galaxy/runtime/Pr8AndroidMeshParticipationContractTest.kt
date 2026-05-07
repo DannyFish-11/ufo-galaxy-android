@@ -84,7 +84,7 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     @Test
-    fun `LocalCollaborationAgent scope explicitly declares ownership and non ownership boundaries`() {
+    fun `LocalCollaborationAgent scope explicitly declares ownership and non-ownership boundaries`() {
         val scope = AndroidMeshParticipationContract.LOCAL_COLLABORATION_AGENT_SCOPE
 
         assertEquals("LocalCollaborationAgent", scope["owner"])

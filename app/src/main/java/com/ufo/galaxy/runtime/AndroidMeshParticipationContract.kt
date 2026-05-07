@@ -109,7 +109,7 @@ object AndroidMeshParticipationContract {
      */
     val MESH_STATE_SEMANTICS: Map<String, String> = mapOf(
         ReadinessLevel.READY.wireValue to
-            "android_can_execute_mesh_subtask_and_delegated_takeover_without_deferred_capability_gap",
+            "android_can_execute_mesh_subtask_and_delegated_takeover_without_capability_gaps",
         ReadinessLevel.PARTIAL.wireValue to
             "android_can_execute_some_mesh_paths_but_full_mesh_runtime_is_scope_constrained",
         ReadinessLevel.DEFERRED.wireValue to
