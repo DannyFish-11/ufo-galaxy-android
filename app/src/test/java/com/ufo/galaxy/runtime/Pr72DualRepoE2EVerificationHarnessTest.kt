@@ -1124,6 +1124,43 @@ class Pr72DualRepoE2EVerificationHarnessTest {
     }
 
     @Test
+    fun `toWireMap includes verification hook correlation fields on canonical happy path`() {
+        harness.recordCanonicalCrossDeviceHappyPath(
+            traceId = "trace-happy-72",
+            runtimeSessionId = "runtime-happy-72",
+            taskId = "task-happy-72"
+        )
+        val wire = harness.buildReport().toWireMap()
+        assertEquals(true, wire["has_canonical_roundtrip_hooks"])
+        assertEquals(true, wire["is_identity_correlated"])
+        assertEquals("trace-happy-72", wire["correlated_trace_id"])
+        assertEquals("runtime-happy-72", wire["correlated_runtime_session_id"])
+        assertEquals("task-happy-72", wire["correlated_task_id"])
+        @Suppress("UNCHECKED_CAST")
+        val hookStates = wire["verification_hooks"] as Map<String, String>
+        assertEquals("passed", hookStates["execution_received"])
+        assertEquals("passed", hookStates["signal_emitted"])
+        assertEquals("passed", hookStates["result_feedback"])
+        assertEquals("passed", hookStates["state_correlated"])
+    }
+
+    @Test
+    fun `toWireMap includes delegated signal kind in verification_hook_delegated_signal_kinds`() {
+        harness.recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.SIGNAL_EMITTED,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = "trace-72-signal",
+            runtimeSessionId = "runtime-72-signal",
+            taskId = "task-72-signal",
+            delegatedSignalKind = "result"
+        )
+        val wire = harness.buildReport().toWireMap()
+        @Suppress("UNCHECKED_CAST")
+        val signalKinds = wire["verification_hook_delegated_signal_kinds"] as Map<String, String>
+        assertEquals("result", signalKinds["signal_emitted"])
+    }
+
+    @Test
     fun `toWireMap bridge_is_real_device_verified is true when all required stages pass on real device`() {
         recordAllRequired(harness)
         val report = harness.buildReport()
@@ -1247,9 +1284,14 @@ class Pr72DualRepoE2EVerificationHarnessTest {
     @Test
     fun `clearAllOutcomes clears stage outcomes and lifecycleTruthState`() {
         recordAllRequired(harness)
+        harness.recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.EXECUTION_RECEIVED,
+            status = ScenarioOutcomeStatus.PASSED
+        )
         harness.lifecycleTruthState = ParticipantLifecycleTruthState.ACTIVE
         harness.clearAllOutcomes()
         assertTrue(harness.getStageOutcomes().isEmpty())
+        assertTrue(harness.getVerificationHooks().isEmpty())
         assertNull(harness.lifecycleTruthState)
     }
 
@@ -1268,5 +1310,41 @@ class Pr72DualRepoE2EVerificationHarnessTest {
             ScenarioOutcomeStatus.PASSED,
             harness.getStageStatus(DualRepoE2EVerificationStage.CAPABILITY_REPORT)
         )
+    }
+
+    @Test
+    fun `recordCanonicalCrossDeviceHappyPath marks report as identity correlated and hook complete`() {
+        harness.recordCanonicalCrossDeviceHappyPath(
+            traceId = "trace-72-canonical",
+            runtimeSessionId = "runtime-72-canonical",
+            taskId = "task-72-canonical"
+        )
+        val report = harness.buildReport()
+        assertTrue(report.hasCanonicalRoundTripHooks)
+        assertTrue(report.isIdentityCorrelated)
+        assertEquals("trace-72-canonical", report.correlatedTraceId)
+        assertEquals("runtime-72-canonical", report.correlatedRuntimeSessionId)
+        assertEquals("task-72-canonical", report.correlatedTaskId)
+    }
+
+    @Test
+    fun `mismatched hook identifiers keep report not identity correlated`() {
+        harness.recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.EXECUTION_RECEIVED,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = "trace-a",
+            runtimeSessionId = "runtime-a",
+            taskId = "task-a"
+        )
+        harness.recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.RESULT_FEEDBACK,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = "trace-b",
+            runtimeSessionId = "runtime-a",
+            taskId = "task-a"
+        )
+        val report = harness.buildReport()
+        assertFalse(report.isIdentityCorrelated)
+        assertNull(report.correlatedTraceId)
     }
 }

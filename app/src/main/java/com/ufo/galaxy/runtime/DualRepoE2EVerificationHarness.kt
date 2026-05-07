@@ -121,6 +121,9 @@ class DualRepoE2EVerificationHarness(
 
     private val stageOutcomes: MutableMap<DualRepoE2EVerificationStage, DualRepoE2EStageOutcome> =
         mutableMapOf()
+    private val verificationHooks:
+        MutableMap<DualRepoE2EVerificationHookKind, DualRepoE2EVerificationHookRecord> =
+        mutableMapOf()
 
     /** Optional [ParticipantLifecycleTruthState] observed during verification. */
     var lifecycleTruthState: ParticipantLifecycleTruthState? = null
@@ -163,6 +166,76 @@ class DualRepoE2EVerificationHarness(
         stageOutcomes.toMap()
 
     /**
+     * Records a verification hook evidence point for Android-side roundtrip correlation.
+     */
+    fun recordVerificationHook(
+        kind: DualRepoE2EVerificationHookKind,
+        status: ScenarioOutcomeStatus,
+        traceId: String? = null,
+        runtimeSessionId: String? = null,
+        taskId: String? = null,
+        delegatedSignalKind: String? = null,
+        reason: String? = null
+    ) {
+        verificationHooks[kind] = DualRepoE2EVerificationHookRecord(
+            kind = kind,
+            outcomeStatus = status,
+            traceId = traceId,
+            runtimeSessionId = runtimeSessionId,
+            taskId = taskId,
+            delegatedSignalKind = delegatedSignalKind,
+            reason = reason
+        )
+    }
+
+    /** Returns the current verification-hook evidence map as an immutable snapshot. */
+    fun getVerificationHooks(): Map<DualRepoE2EVerificationHookKind, DualRepoE2EVerificationHookRecord> =
+        verificationHooks.toMap()
+
+    /**
+     * Records the canonical cross-device happy path with correlation-ready identifiers.
+     */
+    fun recordCanonicalCrossDeviceHappyPath(
+        traceId: String,
+        runtimeSessionId: String,
+        taskId: String,
+        delegatedSignalKind: String = "result"
+    ) {
+        DualRepoE2EVerificationStage.REQUIRED_STAGES.forEach { stage ->
+            recordStageOutcome(stage, ScenarioOutcomeStatus.PASSED)
+        }
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.EXECUTION_RECEIVED,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = traceId,
+            runtimeSessionId = runtimeSessionId,
+            taskId = taskId
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.SIGNAL_EMITTED,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = traceId,
+            runtimeSessionId = runtimeSessionId,
+            taskId = taskId,
+            delegatedSignalKind = delegatedSignalKind
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.RESULT_FEEDBACK,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = traceId,
+            runtimeSessionId = runtimeSessionId,
+            taskId = taskId
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.STATE_CORRELATED,
+            status = ScenarioOutcomeStatus.PASSED,
+            traceId = traceId,
+            runtimeSessionId = runtimeSessionId,
+            taskId = taskId
+        )
+    }
+
+    /**
      * Clears all recorded stage outcomes and the [lifecycleTruthState].
      *
      * After calling this, a subsequent [buildReport] will produce a
@@ -170,6 +243,7 @@ class DualRepoE2EVerificationHarness(
      */
     fun clearAllOutcomes() {
         stageOutcomes.clear()
+        verificationHooks.clear()
         lifecycleTruthState = null
     }
 
@@ -295,6 +369,7 @@ class DualRepoE2EVerificationHarness(
             participantId = participantId,
             verificationKind = verificationKind,
             stageOutcomes = stageOutcomes.toMap(),
+            verificationHooks = verificationHooks.toMap(),
             overallArtifact = artifact,
             bridgeReport = bridgeReport,
             lifecycleTruthState = lifecycleTruthState,
