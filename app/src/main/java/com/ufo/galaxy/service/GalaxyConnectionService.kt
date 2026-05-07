@@ -24,6 +24,7 @@ import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
+import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
@@ -173,6 +174,27 @@ class GalaxyConnectionService : Service() {
      */
     @Volatile
     private var activeTakeoverId: String? = null
+    private val activeTakeoverLock = Any()
+
+    private fun currentActiveTakeoverId(): String? =
+        synchronized(activeTakeoverLock) { activeTakeoverId }
+
+    private fun updateActiveTakeoverId(value: String?) {
+        synchronized(activeTakeoverLock) {
+            activeTakeoverId = value
+        }
+    }
+
+    private fun clearActiveTakeoverIdIfMatches(expectedTakeoverId: String) {
+        synchronized(activeTakeoverLock) {
+            if (activeTakeoverId == expectedTakeoverId) {
+                activeTakeoverId = null
+            }
+        }
+    }
+
+    private fun resolveExecutionTraceId(inboundTraceId: String?): String =
+        inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
 
     /** Canonical assessor that evaluates takeover eligibility based on device readiness. */
     private val takeoverEligibilityAssessor: TakeoverEligibilityAssessor by lazy {
@@ -1085,6 +1107,25 @@ class GalaxyConnectionService : Service() {
      * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
      */
     private suspend fun handleGoalExecution(taskId: String, payloadJson: String, inboundTraceId: String?) {
+        val governanceDecision = AndroidExecutionGovernanceContract.evaluateAcceptance(
+            executionType = AndroidExecutionGovernanceContract.ExecutionType.GOAL_EXECUTION,
+            context = AndroidExecutionGovernanceContract.AcceptanceContext(
+                activeTakeoverId = currentActiveTakeoverId()
+            )
+        )
+        if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
+            val traceId = resolveExecutionTraceId(inboundTraceId)
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "goal_execution_governance_gate",
+                errorType = "execution_conflict",
+                errorContext = governanceDecision.reason
+            )
+            sendGoalError(taskId, null, null, governanceDecision.reason, traceId, ROUTE_MODE_CROSS_DEVICE)
+            taskCancelRegistry.deregister(taskId)
+            return
+        }
+
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
@@ -1262,6 +1303,25 @@ class GalaxyConnectionService : Service() {
      * @param inboundTraceId  trace_id from the inbound AIP envelope; null if absent.
      */
     private suspend fun handleParallelSubtask(taskId: String, payloadJson: String, inboundTraceId: String?) {
+        val governanceDecision = AndroidExecutionGovernanceContract.evaluateAcceptance(
+            executionType = AndroidExecutionGovernanceContract.ExecutionType.PARALLEL_SUBTASK,
+            context = AndroidExecutionGovernanceContract.AcceptanceContext(
+                activeTakeoverId = currentActiveTakeoverId()
+            )
+        )
+        if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
+            val traceId = resolveExecutionTraceId(inboundTraceId)
+            emitRuntimeDiagnostics(
+                taskId = taskId,
+                nodeName = "parallel_subtask_governance_gate",
+                errorType = "execution_conflict",
+                errorContext = governanceDecision.reason
+            )
+            sendGoalError(taskId, null, null, governanceDecision.reason, traceId, ROUTE_MODE_CROSS_DEVICE)
+            taskCancelRegistry.deregister(taskId)
+            return
+        }
+
         val payload = try {
             gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
         } catch (e: Exception) {
@@ -3419,9 +3479,10 @@ class GalaxyConnectionService : Service() {
         // ── Eligibility assessment (canonical PR-3 path) ──────────────────────
         // Capture the existing active takeover before setting the new one.
         // The assessor uses the captured value to detect concurrent takeovers.
-        val existingActiveTakeoverId = activeTakeoverId
+        val existingActiveTakeoverId = currentActiveTakeoverId()
+        var takeoverExecutionStarted = false
         // Mark this request as in-flight so any concurrent inbound request is blocked.
-        activeTakeoverId = envelope.takeover_id
+        updateActiveTakeoverId(envelope.takeover_id)
         try {
             val eligibility = takeoverEligibilityAssessor.assess(
                 envelope = envelope,
@@ -3711,6 +3772,7 @@ class GalaxyConnectionService : Service() {
                 )
             )
 
+            takeoverExecutionStarted = true
             serviceScope.launch {
                 try {
                     val outcome = delegatedTakeoverExecutor.execute(delegatedUnit, activationRecord)
@@ -3805,6 +3867,7 @@ class GalaxyConnectionService : Service() {
                     }
                 } finally {
                     UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+                    clearActiveTakeoverIdIfMatches(envelope.takeover_id)
                 }
             }
 
@@ -3816,9 +3879,9 @@ class GalaxyConnectionService : Service() {
                 reason = "accepted"
             )
         } finally {
-            // Always clear the active takeover ID once we have sent our response so
-            // subsequent requests are not incorrectly blocked.
-            activeTakeoverId = null
+            if (!takeoverExecutionStarted) {
+                clearActiveTakeoverIdIfMatches(envelope.takeover_id)
+            }
         }
     }
 
