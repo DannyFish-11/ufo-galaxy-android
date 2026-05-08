@@ -147,6 +147,11 @@ class GalaxyConnectionService : Service() {
          * wall-clock limit.
          */
         const val TAKEOVER_DEFAULT_TIMEOUT_MS = 0L
+
+        // ── PR-04: Fallback tier wire values ──────────────────────────────────
+        // Used in sendDeviceStateSnapshot() to derive mesh participation fallback state.
+        private const val FALLBACK_TIER_CENTER_DELEGATED_WITH_LOCAL = "center_delegated_with_local_fallback"
+        private const val FALLBACK_TIER_ACTIVE = "active"
     }
     
     private val binder = LocalBinder()
@@ -2824,8 +2829,8 @@ class GalaxyConnectionService : Service() {
                 } else {
                     com.ufo.galaxy.runtime.RuntimeHostDescriptor.HostParticipationState.INACTIVE
                 }
-            val snapshotFallbackActive = currentFallbackTier == "center_delegated_with_local_fallback" ||
-                plannerFallbackTier == "active" || groundingFallbackTier == "active"
+            val snapshotFallbackActive = currentFallbackTier == FALLBACK_TIER_CENTER_DELEGATED_WITH_LOCAL ||
+                plannerFallbackTier == FALLBACK_TIER_ACTIVE || groundingFallbackTier == FALLBACK_TIER_ACTIVE
 
             val meshRuntimeStateReport = try {
                 com.ufo.galaxy.runtime.AndroidMeshParticipationRuntimeContract.derive(

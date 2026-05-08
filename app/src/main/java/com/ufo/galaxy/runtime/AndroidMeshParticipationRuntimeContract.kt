@@ -88,7 +88,7 @@ object AndroidMeshParticipationRuntimeContract {
     const val REASON_BARRIER_TIMED_OUT = "barrier_wait_timed_out"
     const val REASON_NOT_ACTIVE_PARTICIPANT = "not_active_participant"
 
-    // ── Centre-side mesh state alignment ─────────────────────────────────────
+    // ── Center-side mesh state alignment ─────────────────────────────────────
 
     /**
      * Canonical mapping of [MeshParticipationLifecycleState] to center-side mesh state
@@ -182,9 +182,7 @@ object AndroidMeshParticipationRuntimeContract {
     fun onBarrierWait(
         currentLifecycle: MeshParticipationLifecycleState
     ): MeshParticipationLifecycleState {
-        return if (MeshParticipationLifecycleState.isAcceptingSubtasks(currentLifecycle) ||
-            currentLifecycle == MeshParticipationLifecycleState.ACTIVE
-        ) {
+        return if (MeshParticipationLifecycleState.isAcceptingSubtasks(currentLifecycle)) {
             MeshParticipationLifecycleState.BARRIER_WAITING
         } else {
             currentLifecycle
