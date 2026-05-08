@@ -269,7 +269,7 @@ data class AndroidParticipantRuntimeTruth(
                 RuntimeHostDescriptor.FormationRole.SATELLITE ->
                     ParticipantCoordinationRole.PARTICIPANT
             }
-            val alignedSessionSnapshot = alignSessionSnapshot(descriptor, sessionSnapshot)
+            val driftCheckedSessionSnapshot = alignSessionSnapshot(descriptor, sessionSnapshot)
             return AndroidParticipantRuntimeTruth(
                 participantId = participantId,
                 deviceId = descriptor.deviceId,
@@ -277,19 +277,19 @@ data class AndroidParticipantRuntimeTruth(
                 deviceRole = descriptor.deviceRole,
                 participationState = descriptor.participationState,
                 coordinationRole = coordinationRole,
-                sourceRuntimePosture = alignedSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
-                sessionId = alignedSessionSnapshot?.sessionId,
-                sessionState = alignedSessionSnapshot?.attachmentState?.let {
+                sourceRuntimePosture = driftCheckedSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                sessionId = driftCheckedSessionSnapshot?.sessionId,
+                sessionState = driftCheckedSessionSnapshot?.attachmentState?.let {
                     AttachedRuntimeSession.State.fromValue(it)
                 },
-                delegatedExecutionCount = alignedSessionSnapshot?.delegatedExecutionCount ?: 0,
+                delegatedExecutionCount = driftCheckedSessionSnapshot?.delegatedExecutionCount ?: 0,
                 healthState = healthState,
                 readinessState = readinessState,
                 activeTaskId = activeTaskId,
                 activeTaskStatus = activeTaskStatus,
                 runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
                     descriptor = descriptor,
-                    sessionSnapshot = alignedSessionSnapshot,
+                    sessionSnapshot = driftCheckedSessionSnapshot,
                     healthState = healthState,
                     readinessState = readinessState,
                     carrierForegroundVisible = carrierForegroundVisible
