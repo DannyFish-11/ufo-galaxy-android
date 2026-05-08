@@ -2056,6 +2056,7 @@ class RuntimeController(
             readinessState = readinessState,
             activeTaskId = activeTaskId,
             activeTaskStatus = activeTaskStatus,
+            carrierForegroundVisible = appForegroundVisible.value,
             reconciliationEpoch = epoch
         )
         emitReconciliationSignal(
@@ -2263,6 +2264,7 @@ class RuntimeController(
                     readinessState = ParticipantReadinessState.UNKNOWN,
                     activeTaskId = null,
                     activeTaskStatus = null,
+                    carrierForegroundVisible = appForegroundVisible.value,
                     reconciliationEpoch = epoch
                 )
                 emitReconciliationSignal(
