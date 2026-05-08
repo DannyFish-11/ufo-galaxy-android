@@ -2055,7 +2055,37 @@ data class DeviceStateSnapshotPayload(
     val capability_schema_version: String? = null,
     val local_intelligence_status: String? = null,
     val planner_ready: Boolean? = null,
-    val grounding_ready: Boolean? = null
+    val grounding_ready: Boolean? = null,
+
+    // PR-04: Mesh participation runtime closure fields.
+    //
+    // mesh_participation_lifecycle_state: canonical lifecycle state of Android as a mesh
+    //   participant at snapshot time.  Derived from runtime health, rollout gates, and
+    //   barrier state via AndroidMeshParticipationRuntimeContract.derive().
+    //   Values: "inactive" | "joining" | "active" | "barrier_waiting" | "barrier_released"
+    //           | "degraded" | "constrained" | "fallback" | "leaving".
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    //
+    // barrier_participation_state: Android's position in the current V2-coordinated barrier
+    //   cycle.  Android is not a barrier authority — V2 owns coordination — but Android
+    //   reports its barrier response state so V2 can track barrier completion and observability.
+    //   Values: "not_applicable" | "waiting" | "released" | "timed_out".
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    //
+    // collaboration_lifecycle_state: lifecycle state of the current LocalCollaborationAgent
+    //   execution cycle.  Models the progression from subtask assignment through execution
+    //   to completion or failure.
+    //   Values: "idle" | "subtask_assigned" | "executing" | "completed" | "failed" | "cancelled".
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    //
+    // mesh_constrained_reasons: non-empty list of machine-readable reason strings when
+    //   mesh participation is degraded, constrained, or using a fallback path.  Each entry
+    //   corresponds to a specific runtime condition that limits participation quality.
+    //   Empty list when participation is fully healthy and unconstrained.
+    val mesh_participation_lifecycle_state: String? = null,
+    val barrier_participation_state: String? = null,
+    val collaboration_lifecycle_state: String? = null,
+    val mesh_constrained_reasons: List<String> = emptyList()
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
