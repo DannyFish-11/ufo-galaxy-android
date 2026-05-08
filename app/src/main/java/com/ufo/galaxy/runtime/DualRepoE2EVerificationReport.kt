@@ -190,6 +190,23 @@ data class DualRepoE2EVerificationReport(
         get() = correlatedTraceId != null && correlatedRuntimeSessionId != null && correlatedTaskId != null
 
     /**
+     * `true` when Android evidence proves participation-ready runtime conditions:
+     * registration + capability report + task reception + delegated execution availability.
+     */
+    val isParticipationReadyEvidence: Boolean
+        get() = PARTICIPATION_READY_STAGES.all { stage ->
+            stageOutcomes[stage]?.outcomeStatus == ScenarioOutcomeStatus.PASSED
+        }
+
+    /**
+     * `true` when Android evidence proves runtime closure (ready evidence + result returned).
+     */
+    val isRuntimeClosedEvidence: Boolean
+        get() = isParticipationReadyEvidence &&
+            stageOutcomes[DualRepoE2EVerificationStage.TASK_RESULT_RETURN]?.outcomeStatus ==
+            ScenarioOutcomeStatus.PASSED
+
+    /**
      * Produces a stable, V2-consumable key-value map for cross-repo serialization.
      *
      * The map uses snake_case keys and is safe for JSON serialization.  The schema is
@@ -258,6 +275,8 @@ data class DualRepoE2EVerificationReport(
             "is_v2_consumable" to isV2Consumable,
             "has_canonical_roundtrip_hooks" to hasCanonicalRoundTripHooks,
             "is_identity_correlated" to isIdentityCorrelated,
+            "is_participation_ready_evidence" to isParticipationReadyEvidence,
+            "is_runtime_closed_evidence" to isRuntimeClosedEvidence,
             "correlated_trace_id" to correlatedTraceId,
             "correlated_runtime_session_id" to correlatedRuntimeSessionId,
             "correlated_task_id" to correlatedTaskId,
@@ -278,6 +297,13 @@ data class DualRepoE2EVerificationReport(
 
         /** Stable schema version for [toWireMap]. */
         const val SCHEMA_VERSION = "1.0"
+
+        val PARTICIPATION_READY_STAGES: Set<DualRepoE2EVerificationStage> = setOf(
+            DualRepoE2EVerificationStage.DEVICE_REGISTER,
+            DualRepoE2EVerificationStage.CAPABILITY_REPORT,
+            DualRepoE2EVerificationStage.TASK_ASSIGNMENT_RECEPTION,
+            DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE
+        )
 
         /** Human-readable description of this report surface. */
         const val DESCRIPTION =

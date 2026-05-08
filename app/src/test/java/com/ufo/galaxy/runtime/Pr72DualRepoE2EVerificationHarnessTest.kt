@@ -1013,6 +1013,28 @@ class Pr72DualRepoE2EVerificationHarnessTest {
         assertTrue(report.isV2Consumable)
     }
 
+    @Test
+    fun `report distinguishes participation-ready evidence from runtime-closed evidence`() {
+        val partialHarness = DualRepoE2EVerificationHarness(
+            deviceId = "device-partial-72",
+            verificationKind = RealDeviceVerificationKind.REAL_DEVICE
+        )
+        DualRepoE2EVerificationReport.PARTICIPATION_READY_STAGES.forEach { stage ->
+            partialHarness.recordStageOutcome(stage, ScenarioOutcomeStatus.PASSED)
+        }
+        val partialReport = partialHarness.buildReport()
+        assertTrue(partialReport.isParticipationReadyEvidence)
+        assertFalse(partialReport.isRuntimeClosedEvidence)
+
+        partialHarness.recordStageOutcome(
+            DualRepoE2EVerificationStage.TASK_RESULT_RETURN,
+            ScenarioOutcomeStatus.PASSED
+        )
+        val closedReport = partialHarness.buildReport()
+        assertTrue(closedReport.isParticipationReadyEvidence)
+        assertTrue(closedReport.isRuntimeClosedEvidence)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // DualRepoE2EVerificationReport — toWireMap
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1121,6 +1143,24 @@ class Pr72DualRepoE2EVerificationHarnessTest {
     fun `toWireMap contains bridge_is_real_device_verified`() {
         val report = harness.buildReport()
         assertNotNull(report.toWireMap()["bridge_is_real_device_verified"])
+    }
+
+    @Test
+    fun `toWireMap exports readiness and runtime-closed evidence flags`() {
+        DualRepoE2EVerificationReport.PARTICIPATION_READY_STAGES.forEach { stage ->
+            harness.recordStageOutcome(stage, ScenarioOutcomeStatus.PASSED)
+        }
+        var wire = harness.buildReport().toWireMap()
+        assertEquals(true, wire["is_participation_ready_evidence"])
+        assertEquals(false, wire["is_runtime_closed_evidence"])
+
+        harness.recordStageOutcome(
+            DualRepoE2EVerificationStage.TASK_RESULT_RETURN,
+            ScenarioOutcomeStatus.PASSED
+        )
+        wire = harness.buildReport().toWireMap()
+        assertEquals(true, wire["is_participation_ready_evidence"])
+        assertEquals(true, wire["is_runtime_closed_evidence"])
     }
 
     @Test

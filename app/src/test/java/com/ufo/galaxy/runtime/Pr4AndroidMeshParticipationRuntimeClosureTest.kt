@@ -308,6 +308,9 @@ class Pr4AndroidMeshParticipationRuntimeClosureTest {
         assertEquals(BarrierParticipationState.NOT_APPLICABLE, report.barrierState)
         assertEquals(CollaborationLifecycleState.IDLE, report.collaborationLifecycle)
         assertTrue(report.constrainedReasons.isEmpty())
+        assertTrue(report.isParticipationReady)
+        assertTrue(report.isRuntimeEngaged.not())
+        assertTrue(report.isRuntimeClosed.not())
     }
 
     @Test
@@ -390,6 +393,45 @@ class Pr4AndroidMeshParticipationRuntimeClosureTest {
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
         assertEquals(CollaborationLifecycleState.EXECUTING, report.collaborationLifecycle)
+        assertTrue(report.isRuntimeEngaged)
+        assertTrue(report.isRuntimeClosed.not())
+    }
+
+    @Test
+    fun `report distinguishes participation-ready from runtime-closed`() {
+        val ready = AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport(
+            participationLifecycle = MeshParticipationLifecycleState.ACTIVE,
+            barrierState = BarrierParticipationState.NOT_APPLICABLE,
+            collaborationLifecycle = CollaborationLifecycleState.SUBTASK_ASSIGNED,
+            constrainedReasons = emptyList()
+        )
+        assertTrue(ready.isParticipationReady)
+        assertTrue(ready.isRuntimeClosed.not())
+
+        val closed = AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport(
+            participationLifecycle = MeshParticipationLifecycleState.LEAVING,
+            barrierState = BarrierParticipationState.RELEASED,
+            collaborationLifecycle = CollaborationLifecycleState.COMPLETED,
+            constrainedReasons = emptyList()
+        )
+        assertTrue(closed.isParticipationReady.not())
+        assertTrue(closed.isRuntimeClosed)
+    }
+
+    @Test
+    fun `fallback and barrier-timeout path is runtime-closed after terminal collaboration`() {
+        val report = AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport(
+            participationLifecycle = MeshParticipationLifecycleState.FALLBACK,
+            barrierState = BarrierParticipationState.TIMED_OUT,
+            collaborationLifecycle = CollaborationLifecycleState.FAILED,
+            constrainedReasons = listOf(
+                AndroidMeshParticipationRuntimeContract.REASON_FALLBACK_ACTIVE,
+                AndroidMeshParticipationRuntimeContract.REASON_BARRIER_TIMED_OUT
+            )
+        )
+        assertTrue(report.isParticipationReady.not())
+        assertTrue(report.isRuntimeEngaged.not())
+        assertTrue(report.isRuntimeClosed)
     }
 
     // ── Wire-map correctness ──────────────────────────────────────────────────
@@ -410,6 +452,9 @@ class Pr4AndroidMeshParticipationRuntimeClosureTest {
         assertEquals("not_applicable", wireMap[AndroidMeshParticipationRuntimeContract.KEY_BARRIER_STATE])
         assertEquals("idle", wireMap[AndroidMeshParticipationRuntimeContract.KEY_COLLABORATION_LIFECYCLE])
         assertNotNull(wireMap[AndroidMeshParticipationRuntimeContract.KEY_CONSTRAINED_REASONS])
+        assertEquals(true, wireMap[AndroidMeshParticipationRuntimeContract.KEY_PARTICIPATION_READY])
+        assertEquals(false, wireMap[AndroidMeshParticipationRuntimeContract.KEY_RUNTIME_ENGAGED])
+        assertEquals(false, wireMap[AndroidMeshParticipationRuntimeContract.KEY_RUNTIME_CLOSED])
         val reasons = wireMap[AndroidMeshParticipationRuntimeContract.KEY_CONSTRAINED_REASONS] as List<*>
         assertTrue(reasons.isEmpty())
     }
@@ -430,6 +475,9 @@ class Pr4AndroidMeshParticipationRuntimeClosureTest {
         assertEquals("barrier_waiting", wireMap[AndroidMeshParticipationRuntimeContract.KEY_PARTICIPATION_LIFECYCLE])
         assertEquals("waiting", wireMap[AndroidMeshParticipationRuntimeContract.KEY_BARRIER_STATE])
         assertEquals("executing", wireMap[AndroidMeshParticipationRuntimeContract.KEY_COLLABORATION_LIFECYCLE])
+        assertEquals(false, wireMap[AndroidMeshParticipationRuntimeContract.KEY_PARTICIPATION_READY])
+        assertEquals(true, wireMap[AndroidMeshParticipationRuntimeContract.KEY_RUNTIME_ENGAGED])
+        assertEquals(false, wireMap[AndroidMeshParticipationRuntimeContract.KEY_RUNTIME_CLOSED])
         val reasons = wireMap[AndroidMeshParticipationRuntimeContract.KEY_CONSTRAINED_REASONS] as List<*>
         assertTrue(reasons.contains(AndroidMeshParticipationRuntimeContract.REASON_HEALTH_DEGRADED))
     }

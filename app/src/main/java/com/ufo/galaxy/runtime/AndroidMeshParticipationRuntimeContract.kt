@@ -58,6 +58,17 @@ object AndroidMeshParticipationRuntimeContract {
         val constrainedReasons: List<String>
     ) {
 
+        val isParticipationReady: Boolean
+            get() = MeshParticipationLifecycleState.isAcceptingSubtasks(participationLifecycle)
+
+        val isRuntimeEngaged: Boolean
+            get() = CollaborationLifecycleState.isActivelyProcessing(collaborationLifecycle)
+
+        val isRuntimeClosed: Boolean
+            get() = CollaborationLifecycleState.isTerminal(collaborationLifecycle) &&
+                !isParticipationReady &&
+                barrierState != BarrierParticipationState.WAITING
+
         /**
          * Returns a stable wire-map for inclusion in structured log entries and
          * V2-facing diagnostic surfaces.
@@ -67,6 +78,9 @@ object AndroidMeshParticipationRuntimeContract {
             put(KEY_BARRIER_STATE, barrierState.wireValue)
             put(KEY_COLLABORATION_LIFECYCLE, collaborationLifecycle.wireValue)
             put(KEY_CONSTRAINED_REASONS, constrainedReasons)
+            put(KEY_PARTICIPATION_READY, isParticipationReady)
+            put(KEY_RUNTIME_ENGAGED, isRuntimeEngaged)
+            put(KEY_RUNTIME_CLOSED, isRuntimeClosed)
         }
     }
 
@@ -76,6 +90,9 @@ object AndroidMeshParticipationRuntimeContract {
     const val KEY_BARRIER_STATE = "barrier_participation_state"
     const val KEY_COLLABORATION_LIFECYCLE = "collaboration_lifecycle_state"
     const val KEY_CONSTRAINED_REASONS = "mesh_constrained_reasons"
+    const val KEY_PARTICIPATION_READY = "mesh_participation_ready"
+    const val KEY_RUNTIME_ENGAGED = "mesh_runtime_engaged"
+    const val KEY_RUNTIME_CLOSED = "mesh_runtime_closed"
 
     // ── Constrained-reason constants ─────────────────────────────────────────
 
