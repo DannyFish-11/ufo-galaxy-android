@@ -65,6 +65,10 @@ object AndroidMeshParticipationRuntimeContract {
             get() = CollaborationLifecycleState.isActivelyProcessing(collaborationLifecycle)
 
         val isRuntimeClosed: Boolean
+            // Runtime closure is deliberately stricter than terminal collaboration alone:
+            //  1) collaboration must be terminal,
+            //  2) participant must no longer be in a ready-to-accept state, and
+            //  3) barrier must not still be waiting.
             get() = CollaborationLifecycleState.isTerminal(collaborationLifecycle) &&
                 !isParticipationReady &&
                 barrierState != BarrierParticipationState.WAITING
