@@ -94,6 +94,7 @@ data class AndroidParticipantRuntimeTruth(
     val readinessState: ParticipantReadinessState,
     val activeTaskId: String?,
     val activeTaskStatus: ActiveTaskStatus?,
+    val runtimeNodeIdentity: AndroidRuntimeNodeIdentity? = null,
     val reportedAtMs: Long,
     val reconciliationEpoch: Int
 ) {
@@ -161,6 +162,7 @@ data class AndroidParticipantRuntimeTruth(
         put(KEY_READINESS_STATE, readinessState.wireValue)
         activeTaskId?.let { put(KEY_ACTIVE_TASK_ID, it) }
         activeTaskStatus?.let { put(KEY_ACTIVE_TASK_STATUS, it.wireValue) }
+        runtimeNodeIdentity?.let { put(KEY_RUNTIME_NODE_IDENTITY, it.toMap()) }
         put(KEY_REPORTED_AT_MS, reportedAtMs)
         put(KEY_RECONCILIATION_EPOCH, reconciliationEpoch)
         put(KEY_IS_FULLY_RECONCILABLE, isFullyReconcilable)
@@ -214,6 +216,9 @@ data class AndroidParticipantRuntimeTruth(
         /** Wire key for [activeTaskStatus] ([ActiveTaskStatus.wireValue]); absent when null. */
         const val KEY_ACTIVE_TASK_STATUS = "active_task_status"
 
+        /** Wire key for consolidated [runtimeNodeIdentity] map; absent when null. */
+        const val KEY_RUNTIME_NODE_IDENTITY = "runtime_node_identity"
+
         /** Wire key for [reportedAtMs]. */
         const val KEY_REPORTED_AT_MS = "reported_at_ms"
 
@@ -249,6 +254,7 @@ data class AndroidParticipantRuntimeTruth(
             readinessState: ParticipantReadinessState = ParticipantReadinessState.UNKNOWN,
             activeTaskId: String? = null,
             activeTaskStatus: ActiveTaskStatus? = null,
+            carrierForegroundVisible: Boolean? = null,
             reconciliationEpoch: Int = 0,
             reportedAtMs: Long = System.currentTimeMillis()
         ): AndroidParticipantRuntimeTruth {
@@ -263,6 +269,7 @@ data class AndroidParticipantRuntimeTruth(
                 RuntimeHostDescriptor.FormationRole.SATELLITE ->
                     ParticipantCoordinationRole.PARTICIPANT
             }
+            val alignedSessionSnapshot = alignSessionSnapshot(descriptor, sessionSnapshot)
             return AndroidParticipantRuntimeTruth(
                 participantId = participantId,
                 deviceId = descriptor.deviceId,
@@ -270,19 +277,36 @@ data class AndroidParticipantRuntimeTruth(
                 deviceRole = descriptor.deviceRole,
                 participationState = descriptor.participationState,
                 coordinationRole = coordinationRole,
-                sourceRuntimePosture = sessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
-                sessionId = sessionSnapshot?.sessionId,
-                sessionState = sessionSnapshot?.attachmentState?.let {
+                sourceRuntimePosture = alignedSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                sessionId = alignedSessionSnapshot?.sessionId,
+                sessionState = alignedSessionSnapshot?.attachmentState?.let {
                     AttachedRuntimeSession.State.fromValue(it)
                 },
-                delegatedExecutionCount = sessionSnapshot?.delegatedExecutionCount ?: 0,
+                delegatedExecutionCount = alignedSessionSnapshot?.delegatedExecutionCount ?: 0,
                 healthState = healthState,
                 readinessState = readinessState,
                 activeTaskId = activeTaskId,
                 activeTaskStatus = activeTaskStatus,
+                runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
+                    descriptor = descriptor,
+                    sessionSnapshot = alignedSessionSnapshot,
+                    healthState = healthState,
+                    readinessState = readinessState,
+                    carrierForegroundVisible = carrierForegroundVisible
+                ),
                 reportedAtMs = reportedAtMs,
                 reconciliationEpoch = reconciliationEpoch
             )
+        }
+
+        private fun alignSessionSnapshot(
+            descriptor: RuntimeHostDescriptor,
+            sessionSnapshot: AttachedRuntimeHostSessionSnapshot?
+        ): AttachedRuntimeHostSessionSnapshot? {
+            val snapshot = sessionSnapshot ?: return null
+            if (snapshot.deviceId != descriptor.deviceId) return null
+            if (snapshot.hostRole != descriptor.formationRole.wireValue) return null
+            return snapshot
         }
     }
 }
