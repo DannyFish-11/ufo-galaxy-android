@@ -2778,6 +2778,69 @@ class GalaxyConnectionService : Service() {
                 null
             }
 
+            // ── PR-04: Mesh participation runtime closure fields ──────────────────────────────
+            // Derive the structured mesh participation runtime state from live Android state.
+            // These fields close Android-side mesh participation as a stable runtime lifecycle
+            // contract aligned with the center-side mesh runtime state contract.
+            //
+            // participantHealthState: derived from the manager state that is already read above.
+            //   This avoids a second read of the same state and keeps derivation consistent.
+            //
+            // participationHostState: derived from whether a session is currently attached.
+            //   ACTIVE when a session is attached (snapshotAttachedSessionId != null);
+            //   INACTIVE otherwise.  This is a conservative derivation from available snapshot
+            //   state; it matches the ACTIVE/INACTIVE semantic used by RuntimeHostDescriptor.
+            //
+            // barrierState: defaults to NOT_APPLICABLE — barrier state is an ephemeral
+            //   per-execution-cycle concept.  Android reports NOT_APPLICABLE in state snapshots
+            //   (which are emitted at connect/reconnect/periodic intervals) rather than
+            //   attempting to reconstruct transient barrier state from persistent state.
+            //   Barrier wait/release events are reported via the execution-event uplink.
+            //
+            // collaborationState: defaults to IDLE — collaboration state is a per-subtask
+            //   execution concept.  The snapshot reflects the steady-state between subtask
+            //   assignments.  Subtask execution state is reported via the execution-event uplink.
+            //
+            // fallbackActive: true when the active fallback tier is not the primary tier.
+            //   Matches the condition under which Android reports a degraded/fallback path.
+            val snapshotParticipantHealth = when (managerState) {
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running ->
+                    com.ufo.galaxy.runtime.ParticipantHealthState.HEALTHY
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded ->
+                    com.ufo.galaxy.runtime.ParticipantHealthState.DEGRADED
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.FailedStartup ->
+                    com.ufo.galaxy.runtime.ParticipantHealthState.FAILED
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed ->
+                    com.ufo.galaxy.runtime.ParticipantHealthState.FAILED
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Starting ->
+                    com.ufo.galaxy.runtime.ParticipantHealthState.STARTING
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Recovering ->
+                    com.ufo.galaxy.runtime.ParticipantHealthState.RECOVERING
+                else -> com.ufo.galaxy.runtime.ParticipantHealthState.UNKNOWN
+            }
+            val snapshotParticipationHostState =
+                if (snapshotAttachedSessionId != null) {
+                    com.ufo.galaxy.runtime.RuntimeHostDescriptor.HostParticipationState.ACTIVE
+                } else {
+                    com.ufo.galaxy.runtime.RuntimeHostDescriptor.HostParticipationState.INACTIVE
+                }
+            val snapshotFallbackActive = currentFallbackTier == "center_delegated_with_local_fallback" ||
+                plannerFallbackTier == "active" || groundingFallbackTier == "active"
+
+            val meshRuntimeStateReport = try {
+                com.ufo.galaxy.runtime.AndroidMeshParticipationRuntimeContract.derive(
+                    rollout = rolloutSnapshot,
+                    healthState = snapshotParticipantHealth,
+                    barrierState = com.ufo.galaxy.runtime.BarrierParticipationState.NOT_APPLICABLE,
+                    collaborationState = com.ufo.galaxy.runtime.CollaborationLifecycleState.IDLE,
+                    fallbackActive = snapshotFallbackActive,
+                    participationState = snapshotParticipationHostState
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not build mesh runtime state report: ${e.message}")
+                null
+            }
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 llama_cpp_available = llamaCppAvailable,
@@ -2833,7 +2896,13 @@ class GalaxyConnectionService : Service() {
                 capability_schema_version = capabilityAuthority?.schemaVersion,
                 local_intelligence_status = capabilityAuthority?.localIntelligenceStatus,
                 planner_ready = capabilityAuthority?.plannerReady,
-                grounding_ready = capabilityAuthority?.groundingReady
+                grounding_ready = capabilityAuthority?.groundingReady,
+                // PR-04: mesh participation runtime closure fields.
+                // Derived from live Android runtime state via AndroidMeshParticipationRuntimeContract.
+                mesh_participation_lifecycle_state = meshRuntimeStateReport?.participationLifecycle?.wireValue,
+                barrier_participation_state = meshRuntimeStateReport?.barrierState?.wireValue,
+                collaboration_lifecycle_state = meshRuntimeStateReport?.collaborationLifecycle?.wireValue,
+                mesh_constrained_reasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList()
             )
 
             val envelope = AipMessage(
