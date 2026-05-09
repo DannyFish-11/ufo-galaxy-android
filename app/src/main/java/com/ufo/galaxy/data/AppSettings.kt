@@ -370,6 +370,11 @@ interface AppSettings {
      * - [crossDeviceEnabled]
      * - [goalExecutionEnabled]
      * - [parallelExecutionEnabled]
+     *
+     * [wsConnected] defaults to [crossDeviceEnabled] only for static metadata builders such as
+     * [toMetadataMap], where no live socket state exists yet and the best available projection is
+     * "configured for cross-device". Canonical emission paths with real runtime state must pass
+     * the live WebSocket value explicitly so transition/hold semantics are preserved.
      */
     fun authoritativeModeState(
         wsConnected: Boolean = crossDeviceEnabled,

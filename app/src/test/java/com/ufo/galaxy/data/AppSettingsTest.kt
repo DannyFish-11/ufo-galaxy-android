@@ -268,6 +268,21 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `parallel execution eligibility only turns true when cross-device tasks are accepted`() {
+        val settings = InMemoryAppSettings(
+            crossDeviceEnabled = true,
+            goalExecutionEnabled = true,
+            parallelExecutionEnabled = true,
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = true
+        )
+
+        assertTrue(settings.authoritativeModeState(wsConnected = true).parallelExecutionEligibility)
+        assertFalse(settings.authoritativeModeState(wsConnected = false).parallelExecutionEligibility)
+    }
+
+    @Test
     fun `toMetadataMap updates mode gate fields after readiness and mode transition`() {
         val settings = InMemoryAppSettings(
             crossDeviceEnabled = false,
