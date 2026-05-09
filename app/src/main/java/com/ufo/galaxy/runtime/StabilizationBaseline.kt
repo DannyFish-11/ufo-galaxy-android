@@ -1752,6 +1752,44 @@ object StabilizationBaseline {
                 "classifications.",
             introducedPr = 69
         )
+    ) + listOf(
+
+        // ── PR-79: Android semantic-contract closure surfaces (R7/R11) ────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "local-execution-mode-gate",
+            displayName = "LocalExecutionModeGate",
+            packagePath = "com.ufo.galaxy.runtime.LocalExecutionModeGate",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-79 explicit, machine-verifiable gate for Android execution mode " +
+                "state/transition semantics. Closes R7/R11 drift gap: names the complete set " +
+                "of ExecutionModeState values (INACTIVE, LOCAL_ONLY, CROSS_DEVICE_ACTIVE, " +
+                "CROSS_DEVICE_DEGRADED, TRANSITIONING) with task-acceptance and V2-governance " +
+                "flags; names all eight ModeTransitionEvent values with causesHold semantics; " +
+                "provides decide() factory for snapshot-emission; provides TRANSITION_TABLE for " +
+                "V2 android_runtime_transition_reducer.py to validate observed transitions. " +
+                "V2 canonical consumers must read execution_mode_state from device-state snapshots " +
+                "rather than inferring from field combinations.",
+            introducedPr = 79
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "durable-participant-identity",
+            displayName = "DurableParticipantIdentity",
+            packagePath = "com.ufo.galaxy.session.DurableParticipantIdentity",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-79 stable per-installation participant identity anchor with explicit " +
+                "freshness semantics. Closes R7/R11 identity-freshness drift: participantId is " +
+                "constant across all activation eras and process recreations; IdentityFreshness " +
+                "(FRESH/RECOVERED/STALE) is Android-originated and authoritative — V2 " +
+                "android_device_state_store.py must read it rather than applying its own " +
+                "heuristics. STALE_THRESHOLD_MS (24 h) matches V2 participant inactivity " +
+                "timeout. createFromGap() factory applies threshold to classify freshness at " +
+                "registration time. toWireMap() provides all REQUIRED_WIRE_KEYS for V2 " +
+                "participant-record correlation.",
+            introducedPr = 79
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
