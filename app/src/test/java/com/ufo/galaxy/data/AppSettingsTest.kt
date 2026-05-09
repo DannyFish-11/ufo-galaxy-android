@@ -1,5 +1,6 @@
 package com.ufo.galaxy.data
 
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -163,7 +164,12 @@ class AppSettingsTest {
         assertEquals(AuthoritativeModeState.READINESS_READY, map["mode_readiness_state"])
         assertEquals(true, map["cross_device_eligibility"])
         assertEquals(true, map["goal_execution_eligibility"])
-        assertEquals(false, map["parallel_execution_eligibility"])
+        assertEquals(true, map["parallel_execution_eligibility"])
+        assertEquals("cross_device_active", map[LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE])
+        assertEquals(true, map[LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS])
+        assertEquals(true, map[LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE])
+        assertEquals(false, map[LocalExecutionModeGate.KEY_IS_HOLD_STATE])
+        assertEquals(LocalExecutionModeGate.SCHEMA_VERSION, map[LocalExecutionModeGate.KEY_SCHEMA_VERSION])
     }
 
     @Test
@@ -185,6 +191,11 @@ class AppSettingsTest {
         assertEquals(false, map["cross_device_eligibility"])
         assertEquals(false, map["goal_execution_eligibility"])
         assertEquals(false, map["parallel_execution_eligibility"])
+        assertEquals("local_only", map[LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE])
+        assertEquals(false, map[LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS])
+        assertEquals(false, map[LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE])
+        assertEquals(false, map[LocalExecutionModeGate.KEY_IS_HOLD_STATE])
+        assertEquals(LocalExecutionModeGate.SCHEMA_VERSION, map[LocalExecutionModeGate.KEY_SCHEMA_VERSION])
     }
 
     @Test
@@ -225,6 +236,35 @@ class AppSettingsTest {
         assertTrue(state.crossDeviceEligibility)
         assertTrue(state.goalExecutionEligibility)
         assertFalse(state.parallelExecutionEligibility)
+        assertEquals("cross_device_active", state.executionModeState)
+        assertTrue(state.acceptsCrossDeviceTasks)
+        assertTrue(state.v2GovernanceActive)
+        assertFalse(state.isHoldState)
+    }
+
+    @Test
+    fun `authoritativeModeState surfaces transitioning semantics when websocket is not connected`() {
+        val settings = InMemoryAppSettings(
+            crossDeviceEnabled = true,
+            goalExecutionEnabled = true,
+            parallelExecutionEnabled = true,
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = true
+        )
+
+        val state = settings.authoritativeModeState(wsConnected = false)
+
+        assertEquals(AuthoritativeModeState.MODE_CROSS_DEVICE, state.modeState)
+        assertEquals(AuthoritativeModeState.READINESS_DEGRADED, state.modeReadinessState)
+        assertFalse(state.crossDeviceEligibility)
+        assertFalse(state.goalExecutionEligibility)
+        assertFalse(state.parallelExecutionEligibility)
+        assertEquals("transitioning", state.executionModeState)
+        assertFalse(state.acceptsCrossDeviceTasks)
+        assertFalse(state.v2GovernanceActive)
+        assertTrue(state.isHoldState)
+        assertEquals("cross_device_active", state.transitioningTo)
     }
 
     @Test
@@ -254,6 +294,8 @@ class AppSettingsTest {
         assertEquals(true, transitioned["cross_device_eligibility"])
         assertEquals(true, transitioned["goal_execution_eligibility"])
         assertEquals(true, transitioned["parallel_execution_eligibility"])
+        assertEquals("cross_device_active", transitioned[LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE])
+        assertEquals(true, transitioned[LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS])
     }
 
     // ── SharedPrefsAppSettings key constants ──────────────────────────────────

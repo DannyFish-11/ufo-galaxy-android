@@ -1,5 +1,8 @@
 package com.ufo.galaxy.data
 
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
+import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+
 /**
  * UFO Galaxy Android - 数据模型
  */
@@ -130,16 +133,6 @@ data class CapabilityReport(
     fun missingSchedulingBasisKeys(): Set<String> = SCHEDULING_BASIS_METADATA_KEYS - metadata.keys
 
     /**
-     * Returns `true` when [metadata] contains all keys in [CANONICAL_GATE_METADATA_KEYS].
-     *
-     * This extends basic capability_report metadata validation with Android-side gate signals
-     * (mode/readiness/eligibility and local-inference availability) so cross-repo gate
-     * consumers can rely on a stable key surface.
-     */
-    fun validateCanonicalGateMetadata(): Boolean =
-        CANONICAL_GATE_METADATA_KEYS.all { metadata.containsKey(it) }
-
-    /**
      * Returns the set of missing canonical gate metadata keys, or an empty set when complete.
      * Intended for diagnostics/logging.
      */
@@ -147,25 +140,174 @@ data class CapabilityReport(
         CANONICAL_GATE_METADATA_KEYS - metadata.keys
 
     /**
-     * Builds a stable Android-side metadata-evidence surface that summarizes capability-report
-     * metadata completeness for runtime/governance observability.
+     * Returns the canonical gate metadata keys that are present but malformed.
      *
-     * The returned map is additive and compatibility-safe: consumers that do not know these
-     * keys can ignore them. Values are derived from this report's real metadata at call time.
+     * A malformed key is one whose value is the wrong type or whose string value is outside the
+     * documented canonical vocabulary.
+     */
+    fun malformedCanonicalGateMetadataKeys(): Set<String> {
+        val malformed = mutableSetOf<String>()
+
+        BOOLEAN_CANONICAL_GATE_METADATA_KEYS.forEach { key ->
+            if (metadata.containsKey(key) && metadata[key] !is Boolean) {
+                malformed += key
+            }
+        }
+        STRING_CANONICAL_GATE_METADATA_KEYS.forEach { key ->
+            if (metadata.containsKey(key) && metadata[key] !is String) {
+                malformed += key
+            }
+        }
+
+        val executionModeState = metadataString(LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE)
+        if (executionModeState != null &&
+            LocalExecutionModeGate.ExecutionModeState.fromWireValue(executionModeState) == null
+        ) {
+            malformed += LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE
+        }
+
+        val modeState = metadataString("mode_state")
+        if (modeState != null && modeState !in VALID_MODE_STATE_VALUES) {
+            malformed += "mode_state"
+        }
+
+        val modeReadinessState = metadataString("mode_readiness_state")
+        if (modeReadinessState != null && modeReadinessState !in VALID_MODE_READINESS_VALUES) {
+            malformed += "mode_readiness_state"
+        }
+
+        val localIntelligenceStatus = metadataString("local_intelligence_status")
+        if (localIntelligenceStatus != null &&
+            LocalIntelligenceCapabilityStatus.entries.none { it.wireValue == localIntelligenceStatus }
+        ) {
+            malformed += "local_intelligence_status"
+        }
+
+        val schemaVersion = metadataString(LocalExecutionModeGate.KEY_SCHEMA_VERSION)
+        if (schemaVersion != null && schemaVersion != LocalExecutionModeGate.SCHEMA_VERSION) {
+            malformed += LocalExecutionModeGate.KEY_SCHEMA_VERSION
+        }
+
+        val transitioningTo = metadataString(LocalExecutionModeGate.KEY_TRANSITIONING_TO)
+        if (transitioningTo != null &&
+            LocalExecutionModeGate.ExecutionModeState.fromWireValue(transitioningTo) == null
+        ) {
+            malformed += LocalExecutionModeGate.KEY_TRANSITIONING_TO
+        }
+
+        return malformed
+    }
+
+    /**
+     * Returns cross-field canonical gate contract issues that would let Android emit a metadata
+     * surface inconsistent with [LocalExecutionModeGate]'s canonical semantics.
+     */
+    fun canonicalGateContractIssues(): List<String> {
+        val issues = mutableListOf<String>()
+        val executionModeState = LocalExecutionModeGate.ExecutionModeState.fromWireValue(
+            metadataString(LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE)
+        ) ?: return issues
+
+        val semantics = LocalExecutionModeGate.capabilityMetadataSemanticsFor(executionModeState)
+        val modeState = metadataString("mode_state")
+        if (modeState != null && modeState != semantics.modeState) {
+            issues += "mode_state_mismatch_for_execution_mode_state"
+        }
+
+        val modeReadinessState = metadataString("mode_readiness_state")
+        if (modeReadinessState != null && modeReadinessState != semantics.modeReadinessState) {
+            issues += "mode_readiness_state_mismatch_for_execution_mode_state"
+        }
+
+        val crossDeviceEligibility = metadataBoolean("cross_device_eligibility")
+        if (crossDeviceEligibility != null &&
+            crossDeviceEligibility != semantics.acceptsCrossDeviceTasks
+        ) {
+            issues += "cross_device_eligibility_mismatch_for_execution_mode_state"
+        }
+
+        val acceptsCrossDeviceTasks = metadataBoolean(LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS)
+        if (acceptsCrossDeviceTasks != null &&
+            acceptsCrossDeviceTasks != semantics.acceptsCrossDeviceTasks
+        ) {
+            issues += "mode_accepts_cross_device_tasks_mismatch_for_execution_mode_state"
+        }
+
+        val v2GovernanceActive = metadataBoolean(LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE)
+        if (v2GovernanceActive != null && v2GovernanceActive != semantics.v2GovernanceActive) {
+            issues += "mode_v2_governance_active_mismatch_for_execution_mode_state"
+        }
+
+        val isHoldState = metadataBoolean(LocalExecutionModeGate.KEY_IS_HOLD_STATE)
+        if (isHoldState != null && isHoldState != semantics.isHoldState) {
+            issues += "mode_is_hold_state_mismatch_for_execution_mode_state"
+        }
+
+        val goalExecutionEnabled = metadataBoolean("goal_execution_enabled")
+        val goalExecutionEligibility = metadataBoolean("goal_execution_eligibility")
+        if (goalExecutionEnabled != null && goalExecutionEligibility != null &&
+            goalExecutionEligibility != (semantics.acceptsCrossDeviceTasks && goalExecutionEnabled)
+        ) {
+            issues += "goal_execution_eligibility_mismatch_for_execution_mode_state"
+        }
+
+        val parallelExecutionEnabled = metadataBoolean("parallel_execution_enabled")
+        val parallelExecutionEligibility = metadataBoolean("parallel_execution_eligibility")
+        if (parallelExecutionEnabled != null && parallelExecutionEligibility != null &&
+            parallelExecutionEligibility != (semantics.acceptsCrossDeviceTasks && parallelExecutionEnabled)
+        ) {
+            issues += "parallel_execution_eligibility_mismatch_for_execution_mode_state"
+        }
+
+        val transitioningTo = metadataString(LocalExecutionModeGate.KEY_TRANSITIONING_TO)
+        when {
+            executionModeState == LocalExecutionModeGate.ExecutionModeState.TRANSITIONING &&
+                transitioningTo.isNullOrBlank() ->
+                issues += "mode_transitioning_to_missing_for_transitioning_state"
+            executionModeState != LocalExecutionModeGate.ExecutionModeState.TRANSITIONING &&
+                !transitioningTo.isNullOrBlank() ->
+                issues += "mode_transitioning_to_present_for_stable_state"
+        }
+
+        return issues
+    }
+
+    /**
+     * Returns `true` when canonical gate metadata is complete, well-formed, and semantically
+     * aligned with [LocalExecutionModeGate]'s canonical execution-mode contract.
+     */
+    fun validateCanonicalGateMetadata(): Boolean =
+        missingCanonicalGateMetadataKeys().isEmpty() &&
+            malformedCanonicalGateMetadataKeys().isEmpty() &&
+            canonicalGateContractIssues().isEmpty()
+
+    /**
+     * Builds a stable Android-side metadata-evidence surface that summarizes capability-report
+     * metadata completeness and semantic validity for runtime/governance observability.
      */
     fun metadataEvidenceSurface(): Map<String, Any> {
         val missingRequired = missingMetadataKeys().toList().sorted()
         val missingCanonical = missingCanonicalGateMetadataKeys().toList().sorted()
+        val malformedCanonical = malformedCanonicalGateMetadataKeys().toList().sorted()
+        val canonicalContractIssues = canonicalGateContractIssues().sorted()
         val missingScheduling = missingSchedulingBasisKeys().toList().sorted()
         return mapOf(
             KEY_METADATA_REQUIRED_COMPLETE to missingRequired.isEmpty(),
             KEY_METADATA_CANONICAL_GATE_COMPLETE to missingCanonical.isEmpty(),
+            KEY_METADATA_CANONICAL_GATE_VALID to malformedCanonical.isEmpty() &&
+                canonicalContractIssues.isEmpty(),
             KEY_METADATA_SCHEDULING_BASIS_COMPLETE to missingScheduling.isEmpty(),
             KEY_METADATA_MISSING_REQUIRED_KEYS to missingRequired,
             KEY_METADATA_MISSING_CANONICAL_GATE_KEYS to missingCanonical,
+            KEY_METADATA_MALFORMED_CANONICAL_GATE_KEYS to malformedCanonical,
+            KEY_METADATA_CANONICAL_GATE_CONTRACT_ISSUES to canonicalContractIssues,
             KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS to missingScheduling
         )
     }
+
+    private fun metadataString(key: String): String? = metadata[key] as? String
+
+    private fun metadataBoolean(key: String): Boolean? = metadata[key] as? Boolean
 
     companion object {
         /**
@@ -239,15 +381,51 @@ data class CapabilityReport(
             "parallel_execution_eligibility",
             "local_intelligence_status",
             "local_inference_ready",
-            "local_inference_available"
+            "local_inference_available",
+            LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE,
+            LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS,
+            LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE,
+            LocalExecutionModeGate.KEY_IS_HOLD_STATE,
+            LocalExecutionModeGate.KEY_DEGRADATION_REASONS,
+            LocalExecutionModeGate.KEY_SEMANTIC_TAG,
+            LocalExecutionModeGate.KEY_SCHEMA_VERSION
         )
+
+        val BOOLEAN_CANONICAL_GATE_METADATA_KEYS: Set<String> = setOf(
+            "degraded_mode",
+            "cross_device_eligibility",
+            "goal_execution_eligibility",
+            "parallel_execution_eligibility",
+            "local_inference_ready",
+            "local_inference_available",
+            LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS,
+            LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE,
+            LocalExecutionModeGate.KEY_IS_HOLD_STATE
+        )
+
+        val STRING_CANONICAL_GATE_METADATA_KEYS: Set<String> = setOf(
+            "mode_state",
+            "mode_readiness_state",
+            "local_intelligence_status",
+            LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE,
+            LocalExecutionModeGate.KEY_DEGRADATION_REASONS,
+            LocalExecutionModeGate.KEY_SEMANTIC_TAG,
+            LocalExecutionModeGate.KEY_SCHEMA_VERSION,
+            LocalExecutionModeGate.KEY_TRANSITIONING_TO
+        )
+
+        private val VALID_MODE_STATE_VALUES: Set<String> = setOf("local_only", "cross_device")
+        private val VALID_MODE_READINESS_VALUES: Set<String> = setOf("ready", "degraded")
 
         // Android runtime metadata-evidence summary keys (additive observability surface).
         const val KEY_METADATA_REQUIRED_COMPLETE = "android_metadata_required_complete"
         const val KEY_METADATA_CANONICAL_GATE_COMPLETE = "android_metadata_canonical_gate_complete"
+        const val KEY_METADATA_CANONICAL_GATE_VALID = "android_metadata_canonical_gate_valid"
         const val KEY_METADATA_SCHEDULING_BASIS_COMPLETE = "android_metadata_scheduling_basis_complete"
         const val KEY_METADATA_MISSING_REQUIRED_KEYS = "android_metadata_missing_required_keys"
         const val KEY_METADATA_MISSING_CANONICAL_GATE_KEYS = "android_metadata_missing_canonical_gate_keys"
+        const val KEY_METADATA_MALFORMED_CANONICAL_GATE_KEYS = "android_metadata_malformed_canonical_gate_keys"
+        const val KEY_METADATA_CANONICAL_GATE_CONTRACT_ISSUES = "android_metadata_canonical_gate_contract_issues"
         const val KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS = "android_metadata_missing_scheduling_basis_keys"
     }
 }
