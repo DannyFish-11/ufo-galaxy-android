@@ -206,7 +206,7 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     @Test
-    fun `disconnect reconnect replay recovery path stays constrained until stable reconnect`() {
+    fun `reconnect recovery transitions through constrained states to stable`() {
         val disconnected = MultiDeviceParticipantOrchestrationState.from(
             healthState = ParticipantHealthState.UNKNOWN,
             reconnectState = ReconnectRecoveryState.IDLE,
@@ -253,7 +253,7 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     @Test
-    fun `degradation fallback takeover interruption and recovery remain explicit and regression protected`() {
+    fun `degraded state blocks takeover and routes to fallback execution`() {
         val degradedFallback = MultiDeviceParticipantOrchestrationState.from(
             healthState = ParticipantHealthState.DEGRADED,
             reconnectState = ReconnectRecoveryState.IDLE,
@@ -301,7 +301,7 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     @Test
-    fun `disconnect takeover interruption and replay authority filter block stale delegated results`() {
+    fun `disconnect interruption blocks stale delegated replay result`() {
         val disconnectTakeoverScenario = DelegatedTakeoverRecoveryContract.scenarioFor(
             MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
             MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING
@@ -316,16 +316,22 @@ class Pr8AndroidMeshParticipationContractTest {
         val staleReplayDecision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(
             message = OfflineTaskQueue.QueuedMessage(
                 type = "goal_execution_result",
-                json = """{"payload":{"task_id":"delegated-old-session"}}""",
-                sessionTag = "session-old"
+                json = STALE_DELEGATED_RESULT_JSON,
+                sessionTag = OLD_SESSION
             ),
-            currentDurableSessionId = "session-new"
+            currentDurableSessionId = NEW_SESSION
         )
         assertEquals(
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED,
             staleReplayDecision
         )
         assertFalse(staleReplayDecision.isReplayAllowed)
+    }
+
+    companion object {
+        private const val STALE_DELEGATED_RESULT_JSON = """{"payload":{"task_id":"delegated-old-session"}}"""
+        private const val OLD_SESSION = "session-old"
+        private const val NEW_SESSION = "session-new"
     }
 
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
