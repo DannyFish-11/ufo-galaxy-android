@@ -1027,6 +1027,13 @@ class GalaxyWebSocketClient(
                 inferredLocalInferenceAvailable = effectiveCapabilities.contains("local_model_inference")
             )
         )
+        val metadataEvidence = report.metadataEvidenceSurface()
+        val handshakeMetadata = report.metadata.toMutableMap().apply {
+            putAll(metadataEvidence)
+        }
+        val missingRequired = report.missingMetadataKeys()
+        val missingCanonicalGate = report.missingCanonicalGateMetadataKeys()
+        val missingSchedulingBasis = report.missingSchedulingBasisKeys()
 
         val handshake = JsonObject().apply {
             addProperty("type", "capability_report")
@@ -1049,21 +1056,35 @@ class GalaxyWebSocketClient(
             addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
             add("capabilities", gson.toJsonTree(report.capabilities))
-            add("metadata", gson.toJsonTree(report.metadata))
+            add("metadata", gson.toJsonTree(handshakeMetadata))
         }
 
         val handshakeJson = gson.toJson(handshake)
-        // Warn if metadata is incomplete so the issue is surfaced in logcat immediately.
-        val missing = report.missingMetadataKeys()
-        if (missing.isNotEmpty()) {
-            Log.w(TAG, "[WS:CAPABILITY_REPORT] metadata is missing required keys: $missing — " +
+        // Warn if metadata is incomplete so evidence drift is surfaced in logcat immediately.
+        if (missingRequired.isNotEmpty()) {
+            Log.w(TAG, "[WS:CAPABILITY_REPORT] metadata is missing required keys: $missingRequired — " +
                     "call setDeviceMetadata(appSettings.toMetadataMap()) before connecting")
+        }
+        if (missingCanonicalGate.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata is missing canonical gate keys: $missingCanonicalGate"
+            )
+        }
+        if (missingSchedulingBasis.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata is missing scheduling-basis keys: $missingSchedulingBasis"
+            )
         }
         // Route through sendJson() so the cross-device gate is uniformly enforced
         // across all uplink message types, including the initial capability_report.
         sendJson(handshakeJson)
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
+                " required_complete=${missingRequired.isEmpty()}" +
+                " canonical_gate_complete=${missingCanonicalGate.isEmpty()}" +
+                " scheduling_basis_complete=${missingSchedulingBasis.isEmpty()}" +
                 " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
                 (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
                 (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +

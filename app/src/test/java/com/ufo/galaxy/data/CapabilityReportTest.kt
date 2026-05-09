@@ -190,4 +190,83 @@ class CapabilityReportTest {
         assertFalse(report.validateCanonicalGateMetadata())
         assertTrue(report.missingCanonicalGateMetadataKeys().contains("local_intelligence_status"))
     }
+
+    @Test
+    fun `metadataEvidenceSurface marks required and canonical complete for AppSettings metadata`() {
+        val settings = InMemoryAppSettings(
+            crossDeviceEnabled = true,
+            goalExecutionEnabled = true,
+            localModelEnabled = true,
+            parallelExecutionEnabled = true,
+            modelReady = true,
+            accessibilityReady = true,
+            overlayReady = true
+        )
+        val report = CapabilityReport(
+            platform = "android",
+            device_id = "dev-evidence-001",
+            supported_actions = listOf("screen_capture"),
+            metadata = settings.toMetadataMap()
+        )
+
+        val surface = report.metadataEvidenceSurface()
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_REQUIRED_COMPLETE])
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_COMPLETE])
+        assertEquals(false, surface[CapabilityReport.KEY_METADATA_SCHEDULING_BASIS_COMPLETE])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_REQUIRED_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS])
+        assertEquals(
+            CapabilityReport.SCHEDULING_BASIS_METADATA_KEYS.toList().sorted(),
+            surface[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS]
+        )
+    }
+
+    @Test
+    fun `metadataEvidenceSurface reports all categories complete when metadata is fully populated`() {
+        val metadata = mutableMapOf<String, Any>().apply {
+            putAll(
+                mapOf(
+                    "goal_execution_enabled" to true,
+                    "local_model_enabled" to true,
+                    "cross_device_enabled" to true,
+                    "parallel_execution_enabled" to true,
+                    "device_role" to "phone",
+                    "model_ready" to true,
+                    "accessibility_ready" to true,
+                    "overlay_ready" to true,
+                    "degraded_mode" to false,
+                    "mode_state" to "cross_device",
+                    "mode_readiness_state" to "ready",
+                    "cross_device_eligibility" to true,
+                    "goal_execution_eligibility" to true,
+                    "parallel_execution_eligibility" to true,
+                    "local_intelligence_status" to "active",
+                    "local_inference_ready" to true,
+                    "local_inference_available" to true
+                )
+            )
+            putAll(
+                mapOf(
+                    "scheduling_local_eligible" to true,
+                    "scheduling_cross_device_eligible" to true,
+                    "scheduling_parallel_subtask_eligible" to true,
+                    "scheduling_execution_dimensions" to "local,cross_device,parallel_subtask"
+                )
+            )
+        }
+        val report = CapabilityReport(
+            platform = "android",
+            device_id = "dev-evidence-002",
+            supported_actions = listOf("screen_capture"),
+            metadata = metadata
+        )
+
+        val surface = report.metadataEvidenceSurface()
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_REQUIRED_COMPLETE])
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_COMPLETE])
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_SCHEDULING_BASIS_COMPLETE])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_REQUIRED_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS])
+    }
 }
