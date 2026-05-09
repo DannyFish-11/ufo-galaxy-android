@@ -1,5 +1,6 @@
 package com.ufo.galaxy.data
 
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -174,6 +175,11 @@ class CapabilityReportTest {
         assertTrue(keys.contains("local_intelligence_status"))
         assertTrue(keys.contains("local_inference_ready"))
         assertTrue(keys.contains("local_inference_available"))
+        assertTrue(keys.contains(LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE))
+        assertTrue(keys.contains(LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS))
+        assertTrue(keys.contains(LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE))
+        assertTrue(keys.contains(LocalExecutionModeGate.KEY_IS_HOLD_STATE))
+        assertTrue(keys.contains(LocalExecutionModeGate.KEY_SCHEMA_VERSION))
     }
 
     @Test
@@ -189,6 +195,60 @@ class CapabilityReportTest {
 
         assertFalse(report.validateCanonicalGateMetadata())
         assertTrue(report.missingCanonicalGateMetadataKeys().contains("local_intelligence_status"))
+        assertTrue(
+            report.missingCanonicalGateMetadataKeys()
+                .contains(LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE)
+        )
+    }
+
+    @Test
+    fun `validateCanonicalGateMetadata reports malformed and inconsistent mode contract`() {
+        val report = CapabilityReport(
+            platform = "android",
+            device_id = "dev-gate-002",
+            supported_actions = listOf("screen_capture"),
+            metadata = mapOf(
+                "goal_execution_enabled" to true,
+                "local_model_enabled" to true,
+                "cross_device_enabled" to true,
+                "parallel_execution_enabled" to true,
+                "device_role" to "phone",
+                "model_ready" to true,
+                "accessibility_ready" to true,
+                "overlay_ready" to true,
+                "degraded_mode" to false,
+                "mode_state" to "cross_device",
+                "mode_readiness_state" to "ready",
+                "cross_device_eligibility" to true,
+                "goal_execution_eligibility" to true,
+                "parallel_execution_eligibility" to true,
+                "local_intelligence_status" to "ACTIVE",
+                "local_inference_ready" to true,
+                "local_inference_available" to true,
+                LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE to "transitioning",
+                LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS to true,
+                LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE to true,
+                LocalExecutionModeGate.KEY_IS_HOLD_STATE to false,
+                LocalExecutionModeGate.KEY_DEGRADATION_REASONS to "",
+                LocalExecutionModeGate.KEY_SEMANTIC_TAG to "mode.transitioning.dispatch_hold",
+                LocalExecutionModeGate.KEY_SCHEMA_VERSION to "0.9"
+            )
+        )
+
+        assertFalse(report.validateCanonicalGateMetadata())
+        assertTrue(
+            report.malformedCanonicalGateMetadataKeys()
+                .contains(LocalExecutionModeGate.KEY_SCHEMA_VERSION)
+        )
+        assertTrue(report.malformedCanonicalGateMetadataKeys().contains("local_intelligence_status"))
+        assertTrue(
+            report.canonicalGateContractIssues()
+                .contains("mode_readiness_state_mismatch_for_execution_mode_state")
+        )
+        assertTrue(
+            report.canonicalGateContractIssues()
+                .contains("cross_device_eligibility_mismatch_for_execution_mode_state")
+        )
     }
 
     @Test
@@ -212,9 +272,12 @@ class CapabilityReportTest {
         val surface = report.metadataEvidenceSurface()
         assertEquals(true, surface[CapabilityReport.KEY_METADATA_REQUIRED_COMPLETE])
         assertEquals(true, surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_COMPLETE])
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_VALID])
         assertEquals(false, surface[CapabilityReport.KEY_METADATA_SCHEDULING_BASIS_COMPLETE])
         assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_REQUIRED_KEYS])
         assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MALFORMED_CANONICAL_GATE_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_CONTRACT_ISSUES])
         assertEquals(
             CapabilityReport.SCHEDULING_BASIS_METADATA_KEYS.toList().sorted(),
             surface[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS]
@@ -242,7 +305,14 @@ class CapabilityReportTest {
                     "parallel_execution_eligibility" to true,
                     "local_intelligence_status" to "active",
                     "local_inference_ready" to true,
-                    "local_inference_available" to true
+                    "local_inference_available" to true,
+                    LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE to "cross_device_active",
+                    LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS to true,
+                    LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE to true,
+                    LocalExecutionModeGate.KEY_IS_HOLD_STATE to false,
+                    LocalExecutionModeGate.KEY_DEGRADATION_REASONS to "",
+                    LocalExecutionModeGate.KEY_SEMANTIC_TAG to "mode.cross_device_active.v2_governed",
+                    LocalExecutionModeGate.KEY_SCHEMA_VERSION to LocalExecutionModeGate.SCHEMA_VERSION
                 )
             )
             putAll(
@@ -264,9 +334,12 @@ class CapabilityReportTest {
         val surface = report.metadataEvidenceSurface()
         assertEquals(true, surface[CapabilityReport.KEY_METADATA_REQUIRED_COMPLETE])
         assertEquals(true, surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_COMPLETE])
+        assertEquals(true, surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_VALID])
         assertEquals(true, surface[CapabilityReport.KEY_METADATA_SCHEDULING_BASIS_COMPLETE])
         assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_REQUIRED_KEYS])
         assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MALFORMED_CANONICAL_GATE_KEYS])
+        assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_CANONICAL_GATE_CONTRACT_ISSUES])
         assertEquals(emptyList<String>(), surface[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS])
     }
 }

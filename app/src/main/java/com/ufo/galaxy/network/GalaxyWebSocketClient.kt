@@ -10,6 +10,7 @@ import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
@@ -616,11 +617,42 @@ class GalaxyWebSocketClient(
         val crossDeviceEnabledValue = merged["cross_device_enabled"] as? Boolean ?: crossDeviceEnabled
         val goalExecutionEnabled = merged["goal_execution_enabled"] as? Boolean ?: false
         val parallelExecutionEnabled = merged["parallel_execution_enabled"] as? Boolean ?: false
-        merged["mode_state"] = if (crossDeviceEnabledValue) "cross_device" else "local_only"
-        merged["mode_readiness_state"] = if (degradedMode) "degraded" else "ready"
-        merged["cross_device_eligibility"] = crossDeviceEnabledValue
-        merged["goal_execution_eligibility"] = crossDeviceEnabledValue && goalExecutionEnabled
-        merged["parallel_execution_eligibility"] = crossDeviceEnabledValue && parallelExecutionEnabled
+        val modeTransitioningTo = (merged[LocalExecutionModeGate.KEY_TRANSITIONING_TO] as? String)
+            ?.takeIf { it.isNotBlank() }
+        val degradationReasons = when (val rawReasons = merged[LocalExecutionModeGate.KEY_DEGRADATION_REASONS]) {
+            is String -> rawReasons.split(",").mapNotNull { it.trim().takeIf(String::isNotBlank) }
+            is Iterable<*> -> rawReasons.mapNotNull { (it as? String)?.trim()?.takeIf(String::isNotBlank) }
+            else -> emptyList()
+        }
+        val modeDecision = LocalExecutionModeGate.decide(
+            crossDeviceEnabled = crossDeviceEnabledValue,
+            wsConnected = isConnected,
+            capabilityDegraded = degradedMode,
+            degradationReasons = degradationReasons
+        )
+        val modeSemantics = LocalExecutionModeGate.capabilityMetadataSemanticsFor(modeDecision.state)
+        merged["mode_state"] = modeSemantics.modeState
+        merged["mode_readiness_state"] = modeSemantics.modeReadinessState
+        merged["cross_device_eligibility"] = modeSemantics.acceptsCrossDeviceTasks
+        merged["goal_execution_eligibility"] =
+            modeSemantics.acceptsCrossDeviceTasks && goalExecutionEnabled
+        merged["parallel_execution_eligibility"] =
+            modeSemantics.acceptsCrossDeviceTasks && parallelExecutionEnabled
+        merged[LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE] = modeDecision.state.wireValue
+        merged[LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS] = modeDecision.acceptsCrossDeviceTasks
+        merged[LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE] = modeDecision.v2GovernanceActive
+        merged[LocalExecutionModeGate.KEY_IS_HOLD_STATE] = modeDecision.isHoldState
+        merged[LocalExecutionModeGate.KEY_DEGRADATION_REASONS] =
+            modeDecision.degradationReasons.joinToString(",")
+        merged[LocalExecutionModeGate.KEY_SEMANTIC_TAG] = modeDecision.semanticTag
+        merged[LocalExecutionModeGate.KEY_SCHEMA_VERSION] = modeDecision.schemaVersion
+        when {
+            modeDecision.transitioningTo != null ->
+                merged[LocalExecutionModeGate.KEY_TRANSITIONING_TO] =
+                    modeDecision.transitioningTo.wireValue
+            modeTransitioningTo != null ->
+                merged.remove(LocalExecutionModeGate.KEY_TRANSITIONING_TO)
+        }
 
         // Normalize potentially mixed-case external metadata values to canonical lowercase wire form.
         val rawStatus = (merged["local_intelligence_status"] as? String)?.trim()
@@ -1038,6 +1070,12 @@ class GalaxyWebSocketClient(
         val missingCanonicalGate =
             (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS] as? List<String>).orEmpty()
         @Suppress("UNCHECKED_CAST")
+        val malformedCanonicalGate =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MALFORMED_CANONICAL_GATE_KEYS] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val canonicalGateContractIssues =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_CANONICAL_GATE_CONTRACT_ISSUES] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
         val missingSchedulingBasis =
             (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS] as? List<String>).orEmpty()
 
@@ -1077,6 +1115,18 @@ class GalaxyWebSocketClient(
                 "[WS:CAPABILITY_REPORT] metadata is missing canonical gate keys: $missingCanonicalGate"
             )
         }
+        if (malformedCanonicalGate.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata has malformed canonical gate keys: $malformedCanonicalGate"
+            )
+        }
+        if (canonicalGateContractIssues.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata has canonical gate contract issues: $canonicalGateContractIssues"
+            )
+        }
         if (missingSchedulingBasis.isNotEmpty()) {
             Log.w(
                 TAG,
@@ -1090,6 +1140,7 @@ class GalaxyWebSocketClient(
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
                 " required_complete=${missingRequired.isEmpty()}" +
                 " canonical_gate_complete=${missingCanonicalGate.isEmpty()}" +
+                " canonical_gate_valid=${malformedCanonicalGate.isEmpty() && canonicalGateContractIssues.isEmpty()}" +
                 " scheduling_basis_complete=${missingSchedulingBasis.isEmpty()}" +
                 " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
                 (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +

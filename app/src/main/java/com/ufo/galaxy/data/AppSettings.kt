@@ -3,6 +3,8 @@ package com.ufo.galaxy.data
 import android.content.Context
 import com.ufo.galaxy.BuildConfig
 import com.ufo.galaxy.network.resolveAllowSelfSigned
+import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import java.util.Properties
 import org.json.JSONObject
 
@@ -339,6 +341,11 @@ interface AppSettings {
      */
     fun toMetadataMap(): Map<String, Any> {
         val modeState = authoritativeModeState()
+        val localIntelligenceStatus = when {
+            localModelEnabled && !degradedMode -> LocalIntelligenceCapabilityStatus.ACTIVE.wireValue
+            localModelEnabled -> LocalIntelligenceCapabilityStatus.DEGRADED.wireValue
+            else -> LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+        }
         return mapOf(
             "goal_execution_enabled" to goalExecutionEnabled,
             "local_model_enabled" to localModelEnabled,
@@ -349,12 +356,10 @@ interface AppSettings {
             "accessibility_ready" to accessibilityReady,
             "overlay_ready" to overlayReady,
             "degraded_mode" to degradedMode,
-            "mode_state" to modeState.modeState,
-            "mode_readiness_state" to modeState.modeReadinessState,
-            "cross_device_eligibility" to modeState.crossDeviceEligibility,
-            "goal_execution_eligibility" to modeState.goalExecutionEligibility,
-            "parallel_execution_eligibility" to modeState.parallelExecutionEligibility
-        )
+            "local_intelligence_status" to localIntelligenceStatus,
+            "local_inference_ready" to localModelEnabled,
+            "local_inference_available" to localModelEnabled
+        ) + modeState.toMetadataMap()
     }
 
     /**
@@ -365,24 +370,40 @@ interface AppSettings {
      * - [crossDeviceEnabled]
      * - [goalExecutionEnabled]
      * - [parallelExecutionEnabled]
+     *
+     * [wsConnected] defaults to [crossDeviceEnabled] only for static metadata builders such as
+     * [toMetadataMap], where no live socket state exists yet and the best available projection is
+     * "configured for cross-device". Canonical emission paths with real runtime state must pass
+     * the live WebSocket value explicitly so transition/hold semantics are preserved.
      */
-    fun authoritativeModeState(): AuthoritativeModeState {
-        val modeState = if (crossDeviceEnabled) {
-            AuthoritativeModeState.MODE_CROSS_DEVICE
-        } else {
-            AuthoritativeModeState.MODE_LOCAL_ONLY
-        }
-        val modeReadinessState = if (degradedMode) {
-            AuthoritativeModeState.READINESS_DEGRADED
-        } else {
-            AuthoritativeModeState.READINESS_READY
-        }
+    fun authoritativeModeState(
+        wsConnected: Boolean = crossDeviceEnabled,
+        runtimeActive: Boolean = true,
+        capabilityDegraded: Boolean = degradedMode,
+        degradationReasons: List<String> = emptyList()
+    ): AuthoritativeModeState {
+        val decision = LocalExecutionModeGate.decide(
+            crossDeviceEnabled = crossDeviceEnabled,
+            wsConnected = wsConnected,
+            capabilityDegraded = capabilityDegraded,
+            degradationReasons = degradationReasons,
+            runtimeActive = runtimeActive
+        )
+        val semantics = LocalExecutionModeGate.capabilityMetadataSemanticsFor(decision.state)
         return AuthoritativeModeState(
-            modeState = modeState,
-            modeReadinessState = modeReadinessState,
-            crossDeviceEligibility = crossDeviceEnabled,
-            goalExecutionEligibility = crossDeviceEnabled && goalExecutionEnabled,
-            parallelExecutionEligibility = crossDeviceEnabled && parallelExecutionEnabled
+            modeState = semantics.modeState,
+            modeReadinessState = semantics.modeReadinessState,
+            crossDeviceEligibility = semantics.acceptsCrossDeviceTasks,
+            goalExecutionEligibility = semantics.acceptsCrossDeviceTasks && goalExecutionEnabled,
+            parallelExecutionEligibility = semantics.acceptsCrossDeviceTasks && parallelExecutionEnabled,
+            executionModeState = decision.state.wireValue,
+            acceptsCrossDeviceTasks = decision.acceptsCrossDeviceTasks,
+            v2GovernanceActive = decision.v2GovernanceActive,
+            isHoldState = decision.isHoldState,
+            degradationReasons = decision.degradationReasons,
+            semanticTag = decision.semanticTag,
+            schemaVersion = decision.schemaVersion,
+            transitioningTo = decision.transitioningTo?.wireValue
         )
     }
 
@@ -396,8 +417,32 @@ data class AuthoritativeModeState(
     val modeReadinessState: String,
     val crossDeviceEligibility: Boolean,
     val goalExecutionEligibility: Boolean,
-    val parallelExecutionEligibility: Boolean
+    val parallelExecutionEligibility: Boolean,
+    val executionModeState: String,
+    val acceptsCrossDeviceTasks: Boolean,
+    val v2GovernanceActive: Boolean,
+    val isHoldState: Boolean,
+    val degradationReasons: List<String>,
+    val semanticTag: String,
+    val schemaVersion: String,
+    val transitioningTo: String? = null
 ) {
+    fun toMetadataMap(): Map<String, Any> = buildMap {
+        put("mode_state", modeState)
+        put("mode_readiness_state", modeReadinessState)
+        put("cross_device_eligibility", crossDeviceEligibility)
+        put("goal_execution_eligibility", goalExecutionEligibility)
+        put("parallel_execution_eligibility", parallelExecutionEligibility)
+        put(LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE, executionModeState)
+        put(LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS, acceptsCrossDeviceTasks)
+        put(LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE, v2GovernanceActive)
+        put(LocalExecutionModeGate.KEY_IS_HOLD_STATE, isHoldState)
+        put(LocalExecutionModeGate.KEY_DEGRADATION_REASONS, degradationReasons.joinToString(","))
+        put(LocalExecutionModeGate.KEY_SEMANTIC_TAG, semanticTag)
+        put(LocalExecutionModeGate.KEY_SCHEMA_VERSION, schemaVersion)
+        transitioningTo?.let { put(LocalExecutionModeGate.KEY_TRANSITIONING_TO, it) }
+    }
+
     companion object {
         const val MODE_LOCAL_ONLY = "local_only"
         const val MODE_CROSS_DEVICE = "cross_device"

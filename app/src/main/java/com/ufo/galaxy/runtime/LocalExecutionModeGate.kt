@@ -366,6 +366,21 @@ object LocalExecutionModeGate {
         }
     }
 
+    /**
+     * Stable capability-metadata projection derived from the canonical execution-mode state.
+     *
+     * This keeps legacy `mode_state` / `mode_readiness_state` / `*_eligibility` fields aligned
+     * with the canonical [ExecutionModeState] so V2 never has to reconcile two conflicting
+     * Android-produced semantic surfaces.
+     */
+    data class CapabilityMetadataSemantics(
+        val modeState: String,
+        val modeReadinessState: String,
+        val acceptsCrossDeviceTasks: Boolean,
+        val v2GovernanceActive: Boolean,
+        val isHoldState: Boolean
+    )
+
     // ── Transition table ──────────────────────────────────────────────────────
 
     /**
@@ -601,6 +616,47 @@ object LocalExecutionModeGate {
             rationale = rationale
         )
     }
+
+    /**
+     * Projects the canonical [state] onto the legacy capability metadata fields still consumed by
+     * parts of the Android↔V2 contract.
+     *
+     * `mode_readiness_state` is intentionally derived from **cross-device dispatch readiness**,
+     * not just local subsystem health. States that cannot currently accept cross-device tasks
+     * therefore project to `"degraded"` even when Android remains locally operational.
+     */
+    fun capabilityMetadataSemanticsFor(state: ExecutionModeState): CapabilityMetadataSemantics =
+        when (state) {
+            ExecutionModeState.INACTIVE,
+            ExecutionModeState.LOCAL_ONLY -> CapabilityMetadataSemantics(
+                modeState = "local_only",
+                modeReadinessState = "degraded",
+                acceptsCrossDeviceTasks = false,
+                v2GovernanceActive = false,
+                isHoldState = false
+            )
+            ExecutionModeState.CROSS_DEVICE_ACTIVE -> CapabilityMetadataSemantics(
+                modeState = "cross_device",
+                modeReadinessState = "ready",
+                acceptsCrossDeviceTasks = true,
+                v2GovernanceActive = true,
+                isHoldState = false
+            )
+            ExecutionModeState.CROSS_DEVICE_DEGRADED -> CapabilityMetadataSemantics(
+                modeState = "cross_device",
+                modeReadinessState = "degraded",
+                acceptsCrossDeviceTasks = true,
+                v2GovernanceActive = true,
+                isHoldState = false
+            )
+            ExecutionModeState.TRANSITIONING -> CapabilityMetadataSemantics(
+                modeState = "cross_device",
+                modeReadinessState = "degraded",
+                acceptsCrossDeviceTasks = false,
+                v2GovernanceActive = false,
+                isHoldState = true
+            )
+        }
 
     /**
      * Returns `true` when the given state/event pair is a registered valid transition.

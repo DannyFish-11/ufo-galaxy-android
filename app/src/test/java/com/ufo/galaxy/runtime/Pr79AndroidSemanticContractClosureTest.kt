@@ -247,6 +247,32 @@ class Pr79AndroidSemanticContractClosureTest {
     }
 
     @Test
+    fun `capabilityMetadataSemanticsFor projects TRANSITIONING to degraded cross-device hold`() {
+        val semantics = LocalExecutionModeGate.capabilityMetadataSemanticsFor(
+            LocalExecutionModeGate.ExecutionModeState.TRANSITIONING
+        )
+
+        assertEquals("cross_device", semantics.modeState)
+        assertEquals("degraded", semantics.modeReadinessState)
+        assertFalse(semantics.acceptsCrossDeviceTasks)
+        assertFalse(semantics.v2GovernanceActive)
+        assertTrue(semantics.isHoldState)
+    }
+
+    @Test
+    fun `capabilityMetadataSemanticsFor projects LOCAL_ONLY to degraded local-only semantics`() {
+        val semantics = LocalExecutionModeGate.capabilityMetadataSemanticsFor(
+            LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY
+        )
+
+        assertEquals("local_only", semantics.modeState)
+        assertEquals("degraded", semantics.modeReadinessState)
+        assertFalse(semantics.acceptsCrossDeviceTasks)
+        assertFalse(semantics.v2GovernanceActive)
+        assertFalse(semantics.isHoldState)
+    }
+
+    @Test
     fun `CROSS_DEVICE_ACTIVE accepts cross-device tasks`() {
         assertTrue(LocalExecutionModeGate.ExecutionModeState.CROSS_DEVICE_ACTIVE.acceptsCrossDeviceTasks)
     }
