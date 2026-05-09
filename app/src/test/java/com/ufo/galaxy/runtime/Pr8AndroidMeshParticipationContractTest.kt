@@ -175,6 +175,108 @@ class Pr8AndroidMeshParticipationContractTest {
         )
     }
 
+    @Test
+    fun `disconnect reconnect replay and recovery path remains deterministic and evidence rich`() {
+        val disconnected = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.UNKNOWN,
+            reconnectState = ReconnectRecoveryState.IDLE,
+            readinessState = ParticipantReadinessState.NOT_READY,
+            participationState = RuntimeHostDescriptor.HostParticipationState.INACTIVE
+        )
+        val reconnecting = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.RECOVERING,
+            reconnectState = ReconnectRecoveryState.RECOVERING,
+            readinessState = ParticipantReadinessState.NOT_READY,
+            participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+        )
+        val recoveredConnected = createHealthyOrchestrationRecord()
+        val openedRollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+
+        val disconnectedReport = AndroidMeshParticipationContract.evaluate(disconnected, openedRollout)
+        val reconnectingReport = AndroidMeshParticipationContract.evaluate(reconnecting, openedRollout)
+        val reconnectingReplayReport = AndroidMeshParticipationContract.evaluate(reconnecting, openedRollout)
+        val recoveredReport = AndroidMeshParticipationContract.evaluate(recoveredConnected, openedRollout)
+
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.DETACHED, disconnectedReport.continuityLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.RECOVERING, reconnectingReport.continuityLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.STABLE, recoveredReport.continuityLevel)
+
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, disconnectedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, reconnectingReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, recoveredReport.readinessLevel)
+
+        assertEquals(reconnectingReport, reconnectingReplayReport)
+        assertEquals(reconnectingReport.toWireMap(), reconnectingReplayReport.toWireMap())
+
+        assertTrue(
+            disconnectedReport.constrainedReasons.contains(AndroidMeshParticipationContract.REASON_CONTINUITY_DETACHED)
+        )
+        assertTrue(
+            reconnectingReport.constrainedReasons.contains(AndroidMeshParticipationContract.REASON_CONTINUITY_RECOVERING)
+        )
+        assertTrue(
+            recoveredReport.constrainedReasons.contains(
+                "${AndroidMeshParticipationContract.REASON_DEFERRED_CAPABILITY_PREFIX}:hybrid_execute_full"
+            )
+        )
+        assertTrue(
+            recoveredReport.constrainedReasons.contains(
+                "${AndroidMeshParticipationContract.REASON_DEFERRED_CAPABILITY_PREFIX}:barrier_coordination"
+            )
+        )
+    }
+
+    @Test
+    fun `degradation fallback takeover and delegated recovery matrix is regression protected`() {
+        val degradedFallback = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.DEGRADED,
+            reconnectState = ReconnectRecoveryState.IDLE,
+            readinessState = ParticipantReadinessState.READY_WITH_FALLBACK,
+            participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+        )
+        val recovering = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.RECOVERING,
+            reconnectState = ReconnectRecoveryState.IDLE,
+            readinessState = ParticipantReadinessState.NOT_READY,
+            participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+        )
+        val connected = createHealthyOrchestrationRecord()
+
+        val fullRollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        val fallbackRollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = false)
+
+        val degradedReport = AndroidMeshParticipationContract.evaluate(degradedFallback, fullRollout)
+        val recoveringReport = AndroidMeshParticipationContract.evaluate(recovering, fullRollout)
+        val connectedReport = AndroidMeshParticipationContract.evaluate(connected, fullRollout)
+        val fallbackGateReport = AndroidMeshParticipationContract.evaluate(connected, fallbackRollout)
+
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, degradedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, recoveringReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, connectedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, fallbackGateReport.readinessLevel)
+
+        assertFalse(degradedReport.delegatedTakeoverExecutable)
+        assertFalse(recoveringReport.delegatedTakeoverExecutable)
+        assertTrue(connectedReport.delegatedTakeoverExecutable)
+        assertFalse(fallbackGateReport.delegatedTakeoverExecutable)
+
+        assertFalse(degradedReport.meshSubtaskExecutable)
+        assertFalse(recoveringReport.meshSubtaskExecutable)
+        assertTrue(connectedReport.meshSubtaskExecutable)
+        assertTrue(fallbackGateReport.meshSubtaskExecutable)
+
+        assertFalse(degradedReport.fullMeshRuntimeExecutable)
+        assertFalse(recoveringReport.fullMeshRuntimeExecutable)
+        assertFalse(connectedReport.fullMeshRuntimeExecutable)
+        assertFalse(fallbackGateReport.fullMeshRuntimeExecutable)
+
+        assertTrue(
+            fallbackGateReport.constrainedReasons.contains(
+                AndroidMeshParticipationContract.REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE
+            )
+        )
+    }
+
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
         MultiDeviceParticipantOrchestrationState.from(
             healthState = ParticipantHealthState.HEALTHY,
