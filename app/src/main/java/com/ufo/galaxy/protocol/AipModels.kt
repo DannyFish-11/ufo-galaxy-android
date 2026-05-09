@@ -2099,7 +2099,29 @@ data class DeviceStateSnapshotPayload(
     val mesh_participation_lifecycle_state: String? = null,
     val barrier_participation_state: String? = null,
     val collaboration_lifecycle_state: String? = null,
-    val mesh_constrained_reasons: List<String> = emptyList()
+    val mesh_constrained_reasons: List<String> = emptyList(),
+
+    // PR-8Android: Canonical execution mode state from LocalExecutionModeGate.
+    //
+    // execution_mode_state: the 5-state execution mode from LocalExecutionModeGate.decide().
+    //   Values: "inactive" | "local_only" | "cross_device_active" |
+    //           "cross_device_degraded" | "transitioning".
+    //   V2's android_runtime_transition_reducer.py MUST read this field rather than
+    //   inferring mode from combinations of mode_state/mode_readiness_state/carrier fields.
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    //
+    // durable_participant_id: stable per-installation UUID for cross-era participant
+    //   record correlation in V2's android_device_state_store.py.
+    //   Constant across process kills and WS reconnects; resets only on app uninstall.
+    //   Null only as a defensive default (first emission before ID is initialised).
+    //
+    // participant_identity_freshness: Android-originated freshness classification for
+    //   the current participant registration.  Values: "fresh" | "recovered" | "stale".
+    //   V2's unified_governance_semantics.py MUST read this rather than applying its own
+    //   staleness heuristics.  Null only as a defensive default.
+    val execution_mode_state: String? = null,
+    val durable_participant_id: String? = null,
+    val participant_identity_freshness: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2228,7 +2250,14 @@ data class DeviceExecutionEventPayload(
     // carrier_runtime_state: RuntimeController.state.wireLabel at event time.
     // Values: "idle" | "starting" | "active" | "failed" | "local_only".
     // null only as a defensive default; should never be null at a real emission point.
-    val carrier_runtime_state: String? = null
+    val carrier_runtime_state: String? = null,
+
+    // PR-8Android: Canonical execution mode state from LocalExecutionModeGate.decide().
+    // Values: "inactive" | "local_only" | "cross_device_active" |
+    //         "cross_device_degraded" | "transitioning".
+    // Emitted alongside each execution event so V2 can correlate the event with the
+    // precise execution mode at the time of emission.  Null only as defensive default.
+    val execution_mode_state: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

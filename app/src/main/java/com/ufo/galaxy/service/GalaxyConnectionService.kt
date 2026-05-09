@@ -45,6 +45,8 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.runtime.RuntimeStateTruthSequencer
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
+import com.ufo.galaxy.session.DurableParticipantIdentity
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -323,6 +325,20 @@ class GalaxyConnectionService : Service() {
                 phase = payload.phase,
                 requestedTimestampMs = payload.timestamp_ms
             )
+            // PR-8Android: derive canonical execution_mode_state from LocalExecutionModeGate
+            // so V2's android_runtime_transition_reducer.py can read the 5-state model on
+            // every execution event rather than inferring from binary mode_state combinations.
+            val execModeDecision = runCatching {
+                val settings = UFOGalaxyApplication.appSettings
+                val wsConn = webSocketClient.isConnected()
+                val capDegraded = managerStateDegraded()
+                LocalExecutionModeGate.decide(
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = wsConn,
+                    capabilityDegraded = capDegraded,
+                    runtimeActive = true
+                )
+            }.getOrNull()
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -332,7 +348,8 @@ class GalaxyConnectionService : Service() {
                 mode_readiness_state = modeState.modeReadinessState,
                 cross_device_eligibility = modeState.crossDeviceEligibility,
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
-                parallel_execution_eligibility = modeState.parallelExecutionEligibility
+                parallel_execution_eligibility = modeState.parallelExecutionEligibility,
+                execution_mode_state = execModeDecision?.state?.wireValue
             )
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_EXECUTION_EVENT,
@@ -2860,6 +2877,74 @@ class GalaxyConnectionService : Service() {
                 null
             }
 
+            // ── PR-8Android: Canonical execution mode state ────────────────────────────────
+            // execution_mode_state closes the R8 gap: V2's android_runtime_transition_reducer.py
+            // MUST read this 5-state value rather than inferring from mode_state combinations.
+            // Derived from the same inputs already read above to maintain a consistent snapshot.
+            val capabilityDegradedForMode = when (managerState) {
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded,
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.FailedStartup,
+                is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed -> true
+                else -> false
+            }
+            val executionModeDecision = try {
+                LocalExecutionModeGate.decide(
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = webSocketClient.isConnected(),
+                    capabilityDegraded = capabilityDegradedForMode,
+                    degradationReasons = degradedReasons,
+                    runtimeActive = true
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not derive execution mode state: ${e.message}")
+                null
+            }
+
+            // ── PR-8Android: Durable participant identity fields ───────────────────────────
+            // durable_participant_id and participant_identity_freshness close the R8 gap:
+            // V2's android_device_state_store.py MUST use the stable durable_participant_id
+            // as the primary key for cross-era record correlation, and MUST read
+            // participant_identity_freshness rather than applying its own staleness heuristics.
+            //
+            // Freshness is derived from DurableParticipantIdentity.createFromGap() using the
+            // durable session continuity record as the primary timing reference:
+            //  - No durable record → FRESH (first activation)
+            //  - Offline gap < STALE_THRESHOLD_MS → RECOVERED (reconnect within same era)
+            //  - Offline gap >= STALE_THRESHOLD_MS → STALE (staleness self-reported by Android)
+            val snapshotDurableParticipantId: String? = try {
+                val id = settings.durableParticipantId
+                id.takeIf { it.isNotBlank() }
+            } catch (e: Exception) {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not read durable participant ID: ${e.message}")
+                null
+            }
+            val snapshotParticipantFreshness: String? = try {
+                val pid = snapshotDurableParticipantId
+                if (pid == null) {
+                    null
+                } else {
+                    val activationRecord = durableRecord
+                    val continuityRecord = activationRecord ?: com.ufo.galaxy.runtime.DurableSessionContinuityRecord(
+                        durableSessionId = "",
+                        sessionContinuityEpoch = 0,
+                        activationEpochMs = System.currentTimeMillis(),
+                        activationSource = "snapshot_fallback"
+                    )
+                    val identity = DurableParticipantIdentity.createFromGap(
+                        existingParticipantId = pid,
+                        deviceId = deviceId,
+                        deviceRole = settings.deviceRole,
+                        continuityRecord = continuityRecord,
+                        lastActiveEpochMs = activationRecord?.activationEpochMs
+                            ?: System.currentTimeMillis()
+                    )
+                    identity.freshness.wireValue
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not derive participant freshness: ${e.message}")
+                null
+            }
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -2925,7 +3010,13 @@ class GalaxyConnectionService : Service() {
                 mesh_participation_lifecycle_state = meshRuntimeStateReport?.participationLifecycle?.wireValue,
                 barrier_participation_state = meshRuntimeStateReport?.barrierState?.wireValue,
                 collaboration_lifecycle_state = meshRuntimeStateReport?.collaborationLifecycle?.wireValue,
-                mesh_constrained_reasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList()
+                mesh_constrained_reasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList(),
+                // PR-8Android: canonical execution mode state and participant identity fields.
+                // These close the R8 gap: V2 can read execution_mode_state and
+                // durable_participant_id without inferring them from field combinations.
+                execution_mode_state = executionModeDecision?.state?.wireValue,
+                durable_participant_id = snapshotDurableParticipantId,
+                participant_identity_freshness = snapshotParticipantFreshness
             )
 
             val envelope = AipMessage(
@@ -2943,6 +3034,7 @@ class GalaxyConnectionService : Service() {
                     "local_loop_ready=$localLoopReady active_runtime=$activeRuntimeType " +
                     "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier " +
                     "mode_state=${modeState.modeState} mode_readiness_state=${modeState.modeReadinessState} " +
+                    "execution_mode_state=${executionModeDecision?.state?.wireValue} " +
                     "cross_device_eligibility=${modeState.crossDeviceEligibility} sent=$sent"
             )
             GalaxyLogger.log(
@@ -2962,6 +3054,7 @@ class GalaxyConnectionService : Service() {
                     "execution_busy" to snapshotStamp.executionBusy,
                     "mode_state" to modeState.modeState,
                     "mode_readiness_state" to modeState.modeReadinessState,
+                    "execution_mode_state" to (executionModeDecision?.state?.wireValue ?: ""),
                     "cross_device_eligibility" to modeState.crossDeviceEligibility,
                     "goal_execution_eligibility" to modeState.goalExecutionEligibility,
                     "parallel_execution_eligibility" to modeState.parallelExecutionEligibility,
@@ -4309,6 +4402,22 @@ class GalaxyConnectionService : Service() {
      * The [route_mode] field lets the gateway and memory indexer distinguish between
      * locally-executed tasks and tasks dispatched via the AIP v3 cross-device pipeline.
      */
+    /**
+     * PR-8Android — Returns `true` when the local inference runtime manager is in a
+     * degraded or failed state, used to derive [LocalExecutionModeGate.ExecutionModeState].
+     *
+     * Called from [deviceExecutionEventSink] and [sendDeviceStateSnapshot] to populate
+     * `execution_mode_state` without re-reading the full manager state.
+     */
+    private fun managerStateDegraded(): Boolean {
+        return when (UFOGalaxyApplication.localInferenceRuntimeManager.state.value) {
+            is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded,
+            is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.FailedStartup,
+            is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed -> true
+            else -> false
+        }
+    }
+
     private fun storeMemoryEntry(
         taskId: String,
         goal: String,
