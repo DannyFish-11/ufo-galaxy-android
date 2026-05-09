@@ -156,5 +156,38 @@ class CapabilityReportTest {
             "CapabilityReport built from AppSettings.toMetadataMap() must pass validate()",
             report.validate()
         )
+        assertTrue(
+            "CapabilityReport built from AppSettings.toMetadataMap() must include canonical gate keys",
+            report.validateCanonicalGateMetadata()
+        )
+    }
+
+    @Test
+    fun `CANONICAL_GATE_METADATA_KEYS contains expected gate fields`() {
+        val keys = CapabilityReport.CANONICAL_GATE_METADATA_KEYS
+        assertTrue(keys.contains("degraded_mode"))
+        assertTrue(keys.contains("mode_state"))
+        assertTrue(keys.contains("mode_readiness_state"))
+        assertTrue(keys.contains("cross_device_eligibility"))
+        assertTrue(keys.contains("goal_execution_eligibility"))
+        assertTrue(keys.contains("parallel_execution_eligibility"))
+        assertTrue(keys.contains("local_intelligence_status"))
+        assertTrue(keys.contains("local_inference_ready"))
+        assertTrue(keys.contains("local_inference_available"))
+    }
+
+    @Test
+    fun `validateCanonicalGateMetadata reports missing keys`() {
+        val report = CapabilityReport(
+            platform = "android",
+            device_id = "dev-gate-001",
+            supported_actions = listOf("screen_capture"),
+            metadata = mapOf(
+                "mode_state" to "local_only"
+            )
+        )
+
+        assertFalse(report.validateCanonicalGateMetadata())
+        assertTrue(report.missingCanonicalGateMetadataKeys().contains("local_intelligence_status"))
     }
 }

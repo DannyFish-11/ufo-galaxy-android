@@ -129,6 +129,23 @@ data class CapabilityReport(
      */
     fun missingSchedulingBasisKeys(): Set<String> = SCHEDULING_BASIS_METADATA_KEYS - metadata.keys
 
+    /**
+     * Returns `true` when [metadata] contains all keys in [CANONICAL_GATE_METADATA_KEYS].
+     *
+     * This extends basic capability_report metadata validation with Android-side gate signals
+     * (mode/readiness/eligibility and local-inference availability) so cross-repo gate
+     * consumers can rely on a stable key surface.
+     */
+    fun validateCanonicalGateMetadata(): Boolean =
+        CANONICAL_GATE_METADATA_KEYS.all { metadata.containsKey(it) }
+
+    /**
+     * Returns the set of missing canonical gate metadata keys, or an empty set when complete.
+     * Intended for diagnostics/logging.
+     */
+    fun missingCanonicalGateMetadataKeys(): Set<String> =
+        CANONICAL_GATE_METADATA_KEYS - metadata.keys
+
     companion object {
         /**
          * The canonical set of metadata keys that every `capability_report` payload
@@ -184,6 +201,24 @@ data class CapabilityReport(
             "scheduling_cross_device_eligible",
             "scheduling_parallel_subtask_eligible",
             "scheduling_execution_dimensions"
+        )
+
+        /**
+         * Canonical Android gate metadata keys expected on capability_report metadata for
+         * cross-repo governance/orchestration gating.
+         *
+         * This is intentionally additive relative to [REQUIRED_METADATA_KEYS].
+         */
+        val CANONICAL_GATE_METADATA_KEYS: Set<String> = setOf(
+            "degraded_mode",
+            "mode_state",
+            "mode_readiness_state",
+            "cross_device_eligibility",
+            "goal_execution_eligibility",
+            "parallel_execution_eligibility",
+            "local_intelligence_status",
+            "local_inference_ready",
+            "local_inference_available"
         )
     }
 }

@@ -4218,31 +4218,37 @@ class GalaxyConnectionService : Service() {
         }
         webSocketClient.setHighLevelCapabilities(highLevelCaps)
 
-        // Derive a human-readable runtime state label for observability.
+        // Derive canonical local-intelligence labels for observability and gate consumers.
         val inferenceRuntimeState = when {
             startResult.isSuccess -> "running"
             startResult.isUsable -> "degraded"
             else -> "unavailable"
         }
+        val localIntelligenceStatus =
+            com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus.from(startResult).wireValue
+        val modeState = settings.authoritativeModeState()
         webSocketClient.setDeviceMetadata(
-            mapOf(
-                "goal_execution_enabled" to settings.goalExecutionEnabled,
-                "local_model_enabled" to localModelEnabled,
-                "cross_device_enabled" to settings.crossDeviceEnabled,
-                "parallel_execution_enabled" to settings.parallelExecutionEnabled,
-                "device_role" to settings.deviceRole,
-                "model_ready" to settings.modelReady,
-                "accessibility_ready" to settings.accessibilityReady,
-                "overlay_ready" to settings.overlayReady,
+            settings.toMetadataMap() + mapOf(
                 "inference_runtime_state" to inferenceRuntimeState,
-                "local_inference_ready" to localModelEnabled
+                "local_intelligence_status" to localIntelligenceStatus,
+                // local_inference_ready requires full local runtime readiness (both components).
+                "local_inference_ready" to localModelEnabled,
+                // local_inference_available is a broader availability gate input:
+                // true for Success/Degraded, false for Failure.
+                "local_inference_available" to startResult.isUsable,
+                // Keep mode-gate projections explicit in capability metadata.
+                "mode_state" to modeState.modeState,
+                "mode_readiness_state" to modeState.modeReadinessState,
+                "cross_device_eligibility" to modeState.crossDeviceEligibility,
+                "goal_execution_eligibility" to modeState.goalExecutionEligibility,
+                "parallel_execution_eligibility" to modeState.parallelExecutionEligibility
             )
         )
         Log.i(
             TAG,
             "已更新模型能力: lowLevel=$lowLevelCaps highLevel=$highLevelCaps " +
                 "localModelEnabled=$localModelEnabled modelReady=${settings.modelReady} " +
-                "inferenceRuntimeState=$inferenceRuntimeState"
+                "inferenceRuntimeState=$inferenceRuntimeState localIntelligenceStatus=$localIntelligenceStatus"
         )
     }
 
