@@ -316,10 +316,10 @@ class Pr8AndroidMeshParticipationContractTest {
         val staleReplayDecision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(
             message = OfflineTaskQueue.QueuedMessage(
                 type = "goal_execution_result",
-                json = staleDelegatedResultPayload(STALE_DELEGATED_TASK_ID),
-                sessionTag = STALE_SESSION_ID
+                json = staleDelegatedResultPayload(staleDelegatedTaskId),
+                sessionTag = staleSessionId
             ),
-            currentDurableSessionId = CURRENT_SESSION_ID
+            currentDurableSessionId = currentSessionId
         )
         assertEquals(
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED,
@@ -329,12 +329,14 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     companion object {
-        private const val STALE_DELEGATED_TASK_ID = "delegated-old-session"
-        private const val STALE_SESSION_ID = "session-old"
-        private const val CURRENT_SESSION_ID = "session-new"
+        private const val staleDelegatedTaskId = "delegated-old-session"
+        private const val staleSessionId = "session-old"
+        private const val currentSessionId = "session-new"
+        private const val payloadKey = "payload"
+        private const val taskIdKey = "task_id"
 
         private fun staleDelegatedResultPayload(taskId: String): String =
-            """{"payload":{"task_id":"$taskId"}}"""
+            """{"$payloadKey":{"$taskIdKey":"$taskId"}}"""
     }
 
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
