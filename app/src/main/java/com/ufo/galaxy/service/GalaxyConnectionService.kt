@@ -24,6 +24,7 @@ import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
+import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
@@ -2407,6 +2408,9 @@ class GalaxyConnectionService : Service() {
         // PR-10: capture carrier runtime state for coherent event-snapshot alignment.
         val carrierRuntimeState = UFOGalaxyApplication.runtimeController.state.value.wireLabel
 
+        // PR-08: derive canonical truth category for this terminal event from its phase.
+        val terminalEventCategory = AndroidCanonicalRuntimeTruthContract.classifyEventCategory(phase).wireValue
+
         return DeviceExecutionEventPayload(
             flow_id = flowId,
             task_id = taskId,
@@ -2426,7 +2430,9 @@ class GalaxyConnectionService : Service() {
             carrier_foreground_visible = carrierForegroundVisible,
             interaction_surface_ready = interactionSurfaceReady,
             // PR-10: carrier runtime state for coherent carrier status in every event.
-            carrier_runtime_state = carrierRuntimeState
+            carrier_runtime_state = carrierRuntimeState,
+            // PR-08: canonical runtime truth category for this event's phase.
+            reported_state_category = terminalEventCategory
         )
     }
 
@@ -2925,6 +2931,33 @@ class GalaxyConnectionService : Service() {
                 null
             }
 
+            // ── PR-08: Canonical runtime truth classification ─────────────────────────────
+            // Classify this snapshot into a canonical truth category and derive the active
+            // degraded condition kinds. Both fields are derived from already-computed state
+            // so no additional I/O is required.
+            val snapshotReportedStateCategory: String =
+                AndroidCanonicalRuntimeTruthContract.classifyStateCategory(
+                    executionBusy = snapshotStamp.executionBusy,
+                    reconnectRecoveryState = reconnectRecoveryState,
+                    currentFallbackTier = currentFallbackTier,
+                    plannerFallbackTier = plannerFallbackTier,
+                    groundingFallbackTier = groundingFallbackTier,
+                    executionModeState = modeState.executionModeState,
+                    meshConstrainedReasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList()
+                ).wireValue
+            val snapshotDegradedConditionKinds: List<String> =
+                AndroidCanonicalRuntimeTruthContract.classifyDegradedConditions(
+                    localIntelligenceStatus = capabilityAuthority?.localIntelligenceStatus,
+                    degradedReasons = degradedReasons,
+                    currentFallbackTier = currentFallbackTier,
+                    plannerFallbackTier = plannerFallbackTier,
+                    groundingFallbackTier = groundingFallbackTier,
+                    meshConstrainedReasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList(),
+                    executionBusy = snapshotStamp.executionBusy,
+                    offlineQueueDepth = offlineQueueDepth,
+                    reconnectRecoveryState = reconnectRecoveryState
+                )
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -2996,7 +3029,10 @@ class GalaxyConnectionService : Service() {
                 // durable_participant_id without inferring them from field combinations.
                 execution_mode_state = modeState.executionModeState,
                 durable_participant_id = snapshotDurableParticipantId,
-                participant_identity_freshness = snapshotParticipantFreshness
+                participant_identity_freshness = snapshotParticipantFreshness,
+                // PR-08: canonical runtime truth unification fields.
+                reported_state_category = snapshotReportedStateCategory,
+                degraded_condition_kinds = snapshotDegradedConditionKinds
             )
 
             val envelope = AipMessage(
@@ -3015,6 +3051,7 @@ class GalaxyConnectionService : Service() {
                     "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier " +
                     "mode_state=${modeState.modeState} mode_readiness_state=${modeState.modeReadinessState} " +
                     "execution_mode_state=${modeState.executionModeState} " +
+                    "reported_state_category=$snapshotReportedStateCategory " +
                     "cross_device_eligibility=${modeState.crossDeviceEligibility} sent=$sent"
             )
             GalaxyLogger.log(
@@ -3038,6 +3075,8 @@ class GalaxyConnectionService : Service() {
                     "cross_device_eligibility" to modeState.crossDeviceEligibility,
                     "goal_execution_eligibility" to modeState.goalExecutionEligibility,
                     "parallel_execution_eligibility" to modeState.parallelExecutionEligibility,
+                    "reported_state_category" to snapshotReportedStateCategory,
+                    "degraded_condition_kinds" to snapshotDegradedConditionKinds,
                     "llama_cpp_available" to llamaCppAvailable,
                     "ncnn_available" to ncnnAvailable,
                     "sent" to sent

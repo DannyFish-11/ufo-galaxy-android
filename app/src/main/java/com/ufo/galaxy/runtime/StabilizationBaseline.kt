@@ -1809,6 +1809,28 @@ object StabilizationBaseline {
                 "own inference heuristics. CLOSURE_INVARIANTS provides machine-verifiable " +
                 "evidence that the fields are present on the canonical emission paths.",
             introducedPr = 80
+        ),
+
+        // ── PR-08: Canonical runtime truth unification surfaces ───────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-canonical-runtime-truth",
+            displayName = "AndroidCanonicalRuntimeTruthContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08 canonical runtime truth unification contract. Defines the five " +
+                "ReportedStateCategory values (CAPABILITY_STATE/OBSERVATION_STATE/" +
+                "ACTIVE_EXECUTION_STATE/DERIVED_LOCAL_STATE/TERMINAL_REPORTING_STATE) and " +
+                "eight DegradedConditionKind values (DEGRADED/FALLBACK/CONSTRAINED/PARTIAL/" +
+                "DELAYED/RECOVERING/RECOVERED/UNKNOWN). classifyStateCategory() and " +
+                "classifyEventCategory() derive the canonical truth category from snapshot " +
+                "fields. classifyDegradedConditions() derives the active degraded condition set. " +
+                "Both classification results are wired into DeviceStateSnapshotPayload and " +
+                "DeviceExecutionEventPayload as reported_state_category and " +
+                "degraded_condition_kinds. CANONICAL_TRUTH_INVARIANTS provides machine-verifiable " +
+                "evidence that the classification logic is consistent.",
+            introducedPr = 8
         )
     )
 

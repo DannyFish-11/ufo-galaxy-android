@@ -2121,7 +2121,25 @@ data class DeviceStateSnapshotPayload(
     //   staleness heuristics.  Null only as a defensive default.
     val execution_mode_state: String? = null,
     val durable_participant_id: String? = null,
-    val participant_identity_freshness: String? = null
+    val participant_identity_freshness: String? = null,
+
+    // PR-08: Canonical runtime truth unification fields.
+    //
+    // reported_state_category: canonical classification of this snapshot into one of five
+    //   truth categories, derived via AndroidCanonicalRuntimeTruthContract.classifyStateCategory().
+    //   Values: "capability_state" | "observation_state" | "active_execution_state" |
+    //           "derived_local_state" | "terminal_reporting_state".
+    //   V2 MUST use this field to apply the correct truth-reconciliation policy rather than
+    //   inferring the category from field combinations.
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    //
+    // degraded_condition_kinds: list of active degraded condition kinds at snapshot time,
+    //   derived via AndroidCanonicalRuntimeTruthContract.classifyDegradedConditions().
+    //   Possible wire values are a subset of: "degraded" | "fallback" | "constrained" |
+    //   "partial" | "delayed" | "recovering" | "recovered" | "unknown".
+    //   Empty list when the participant is fully healthy and unconstrained.
+    val reported_state_category: String? = null,
+    val degraded_condition_kinds: List<String> = emptyList()
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2257,7 +2275,23 @@ data class DeviceExecutionEventPayload(
     //         "cross_device_degraded" | "transitioning".
     // Emitted alongside each execution event so V2 can correlate the event with the
     // precise execution mode at the time of emission.  Null only as defensive default.
-    val execution_mode_state: String? = null
+    val execution_mode_state: String? = null,
+
+    // PR-08: Canonical runtime truth unification fields.
+    //
+    // reported_state_category: canonical classification of this execution event into one of
+    //   five truth categories, derived via AndroidCanonicalRuntimeTruthContract.classifyEventCategory().
+    //   Possible wire values: "capability_state" | "observation_state" |
+    //   "active_execution_state" | "derived_local_state" | "terminal_reporting_state".
+    //   V2 MUST use this field to apply the correct truth-reconciliation policy.
+    //   Null only as a defensive default; populated in buildTerminalExecutionEvent() and
+    //   at inline execution event emission sites.
+    //
+    // degraded_condition_kinds: list of active degraded condition kinds at event emission
+    //   time.  Empty when the participant is fully healthy.  Same semantics as the
+    //   corresponding DeviceStateSnapshotPayload field.
+    val reported_state_category: String? = null,
+    val degraded_condition_kinds: List<String> = emptyList()
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
