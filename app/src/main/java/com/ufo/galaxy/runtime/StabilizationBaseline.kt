@@ -1814,6 +1814,8 @@ object StabilizationBaseline {
 
         // ── PR-08Android: Canonical runtime truth unification ─────────────────
 
+        // introducedPr uses the internal numeric PR series ID (81 = PR-08Android in string form;
+        // the numeric convention in StabilizationBaseline increments per registered PR).
         BaselineSurfaceEntry(
             surfaceId = "android-canonical-runtime-truth-contract",
             displayName = "AndroidCanonicalRuntimeTruthContract",

@@ -12,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * PR-08 Android — Regression-protection tests for Canonical Runtime Truth Unification.
+ * PR-08Android — Regression-protection tests for Canonical Runtime Truth Unification.
  *
  * Validates all deliverables of the Android-side canonical runtime truth unification:
  *
@@ -31,7 +31,7 @@ import org.junit.Test
  * 8. [StabilizationBaseline] registration for the new contract surface.
  * 9. Gson round-trip stability for all new wire fields.
  *
- * ## Test matrix (116 tests)
+ * ## Test matrix (117 tests)
  *
  * ### ReportedStateSemanticClass — enum coverage
  *  - has exactly 5 values
@@ -418,8 +418,15 @@ class Pr8AndroidCanonicalRuntimeTruthUnificationTest {
     }
 
     @Test
-    fun `classifySnapshot returns OBSERVATION when carrierForegroundVisible is non-null`() {
+    fun `classifySnapshot returns OBSERVATION when carrierForegroundVisible is set to true`() {
         val result = AndroidCanonicalRuntimeTruthContract.classifySnapshot(carrierForegroundVisible = true)
+        assertEquals(AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.OBSERVATION, result)
+    }
+
+    @Test
+    fun `classifySnapshot returns OBSERVATION when carrierForegroundVisible is set to false`() {
+        // false (backgrounded) is still a meaningful participation-state observation
+        val result = AndroidCanonicalRuntimeTruthContract.classifySnapshot(carrierForegroundVisible = false)
         assertEquals(AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.OBSERVATION, result)
     }
 

@@ -573,6 +573,11 @@ object AndroidCanonicalRuntimeTruthContract {
         }
 
         // 3. Observation: mesh participation or foreground visibility is meaningful
+        // meshParticipationLifecycle excludes "inactive" because inactive is the absence of
+        // participation — not an observation worth reporting to V2.  carrierForegroundVisible
+        // includes any non-null value (true = foreground, false = background) because both
+        // foreground and background carrier state are meaningful observations for V2's
+        // participant-interaction model.
         if ((meshParticipationLifecycle != null && meshParticipationLifecycle != "inactive") ||
             carrierForegroundVisible != null
         ) {
@@ -800,9 +805,10 @@ object AndroidCanonicalRuntimeTruthContract {
             (LocalObservationBasis.entries.count { it.isFresh } == 1 &&
                 LocalObservationBasis.LIVE_RUNTIME.isFresh),
 
-        // wire keys match expected canonical field names in DeviceStateSnapshotPayload
-        "snapshot_field_reported_state_semantic_class_name_stable" to
-            (com.ufo.galaxy.protocol.DeviceStateSnapshotPayload(
+        // All three new DeviceStateSnapshotPayload canonical-truth fields default to null
+        // (compile-time presence verified; runtime null-default verified here via an actual instance)
+        "snapshot_new_fields_default_to_null" to
+            com.ufo.galaxy.protocol.DeviceStateSnapshotPayload(
                 device_id = "test",
                 llama_cpp_available = false,
                 ncnn_available = false,
@@ -821,51 +827,11 @@ object AndroidCanonicalRuntimeTruthContract {
                 warmup_result = "unavailable",
                 offline_queue_depth = 0,
                 current_fallback_tier = null
-            ).reported_state_semantic_class.let { true }), // field existence verified at compile time
-
-        "snapshot_field_degraded_condition_class_name_stable" to
-            (com.ufo.galaxy.protocol.DeviceStateSnapshotPayload(
-                device_id = "test",
-                llama_cpp_available = false,
-                ncnn_available = false,
-                active_runtime_type = "CENTER",
-                model_ready = false,
-                accessibility_ready = false,
-                overlay_ready = false,
-                local_loop_ready = false,
-                model_id = null,
-                runtime_type = null,
-                checksum_ok = null,
-                mobilevlm_present = false,
-                mobilevlm_checksum_ok = false,
-                seeclick_present = false,
-                pending_first_download = true,
-                warmup_result = "unavailable",
-                offline_queue_depth = 0,
-                current_fallback_tier = null
-            ).degraded_condition_class.let { true }), // field existence verified at compile time
-
-        "snapshot_field_local_observation_basis_name_stable" to
-            (com.ufo.galaxy.protocol.DeviceStateSnapshotPayload(
-                device_id = "test",
-                llama_cpp_available = false,
-                ncnn_available = false,
-                active_runtime_type = "CENTER",
-                model_ready = false,
-                accessibility_ready = false,
-                overlay_ready = false,
-                local_loop_ready = false,
-                model_id = null,
-                runtime_type = null,
-                checksum_ok = null,
-                mobilevlm_present = false,
-                mobilevlm_checksum_ok = false,
-                seeclick_present = false,
-                pending_first_download = true,
-                warmup_result = "unavailable",
-                offline_queue_depth = 0,
-                current_fallback_tier = null
-            ).local_observation_basis.let { true }) // field existence verified at compile time
+            ).let {
+                it.reported_state_semantic_class == null &&
+                    it.degraded_condition_class == null &&
+                    it.local_observation_basis == null
+            }
     )
 
     /** The canonical test class for this contract. */
