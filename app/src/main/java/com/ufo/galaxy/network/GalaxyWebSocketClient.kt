@@ -323,6 +323,8 @@ class GalaxyWebSocketClient(
 
     /** Mesh session ID currently joined; null if not participating in any mesh. Set by [sendMeshJoin]. */
     @Volatile private var currentMeshId: String? = null
+    @Volatile private var currentMeshRole: String = "participant"
+    @Volatile private var currentMeshCapabilities: List<String> = emptyList()
 
     /** Derives route_mode from the cross-device switch state. */
     private fun currentRouteMode(): String =
@@ -695,6 +697,9 @@ class GalaxyWebSocketClient(
                 
                 // 发送握手消息
                 sendHandshake()
+                // Re-announce mesh participation context after reconnect so center-side
+                // collaboration runtime can re-bind this participant to the in-flight mesh.
+                sendMeshRejoinIfNeeded()
 
                 // Flush any messages queued while we were offline
                 flushOfflineQueue()
@@ -1097,6 +1102,9 @@ class GalaxyWebSocketClient(
         role: String = "participant",
         capabilities: List<String> = emptyList()
     ): Boolean {
+        currentMeshId = meshId
+        currentMeshRole = role
+        currentMeshCapabilities = capabilities
         val deviceId = getDeviceId()
         val payload = MeshJoinPayload(
             mesh_id = meshId,
@@ -1114,7 +1122,6 @@ class GalaxyWebSocketClient(
         )
         val sent = sendJson(gson.toJson(envelope))
         if (sent) {
-            currentMeshId = meshId
             Log.i(TAG, "[MESH:JOIN] mesh_id=$meshId role=$role device_id=$deviceId trace_id=$sessionTraceId")
         }
         return sent
@@ -1148,9 +1155,46 @@ class GalaxyWebSocketClient(
         )
         val sent = sendJson(gson.toJson(envelope))
         currentMeshId = null
+        currentMeshRole = "participant"
+        currentMeshCapabilities = emptyList()
         Log.i(TAG, "[MESH:LEAVE] mesh_id=$meshId reason=$reason device_id=$deviceId sent=$sent")
         return sent
     }
+
+    private fun sendMeshRejoinIfNeeded() {
+        val rejoinJson = buildMeshRejoinEnvelope() ?: return
+        val meshId = currentMeshId ?: return
+        val sent = sendJson(rejoinJson)
+        if (sent) {
+            Log.i(
+                TAG,
+                "[MESH:REJOIN] mesh_id=$meshId role=$currentMeshRole capabilities=${currentMeshCapabilities.size}"
+            )
+        } else {
+            Log.w(TAG, "[MESH:REJOIN] Failed to rejoin mesh_id=$meshId after reconnect")
+        }
+    }
+
+    private fun buildMeshRejoinEnvelope(): String? {
+        val meshId = currentMeshId ?: return null
+        val payload = MeshJoinPayload(
+            mesh_id = meshId,
+            device_id = getDeviceId(),
+            role = currentMeshRole,
+            capabilities = currentMeshCapabilities
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_JOIN,
+            payload = payload,
+            device_id = getDeviceId(),
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_JOIN.value)
+        )
+        return gson.toJson(envelope)
+    }
+
+    internal fun buildMeshRejoinEnvelopeForTest(): String? = buildMeshRejoinEnvelope()
 
     /**
      * Sends a [MsgType.MESH_RESULT] message reporting aggregated parallel-subtask results
