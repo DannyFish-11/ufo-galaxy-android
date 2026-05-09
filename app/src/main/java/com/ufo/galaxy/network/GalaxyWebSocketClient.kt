@@ -1832,6 +1832,39 @@ class GalaxyWebSocketClient(
     // ── PR-33 test-support simulation API ────────────────────────────────────
 
     /**
+     * Installs a test [WebSocket] transport.
+     *
+     * Used by JVM tests to capture outbound reconnect-handshake/replay messages without
+     * requiring a live server.
+     */
+    internal fun installWebSocketForTest(testWebSocket: WebSocket?) {
+        webSocket = testWebSocket
+    }
+
+    /**
+     * PR-84 — For testing only: simulates the canonical reconnect-open sequence.
+     *
+     * Mirrors the production [onOpen] recovery steps needed for runtime-proof tests:
+     *  1) marks socket connected and resets reconnect counters
+     *  2) notifies listeners (`onConnected`) so [RuntimeController] restores attachment context
+     *  3) sends handshake / mesh rejoin envelopes
+     *  4) flushes offline replay queue
+     *
+     * Heartbeat scheduling is intentionally omitted to keep JVM tests deterministic.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateCanonicalReconnectOpenForTest() {
+        isConnected = true
+        reconnectAttempts = 0
+        _reconnectAttemptCount.value = 0
+        listeners.forEach { it.onConnected() }
+        sendHandshake()
+        sendMeshRejoinIfNeeded()
+        flushOfflineQueue()
+    }
+
+    /**
      * PR-33 — For testing only: fires [Listener.onConnected] on all registered listeners
      * without establishing a real WebSocket connection.
      *
