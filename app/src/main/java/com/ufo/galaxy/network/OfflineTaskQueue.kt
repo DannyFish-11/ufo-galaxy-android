@@ -27,7 +27,8 @@ import java.util.ArrayDeque
  * not survive process restart — document this limitation in the README.
  *
  * **Types that are queued**: Only messages whose JSON `type` field is listed in
- * [QUEUEABLE_TYPES] ("task_result", "goal_result", "goal_execution_result") are candidates
+ * [QUEUEABLE_TYPES] ("task_result", "goal_result", "goal_execution_result",
+ * "delegated_execution_signal") are candidates
  * for queuing.  Heartbeats, handshakes, and diagnostics are never queued.
  *
  * **JVM / unit-test compatible**: no Android framework references other than
@@ -55,10 +56,19 @@ class OfflineTaskQueue(
          * queueable so that results produced while the WebSocket is temporarily disconnected
          * are buffered and retransmitted on reconnect rather than silently dropped.
          *
+         * "delegated_execution_signal" carries delegated takeover ACK / PROGRESS / RESULT
+         * lifecycle updates.  It must also be queueable so takeover recovery remains
+         * observable and idempotent across disconnect/reconnect transport interruptions.
+         *
          * "task_result" and "goal_result" are retained for backward-compatibility with legacy
          * paths and REST-fallback callers.
          */
-        val QUEUEABLE_TYPES: Set<String> = setOf("task_result", "goal_result", "goal_execution_result")
+        val QUEUEABLE_TYPES: Set<String> = setOf(
+            "task_result",
+            "goal_result",
+            "goal_execution_result",
+            "delegated_execution_signal"
+        )
     }
 
     /**
