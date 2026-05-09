@@ -323,8 +323,8 @@ class GalaxyWebSocketClient(
 
     /** Mesh session ID currently joined; null if not participating in any mesh. Set by [sendMeshJoin]. */
     @Volatile private var currentMeshId: String? = null
-    @Volatile private var currentMeshRole: String = "participant"
-    @Volatile private var currentMeshCapabilities: List<String> = emptyList()
+    private var currentMeshRole: String = "participant"
+    private var currentMeshCapabilities: List<String> = emptyList()
     private val meshContextLock = Any()
 
     private data class MeshRejoinContext(
@@ -1212,7 +1212,7 @@ class GalaxyWebSocketClient(
         synchronized(meshContextLock) {
             currentMeshId = meshId
             currentMeshRole = role
-            currentMeshCapabilities = capabilities.toList()
+            currentMeshCapabilities = capabilities
         }
     }
 
@@ -1229,7 +1229,7 @@ class GalaxyWebSocketClient(
         MeshRejoinContext(
             meshId = meshId,
             role = currentMeshRole,
-            capabilities = currentMeshCapabilities.toList()
+            capabilities = currentMeshCapabilities
         )
     }
 
