@@ -2135,8 +2135,8 @@ data class DeviceStateSnapshotPayload(
     //
     // degraded_condition_kinds: list of active degraded condition kinds at snapshot time,
     //   derived via AndroidCanonicalRuntimeTruthContract.classifyDegradedConditions().
-    //   Values are a subset of: "degraded" | "fallback" | "constrained" | "partial" |
-    //   "delayed" | "recovering" | "recovered" | "unknown".
+    //   Possible wire values are a subset of: "degraded" | "fallback" | "constrained" |
+    //   "partial" | "delayed" | "recovering" | "recovered" | "unknown".
     //   Empty list when the participant is fully healthy and unconstrained.
     val reported_state_category: String? = null,
     val degraded_condition_kinds: List<String> = emptyList()
@@ -2281,8 +2281,8 @@ data class DeviceExecutionEventPayload(
     //
     // reported_state_category: canonical classification of this execution event into one of
     //   five truth categories, derived via AndroidCanonicalRuntimeTruthContract.classifyEventCategory().
-    //   Values: "capability_state" | "observation_state" | "active_execution_state" |
-    //           "derived_local_state" | "terminal_reporting_state".
+    //   Possible wire values: "capability_state" | "observation_state" |
+    //   "active_execution_state" | "derived_local_state" | "terminal_reporting_state".
     //   V2 MUST use this field to apply the correct truth-reconciliation policy.
     //   Null only as a defensive default; populated in buildTerminalExecutionEvent() and
     //   at inline execution event emission sites.

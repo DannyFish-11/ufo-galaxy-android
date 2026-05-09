@@ -1830,7 +1830,7 @@ object StabilizationBaseline {
                 "DeviceExecutionEventPayload as reported_state_category and " +
                 "degraded_condition_kinds. CANONICAL_TRUTH_INVARIANTS provides machine-verifiable " +
                 "evidence that the classification logic is consistent.",
-            introducedPr = 81
+            introducedPr = 8
         )
     )
 
