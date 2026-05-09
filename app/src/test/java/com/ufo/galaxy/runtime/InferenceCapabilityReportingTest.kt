@@ -226,6 +226,42 @@ class InferenceCapabilityReportingTest {
             planner.isModelLoaded() && grounding.isModelLoaded())
     }
 
+    @Test
+    fun `local_intelligence_status is active degraded or disabled from RuntimeStartResult`() = runBlocking {
+        planner.warmupSucceeds = true
+        grounding.warmupSucceeds = true
+        val success = manager.start()
+        assertEquals("active", LocalIntelligenceCapabilityStatus.from(success).wireValue)
+
+        manager.stop()
+        planner.warmupSucceeds = true
+        grounding.warmupSucceeds = false
+        val degraded = manager.start()
+        assertEquals("degraded", LocalIntelligenceCapabilityStatus.from(degraded).wireValue)
+
+        manager.stop()
+        planner.warmupSucceeds = false
+        grounding.warmupSucceeds = false
+        val failed = manager.start()
+        assertEquals("disabled", LocalIntelligenceCapabilityStatus.from(failed).wireValue)
+    }
+
+    @Test
+    fun `local_inference_available follows isUsable while local_inference_ready requires both models`() =
+        runBlocking {
+            planner.warmupSucceeds = true
+            grounding.warmupSucceeds = false
+            val degraded = manager.start()
+
+            val degradedMetadata = loadModelsMetadata(
+                result = degraded,
+                plannerLoaded = planner.isModelLoaded(),
+                groundingLoaded = grounding.isModelLoaded()
+            )
+            assertEquals(true, degradedMetadata["local_inference_available"])
+            assertEquals(false, degradedMetadata["local_inference_ready"])
+        }
+
     // ── restart clears and re-advertises correctly ───────────────────────────
 
     @Test
@@ -287,6 +323,22 @@ class InferenceCapabilityReportingTest {
         result.isSuccess -> "running"
         result.isUsable -> "degraded"
         else -> "unavailable"
+    }
+
+    /**
+     * Mirrors the gate-facing metadata fields populated by GalaxyConnectionService.loadModels().
+     */
+    private fun loadModelsMetadata(
+        result: RuntimeStartResult,
+        plannerLoaded: Boolean,
+        groundingLoaded: Boolean
+    ): Map<String, Any> {
+        val localModelEnabled = plannerLoaded && groundingLoaded
+        return mapOf(
+            "local_intelligence_status" to LocalIntelligenceCapabilityStatus.from(result).wireValue,
+            "local_inference_available" to result.isUsable,
+            "local_inference_ready" to localModelEnabled
+        )
     }
 
     // ── stub services ─────────────────────────────────────────────────────────

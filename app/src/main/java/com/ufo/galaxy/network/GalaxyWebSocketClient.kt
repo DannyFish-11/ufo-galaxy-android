@@ -10,6 +10,7 @@ import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
 import com.ufo.galaxy.protocol.MeshLeavePayload
@@ -486,16 +487,7 @@ class GalaxyWebSocketClient(
      * a capability_report sent before [setDeviceMetadata] is ever called (e.g. in tests)
      * still satisfies [CapabilityReport.REQUIRED_METADATA_KEYS].
      */
-    private var deviceMetadata: Map<String, Any> = mapOf(
-        "goal_execution_enabled" to false,
-        "local_model_enabled" to false,
-        "cross_device_enabled" to crossDeviceEnabled,
-        "parallel_execution_enabled" to false,
-        "device_role" to "phone",
-        "model_ready" to false,
-        "accessibility_ready" to false,
-        "overlay_ready" to false
-    )
+    private var deviceMetadata: Map<String, Any> = normalizedCapabilityMetadata(emptyMap())
     
     /**
      * 设置监听器（向后兼容；清除已有监听器后添加新的）
@@ -563,7 +555,75 @@ class GalaxyWebSocketClient(
      * are forwarded as-is to the gateway and ignored by servers that do not know them.
      */
     fun setDeviceMetadata(metadata: Map<String, Any>) {
-        deviceMetadata = metadata
+        deviceMetadata = normalizedCapabilityMetadata(metadata)
+    }
+
+    private fun normalizedCapabilityMetadata(
+        metadata: Map<String, Any>,
+        inferredLocalInferenceAvailable: Boolean? = null
+    ): Map<String, Any> {
+        val merged = mutableMapOf<String, Any>(
+            "goal_execution_enabled" to false,
+            "local_model_enabled" to false,
+            "cross_device_enabled" to crossDeviceEnabled,
+            "parallel_execution_enabled" to false,
+            "device_role" to "phone",
+            "model_ready" to false,
+            "accessibility_ready" to false,
+            "overlay_ready" to false,
+            "degraded_mode" to true,
+            "mode_state" to "local_only",
+            "mode_readiness_state" to "degraded",
+            "cross_device_eligibility" to false,
+            "goal_execution_eligibility" to false,
+            "parallel_execution_eligibility" to false,
+            "local_intelligence_status" to "disabled",
+            "local_inference_ready" to false,
+            "local_inference_available" to false
+        )
+        merged.putAll(metadata)
+
+        val modelReady = merged["model_ready"] as? Boolean ?: false
+        val accessibilityReady = merged["accessibility_ready"] as? Boolean ?: false
+        val overlayReady = merged["overlay_ready"] as? Boolean ?: false
+        val degradedMode = !(modelReady && accessibilityReady && overlayReady)
+        merged["degraded_mode"] = degradedMode
+
+        val crossDeviceEnabledValue = merged["cross_device_enabled"] as? Boolean ?: crossDeviceEnabled
+        val goalExecutionEnabled = merged["goal_execution_enabled"] as? Boolean ?: false
+        val parallelExecutionEnabled = merged["parallel_execution_enabled"] as? Boolean ?: false
+        merged["mode_state"] = if (crossDeviceEnabledValue) "cross_device" else "local_only"
+        merged["mode_readiness_state"] = if (degradedMode) "degraded" else "ready"
+        merged["cross_device_eligibility"] = crossDeviceEnabledValue
+        merged["goal_execution_eligibility"] = crossDeviceEnabledValue && goalExecutionEnabled
+        merged["parallel_execution_eligibility"] = crossDeviceEnabledValue && parallelExecutionEnabled
+
+        // Normalize potentially mixed-case external metadata values to canonical lowercase wire form.
+        val rawStatus = (merged["local_intelligence_status"] as? String)?.trim()
+        val status = rawStatus?.lowercase() ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+        if (rawStatus.isNullOrEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] local_intelligence_status missing; defaulting to " +
+                    LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+            )
+        }
+        val inferredAvailableFromStatus =
+            status == LocalIntelligenceCapabilityStatus.ACTIVE.wireValue ||
+                status == LocalIntelligenceCapabilityStatus.DEGRADED.wireValue ||
+                status == LocalIntelligenceCapabilityStatus.RECOVERING.wireValue
+        // If explicit local_inference_ready is absent, fall back to local_model_enabled so
+        // pre-existing senders still emit a deterministic readiness boolean for gate consumers.
+        val localInferenceReady = merged["local_inference_ready"] as? Boolean
+            ?: (merged["local_model_enabled"] as? Boolean ?: false)
+        val localInferenceAvailable = inferredLocalInferenceAvailable
+            ?: (merged["local_inference_available"] as? Boolean)
+            ?: inferredAvailableFromStatus
+        merged["local_intelligence_status"] = status
+        merged["local_inference_ready"] = localInferenceReady
+        merged["local_inference_available"] = localInferenceAvailable
+
+        return merged
     }
 
     /**
@@ -915,6 +975,15 @@ class GalaxyWebSocketClient(
             m.putAll(hostMeta)
         }
 
+        val effectiveCapabilities = highLevelCapabilities.ifEmpty {
+            listOf(
+                "autonomous_goal_execution",
+                "local_task_planning",
+                "local_ui_reasoning",
+                "cross_device_coordination"
+            )
+        }
+
         val report = CapabilityReport(
             platform = "android",
             device_id = deviceId,
@@ -925,15 +994,11 @@ class GalaxyWebSocketClient(
             // LocalInferenceRuntimeManager confirms the runtime is operational.
             // Claiming it before runtime readiness is verified would produce a false
             // capability advertisement on the initial connection handshake.
-            capabilities = highLevelCapabilities.ifEmpty {
-                listOf(
-                    "autonomous_goal_execution",
-                    "local_task_planning",
-                    "local_ui_reasoning",
-                    "cross_device_coordination"
-                )
-            },
-            metadata = mergedMetadata
+            capabilities = effectiveCapabilities,
+            metadata = normalizedCapabilityMetadata(
+                metadata = mergedMetadata,
+                inferredLocalInferenceAvailable = effectiveCapabilities.contains("local_model_inference")
+            )
         )
 
         val handshake = JsonObject().apply {

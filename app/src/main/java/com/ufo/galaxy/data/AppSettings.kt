@@ -311,37 +311,35 @@ interface AppSettings {
     }
 
     /**
-     * Returns all eight canonical runtime-identity fields as a [Map] suitable for
-     * inclusion in a [CapabilityReport.metadata] payload sent to the gateway.
+     * Returns canonical capability/gate metadata as a [Map] suitable for inclusion in
+     * a [CapabilityReport.metadata] payload sent to the gateway.
      *
-     * The returned map satisfies [CapabilityReport.REQUIRED_METADATA_KEYS]: every key in
-     * that set is present with a Boolean or String value reflecting the current device
-     * state. The server consumes this map directly as canonical runtime identity without
-     * any Android-specific translation.
+     * The returned map always satisfies [CapabilityReport.REQUIRED_METADATA_KEYS] and also
+     * includes Android-side gate-state projections used by cross-repo governance/orchestration
+     * consumers (`degraded_mode`, `mode_state`, `mode_readiness_state`, and `*_eligibility`).
      *
-     * Keys and value semantics:
-     * - `goal_execution_enabled`     – [goalExecutionEnabled]
-     * - `local_model_enabled`        – [localModelEnabled]
-     * - `cross_device_enabled`       – [crossDeviceEnabled]
-     * - `parallel_execution_enabled` – [parallelExecutionEnabled]
-     * - `device_role`                – [deviceRole]
-     * - `model_ready`                – [modelReady]
-     * - `accessibility_ready`        – [accessibilityReady]
-     * - `overlay_ready`              – [overlayReady]
-     *
-     * Gateways that do not understand extra keys (if any are ever added) will ignore
-     * them, preserving backward compatibility during future migrations.
+     * Gateways that do not understand extra keys will ignore them, preserving backward
+     * compatibility.
      */
-    fun toMetadataMap(): Map<String, Any> = mapOf(
-        "goal_execution_enabled" to goalExecutionEnabled,
-        "local_model_enabled" to localModelEnabled,
-        "cross_device_enabled" to crossDeviceEnabled,
-        "parallel_execution_enabled" to parallelExecutionEnabled,
-        "device_role" to deviceRole,
-        "model_ready" to modelReady,
-        "accessibility_ready" to accessibilityReady,
-        "overlay_ready" to overlayReady
-    )
+    fun toMetadataMap(): Map<String, Any> {
+        val modeState = authoritativeModeState()
+        return mapOf(
+            "goal_execution_enabled" to goalExecutionEnabled,
+            "local_model_enabled" to localModelEnabled,
+            "cross_device_enabled" to crossDeviceEnabled,
+            "parallel_execution_enabled" to parallelExecutionEnabled,
+            "device_role" to deviceRole,
+            "model_ready" to modelReady,
+            "accessibility_ready" to accessibilityReady,
+            "overlay_ready" to overlayReady,
+            "degraded_mode" to degradedMode,
+            "mode_state" to modeState.modeState,
+            "mode_readiness_state" to modeState.modeReadinessState,
+            "cross_device_eligibility" to modeState.crossDeviceEligibility,
+            "goal_execution_eligibility" to modeState.goalExecutionEligibility,
+            "parallel_execution_eligibility" to modeState.parallelExecutionEligibility
+        )
+    }
 
     /**
      * Returns the authoritative Android-side mode/governance state used by

@@ -150,7 +150,6 @@ class AppSettingsTest {
         )
         val map = settings.toMetadataMap()
 
-        assertEquals(8, map.size)
         assertEquals(true, map["cross_device_enabled"])
         assertEquals(true, map["goal_execution_enabled"])
         assertEquals(true, map["local_model_enabled"])
@@ -159,6 +158,12 @@ class AppSettingsTest {
         assertEquals(true, map["model_ready"])
         assertEquals(true, map["accessibility_ready"])
         assertEquals(true, map["overlay_ready"])
+        assertEquals(false, map["degraded_mode"])
+        assertEquals(AuthoritativeModeState.MODE_CROSS_DEVICE, map["mode_state"])
+        assertEquals(AuthoritativeModeState.READINESS_READY, map["mode_readiness_state"])
+        assertEquals(true, map["cross_device_eligibility"])
+        assertEquals(true, map["goal_execution_eligibility"])
+        assertEquals(false, map["parallel_execution_eligibility"])
     }
 
     @Test
@@ -174,6 +179,12 @@ class AppSettingsTest {
         assertEquals(false, map["model_ready"])
         assertEquals(false, map["accessibility_ready"])
         assertEquals(false, map["overlay_ready"])
+        assertEquals(true, map["degraded_mode"])
+        assertEquals(AuthoritativeModeState.MODE_LOCAL_ONLY, map["mode_state"])
+        assertEquals(AuthoritativeModeState.READINESS_DEGRADED, map["mode_readiness_state"])
+        assertEquals(false, map["cross_device_eligibility"])
+        assertEquals(false, map["goal_execution_eligibility"])
+        assertEquals(false, map["parallel_execution_eligibility"])
     }
 
     @Test
@@ -214,6 +225,35 @@ class AppSettingsTest {
         assertTrue(state.crossDeviceEligibility)
         assertTrue(state.goalExecutionEligibility)
         assertFalse(state.parallelExecutionEligibility)
+    }
+
+    @Test
+    fun `toMetadataMap updates mode gate fields after readiness and mode transition`() {
+        val settings = InMemoryAppSettings(
+            crossDeviceEnabled = false,
+            goalExecutionEnabled = true,
+            parallelExecutionEnabled = true,
+            modelReady = false,
+            accessibilityReady = false,
+            overlayReady = false
+        )
+
+        val initial = settings.toMetadataMap()
+        assertEquals("local_only", initial["mode_state"])
+        assertEquals("degraded", initial["mode_readiness_state"])
+        assertEquals(false, initial["cross_device_eligibility"])
+
+        settings.crossDeviceEnabled = true
+        settings.modelReady = true
+        settings.accessibilityReady = true
+        settings.overlayReady = true
+
+        val transitioned = settings.toMetadataMap()
+        assertEquals("cross_device", transitioned["mode_state"])
+        assertEquals("ready", transitioned["mode_readiness_state"])
+        assertEquals(true, transitioned["cross_device_eligibility"])
+        assertEquals(true, transitioned["goal_execution_eligibility"])
+        assertEquals(true, transitioned["parallel_execution_eligibility"])
     }
 
     // ── SharedPrefsAppSettings key constants ──────────────────────────────────
