@@ -103,6 +103,15 @@ class OfflineQueueTest {
     }
 
     @Test
+    fun `QUEUEABLE_TYPES contains delegated_execution_signal`() {
+        assertTrue(
+            "delegated_execution_signal must be queueable so delegated takeover ACK/PROGRESS/RESULT " +
+                "signals can replay across reconnect",
+            "delegated_execution_signal" in OfflineTaskQueue.QUEUEABLE_TYPES
+        )
+    }
+
+    @Test
     fun `heartbeat type is NOT in QUEUEABLE_TYPES`() {
         assertFalse("heartbeat" in OfflineTaskQueue.QUEUEABLE_TYPES)
     }

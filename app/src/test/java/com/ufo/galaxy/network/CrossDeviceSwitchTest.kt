@@ -282,7 +282,7 @@ class CrossDeviceSwitchTest {
         )
         val messageTypes = listOf(
             "task_submit", "task_result", "goal_result", "goal_execution_result",
-            "cancel_result", "heartbeat", "capability_report"
+            "delegated_execution_signal", "cancel_result", "heartbeat", "capability_report"
         )
         for (type in messageTypes) {
             val json = """{"type":"$type","payload":{}}"""
@@ -393,6 +393,21 @@ class CrossDeviceSwitchTest {
         assertFalse("sendJson returns false when not connected", sent)
         assertEquals("goal_execution_result must be queued when offline", 1, testQueue.size)
         assertEquals("goal_execution_result", testQueue.drainAll().first().type)
+    }
+
+    @Test
+    fun `sendJson when disconnected queues delegated_execution_signal type`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """{"type":"delegated_execution_signal","payload":{"signal_id":"sig-1","emission_seq":3}}"""
+        val sent = client.sendJson(json)
+        assertFalse("sendJson returns false when not connected", sent)
+        assertEquals("delegated_execution_signal must be queued when offline", 1, testQueue.size)
+        assertEquals("delegated_execution_signal", testQueue.drainAll().first().type)
     }
 
     @Test

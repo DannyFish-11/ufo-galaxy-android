@@ -883,7 +883,8 @@ class GalaxyWebSocketClient(
      *
      * **Offline queuing**: if the socket is currently disconnected and the message
      * `type` field belongs to [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
-     * "goal_result" / "goal_execution_result"), the payload is enqueued in [offlineQueue] for delivery on the
+     * "goal_result" / "goal_execution_result" / "delegated_execution_signal"), the payload is enqueued in
+     * [offlineQueue] for delivery on the
      * next successful reconnect.  The method returns `false` in this case (the message
      * was not sent *now*) but will not be lost.
      *

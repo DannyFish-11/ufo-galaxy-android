@@ -4,7 +4,10 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.ufo.galaxy.agent.AccessibilityExecutor
 import com.ufo.galaxy.agent.AutonomousExecutionPipeline
+import com.ufo.galaxy.agent.DelegatedRuntimeUnit
+import com.ufo.galaxy.agent.DelegatedTakeoverExecutor
 import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.GoalExecutionPipeline
 import com.ufo.galaxy.agent.LocalCollaborationAgent
 import com.ufo.galaxy.agent.LocalGoalExecutor
 import com.ufo.galaxy.agent.NoOpImageScaler
@@ -211,5 +214,110 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
         assertTrue(replayPayload.get("is_continuation").asBoolean)
         assertEquals("disconnect_during_execution", replayPayload.get("interruption_reason").asString)
         assertEquals("3", replayPayload.getAsJsonObject("recovery_context").get("resume_step").asString)
+    }
+
+    @Test
+    fun `delegated takeover signals replay after reconnect and transfer completes`() {
+        val gson = Gson()
+        val (controller, wsClient) = buildController()
+        val recordingSocket = RecordingWebSocket()
+
+        controller.setActiveForTest()
+
+        val delegatedUnit = DelegatedRuntimeUnit(
+            unitId = "takeover-unit-1",
+            taskId = "takeover-task-1",
+            traceId = "trace-takeover-proof",
+            goal = "resume ownership transfer",
+            attachedSessionId = "session-takeover-1"
+        )
+        val activationRecord = DelegatedActivationRecord.create(
+            unit = delegatedUnit,
+            activatedAtMs = 1_000L
+        )
+
+        val emittedSignals = mutableListOf<DelegatedExecutionSignal>()
+        val executor = DelegatedTakeoverExecutor(
+            pipeline = GoalExecutionPipeline { payload ->
+                GoalResultPayload(
+                    task_id = payload.task_id,
+                    correlation_id = payload.task_id,
+                    status = EdgeExecutor.STATUS_SUCCESS,
+                    continuity_token = "cont-takeover-1",
+                    recovery_context = mapOf(
+                        "resume_step" to "4",
+                        "origin" to "delegated_takeover_reconnect"
+                    ),
+                    is_resumable = true,
+                    interruption_reason = "disconnect_during_takeover"
+                )
+            },
+            signalSink = DelegatedExecutionSignalSink { signal -> emittedSignals += signal }
+        )
+        val outcome = executor.execute(
+            unit = delegatedUnit,
+            initialRecord = activationRecord,
+            nowMs = 10_000L
+        ) as DelegatedTakeoverExecutor.ExecutionOutcome.Completed
+        val terminalSignal = emittedSignals.last()
+        val expectedLifecycleSignalCount = 3 // ACK + PROGRESS + RESULT
+        assertEquals(expectedLifecycleSignalCount, emittedSignals.size)
+        assertTrue(terminalSignal.isResult)
+
+        // Simulate transport interruption after takeover execution; terminal signal must queue.
+        wsClient.simulateDisconnected()
+        assertEquals(ReconnectRecoveryState.RECOVERING, controller.reconnectRecoveryState.value)
+
+        val delegatedSignalEnvelope = AipMessage(
+            type = MsgType.DELEGATED_EXECUTION_SIGNAL,
+            payload = terminalSignal.toOutboundPayload(deviceId = "test-device"),
+            correlation_id = delegatedUnit.taskId,
+            device_id = "test-device",
+            trace_id = delegatedUnit.traceId,
+            idempotency_key = terminalSignal.signalId
+        )
+        val sentWhileDisconnected = wsClient.sendJson(gson.toJson(delegatedSignalEnvelope))
+        assertFalse(sentWhileDisconnected)
+        assertEquals(1, wsClient.offlineQueue.size)
+
+        // Canonical reconnect must replay queued takeover signal before resumed transfer result.
+        wsClient.installWebSocketForTest(recordingSocket)
+        wsClient.simulateCanonicalReconnectOpenForTest()
+        assertEquals(ReconnectRecoveryState.RECOVERED, controller.reconnectRecoveryState.value)
+        assertEquals(0, wsClient.offlineQueue.size)
+
+        val replayedSignalEnvelope = recordingSocket.textMessages
+            .map { JsonParser.parseString(it).asJsonObject }
+            .firstOrNull { it.get("type")?.asString == MsgType.DELEGATED_EXECUTION_SIGNAL.value }
+        assertNotNull("Reconnected transport must replay queued delegated_execution_signal", replayedSignalEnvelope)
+
+        val replayedSignalPayload = replayedSignalEnvelope!!.getAsJsonObject("payload")
+        assertEquals(terminalSignal.signalId, replayedSignalPayload.get("signal_id").asString)
+        assertEquals(terminalSignal.emissionSeq, replayedSignalPayload.get("emission_seq").asInt)
+        assertEquals(terminalSignal.resultKind?.wireValue, replayedSignalPayload.get("result_kind").asString)
+
+        val resumedEnvelope = AipMessage(
+            type = MsgType.GOAL_EXECUTION_RESULT,
+            payload = outcome.goalResult.copy(
+                task_id = delegatedUnit.taskId,
+                correlation_id = delegatedUnit.taskId
+            ),
+            correlation_id = delegatedUnit.taskId,
+            device_id = "test-device",
+            trace_id = delegatedUnit.traceId
+        )
+        assertTrue(wsClient.sendJson(gson.toJson(resumedEnvelope)))
+
+        val resumedResultEnvelope = recordingSocket.textMessages
+            .map { JsonParser.parseString(it).asJsonObject }
+            .lastOrNull { envelope ->
+                envelope.get("type")?.asString == MsgType.GOAL_EXECUTION_RESULT.value &&
+                    envelope.getAsJsonObject("payload").get("task_id").asString == delegatedUnit.taskId
+            }
+        assertNotNull("Resumed takeover transfer result must converge on canonical goal_execution_result uplink", resumedResultEnvelope)
+
+        val resumedPayload = resumedResultEnvelope!!.getAsJsonObject("payload")
+        assertTrue(resumedPayload.get("is_resumable").asBoolean)
+        assertEquals("4", resumedPayload.getAsJsonObject("recovery_context").get("resume_step").asString)
     }
 }
