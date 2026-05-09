@@ -146,6 +146,27 @@ data class CapabilityReport(
     fun missingCanonicalGateMetadataKeys(): Set<String> =
         CANONICAL_GATE_METADATA_KEYS - metadata.keys
 
+    /**
+     * Builds a stable Android-side metadata-evidence surface that summarizes capability-report
+     * metadata completeness for runtime/governance observability.
+     *
+     * The returned map is additive and compatibility-safe: consumers that do not know these
+     * keys can ignore them. Values are derived from this report's real metadata at call time.
+     */
+    fun metadataEvidenceSurface(): Map<String, Any> {
+        val missingRequired = missingMetadataKeys().toList().sorted()
+        val missingCanonical = missingCanonicalGateMetadataKeys().toList().sorted()
+        val missingScheduling = missingSchedulingBasisKeys().toList().sorted()
+        return mapOf(
+            KEY_METADATA_REQUIRED_COMPLETE to missingRequired.isEmpty(),
+            KEY_METADATA_CANONICAL_GATE_COMPLETE to missingCanonical.isEmpty(),
+            KEY_METADATA_SCHEDULING_BASIS_COMPLETE to missingScheduling.isEmpty(),
+            KEY_METADATA_MISSING_REQUIRED_KEYS to missingRequired,
+            KEY_METADATA_MISSING_CANONICAL_GATE_KEYS to missingCanonical,
+            KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS to missingScheduling
+        )
+    }
+
     companion object {
         /**
          * The canonical set of metadata keys that every `capability_report` payload
@@ -220,6 +241,14 @@ data class CapabilityReport(
             "local_inference_ready",
             "local_inference_available"
         )
+
+        // Android runtime metadata-evidence summary keys (additive observability surface).
+        const val KEY_METADATA_REQUIRED_COMPLETE = "android_metadata_required_complete"
+        const val KEY_METADATA_CANONICAL_GATE_COMPLETE = "android_metadata_canonical_gate_complete"
+        const val KEY_METADATA_SCHEDULING_BASIS_COMPLETE = "android_metadata_scheduling_basis_complete"
+        const val KEY_METADATA_MISSING_REQUIRED_KEYS = "android_metadata_missing_required_keys"
+        const val KEY_METADATA_MISSING_CANONICAL_GATE_KEYS = "android_metadata_missing_canonical_gate_keys"
+        const val KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS = "android_metadata_missing_scheduling_basis_keys"
     }
 }
 
