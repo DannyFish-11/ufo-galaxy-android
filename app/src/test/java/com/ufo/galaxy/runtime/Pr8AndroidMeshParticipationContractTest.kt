@@ -1,5 +1,6 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.network.OfflineTaskQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -104,6 +105,26 @@ class Pr8AndroidMeshParticipationContractTest {
                 it.from == "active_takeover" && it.to == "parallel_subtask"
             }
         )
+        assertTrue(
+            relationships.any {
+                it.from == "takeover_interrupted_disconnect" && it.to == "delegated_result_failed"
+            }
+        )
+        assertTrue(
+            relationships.any {
+                it.from == "reconnect_recovery" && it.to == "offline_replay_authority_filtering"
+            }
+        )
+        assertTrue(
+            relationships.any {
+                it.from == "participant_degraded" && it.to == "local_fallback_execution"
+            }
+        )
+        assertTrue(
+            relationships.any {
+                it.from == "recovered_participant" && it.to == "hybrid_mesh_participation"
+            }
+        )
     }
 
     @Test
@@ -156,6 +177,15 @@ class Pr8AndroidMeshParticipationContractTest {
             AndroidMeshParticipationContract.RELATIONSHIP_GRAPH_VERSION,
             wireMap[AndroidMeshParticipationContract.KEY_RELATIONSHIP_GRAPH_VERSION]
         )
+        @Suppress("UNCHECKED_CAST")
+        val relationships = wireMap[AndroidMeshParticipationContract.KEY_RUNTIME_RELATIONSHIPS] as List<Map<String, String>>
+        assertEquals(AndroidMeshParticipationContract.RUNTIME_RELATIONSHIPS.size, relationships.size)
+        assertTrue(
+            relationships.any {
+                it["from"] == "reconnect_recovery" &&
+                    it["to"] == "offline_replay_authority_filtering"
+            }
+        )
         assertNotNull(wireMap[AndroidMeshParticipationContract.KEY_CONSTRAINED_REASONS])
         assertEquals(
             AndroidMeshParticipationContract.LOCAL_COLLABORATION_AGENT_SCOPE,
@@ -173,6 +203,140 @@ class Pr8AndroidMeshParticipationContractTest {
             AndroidMeshParticipationContract.MESH_PARTIAL_DEFERRED_SCOPE,
             wireMap[AndroidMeshParticipationContract.KEY_MESH_PARTIAL_DEFERRED_SCOPE]
         )
+    }
+
+    @Test
+    fun `reconnect recovery transitions through constrained states to stable`() {
+        val disconnected = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.UNKNOWN,
+            reconnectState = ReconnectRecoveryState.IDLE,
+            readinessState = ParticipantReadinessState.NOT_READY,
+            participationState = RuntimeHostDescriptor.HostParticipationState.INACTIVE
+        )
+        val reconnecting = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.RECOVERING,
+            reconnectState = ReconnectRecoveryState.RECOVERING,
+            readinessState = ParticipantReadinessState.NOT_READY,
+            participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+        )
+        val reconnectedStable = createHealthyOrchestrationRecord()
+
+        val disconnectedReport = AndroidMeshParticipationContract.evaluate(
+            orchestration = disconnected,
+            rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        )
+        val reconnectingReport = AndroidMeshParticipationContract.evaluate(
+            orchestration = reconnecting,
+            rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        )
+        val reconnectedReport = AndroidMeshParticipationContract.evaluate(
+            orchestration = reconnectedStable,
+            rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        )
+
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, disconnectedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.DETACHED, disconnectedReport.continuityLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, reconnectingReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.RECOVERING, reconnectingReport.continuityLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, reconnectedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.STABLE, reconnectedReport.continuityLevel)
+
+        val phaseSequence = UnifiedReplayRecoveryContract.canonicalPhaseSequence
+        assertTrue(
+            phaseSequence.indexOf(UnifiedReplayRecoveryContract.RecoveryPhase.AUTHORITY_FILTERING) <
+                phaseSequence.indexOf(UnifiedReplayRecoveryContract.RecoveryPhase.REPLAYING)
+        )
+        assertEquals(
+            UnifiedReplayRecoveryContract.RecoveryPhase.RECOVERED,
+            phaseSequence.last()
+        )
+    }
+
+    @Test
+    fun `degraded state blocks takeover and routes to fallback execution`() {
+        val degradedFallback = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.DEGRADED,
+            reconnectState = ReconnectRecoveryState.IDLE,
+            readinessState = ParticipantReadinessState.READY_WITH_FALLBACK,
+            participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+        )
+        val degradedReport = AndroidMeshParticipationContract.evaluate(
+            orchestration = degradedFallback,
+            rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        )
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, degradedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.STABLE, degradedReport.continuityLevel)
+        assertTrue(
+            degradedReport.constrainedReasons.contains(
+                AndroidMeshParticipationContract.REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE
+            )
+        )
+        assertTrue(
+            degradedReport.constrainedReasons.contains(
+                AndroidMeshParticipationContract.REASON_MESH_SUBTASK_NOT_EXECUTABLE
+            )
+        )
+
+        val degradedTakeoverScenario = DelegatedTakeoverRecoveryContract.scenarioFor(
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.DEGRADED
+        )
+        assertNotNull(degradedTakeoverScenario)
+        assertEquals(
+            DelegatedTakeoverRecoveryContract.TakeoverInterruptionOutcome.DRAIN_THEN_TERMINATE,
+            degradedTakeoverScenario!!.interruptionOutcome
+        )
+        assertEquals(
+            DelegatedTakeoverRecoveryContract.REASON_PARTICIPANT_DEGRADED,
+            degradedTakeoverScenario.requiredReasonPrefix
+        )
+
+        val recoveredReport = AndroidMeshParticipationContract.evaluate(
+            orchestration = createHealthyOrchestrationRecord(),
+            rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        )
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, recoveredReport.readinessLevel)
+        assertTrue(recoveredReport.delegatedTakeoverExecutable)
+        assertTrue(recoveredReport.meshSubtaskExecutable)
+    }
+
+    @Test
+    fun `disconnect interruption blocks stale delegated replay result`() {
+        val disconnectTakeoverScenario = DelegatedTakeoverRecoveryContract.scenarioFor(
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING
+        )
+        assertNotNull(disconnectTakeoverScenario)
+        assertEquals(
+            DelegatedTakeoverRecoveryContract.REASON_PARTICIPANT_DISCONNECTED,
+            disconnectTakeoverScenario!!.requiredReasonPrefix
+        )
+        assertFalse(disconnectTakeoverScenario.mayResumeAfterReconnect)
+
+        val staleReplayDecision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(
+            message = OfflineTaskQueue.QueuedMessage(
+                type = "goal_execution_result",
+                json = staleDelegatedResultPayload(staleDelegatedTaskId),
+                sessionTag = staleSessionId
+            ),
+            currentDurableSessionId = currentSessionId
+        )
+        assertEquals(
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED,
+            staleReplayDecision
+        )
+        assertFalse(staleReplayDecision.isReplayAllowed)
+    }
+
+    companion object {
+        private const val staleDelegatedTaskId = "delegated-old-session"
+        private const val staleSessionId = "session-old"
+        private const val currentSessionId = "session-new"
+        private const val payloadKey = "payload"
+        private const val taskIdKey = "task_id"
+
+        private fun staleDelegatedResultPayload(taskId: String): String =
+            """{"$payloadKey":{"$taskIdKey":"$taskId"}}"""
     }
 
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
