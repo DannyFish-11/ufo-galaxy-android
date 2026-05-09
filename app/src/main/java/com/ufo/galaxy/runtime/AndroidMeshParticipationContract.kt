@@ -59,6 +59,13 @@ object AndroidMeshParticipationContract {
             KEY_FULL_MESH_RUNTIME_EXECUTABLE to fullMeshRuntimeExecutable,
             KEY_CONSTRAINED_REASONS to constrainedReasons,
             KEY_RELATIONSHIP_GRAPH_VERSION to RELATIONSHIP_GRAPH_VERSION,
+            KEY_RUNTIME_RELATIONSHIPS to RUNTIME_RELATIONSHIPS.map { relationship ->
+                mapOf(
+                    "from" to relationship.from,
+                    "to" to relationship.to,
+                    "semantic" to relationship.semantic
+                )
+            },
             KEY_LOCAL_COLLABORATION_AGENT_SCOPE to LOCAL_COLLABORATION_AGENT_SCOPE,
             KEY_MESH_STATE_SEMANTICS to MESH_STATE_SEMANTICS,
             KEY_MESH_RESULT_SEMANTICS to MESH_RESULT_SEMANTICS,
@@ -90,6 +97,26 @@ object AndroidMeshParticipationContract {
             from = "active_takeover",
             to = "parallel_subtask",
             semantic = "governance conflict rule rejects parallel_subtask while takeover is active"
+        ),
+        RuntimeRelationship(
+            from = "takeover_interrupted_disconnect",
+            to = "delegated_result_failed",
+            semantic = "disconnect while delegated takeover is active emits RESULT/FAILED and clears active takeover"
+        ),
+        RuntimeRelationship(
+            from = "reconnect_recovery",
+            to = "offline_replay_authority_filtering",
+            semantic = "reconnect recovery runs authority filtering before replay to block stale-session execution results"
+        ),
+        RuntimeRelationship(
+            from = "participant_degraded",
+            to = "local_fallback_execution",
+            semantic = "degradation routes execution to fallback-limited local path while blocking delegated takeover acceptance"
+        ),
+        RuntimeRelationship(
+            from = "recovered_participant",
+            to = "hybrid_mesh_participation",
+            semantic = "recovered healthy participant re-enters staged mesh and delegated execution eligibility"
         )
     )
 
@@ -216,7 +243,7 @@ object AndroidMeshParticipationContract {
         )
     }
 
-    const val RELATIONSHIP_GRAPH_VERSION: Int = 1
+    const val RELATIONSHIP_GRAPH_VERSION: Int = 2
 
     const val REASON_MESH_SUBTASK_NOT_EXECUTABLE = "mesh_subtask_not_executable"
     const val REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE = "delegated_takeover_not_executable"
@@ -231,6 +258,7 @@ object AndroidMeshParticipationContract {
     const val KEY_FULL_MESH_RUNTIME_EXECUTABLE = "full_mesh_runtime_executable"
     const val KEY_CONSTRAINED_REASONS = "mesh_participation_constrained_reasons"
     const val KEY_RELATIONSHIP_GRAPH_VERSION = "mesh_runtime_relationship_graph_version"
+    const val KEY_RUNTIME_RELATIONSHIPS = "mesh_runtime_relationships"
     const val KEY_LOCAL_COLLABORATION_AGENT_SCOPE = "local_collaboration_agent_scope"
     const val KEY_MESH_STATE_SEMANTICS = "mesh_state_semantics"
     const val KEY_MESH_RESULT_SEMANTICS = "mesh_result_semantics"
