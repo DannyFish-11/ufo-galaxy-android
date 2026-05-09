@@ -599,8 +599,15 @@ class GalaxyWebSocketClient(
         merged["parallel_execution_eligibility"] = crossDeviceEnabledValue && parallelExecutionEnabled
 
         // Normalize potentially mixed-case external metadata values to canonical lowercase wire form.
-        val status = (merged["local_intelligence_status"] as? String)?.trim()?.lowercase()
-            ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+        val rawStatus = (merged["local_intelligence_status"] as? String)?.trim()
+        val status = rawStatus?.lowercase() ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+        if (rawStatus.isNullOrEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] local_intelligence_status missing; defaulting to " +
+                    LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+            )
+        }
         val inferredAvailableFromStatus =
             status == LocalIntelligenceCapabilityStatus.ACTIVE.wireValue ||
                 status == LocalIntelligenceCapabilityStatus.DEGRADED.wireValue ||
