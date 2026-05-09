@@ -598,12 +598,15 @@ class GalaxyWebSocketClient(
         merged["goal_execution_eligibility"] = crossDeviceEnabledValue && goalExecutionEnabled
         merged["parallel_execution_eligibility"] = crossDeviceEnabledValue && parallelExecutionEnabled
 
+        // Normalise potentially mixed-case external metadata values to canonical lowercase wire form.
         val status = (merged["local_intelligence_status"] as? String)?.trim()?.lowercase()
             ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
         val inferredAvailableFromStatus =
             status == LocalIntelligenceCapabilityStatus.ACTIVE.wireValue ||
                 status == LocalIntelligenceCapabilityStatus.DEGRADED.wireValue ||
                 status == LocalIntelligenceCapabilityStatus.RECOVERING.wireValue
+        // If explicit local_inference_ready is absent, fall back to local_model_enabled so
+        // pre-existing senders still emit a deterministic readiness boolean for gate consumers.
         val localInferenceReady = merged["local_inference_ready"] as? Boolean
             ?: (merged["local_model_enabled"] as? Boolean ?: false)
         val localInferenceAvailable = inferredLocalInferenceAvailable
