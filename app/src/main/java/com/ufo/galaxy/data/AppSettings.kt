@@ -179,6 +179,22 @@ interface AppSettings {
      */
     var lastDurableSessionId: String
 
+    /**
+     * PR-8Android — Stable per-installation participant identifier for
+     * [com.ufo.galaxy.session.DurableParticipantIdentity].
+     *
+     * A UUID v4 string generated on first access and persisted across app restarts
+     * (but not across uninstalls).  Constant for the lifetime of this app installation,
+     * regardless of process kills, WS reconnects, or durable session era resets.
+     *
+     * V2's `android_device_state_store.py` uses this as the primary key for correlating
+     * participant records across activation eras (process kills, session resets).
+     *
+     * A blank value must never be used as the canonical participant identifier —
+     * callers must ensure the value is initialised before emitting it on the wire.
+     */
+    var durableParticipantId: String
+
     // ── Local-chain execution settings (planner / grounding) ─────────────────
 
     /**
@@ -418,6 +434,7 @@ class InMemoryAppSettings(
     override var metricsEndpoint: String = "",
     override var gatewayToken: String = "",
     override var lastDurableSessionId: String = "",
+    override var durableParticipantId: String = "",
     // Local-chain execution settings
     override var plannerMaxTokens: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS,
     override var plannerTemperature: Double = SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE,
@@ -568,6 +585,23 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getString(KEY_LAST_DURABLE_SESSION_ID, "") ?: ""
         set(value) { prefs.edit().putString(KEY_LAST_DURABLE_SESSION_ID, value).apply() }
 
+    // ── PR-8Android: Stable per-installation participant ID ───────────────────
+    //
+    // Generated lazily on first access: if the preference is blank (first install or
+    // cleared data), a fresh UUID v4 is generated, persisted, and returned.  Subsequent
+    // reads return the persisted value so the ID survives process kills and restarts.
+    // The getter-side lazy-generate pattern avoids any initialisation-order issues.
+
+    override var durableParticipantId: String
+        get() {
+            val stored = prefs.getString(KEY_DURABLE_PARTICIPANT_ID, "") ?: ""
+            if (stored.isNotBlank()) return stored
+            val fresh = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DURABLE_PARTICIPANT_ID, fresh).apply()
+            return fresh
+        }
+        set(value) { prefs.edit().putString(KEY_DURABLE_PARTICIPANT_ID, value).apply() }
+
     // ── Local-chain execution settings ───────────────────────────────────────
 
     override var plannerMaxTokens: Int
@@ -623,6 +657,9 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
         // PR-7: Process-recreation re-attach hint key
         const val KEY_LAST_DURABLE_SESSION_ID = "last_durable_session_id"
+
+        // PR-8Android: Stable per-installation participant ID key
+        const val KEY_DURABLE_PARTICIPANT_ID = "durable_participant_id"
 
         // Local-chain execution keys
         const val KEY_PLANNER_MAX_TOKENS = "planner_max_tokens"

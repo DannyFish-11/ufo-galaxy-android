@@ -1790,6 +1790,26 @@ object StabilizationBaseline {
                 "participant-record correlation.",
             introducedPr = 79
         )
+    ) + listOf(
+
+        // ── PR-8Android: R8 canonical path closure surfaces ───────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-r8-canonical-path-closure",
+            displayName = "AndroidR8CanonicalPathClosureContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidR8CanonicalPathClosureContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-8Android R8 canonical-path closure contract. Wires LocalExecutionModeGate " +
+                "and DurableParticipantIdentity (both introduced in PR-79) into the canonical " +
+                "DeviceStateSnapshotPayload and DeviceExecutionEventPayload emission paths. " +
+                "Closes the R8 gap: V2 android_runtime_transition_reducer.py can now read " +
+                "execution_mode_state directly; V2 android_device_state_store.py can now read " +
+                "durable_participant_id and participant_identity_freshness without applying its " +
+                "own inference heuristics. CLOSURE_INVARIANTS provides machine-verifiable " +
+                "evidence that the fields are present on the canonical emission paths.",
+            introducedPr = 80
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
