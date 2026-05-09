@@ -59,13 +59,7 @@ object AndroidMeshParticipationContract {
             KEY_FULL_MESH_RUNTIME_EXECUTABLE to fullMeshRuntimeExecutable,
             KEY_CONSTRAINED_REASONS to constrainedReasons,
             KEY_RELATIONSHIP_GRAPH_VERSION to RELATIONSHIP_GRAPH_VERSION,
-            KEY_RUNTIME_RELATIONSHIPS to RUNTIME_RELATIONSHIPS.map { relationship ->
-                mapOf(
-                    "from" to relationship.from,
-                    "to" to relationship.to,
-                    "semantic" to relationship.semantic
-                )
-            },
+            KEY_RUNTIME_RELATIONSHIPS to RUNTIME_RELATIONSHIP_WIRE_MAPS,
             KEY_LOCAL_COLLABORATION_AGENT_SCOPE to LOCAL_COLLABORATION_AGENT_SCOPE,
             KEY_MESH_STATE_SEMANTICS to MESH_STATE_SEMANTICS,
             KEY_MESH_RESULT_SEMANTICS to MESH_RESULT_SEMANTICS,
@@ -174,6 +168,14 @@ object AndroidMeshParticipationContract {
         "barrier_coordination_deferred_until_cross_repo_runtime_contract_is_closed",
         "android_participates_as_execution_participant_not_mesh_coordinator"
     )
+
+    private val RUNTIME_RELATIONSHIP_WIRE_MAPS: List<Map<String, String>> = RUNTIME_RELATIONSHIPS.map { relationship ->
+        mapOf(
+            "from" to relationship.from,
+            "to" to relationship.to,
+            "semantic" to relationship.semantic
+        )
+    }
 
     private val REQUIRED_FULL_MESH_CAPABILITIES = setOf(
         HybridParticipantCapability.HYBRID_EXECUTE_FULL,
