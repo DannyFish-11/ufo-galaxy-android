@@ -245,7 +245,7 @@ object AndroidMeshParticipationContract {
         )
     }
 
-    const val RELATIONSHIP_GRAPH_VERSION: Int = 2
+    const val RELATIONSHIP_GRAPH_VERSION: Int = 1
 
     const val REASON_MESH_SUBTASK_NOT_EXECUTABLE = "mesh_subtask_not_executable"
     const val REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE = "delegated_takeover_not_executable"

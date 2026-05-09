@@ -316,7 +316,7 @@ class Pr8AndroidMeshParticipationContractTest {
         val staleReplayDecision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(
             message = OfflineTaskQueue.QueuedMessage(
                 type = "goal_execution_result",
-                json = STALE_DELEGATED_RESULT_PAYLOAD_JSON,
+                json = staleDelegatedResultPayload(STALE_DELEGATED_TASK_ID),
                 sessionTag = OLD_SESSION
             ),
             currentDurableSessionId = NEW_SESSION
@@ -329,9 +329,12 @@ class Pr8AndroidMeshParticipationContractTest {
     }
 
     companion object {
-        private const val STALE_DELEGATED_RESULT_PAYLOAD_JSON = """{"payload":{"task_id":"delegated-old-session"}}"""
+        private const val STALE_DELEGATED_TASK_ID = "delegated-old-session"
         private const val OLD_SESSION = "session-old"
         private const val NEW_SESSION = "session-new"
+
+        private fun staleDelegatedResultPayload(taskId: String): String =
+            """{"payload":{"task_id":"$taskId"}}"""
     }
 
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =
