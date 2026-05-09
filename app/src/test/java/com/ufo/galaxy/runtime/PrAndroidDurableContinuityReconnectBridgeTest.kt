@@ -516,6 +516,50 @@ class PrAndroidDurableContinuityReconnectBridgeTest {
         )
     }
 
+    @Test
+    fun `WsClient clears epoch when durableSessionId is explicitly blanked`() {
+        val (_, client) = buildController()
+        client.updateRuntimeConnectionConfig(
+            durableSessionId = "durable-era-1",
+            sessionContinuityEpoch = 7
+        )
+        assertEquals("durable-era-1", client.getDurableSessionId())
+        assertEquals(7, client.getSessionContinuityEpoch())
+
+        client.updateRuntimeConnectionConfig(durableSessionId = "")
+
+        assertNull("Blank durableSessionId must clear durable continuity identity", client.getDurableSessionId())
+        assertNull("Clearing durableSessionId must also clear continuity epoch", client.getSessionContinuityEpoch())
+    }
+
+    @Test
+    fun `WsClient ignores epoch updates when durable session authority is missing`() {
+        val (_, client) = buildController()
+        client.clearRuntimeAttachmentSessionIdentity()
+
+        client.updateRuntimeConnectionConfig(sessionContinuityEpoch = 9)
+
+        assertNull(
+            "sessionContinuityEpoch must remain null when durableSessionId is absent",
+            client.getSessionContinuityEpoch()
+        )
+    }
+
+    @Test
+    fun `WsClient clears epoch when durableSessionId is whitespace-only`() {
+        val (_, client) = buildController()
+        client.updateRuntimeConnectionConfig(
+            durableSessionId = "durable-era-2",
+            sessionContinuityEpoch = 3
+        )
+        assertEquals(3, client.getSessionContinuityEpoch())
+
+        client.updateRuntimeConnectionConfig(durableSessionId = "   ")
+
+        assertNull("Whitespace-only durableSessionId must clear continuity identity", client.getDurableSessionId())
+        assertNull("Whitespace-only durableSessionId must also clear continuity epoch", client.getSessionContinuityEpoch())
+    }
+
     // ── RuntimeController / WsClient — cross-object consistency after reconnect
 
     @Test

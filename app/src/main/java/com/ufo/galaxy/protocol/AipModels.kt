@@ -890,9 +890,15 @@ data class GoalExecutionPayload(
  * @param continuity_token  Echoed from [GoalExecutionPayload.continuity_token] so V2 can
  *                       correlate the result with the originating durable continuity context.
  *                       `null` for legacy / non-continuity dispatches.
+ * @param recovery_context  Echoed from [GoalExecutionPayload.recovery_context] when non-empty
+ *                       so V2 can recover execution-relevant recovery hints without relying on
+ *                       separate side channels. `null` when no recovery context was provided.
  * @param is_resumable   Echoed from [GoalExecutionPayload.is_resumable] so V2 can determine
  *                       whether Android treated this execution as resumable or terminal.
  *                       `null` for legacy senders.
+ * @param interruption_reason Echoed from [GoalExecutionPayload.interruption_reason] so V2 can
+ *                       preserve interruption semantics across resume/handoff/recovery paths.
+ *                       `null` when no interruption reason was provided.
  * @param dispatch_trace_id  Echoed from [GoalExecutionPayload.dispatch_trace_id] so V2 can
  *                       correlate the result with the originating dispatch chain.  `null`
  *                       for legacy / pre-V2 senders that do not include dispatch tracing.
@@ -973,7 +979,9 @@ data class GoalResultPayload(
     val executor_target_type: String? = null,
     // ── PR-F: V2 durable continuity and recovery context (optional; echoed for full-chain correlation) ──
     val continuity_token: String? = null,
+    val recovery_context: Map<String, String>? = null,
     val is_resumable: Boolean? = null,
+    val interruption_reason: String? = null,
     // ── PR-G: V2 observability/tracing metadata (optional; echoed for full-chain correlation) ──
     val dispatch_trace_id: String? = null,
     // ── PR-48: V2 richer dispatch metadata (optional; echoed for full-chain correlation) ──

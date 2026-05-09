@@ -105,13 +105,17 @@ class AutonomousExecutionPipelineTest {
         taskId: String = "t-001",
         goal: String = "open WeChat",
         groupId: String? = null,
-        subtaskIndex: Int? = null
+        subtaskIndex: Int? = null,
+        interruptionReason: String? = null,
+        recoveryContext: Map<String, String> = emptyMap()
     ) = GoalExecutionPayload(
         task_id = taskId,
         goal = goal,
         group_id = groupId,
         subtask_index = subtaskIndex,
-        max_steps = 5
+        max_steps = 5,
+        interruption_reason = interruptionReason,
+        recovery_context = recoveryContext
     )
 
     // ── goal_execution disabled ───────────────────────────────────────────────
@@ -318,5 +322,35 @@ class AutonomousExecutionPipelineTest {
         assertEquals(0L, result.latency_ms)
         assertEquals("agg-device", result.device_id)
         assertEquals("tablet", result.device_role)
+    }
+
+    @Test
+    fun `goal_execution success echoes interruption reason and recovery context`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = true)
+        val recovery = mapOf("resume_step" to "4", "origin" to "handoff")
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(
+                interruptionReason = "transport_degraded",
+                recoveryContext = recovery
+            )
+        )
+        assertEquals(EdgeExecutor.STATUS_SUCCESS, result.status)
+        assertEquals("transport_degraded", result.interruption_reason)
+        assertEquals(recovery, result.recovery_context)
+    }
+
+    @Test
+    fun `goal_execution disabled echoes interruption reason and recovery context`() {
+        val pipeline = buildPipeline(goalExecutionEnabled = false)
+        val recovery = mapOf("resume_step" to "2")
+        val result = pipeline.handleGoalExecution(
+            buildGoalPayload(
+                interruptionReason = "process_recreation",
+                recoveryContext = recovery
+            )
+        )
+        assertEquals(AutonomousExecutionPipeline.STATUS_DISABLED, result.status)
+        assertEquals("process_recreation", result.interruption_reason)
+        assertEquals(recovery, result.recovery_context)
     }
 }

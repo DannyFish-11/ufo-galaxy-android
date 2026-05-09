@@ -431,13 +431,20 @@ class GalaxyWebSocketClient(
             this.configuredDeviceId = deviceId
         }
         if (runtimeAttachmentSessionId != null) {
-            this.runtimeAttachmentSessionId = runtimeAttachmentSessionId
+            this.runtimeAttachmentSessionId = runtimeAttachmentSessionId.takeIf { it.isNotBlank() }
         }
         if (durableSessionId != null) {
-            this.durableSessionId = durableSessionId
+            this.durableSessionId = durableSessionId.takeIf { it.isNotBlank() }
+            if (this.durableSessionId == null) {
+                this.sessionContinuityEpoch = null
+            }
         }
         if (sessionContinuityEpoch != null) {
-            this.sessionContinuityEpoch = sessionContinuityEpoch
+            if (this.durableSessionId != null) {
+                this.sessionContinuityEpoch = sessionContinuityEpoch.coerceAtLeast(0)
+            } else {
+                this.sessionContinuityEpoch = null
+            }
         }
         return changed
     }
