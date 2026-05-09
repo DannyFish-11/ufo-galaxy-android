@@ -233,7 +233,9 @@ class AutonomousExecutionPipeline(
                 device_role = deviceRole,
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
+                recovery_context = payload.recovery_context.takeIf { it.isNotEmpty() },
                 is_resumable = payload.is_resumable,
+                interruption_reason = payload.interruption_reason,
                 dispatch_trace_id = payload.dispatch_trace_id,
                 dispatch_plan_id = payload.dispatch_plan_id,
                 policy_routing_outcome = payload.policy_routing_outcome,
@@ -360,7 +362,9 @@ class AutonomousExecutionPipeline(
                 device_role = deviceRole,
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
+                recovery_context = payload.recovery_context.takeIf { it.isNotEmpty() },
                 is_resumable = payload.is_resumable,
+                interruption_reason = payload.interruption_reason,
                 dispatch_trace_id = payload.dispatch_trace_id,
                 dispatch_plan_id = payload.dispatch_plan_id,
                 policy_routing_outcome = payload.policy_routing_outcome,
@@ -481,7 +485,9 @@ class AutonomousExecutionPipeline(
         executor_target_type = payload.executor_target_type,
         // PR-F: echo continuity/recovery fields in disabled results so V2 can correlate
         continuity_token = payload.continuity_token,
+        recovery_context = payload.recovery_context.takeIf { it.isNotEmpty() },
         is_resumable = payload.is_resumable,
+        interruption_reason = payload.interruption_reason,
         // PR-G: echo dispatch_trace_id in disabled results for full-chain observability
         dispatch_trace_id = payload.dispatch_trace_id,
         // PR-48: echo dispatch_plan_id in disabled results for dispatch plan correlation
@@ -516,7 +522,9 @@ class AutonomousExecutionPipeline(
         executor_target_type = payload.executor_target_type,
         // PR-F: echo continuity/recovery fields in hold results so V2 can correlate
         continuity_token = payload.continuity_token,
+        recovery_context = payload.recovery_context.takeIf { it.isNotEmpty() },
         is_resumable = payload.is_resumable,
+        interruption_reason = payload.interruption_reason,
         // PR-G: echo dispatch_trace_id in hold results for full-chain observability
         dispatch_trace_id = payload.dispatch_trace_id,
         // PR-48: echo dispatch_plan_id in hold results for dispatch plan correlation
