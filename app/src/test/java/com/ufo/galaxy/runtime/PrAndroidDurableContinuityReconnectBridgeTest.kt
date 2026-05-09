@@ -545,6 +545,21 @@ class PrAndroidDurableContinuityReconnectBridgeTest {
         )
     }
 
+    @Test
+    fun `WsClient clears epoch when durableSessionId is whitespace-only`() {
+        val (_, client) = buildController()
+        client.updateRuntimeConnectionConfig(
+            durableSessionId = "durable-era-2",
+            sessionContinuityEpoch = 3
+        )
+        assertEquals(3, client.getSessionContinuityEpoch())
+
+        client.updateRuntimeConnectionConfig(durableSessionId = "   ")
+
+        assertNull("Whitespace-only durableSessionId must clear continuity identity", client.getDurableSessionId())
+        assertNull("Whitespace-only durableSessionId must also clear continuity epoch", client.getSessionContinuityEpoch())
+    }
+
     // ── RuntimeController / WsClient — cross-object consistency after reconnect
 
     @Test

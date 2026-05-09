@@ -437,6 +437,8 @@ class GalaxyWebSocketClient(
             this.durableSessionId = durableSessionId.takeIf { it.isNotBlank() }
             if (this.durableSessionId == null) {
                 this.sessionContinuityEpoch = null
+            } else {
+                this.sessionContinuityEpoch = this.sessionContinuityEpoch?.coerceAtLeast(0)
             }
         }
         if (sessionContinuityEpoch != null) {
