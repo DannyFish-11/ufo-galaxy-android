@@ -2121,7 +2121,33 @@ data class DeviceStateSnapshotPayload(
     //   staleness heuristics.  Null only as a defensive default.
     val execution_mode_state: String? = null,
     val durable_participant_id: String? = null,
-    val participant_identity_freshness: String? = null
+    val participant_identity_freshness: String? = null,
+
+    // PR-08Android: Canonical runtime truth unification fields.
+    //
+    // reported_state_semantic_class: the dominant semantic class of this snapshot, derived
+    //   from AndroidCanonicalRuntimeTruthContract.classifySnapshot().
+    //   Values: "capability" | "observation" | "active_runtime" | "derived_local" |
+    //           "terminal_reporting".
+    //   V2's canonical truth reducer uses this class to route the snapshot to the correct
+    //   truth tier (capability_truth, participant_observation, runtime_state_truth,
+    //   local_projection, or terminal_truth).  Null only as a defensive default.
+    //
+    // degraded_condition_class: the classification of any degraded, fallback, constrained,
+    //   partial, delayed, or recovered condition present at snapshot time.  Derived from
+    //   AndroidCanonicalRuntimeTruthContract.classifyDegradedCondition().
+    //   Values: "nominal" | "degraded" | "fallback" | "constrained" | "partial" |
+    //           "delayed" | "recovered".
+    //   V2 uses this class to determine dispatch policy adjustments.  Null only as defensive
+    //   default; populated at sendDeviceStateSnapshot().
+    //
+    // local_observation_basis: declares how the fields in this snapshot were derived.
+    //   Values: "live_runtime" | "cached_state" | "derived_projection" | "none".
+    //   V2 applies staleness heuristics based on this declaration.  Null only as defensive
+    //   default; "live_runtime" is the expected nominal value at sendDeviceStateSnapshot().
+    val reported_state_semantic_class: String? = null,
+    val degraded_condition_class: String? = null,
+    val local_observation_basis: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2257,7 +2283,27 @@ data class DeviceExecutionEventPayload(
     //         "cross_device_degraded" | "transitioning".
     // Emitted alongside each execution event so V2 can correlate the event with the
     // precise execution mode at the time of emission.  Null only as defensive default.
-    val execution_mode_state: String? = null
+    val execution_mode_state: String? = null,
+
+    // PR-08Android: Canonical runtime truth unification fields for execution events.
+    //
+    // reported_state_semantic_class: semantic class of the state this event reports.
+    //   Values: "capability" | "observation" | "active_runtime" | "derived_local" |
+    //           "terminal_reporting".
+    //   Allows V2 to route the event to the correct truth tier without field inspection.
+    //   Null only as defensive default; populated at event-emission call sites.
+    //
+    // result_uplink_semantic_class: semantic class of any result uplink this event carries.
+    //   Values: "authoritative_terminal" | "authoritative_interruption" |
+    //           "authoritative_recovery" | "informational".
+    //   V2 uses this class to determine what truth-maintenance action to apply:
+    //     - authoritative_terminal: close execution, apply success/failure/rejected policy.
+    //     - authoritative_interruption: mark interrupted; apply retry/fallback policy.
+    //     - authoritative_recovery: close interruption era; resume normal policy.
+    //     - informational: record progress; no terminal action.
+    //   Null only as defensive default; populated at event-emission call sites.
+    val reported_state_semantic_class: String? = null,
+    val result_uplink_semantic_class: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

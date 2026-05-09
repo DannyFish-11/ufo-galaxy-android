@@ -1810,6 +1810,32 @@ object StabilizationBaseline {
                 "evidence that the fields are present on the canonical emission paths.",
             introducedPr = 80
         )
+    ) + listOf(
+
+        // ── PR-08Android: Canonical runtime truth unification ─────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-canonical-runtime-truth-contract",
+            displayName = "AndroidCanonicalRuntimeTruthContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08Android canonical runtime truth unification contract. Introduces " +
+                "ReportedStateSemanticClass (5-class: capability, observation, active_runtime, " +
+                "derived_local, terminal_reporting), DegradedConditionClass (7-class: nominal, " +
+                "degraded, fallback, constrained, partial, delayed, recovered), " +
+                "ResultUplinkSemanticClass (4-class: authoritative_terminal, authoritative_interruption, " +
+                "authoritative_recovery, informational), and LocalObservationBasis (4-value: live_runtime, " +
+                "cached_state, derived_projection, none). Classifier methods classifySnapshot(), " +
+                "classifyDegradedCondition(), and classifyResultUplink() derive the dominant class " +
+                "from existing payload fields. New wire fields reported_state_semantic_class, " +
+                "degraded_condition_class, local_observation_basis added to DeviceStateSnapshotPayload; " +
+                "reported_state_semantic_class and result_uplink_semantic_class added to " +
+                "DeviceExecutionEventPayload. Closes the semantic-class gap: V2's canonical truth " +
+                "reducer can now route any Android snapshot to the correct truth tier without implicit " +
+                "per-field knowledge of derivation paths.",
+            introducedPr = 81
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
