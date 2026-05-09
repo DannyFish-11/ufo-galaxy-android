@@ -1031,9 +1031,15 @@ class GalaxyWebSocketClient(
         val handshakeMetadata = report.metadata.toMutableMap().apply {
             putAll(metadataEvidence)
         }
-        val missingRequired = report.missingMetadataKeys()
-        val missingCanonicalGate = report.missingCanonicalGateMetadataKeys()
-        val missingSchedulingBasis = report.missingSchedulingBasisKeys()
+        @Suppress("UNCHECKED_CAST")
+        val missingRequired =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_REQUIRED_KEYS] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val missingCanonicalGate =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val missingSchedulingBasis =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS] as? List<String>).orEmpty()
 
         val handshake = JsonObject().apply {
             addProperty("type", "capability_report")

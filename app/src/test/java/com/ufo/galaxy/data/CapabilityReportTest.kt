@@ -192,7 +192,7 @@ class CapabilityReportTest {
     }
 
     @Test
-    fun `metadataEvidenceSurface marks required and canonical complete for AppSettings metadata`() {
+    fun `metadataEvidenceSurface marks required and canonical complete when those key sets are present`() {
         val settings = InMemoryAppSettings(
             crossDeviceEnabled = true,
             goalExecutionEnabled = true,
