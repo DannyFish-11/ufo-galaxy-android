@@ -317,9 +317,9 @@ class Pr8AndroidMeshParticipationContractTest {
             message = OfflineTaskQueue.QueuedMessage(
                 type = "goal_execution_result",
                 json = staleDelegatedResultPayload(STALE_DELEGATED_TASK_ID),
-                sessionTag = OLD_SESSION
+                sessionTag = STALE_SESSION_ID
             ),
-            currentDurableSessionId = NEW_SESSION
+            currentDurableSessionId = CURRENT_SESSION_ID
         )
         assertEquals(
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED,
@@ -330,8 +330,8 @@ class Pr8AndroidMeshParticipationContractTest {
 
     companion object {
         private const val STALE_DELEGATED_TASK_ID = "delegated-old-session"
-        private const val OLD_SESSION = "session-old"
-        private const val NEW_SESSION = "session-new"
+        private const val STALE_SESSION_ID = "session-old"
+        private const val CURRENT_SESSION_ID = "session-new"
 
         private fun staleDelegatedResultPayload(taskId: String): String =
             """{"payload":{"task_id":"$taskId"}}"""
