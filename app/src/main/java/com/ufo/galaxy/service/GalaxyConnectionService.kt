@@ -44,6 +44,7 @@ import com.ufo.galaxy.runtime.wireLabel
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.RuntimeStateTruthSequencer
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
@@ -158,6 +159,7 @@ class GalaxyConnectionService : Service() {
     private lateinit var webSocketClient: GalaxyWebSocketClient
     private val gson = Gson()
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val runtimeStateTruthSequencer = RuntimeStateTruthSequencer()
 
     /** Stable device identifier used in all outbound AIP v3 message envelopes. */
     private val localDeviceId: String by lazy {
@@ -317,7 +319,15 @@ class GalaxyConnectionService : Service() {
     private val deviceExecutionEventSink = DeviceExecutionEventSink { payload ->
         try {
             val modeState = UFOGalaxyApplication.appSettings.authoritativeModeState()
+            val eventStamp = runtimeStateTruthSequencer.nextEventStamp(
+                phase = payload.phase,
+                requestedTimestampMs = payload.timestamp_ms
+            )
             val enrichedPayload = payload.copy(
+                timestamp_ms = eventStamp.timestampMs,
+                execution_event_sequence = eventStamp.eventSequence,
+                active_execution_count = eventStamp.activeExecutionCount,
+                execution_busy = eventStamp.executionBusy,
                 mode_state = modeState.modeState,
                 mode_readiness_state = modeState.modeReadinessState,
                 cross_device_eligibility = modeState.crossDeviceEligibility,
@@ -337,6 +347,9 @@ class GalaxyConnectionService : Service() {
                     "blocking_reason" to enrichedPayload.blocking_reason,
                     "stagnation_detected" to enrichedPayload.stagnation_detected,
                     "fallback_tier" to (enrichedPayload.fallback_tier ?: ""),
+                    "execution_event_sequence" to (enrichedPayload.execution_event_sequence ?: -1L),
+                    "active_execution_count" to (enrichedPayload.active_execution_count ?: -1),
+                    "execution_busy" to (enrichedPayload.execution_busy ?: false),
                     "event_id" to enrichedPayload.event_id,
                     "source_component" to enrichedPayload.source_component
                 )
@@ -2606,6 +2619,7 @@ class GalaxyConnectionService : Service() {
                 return
             }
             val settings = UFOGalaxyApplication.appSettings
+            val snapshotStamp = runtimeStateTruthSequencer.nextSnapshotStamp()
 
             // ── Native runtime availability ───────────────────────────────────
             val llamaCppAvailable = NativeInferenceLoader.isLlamaCppAvailable()
@@ -2848,6 +2862,8 @@ class GalaxyConnectionService : Service() {
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
+                snapshot_ts = snapshotStamp.timestampMs,
+                snapshot_sequence = snapshotStamp.snapshotSequence,
                 llama_cpp_available = llamaCppAvailable,
                 ncnn_available = ncnnAvailable,
                 active_runtime_type = activeRuntimeType,
@@ -2875,6 +2891,8 @@ class GalaxyConnectionService : Service() {
                 runtime_health_snapshot = runtimeHealthMap,
                 offline_queue_depth = offlineQueueDepth,
                 current_fallback_tier = currentFallbackTier,
+                active_execution_count = snapshotStamp.activeExecutionCount,
+                execution_busy = snapshotStamp.executionBusy,
                 planner_fallback_tier = plannerFallbackTier,
                 grounding_fallback_tier = groundingFallbackTier,
                 // PR-6: propagate session identity so V2 can correlate this snapshot with the
@@ -2939,6 +2957,9 @@ class GalaxyConnectionService : Service() {
                     "warmup_result" to warmupResult,
                     "offline_queue_depth" to offlineQueueDepth,
                     "current_fallback_tier" to currentFallbackTier,
+                    "snapshot_sequence" to snapshotStamp.snapshotSequence,
+                    "active_execution_count" to snapshotStamp.activeExecutionCount,
+                    "execution_busy" to snapshotStamp.executionBusy,
                     "mode_state" to modeState.modeState,
                     "mode_readiness_state" to modeState.modeReadinessState,
                     "cross_device_eligibility" to modeState.crossDeviceEligibility,

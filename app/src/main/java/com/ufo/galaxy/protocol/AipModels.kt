@@ -1946,6 +1946,9 @@ data class DeviceAuditReportPayload(
 data class DeviceStateSnapshotPayload(
     val device_id: String,
     val snapshot_ts: Long = System.currentTimeMillis(),
+    // Monotone emission sequence (service-lifecycle scoped) for deterministic ordering on
+    // reconnect/replay paths where wall-clock order alone may be ambiguous.
+    val snapshot_sequence: Long? = null,
 
     // Native runtime availability
     val llama_cpp_available: Boolean?,
@@ -1978,6 +1981,9 @@ data class DeviceStateSnapshotPayload(
     // Queue / fallback
     val offline_queue_depth: Int?,
     val current_fallback_tier: String?,
+    // Explicit busy/idle projection from Android execution-event state tracking.
+    val active_execution_count: Int? = null,
+    val execution_busy: Boolean? = null,
 
     // PR-3: Per-subsystem fallback tier fields accepted by V2 _parse_state_snapshot.
     // Derived from LocalLoopConfig.fallback; null when the config is not yet initialised.
@@ -2173,6 +2179,12 @@ data class DeviceExecutionEventPayload(
     val blocking_reason: String = "",
     val stagnation_detected: Boolean = false,
     val fallback_tier: String? = null,
+    // Monotone execution-event sequence (service-lifecycle scoped) for deterministic event
+    // ordering on reconnect/replay paths where wall-clock timestamps can collide.
+    val execution_event_sequence: Long? = null,
+    // Explicit busy/idle projection after this phase transition is applied.
+    val active_execution_count: Int? = null,
+    val execution_busy: Boolean? = null,
     val device_id: String = "",
     val event_id: String = java.util.UUID.randomUUID().toString(),
     val source_component: String = "",
