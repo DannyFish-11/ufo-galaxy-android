@@ -1950,6 +1950,21 @@ data class DeviceAuditReportPayload(
  *                                   snapshot time.  Derived from [RuntimeHealthSnapshot.groundingHealth].
  *                                   Distinct from `grounding_fallback_tier` (which reflects fallback
  *                                   ladder config, not live health).
+ *
+ * PR-08 (Canonical Runtime Truth Unification):
+ * @param reporting_scenario         Wire value of [com.ufo.galaxy.runtime.AndroidCanonicalTruthAlignmentContract.ReportingScenario]
+ *                                   at snapshot emission time.  Values: `"normal"` | `"degraded"` |
+ *                                   `"fallback"` | `"constrained"` | `"delayed"` | `"partial"` |
+ *                                   `"recovered"`.  V2 center-side consumers MUST read this field
+ *                                   first to apply the appropriate canonical truth policy before
+ *                                   interpreting individual state fields.  `null` only as a
+ *                                   defensive default when emission context is unknown.
+ * @param state_surface_class        Wire value of [com.ufo.galaxy.runtime.AndroidCanonicalTruthAlignmentContract.StateSurfaceClass]
+ *                                   representing the dominant state category at snapshot emission time.
+ *                                   Values: `"locally_observed"` | `"locally_derived"` |
+ *                                   `"active_runtime"` | `"terminal_reported"`.  Allows V2 to
+ *                                   classify the snapshot's primary semantic content without
+ *                                   consulting individual fields.  `null` only as a defensive default.
  */
 data class DeviceStateSnapshotPayload(
     val device_id: String,
@@ -2121,7 +2136,25 @@ data class DeviceStateSnapshotPayload(
     //   staleness heuristics.  Null only as a defensive default.
     val execution_mode_state: String? = null,
     val durable_participant_id: String? = null,
-    val participant_identity_freshness: String? = null
+    val participant_identity_freshness: String? = null,
+
+    // PR-08: Canonical Runtime Truth Unification fields.
+    //
+    // reporting_scenario: canonical reporting context at snapshot emission time, derived from
+    //   AndroidCanonicalTruthAlignmentContract.ReportingScenario.
+    //   Values: "normal" | "degraded" | "fallback" | "constrained" | "delayed" |
+    //           "partial" | "recovered".
+    //   V2 center-side consumers MUST read this field first and apply the appropriate
+    //   canonical truth policy before interpreting individual state fields.
+    //   Null only as a defensive default when the emission context is unknown.
+    //
+    // state_surface_class: the dominant state surface category at snapshot emission time,
+    //   derived from AndroidCanonicalTruthAlignmentContract.StateSurfaceClass.
+    //   Values: "locally_observed" | "locally_derived" | "active_runtime" | "terminal_reported".
+    //   Allows V2 to classify the snapshot's primary semantic content without consulting
+    //   individual fields. Null only as a defensive default.
+    val reporting_scenario: String? = null,
+    val state_surface_class: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2257,7 +2290,21 @@ data class DeviceExecutionEventPayload(
     //         "cross_device_degraded" | "transitioning".
     // Emitted alongside each execution event so V2 can correlate the event with the
     // precise execution mode at the time of emission.  Null only as defensive default.
-    val execution_mode_state: String? = null
+    val execution_mode_state: String? = null,
+
+    // PR-08: Canonical Runtime Truth Unification fields.
+    //
+    // reporting_scenario: canonical reporting context at event emission time.
+    //   Values: "normal" | "degraded" | "fallback" | "constrained" | "delayed" |
+    //           "partial" | "recovered".
+    //   V2 center-side consumers MUST read this field to determine the appropriate
+    //   canonical truth policy for this event. Null only as a defensive default.
+    //
+    // state_surface_class: the dominant state surface category at event emission time.
+    //   Values: "locally_observed" | "locally_derived" | "active_runtime" | "terminal_reported".
+    //   Null only as a defensive default.
+    val reporting_scenario: String? = null,
+    val state_surface_class: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

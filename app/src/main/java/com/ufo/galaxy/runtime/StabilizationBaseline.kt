@@ -1810,6 +1810,97 @@ object StabilizationBaseline {
                 "evidence that the fields are present on the canonical emission paths.",
             introducedPr = 80
         )
+    ) + listOf(
+
+        // ── PR-08: Canonical Runtime Truth Unification (Android side) ─────────
+        //
+        // Formalizes the four-category state surface classification (LOCALLY_OBSERVED,
+        // LOCALLY_DERIVED, ACTIVE_RUNTIME, TERMINAL_REPORTED), seven-scenario reporting
+        // classification (NORMAL, DEGRADED, FALLBACK, CONSTRAINED, DELAYED, PARTIAL,
+        // RECOVERED), and canonical uplink discipline for each scenario. Closes the
+        // remaining semantic gaps in Android state/reporting: distributed surfaces are
+        // now classified, reporting context is explicit on the wire, and center-side
+        // consumers have a single canonical truth policy entry point.
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-canonical-truth-alignment-contract",
+            displayName = "AndroidCanonicalTruthAlignmentContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCanonicalTruthAlignmentContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08 (Android side) canonical runtime truth unification contract. " +
+                "Defines StateSurfaceClass (4 categories: LOCALLY_OBSERVED, LOCALLY_DERIVED, " +
+                "ACTIVE_RUNTIME, TERMINAL_REPORTED) with explicit precedence ordering; " +
+                "ReportingScenario (7 scenarios: NORMAL, DEGRADED, FALLBACK, CONSTRAINED, " +
+                "DELAYED, PARTIAL, RECOVERED) with per-scenario V2 policy actions; " +
+                "STATE_SURFACE_REGISTRY mapping all canonical Android state surfaces to their " +
+                "StateSurfaceClass; REPORTING_SCENARIO_UPLINK_RULES specifying required fields " +
+                "per scenario; and CANONICAL_TRUTH_INVARIANTS for regression protection. " +
+                "Adds reporting_scenario and state_surface_class fields to both " +
+                "DeviceStateSnapshotPayload and DeviceExecutionEventPayload so V2 center-side " +
+                "consumers have an explicit canonical truth policy entry point on every snapshot " +
+                "and execution event.",
+            introducedPr = 8
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "state-surface-class",
+            displayName = "AndroidCanonicalTruthAlignmentContract.StateSurfaceClass",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCanonicalTruthAlignmentContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08 four-category state surface classification enum for Android runtime " +
+                "truth. LOCALLY_OBSERVED (raw hardware/OS/user observations, precedence 10), " +
+                "LOCALLY_DERIVED (derived from observations via documented contracts, precedence 20), " +
+                "TERMINAL_REPORTED (terminal outcomes reported to center, precedence 25), and " +
+                "ACTIVE_RUNTIME (in-flight execution state, precedence 30, highest). " +
+                "Explicit precedence ordering resolves conflicts when surfaces in different " +
+                "categories disagree. V2 MUST use this classification when interpreting Android " +
+                "state snapshots and execution events.",
+            introducedPr = 8
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "reporting-scenario",
+            displayName = "AndroidCanonicalTruthAlignmentContract.ReportingScenario",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCanonicalTruthAlignmentContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08 seven-scenario reporting classification enum for Android uplink context. " +
+                "NORMAL (accept at face value), DEGRADED (reduce capability estimate, block full " +
+                "dispatch), FALLBACK (reduced-path execution, expect fallback_tier), CONSTRAINED " +
+                "(hold additional dispatch), DELAYED (do not treat as failure), PARTIAL (accumulate " +
+                "results, do not close parent task), RECOVERED (re-evaluate dispatch eligibility). " +
+                "Carried as reporting_scenario in DeviceStateSnapshotPayload and " +
+                "DeviceExecutionEventPayload so V2 can apply the appropriate canonical truth policy " +
+                "before reading individual state fields.",
+            introducedPr = 8
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "device-state-snapshot-reporting-scenario-field",
+            displayName = "DeviceStateSnapshotPayload.reporting_scenario / .state_surface_class",
+            packagePath = "com.ufo.galaxy.protocol.DeviceStateSnapshotPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08 new wire fields on DeviceStateSnapshotPayload: reporting_scenario " +
+                "(ReportingScenario.wireValue) and state_surface_class (StateSurfaceClass.wireValue). " +
+                "Both fields default to null for backward compatibility with pre-PR-08 consumers. " +
+                "V2 MUST read reporting_scenario first on every snapshot; the field provides an " +
+                "unambiguous canonical truth policy entry point that eliminates the need for V2 to " +
+                "infer reporting context from individual field combinations.",
+            introducedPr = 8
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "device-execution-event-reporting-scenario-field",
+            displayName = "DeviceExecutionEventPayload.reporting_scenario / .state_surface_class",
+            packagePath = "com.ufo.galaxy.protocol.DeviceExecutionEventPayload",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-08 new wire fields on DeviceExecutionEventPayload: reporting_scenario " +
+                "(ReportingScenario.wireValue) and state_surface_class (StateSurfaceClass.wireValue). " +
+                "Both fields default to null for backward compatibility with pre-PR-08 consumers. " +
+                "Symmetric with the snapshot fields so center-side consumers can apply canonical " +
+                "truth policy uniformly across both snapshot and execution-event uplink paths.",
+            introducedPr = 8
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
