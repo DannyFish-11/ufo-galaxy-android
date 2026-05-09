@@ -151,6 +151,7 @@ class GalaxyWebSocketClient(
         private val RECONNECT_BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
         private const val RECONNECT_JITTER_MAX_MS = 1_000L
         private const val MAX_RECONNECT_ATTEMPTS = 10
+        private const val DEFAULT_MESH_ROLE = "participant"
 
         /**
          * Builds an OkHttpClient configured for WebSocket connections.
@@ -322,8 +323,8 @@ class GalaxyWebSocketClient(
     fun getTraceId(): String = sessionTraceId
 
     /** Mesh session ID currently joined; null if not participating in any mesh. Set by [sendMeshJoin]. */
-    @Volatile private var currentMeshId: String? = null
-    private var currentMeshRole: String = "participant"
+    private var currentMeshId: String? = null
+    private var currentMeshRole: String = DEFAULT_MESH_ROLE
     private var currentMeshCapabilities: List<String> = emptyList()
     private val meshContextLock = Any()
 
@@ -766,7 +767,7 @@ class GalaxyWebSocketClient(
     fun disconnect() {
         // Notify the mesh coordinator before closing the WebSocket.
         // Capture into a local val to avoid a TOCTOU race between the null-check and the call.
-        val meshId = currentMeshId
+        val meshId = currentMeshIdSnapshot()
         if (meshId != null) sendMeshLeave(meshId, "disconnect")
         Log.i(TAG, "[WS:DISCONNECT] Explicit disconnect requested")
         shouldReconnect = false
@@ -1113,7 +1114,7 @@ class GalaxyWebSocketClient(
      */
     fun sendMeshJoin(
         meshId: String,
-        role: String = "participant",
+        role: String = DEFAULT_MESH_ROLE,
         capabilities: List<String> = emptyList()
     ): Boolean {
         rememberMeshRejoinContext(meshId = meshId, role = role, capabilities = capabilities)
@@ -1219,7 +1220,7 @@ class GalaxyWebSocketClient(
     private fun clearMeshRejoinContext() {
         synchronized(meshContextLock) {
             currentMeshId = null
-            currentMeshRole = "participant"
+            currentMeshRole = DEFAULT_MESH_ROLE
             currentMeshCapabilities = emptyList()
         }
     }
@@ -1232,6 +1233,8 @@ class GalaxyWebSocketClient(
             capabilities = currentMeshCapabilities
         )
     }
+
+    private fun currentMeshIdSnapshot(): String? = synchronized(meshContextLock) { currentMeshId }
 
     internal fun buildMeshRejoinEnvelopeForTest(): String? = buildMeshRejoinEnvelope()?.json
 
