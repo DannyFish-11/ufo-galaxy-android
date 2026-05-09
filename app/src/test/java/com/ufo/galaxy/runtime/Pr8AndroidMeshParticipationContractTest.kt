@@ -17,6 +17,7 @@ class Pr8AndroidMeshParticipationContractTest {
         )
 
         assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, report.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.STABLE, report.continuityLevel)
         assertTrue(report.meshSubtaskExecutable)
         assertTrue(report.delegatedTakeoverExecutable)
         assertFalse(report.fullMeshRuntimeExecutable)
@@ -46,6 +47,7 @@ class Pr8AndroidMeshParticipationContractTest {
         )
 
         assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, report.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.RECOVERING, report.continuityLevel)
         assertFalse(report.meshSubtaskExecutable)
         assertFalse(report.delegatedTakeoverExecutable)
         assertFalse(report.fullMeshRuntimeExecutable)
@@ -55,6 +57,27 @@ class Pr8AndroidMeshParticipationContractTest {
                 AndroidMeshParticipationContract.REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE
             )
         )
+        assertTrue(
+            report.constrainedReasons.contains(AndroidMeshParticipationContract.REASON_CONTINUITY_RECOVERING)
+        )
+    }
+
+    @Test
+    fun `evaluate returns DETACHED continuity when orchestration is disconnected`() {
+        val disconnected = MultiDeviceParticipantOrchestrationState.from(
+            healthState = ParticipantHealthState.UNKNOWN,
+            reconnectState = ReconnectRecoveryState.IDLE,
+            readinessState = ParticipantReadinessState.NOT_READY,
+            participationState = RuntimeHostDescriptor.HostParticipationState.INACTIVE
+        )
+        val report = AndroidMeshParticipationContract.evaluate(
+            orchestration = disconnected,
+            rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
+        )
+
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, report.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ContinuityLevel.DETACHED, report.continuityLevel)
+        assertTrue(report.constrainedReasons.contains(AndroidMeshParticipationContract.REASON_CONTINUITY_DETACHED))
     }
 
     @Test
@@ -125,6 +148,7 @@ class Pr8AndroidMeshParticipationContractTest {
 
         val wireMap = report.toWireMap()
         assertEquals("partial", wireMap[AndroidMeshParticipationContract.KEY_READINESS_LEVEL])
+        assertEquals("stable", wireMap[AndroidMeshParticipationContract.KEY_CONTINUITY_LEVEL])
         assertEquals(true, wireMap[AndroidMeshParticipationContract.KEY_MESH_SUBTASK_EXECUTABLE])
         assertEquals(true, wireMap[AndroidMeshParticipationContract.KEY_DELEGATED_TAKEOVER_EXECUTABLE])
         assertEquals(false, wireMap[AndroidMeshParticipationContract.KEY_FULL_MESH_RUNTIME_EXECUTABLE])

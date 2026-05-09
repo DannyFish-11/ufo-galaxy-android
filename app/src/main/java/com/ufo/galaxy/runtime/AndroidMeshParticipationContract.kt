@@ -23,6 +23,15 @@ object AndroidMeshParticipationContract {
     }
 
     /**
+     * Runtime continuity posture for Android collaboration participation.
+     */
+    enum class ContinuityLevel(val wireValue: String) {
+        STABLE("stable"),
+        RECOVERING("recovering"),
+        DETACHED("detached")
+    }
+
+    /**
      * Runtime relationship edge between Android collaboration entry points.
      */
     data class RuntimeRelationship(
@@ -36,6 +45,7 @@ object AndroidMeshParticipationContract {
      */
     data class ParticipationReport(
         val readinessLevel: ReadinessLevel,
+        val continuityLevel: ContinuityLevel,
         val meshSubtaskExecutable: Boolean,
         val delegatedTakeoverExecutable: Boolean,
         val fullMeshRuntimeExecutable: Boolean,
@@ -43,6 +53,7 @@ object AndroidMeshParticipationContract {
     ) {
         fun toWireMap(): Map<String, Any> = mapOf(
             KEY_READINESS_LEVEL to readinessLevel.wireValue,
+            KEY_CONTINUITY_LEVEL to continuityLevel.wireValue,
             KEY_MESH_SUBTASK_EXECUTABLE to meshSubtaskExecutable,
             KEY_DELEGATED_TAKEOVER_EXECUTABLE to delegatedTakeoverExecutable,
             KEY_FULL_MESH_RUNTIME_EXECUTABLE to fullMeshRuntimeExecutable,
@@ -164,6 +175,16 @@ object AndroidMeshParticipationContract {
         val deferredRequiredCapabilities = REQUIRED_FULL_MESH_CAPABILITIES
             .filter { it.supportLevel != HybridParticipantCapability.SupportLevel.AVAILABLE }
 
+        val continuityLevel = when (orchestration.orchestrationState) {
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING,
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.RECOVERING ->
+                ContinuityLevel.RECOVERING
+            MultiDeviceParticipantOrchestrationState.OrchestrationState.DISCONNECTED ->
+                ContinuityLevel.DETACHED
+            else ->
+                ContinuityLevel.STABLE
+        }
+
         val fullMeshRuntimeExecutable = meshSubtaskExecutable &&
             delegatedTakeoverExecutable &&
             deferredRequiredCapabilities.isEmpty()
@@ -171,6 +192,8 @@ object AndroidMeshParticipationContract {
         val constrainedReasons = buildList {
             if (!meshSubtaskExecutable) add(REASON_MESH_SUBTASK_NOT_EXECUTABLE)
             if (!delegatedTakeoverExecutable) add(REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE)
+            if (continuityLevel == ContinuityLevel.RECOVERING) add(REASON_CONTINUITY_RECOVERING)
+            if (continuityLevel == ContinuityLevel.DETACHED) add(REASON_CONTINUITY_DETACHED)
             deferredRequiredCapabilities.forEach { capability ->
                 // Always serialize deferred capability identity with stable wireValue (not enum name).
                 add("$REASON_DEFERRED_CAPABILITY_PREFIX:${capability.wireValue}")
@@ -185,6 +208,7 @@ object AndroidMeshParticipationContract {
 
         return ParticipationReport(
             readinessLevel = readinessLevel,
+            continuityLevel = continuityLevel,
             meshSubtaskExecutable = meshSubtaskExecutable,
             delegatedTakeoverExecutable = delegatedTakeoverExecutable,
             fullMeshRuntimeExecutable = fullMeshRuntimeExecutable,
@@ -196,9 +220,12 @@ object AndroidMeshParticipationContract {
 
     const val REASON_MESH_SUBTASK_NOT_EXECUTABLE = "mesh_subtask_not_executable"
     const val REASON_DELEGATED_TAKEOVER_NOT_EXECUTABLE = "delegated_takeover_not_executable"
+    const val REASON_CONTINUITY_RECOVERING = "collaboration_continuity_recovering"
+    const val REASON_CONTINUITY_DETACHED = "collaboration_continuity_detached"
     const val REASON_DEFERRED_CAPABILITY_PREFIX = "deferred_capability"
 
     const val KEY_READINESS_LEVEL = "mesh_participation_readiness_level"
+    const val KEY_CONTINUITY_LEVEL = "mesh_participation_continuity_level"
     const val KEY_MESH_SUBTASK_EXECUTABLE = "mesh_subtask_executable"
     const val KEY_DELEGATED_TAKEOVER_EXECUTABLE = "delegated_takeover_executable"
     const val KEY_FULL_MESH_RUNTIME_EXECUTABLE = "full_mesh_runtime_executable"
