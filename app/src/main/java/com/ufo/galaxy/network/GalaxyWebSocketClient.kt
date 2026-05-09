@@ -598,7 +598,7 @@ class GalaxyWebSocketClient(
         merged["goal_execution_eligibility"] = crossDeviceEnabledValue && goalExecutionEnabled
         merged["parallel_execution_eligibility"] = crossDeviceEnabledValue && parallelExecutionEnabled
 
-        // Normalise potentially mixed-case external metadata values to canonical lowercase wire form.
+        // Normalize potentially mixed-case external metadata values to canonical lowercase wire form.
         val status = (merged["local_intelligence_status"] as? String)?.trim()?.lowercase()
             ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
         val inferredAvailableFromStatus =
