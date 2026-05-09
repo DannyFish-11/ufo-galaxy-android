@@ -55,11 +55,21 @@ object AndroidMeshParticipationRuntimeContract {
         val participationLifecycle: MeshParticipationLifecycleState,
         val barrierState: BarrierParticipationState,
         val collaborationLifecycle: CollaborationLifecycleState,
-        val constrainedReasons: List<String>
+        val constrainedReasons: List<String>,
+        val proofQuality: MeshRuntimeProofQuality = MeshRuntimeProofQuality.MISSING
     ) {
 
+        /**
+         * `true` only when the participation lifecycle permits new subtask assignments
+         * **and** the proof quality is not [MeshRuntimeProofQuality.MISSING].
+         *
+         * A [MeshRuntimeProofQuality.MISSING] proof grade means no runtime measurement is
+         * available; emitting `isParticipationReady = true` in that state would produce an
+         * over-optimistic readiness signal that V2 could misinterpret as a live-healthy node.
+         */
         val isParticipationReady: Boolean
-            get() = MeshParticipationLifecycleState.isAcceptingSubtasks(participationLifecycle)
+            get() = MeshParticipationLifecycleState.isAcceptingSubtasks(participationLifecycle) &&
+                proofQuality != MeshRuntimeProofQuality.MISSING
 
         val isRuntimeEngaged: Boolean
             get() = CollaborationLifecycleState.isActivelyProcessing(collaborationLifecycle)
@@ -85,6 +95,7 @@ object AndroidMeshParticipationRuntimeContract {
             put(KEY_PARTICIPATION_READY, isParticipationReady)
             put(KEY_RUNTIME_ENGAGED, isRuntimeEngaged)
             put(KEY_RUNTIME_CLOSED, isRuntimeClosed)
+            put(KEY_PROOF_QUALITY, proofQuality.wireValue)
         }
     }
 
@@ -97,6 +108,7 @@ object AndroidMeshParticipationRuntimeContract {
     const val KEY_PARTICIPATION_READY = "mesh_participation_ready"
     const val KEY_RUNTIME_ENGAGED = "mesh_runtime_engaged"
     const val KEY_RUNTIME_CLOSED = "mesh_runtime_closed"
+    const val KEY_PROOF_QUALITY = MeshRuntimeProofQuality.WIRE_KEY
 
     // ── Constrained-reason constants ─────────────────────────────────────────
 
@@ -180,11 +192,21 @@ object AndroidMeshParticipationRuntimeContract {
             lifecycleState = lifecycleState
         )
 
+        val proofQuality = MeshRuntimeProofQuality.derive(
+            healthState = healthState,
+            participationState = participationState,
+            barrierState = barrierState,
+            fallbackActive = fallbackActive,
+            crossDeviceAllowed = rollout.crossDeviceAllowed,
+            delegatedExecutionAllowed = rollout.delegatedExecutionAllowed
+        )
+
         return MeshRuntimeStateReport(
             participationLifecycle = lifecycleState,
             barrierState = barrierState,
             collaborationLifecycle = collaborationState,
-            constrainedReasons = constrainedReasons
+            constrainedReasons = constrainedReasons,
+            proofQuality = proofQuality
         )
     }
 

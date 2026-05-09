@@ -49,7 +49,8 @@ object AndroidMeshParticipationContract {
         val meshSubtaskExecutable: Boolean,
         val delegatedTakeoverExecutable: Boolean,
         val fullMeshRuntimeExecutable: Boolean,
-        val constrainedReasons: List<String>
+        val constrainedReasons: List<String>,
+        val proofQuality: MeshRuntimeProofQuality = MeshRuntimeProofQuality.MISSING
     ) {
         fun toWireMap(): Map<String, Any> = mapOf(
             KEY_READINESS_LEVEL to readinessLevel.wireValue,
@@ -63,7 +64,8 @@ object AndroidMeshParticipationContract {
             KEY_LOCAL_COLLABORATION_AGENT_SCOPE to LOCAL_COLLABORATION_AGENT_SCOPE,
             KEY_MESH_STATE_SEMANTICS to MESH_STATE_SEMANTICS,
             KEY_MESH_RESULT_SEMANTICS to MESH_RESULT_SEMANTICS,
-            KEY_MESH_PARTIAL_DEFERRED_SCOPE to MESH_PARTIAL_DEFERRED_SCOPE
+            KEY_MESH_PARTIAL_DEFERRED_SCOPE to MESH_PARTIAL_DEFERRED_SCOPE,
+            KEY_PROOF_QUALITY to proofQuality.wireValue
         )
     }
 
@@ -235,13 +237,34 @@ object AndroidMeshParticipationContract {
             else -> ReadinessLevel.DEFERRED
         }
 
+        // Derive proof quality from the orchestration health + continuity + participation signals.
+        // Orchestration health drives the primary health-state input; continuity drives whether
+        // evidence is stale (RECOVERING) or missing (DISCONNECTED / INACTIVE).
+        val proofHealthState = orchestration.healthState
+        val proofParticipationState =
+            if (orchestration.participationState == RuntimeHostDescriptor.HostParticipationState.ACTIVE)
+                RuntimeHostDescriptor.HostParticipationState.ACTIVE
+            else
+                RuntimeHostDescriptor.HostParticipationState.INACTIVE
+        val proofFallbackActive = !meshSubtaskExecutable && !delegatedTakeoverExecutable &&
+            continuityLevel == ContinuityLevel.STABLE
+        val proofQuality = MeshRuntimeProofQuality.derive(
+            healthState = proofHealthState,
+            participationState = proofParticipationState,
+            barrierState = BarrierParticipationState.NOT_APPLICABLE,
+            fallbackActive = proofFallbackActive,
+            crossDeviceAllowed = rollout.crossDeviceAllowed,
+            delegatedExecutionAllowed = rollout.delegatedExecutionAllowed
+        )
+
         return ParticipationReport(
             readinessLevel = readinessLevel,
             continuityLevel = continuityLevel,
             meshSubtaskExecutable = meshSubtaskExecutable,
             delegatedTakeoverExecutable = delegatedTakeoverExecutable,
             fullMeshRuntimeExecutable = fullMeshRuntimeExecutable,
-            constrainedReasons = constrainedReasons
+            constrainedReasons = constrainedReasons,
+            proofQuality = proofQuality
         )
     }
 
@@ -265,4 +288,5 @@ object AndroidMeshParticipationContract {
     const val KEY_MESH_STATE_SEMANTICS = "mesh_state_semantics"
     const val KEY_MESH_RESULT_SEMANTICS = "mesh_result_semantics"
     const val KEY_MESH_PARTIAL_DEFERRED_SCOPE = "mesh_partial_deferred_scope"
+    const val KEY_PROOF_QUALITY = MeshRuntimeProofQuality.WIRE_KEY
 }

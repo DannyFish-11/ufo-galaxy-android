@@ -403,7 +403,8 @@ class Pr4AndroidMeshParticipationRuntimeClosureTest {
             participationLifecycle = MeshParticipationLifecycleState.ACTIVE,
             barrierState = BarrierParticipationState.NOT_APPLICABLE,
             collaborationLifecycle = CollaborationLifecycleState.SUBTASK_ASSIGNED,
-            constrainedReasons = emptyList()
+            constrainedReasons = emptyList(),
+            proofQuality = MeshRuntimeProofQuality.LIVE
         )
         assertTrue(ready.isParticipationReady)
         assertTrue(ready.isRuntimeClosed.not())
