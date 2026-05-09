@@ -2924,7 +2924,7 @@ class GalaxyConnectionService : Service() {
                     null
                 } else {
                     val activationRecord = durableRecord
-                    val fallbackRecord = com.ufo.galaxy.runtime.DurableSessionContinuityRecord(
+                    val continuityRecord = activationRecord ?: com.ufo.galaxy.runtime.DurableSessionContinuityRecord(
                         durableSessionId = "",
                         sessionContinuityEpoch = 0,
                         activationEpochMs = System.currentTimeMillis(),
@@ -2934,7 +2934,7 @@ class GalaxyConnectionService : Service() {
                         existingParticipantId = pid,
                         deviceId = deviceId,
                         deviceRole = settings.deviceRole,
-                        continuityRecord = activationRecord ?: fallbackRecord,
+                        continuityRecord = continuityRecord,
                         lastActiveEpochMs = activationRecord?.activationEpochMs
                             ?: System.currentTimeMillis()
                     )
