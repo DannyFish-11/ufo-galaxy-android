@@ -150,7 +150,6 @@ class AppSettingsTest {
         )
         val map = settings.toMetadataMap()
 
-        assertTrue("toMetadataMap must include required identity keys and gate keys", map.size >= 8)
         assertEquals(true, map["cross_device_enabled"])
         assertEquals(true, map["goal_execution_enabled"])
         assertEquals(true, map["local_model_enabled"])
@@ -159,6 +158,12 @@ class AppSettingsTest {
         assertEquals(true, map["model_ready"])
         assertEquals(true, map["accessibility_ready"])
         assertEquals(true, map["overlay_ready"])
+        assertEquals(false, map["degraded_mode"])
+        assertEquals(AuthoritativeModeState.MODE_CROSS_DEVICE, map["mode_state"])
+        assertEquals(AuthoritativeModeState.READINESS_READY, map["mode_readiness_state"])
+        assertEquals(true, map["cross_device_eligibility"])
+        assertEquals(true, map["goal_execution_eligibility"])
+        assertEquals(false, map["parallel_execution_eligibility"])
     }
 
     @Test

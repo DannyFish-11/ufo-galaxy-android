@@ -10,6 +10,7 @@ import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
 import com.ufo.galaxy.protocol.MeshLeavePayload
@@ -598,8 +599,11 @@ class GalaxyWebSocketClient(
         merged["parallel_execution_eligibility"] = crossDeviceEnabledValue && parallelExecutionEnabled
 
         val status = (merged["local_intelligence_status"] as? String)?.trim()?.lowercase()
-            ?: "disabled"
-        val inferredAvailableFromStatus = status == "active" || status == "degraded" || status == "recovering"
+            ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+        val inferredAvailableFromStatus =
+            status == LocalIntelligenceCapabilityStatus.ACTIVE.wireValue ||
+                status == LocalIntelligenceCapabilityStatus.DEGRADED.wireValue ||
+                status == LocalIntelligenceCapabilityStatus.RECOVERING.wireValue
         val localInferenceReady = merged["local_inference_ready"] as? Boolean
             ?: (merged["local_model_enabled"] as? Boolean ?: false)
         val localInferenceAvailable = inferredLocalInferenceAvailable
