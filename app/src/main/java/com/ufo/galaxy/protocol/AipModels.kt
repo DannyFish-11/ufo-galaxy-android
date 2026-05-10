@@ -2164,7 +2164,21 @@ data class DeviceStateSnapshotPayload(
     //   default; "live_runtime" is the expected nominal value at sendDeviceStateSnapshot().
     val reported_state_semantic_class: String? = null,
     val degraded_condition_class: String? = null,
-    val local_observation_basis: String? = null
+    val local_observation_basis: String? = null,
+
+    // PR-7B: Evidence presence kind — explicit label for the quality and completeness of
+    //   the evidence backing this snapshot publication.
+    //   Values: "positive_evidence" | "unknown" | "unavailable" | "delayed" |
+    //           "partial" | "failed_observation".
+    //   V2 MUST use this field to determine governance policy:
+    //     - "positive_evidence": apply standard dispatch and capability scoring.
+    //     - "unknown": withhold dispatch; evidence not yet available.
+    //     - "unavailable": block dispatch requiring this capability surface.
+    //     - "delayed": apply staleness penalty and extend timeout budgets.
+    //     - "partial": limit dispatch to confirmed subsystems only.
+    //     - "failed_observation": apply recovery policy; MUST NOT assume healthy state.
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    val evidence_presence_kind: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2350,7 +2364,22 @@ data class DeviceExecutionEventPayload(
     val lifecycle_transition_valid: Boolean? = null,
     val lifecycle_result_uplink_required: Boolean? = null,
     val lifecycle_state_uplink_required: Boolean? = null,
-    val lifecycle_terminal_phase: Boolean? = null
+    val lifecycle_terminal_phase: Boolean? = null,
+
+    // PR-7B: Evidence presence kind — explicit label for the quality and completeness of
+    //   the evidence backing this execution event publication.
+    //   Values: "positive_evidence" | "unknown" | "unavailable" | "delayed" |
+    //           "partial" | "failed_observation".
+    //   V2 MUST use this field to determine governance policy for each execution event:
+    //     - "positive_evidence": apply standard dispatch and capability scoring.
+    //     - "unknown": do not treat as confirmed state; await further evidence.
+    //     - "unavailable": resource was explicitly inaccessible; do not retry without
+    //       a subsequent positive-evidence publication confirming availability.
+    //     - "delayed": event was queued; apply staleness and timeout budget extensions.
+    //     - "partial": primary path unavailable; limit to confirmed fallback subsystems.
+    //     - "failed_observation": runtime or stagnation failure observed; apply recovery policy.
+    //   Null only as a defensive default; populated at event-emission call sites.
+    val evidence_presence_kind: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

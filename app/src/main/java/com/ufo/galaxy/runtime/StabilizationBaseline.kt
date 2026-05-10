@@ -1862,6 +1862,28 @@ object StabilizationBaseline {
                 "in every capability_report metadata map. Pr3AndroidCapabilityExportContractTest provides " +
                 "the blocking CI gate protecting schema stability.",
             introducedPr = 82
+        ),
+
+        // ── PR-7B: Android truth publication semantics ────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-truth-publication-semantics",
+            displayName = "AndroidTruthPublicationSemanticsContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-7B canonical Android truth publication semantics contract. Aligns Android-side " +
+                "truth emission with V2's hardened governance expectations so that missing or unverifiable " +
+                "Android state is never represented as implicitly healthy. Introduces EvidencePresenceKind " +
+                "(6 values: POSITIVE_EVIDENCE/UNKNOWN/UNAVAILABLE/DELAYED/PARTIAL/FAILED_OBSERVATION) with " +
+                "classifySnapshotEvidencePresence() and classifyEventEvidencePresence() classifiers. Adds " +
+                "evidence_presence_kind: String? wire field to DeviceStateSnapshotPayload and " +
+                "DeviceExecutionEventPayload so V2 applies correct governance policy (standard dispatch, " +
+                "withhold dispatch, block dependent dispatch, staleness penalty, subsystem-limited dispatch, " +
+                "or recovery policy) without relying on optimistic defaults for absent evidence. " +
+                "GalaxyConnectionService populates evidence_presence_kind at all snapshot and event " +
+                "emission call sites. Test: Pr7BAndroidTruthPublicationSemanticsTest.",
+            introducedPr = 83
         )
     )
 
