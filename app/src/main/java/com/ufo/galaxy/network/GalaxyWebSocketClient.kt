@@ -11,6 +11,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
+import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.protocol.DiagnosticsPayload
@@ -1169,13 +1170,21 @@ class GalaxyWebSocketClient(
         errorContext: String
     ): Boolean {
         val deviceId = getDeviceId()
+        val diagnosticClassification = AndroidLocalDiagnosticReasonContract.classify(
+            errorType = errorType,
+            nodeName = nodeName
+        )
 
         val diagnosticsPayload = DiagnosticsPayload(
             task_id = taskId,
             device_id = deviceId,
             node_name = nodeName,
             error_type = errorType,
-            error_context = errorContext
+            error_context = errorContext,
+            diagnostic_schema_version = diagnosticClassification.schemaVersion,
+            diagnostic_domain = diagnosticClassification.domain.wireValue,
+            diagnostic_reason = diagnosticClassification.reason.wireValue,
+            local_cause = diagnosticClassification.localCause
         )
         val envelope = AipMessage(
             type = MsgType.DIAGNOSTICS_PAYLOAD,

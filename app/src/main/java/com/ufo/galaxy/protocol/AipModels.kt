@@ -1053,6 +1053,10 @@ data class CancelResultPayload(
  * @param node_name     Name of the reporting node.
  * @param error_type    Error classification (e.g., "network_timeout", "permission_denied").
  * @param error_context Specific error description or stack summary.
+ * @param diagnostic_schema_version Stable schema version for local diagnostic reason surfaces.
+ * @param diagnostic_domain Stable local diagnostic domain for V2 canonical reconciliation.
+ * @param diagnostic_reason Stable local diagnostic reason code for V2 canonical reconciliation.
+ * @param local_cause Surface where Android observed the local failure cause.
  * @param timestamp     Unix epoch millis at the time of the failure.
  */
 data class DiagnosticsPayload(
@@ -1061,6 +1065,10 @@ data class DiagnosticsPayload(
     val node_name: String,
     val error_type: String,
     val error_context: String,
+    val diagnostic_schema_version: String? = null,
+    val diagnostic_domain: String? = null,
+    val diagnostic_reason: String? = null,
+    val local_cause: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 

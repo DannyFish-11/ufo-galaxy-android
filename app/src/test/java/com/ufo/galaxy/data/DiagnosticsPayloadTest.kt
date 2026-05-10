@@ -22,6 +22,10 @@ class DiagnosticsPayloadTest {
         assertEquals("Connection timed out after 30s on task step 2", payload.error_context)
         assertEquals("task-abc-123", payload.task_id)
         assertEquals("android_agent_01", payload.node_name)
+        assertNull(payload.diagnostic_schema_version)
+        assertNull(payload.diagnostic_domain)
+        assertNull(payload.diagnostic_reason)
+        assertNull(payload.local_cause)
         assertTrue("timestamp must be positive", payload.timestamp > 0)
     }
 
@@ -55,5 +59,24 @@ class DiagnosticsPayloadTest {
             )
             assertEquals(errorType, payload.error_type)
         }
+    }
+
+    @Test
+    fun `diagnostics payload supports stable local diagnostic reason fields`() {
+        val payload = DiagnosticsPayload(
+            error_type = "takeover_execution_failed",
+            error_context = "executor failed",
+            task_id = "task-structured-001",
+            node_name = "takeover_execution",
+            diagnostic_schema_version = "1",
+            diagnostic_domain = "takeover",
+            diagnostic_reason = "takeover_execution_failed",
+            local_cause = "takeover_execution"
+        )
+
+        assertEquals("1", payload.diagnostic_schema_version)
+        assertEquals("takeover", payload.diagnostic_domain)
+        assertEquals("takeover_execution_failed", payload.diagnostic_reason)
+        assertEquals("takeover_execution", payload.local_cause)
     }
 }
