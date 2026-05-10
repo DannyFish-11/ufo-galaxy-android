@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -25,7 +26,13 @@ class RuntimeStateTruthSequencer(
         val timestampMs: Long,
         val eventSequence: Long,
         val activeExecutionCount: Int,
-        val executionBusy: Boolean
+        val executionBusy: Boolean,
+        val executionLifecyclePhase: String,
+        val previousExecutionLifecyclePhase: String?,
+        val lifecycleTransitionValid: Boolean,
+        val lifecycleResultUplinkRequired: Boolean,
+        val lifecycleStateUplinkRequired: Boolean,
+        val lifecycleTerminalPhase: Boolean
     )
 
     private val snapshotSequenceCounter = AtomicLong(0L)
@@ -33,6 +40,8 @@ class RuntimeStateTruthSequencer(
     private val snapshotTimestampClock = AtomicLong(0L)
     private val executionTimestampClock = AtomicLong(0L)
     private val activeExecutionCount = AtomicInteger(0)
+    private val lastLifecyclePhaseByTaskId =
+        ConcurrentHashMap<String, AndroidExecutionLifecycleContract.ExecutionLifecyclePhase>()
 
     fun nextSnapshotStamp(requestedTimestampMs: Long? = null): SnapshotStamp {
         val timestamp = nextMonotonicTimestamp(
@@ -49,18 +58,45 @@ class RuntimeStateTruthSequencer(
         )
     }
 
-    fun nextEventStamp(phase: String, requestedTimestampMs: Long? = null): EventStamp {
+    fun nextEventStamp(
+        phase: String,
+        requestedTimestampMs: Long? = null,
+        taskId: String = ""
+    ): EventStamp {
+        val lifecyclePhase = mapExecutionEventToLifecyclePhase(phase)
+        val previousLifecyclePhase = if (taskId.isNotBlank()) {
+            lastLifecyclePhaseByTaskId[taskId]
+        } else {
+            null
+        }
+        val lifecycleTransitionValid = previousLifecyclePhase?.let { previous ->
+            AndroidExecutionLifecycleContract.isValidTransition(previous, lifecyclePhase)
+        } ?: true
+        val uplinkDecision = ExecutionUplinkDiscipline.classify(lifecyclePhase)
         val countAfterTransition = applyExecutionPhase(phase)
         val timestamp = nextMonotonicTimestamp(
             clock = executionTimestampClock,
             candidate = requestedTimestampMs ?: wallClockMs()
         )
         val sequence = executionEventSequenceCounter.incrementAndGet()
+        if (taskId.isNotBlank()) {
+            if (lifecyclePhase == AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.CAPABILITY_IDLE) {
+                lastLifecyclePhaseByTaskId.remove(taskId)
+            } else {
+                lastLifecyclePhaseByTaskId[taskId] = lifecyclePhase
+            }
+        }
         return EventStamp(
             timestampMs = timestamp,
             eventSequence = sequence,
             activeExecutionCount = countAfterTransition,
-            executionBusy = countAfterTransition > 0
+            executionBusy = countAfterTransition > 0,
+            executionLifecyclePhase = lifecyclePhase.wireValue,
+            previousExecutionLifecyclePhase = previousLifecyclePhase?.wireValue,
+            lifecycleTransitionValid = lifecycleTransitionValid,
+            lifecycleResultUplinkRequired = uplinkDecision.resultRequired,
+            lifecycleStateUplinkRequired = uplinkDecision.stateRequired,
+            lifecycleTerminalPhase = lifecyclePhase.isTerminal
         )
     }
 
@@ -84,5 +120,21 @@ class RuntimeStateTruthSequencer(
             if (clock.compareAndSet(previous, next)) return next
         }
     }
-}
 
+    private fun mapExecutionEventToLifecyclePhase(
+        phase: String
+    ): AndroidExecutionLifecycleContract.ExecutionLifecyclePhase {
+        val P = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
+        return when (phase) {
+            DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED -> P.ACTIVE
+            DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS -> P.ACTIVE
+            DeviceExecutionEventPayload.PHASE_COMPLETED -> P.COMPLETED
+            DeviceExecutionEventPayload.PHASE_FAILED,
+            DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
+            DeviceExecutionEventPayload.PHASE_CANCELLED -> P.FAILED
+            DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION -> P.DEGRADED
+            DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE -> P.RETRYING
+            else -> P.UNKNOWN
+        }
+    }
+}

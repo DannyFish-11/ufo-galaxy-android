@@ -3,6 +3,7 @@ package com.ufo.galaxy.runtime
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,19 +18,72 @@ class Pr1046AndroidRuntimeStateTruthSequencerTest {
     @Test
     fun `execution start marks busy and increments active count`() {
         val sequencer = RuntimeStateTruthSequencer { 1_700_000_000_000L }
-        val stamp = sequencer.nextEventStamp(DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED)
+        val stamp = sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+            taskId = "task-a"
+        )
         assertEquals(1L, stamp.eventSequence)
         assertEquals(1, stamp.activeExecutionCount)
         assertTrue(stamp.executionBusy)
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE.wireValue,
+            stamp.executionLifecyclePhase
+        )
+        assertNull(stamp.previousExecutionLifecyclePhase)
+        assertTrue(stamp.lifecycleTransitionValid)
+        assertFalse(stamp.lifecycleResultUplinkRequired)
+        assertTrue(stamp.lifecycleStateUplinkRequired)
+        assertFalse(stamp.lifecycleTerminalPhase)
     }
 
     @Test
     fun `terminal phase decrements count and can transition to idle`() {
         val sequencer = RuntimeStateTruthSequencer { 1_700_000_000_000L }
-        sequencer.nextEventStamp(DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED)
-        val terminal = sequencer.nextEventStamp(DeviceExecutionEventPayload.PHASE_COMPLETED)
+        sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+            taskId = "task-a"
+        )
+        val terminal = sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_COMPLETED,
+            taskId = "task-a"
+        )
         assertEquals(0, terminal.activeExecutionCount)
         assertFalse(terminal.executionBusy)
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.COMPLETED.wireValue,
+            terminal.executionLifecyclePhase
+        )
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE.wireValue,
+            terminal.previousExecutionLifecyclePhase
+        )
+        assertTrue(terminal.lifecycleTransitionValid)
+        assertTrue(terminal.lifecycleResultUplinkRequired)
+        assertTrue(terminal.lifecycleStateUplinkRequired)
+        assertTrue(terminal.lifecycleTerminalPhase)
+    }
+
+    @Test
+    fun `invalid lifecycle transition is marked false for remote governance diagnostics`() {
+        val sequencer = RuntimeStateTruthSequencer { 1_700_000_000_000L }
+        sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_COMPLETED,
+            taskId = "task-a"
+        )
+        val invalid = sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS,
+            taskId = "task-a"
+        )
+
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE.wireValue,
+            invalid.executionLifecyclePhase
+        )
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.COMPLETED.wireValue,
+            invalid.previousExecutionLifecyclePhase
+        )
+        assertFalse(invalid.lifecycleTransitionValid)
     }
 
     @Test
@@ -121,4 +175,3 @@ class Pr1046AndroidRuntimeStateTruthSequencerTest {
         assertEquals(2L, s2.snapshotSequence)
     }
 }
-
