@@ -128,6 +128,9 @@ class DualRepoE2EVerificationHarness(
     /** Optional [ParticipantLifecycleTruthState] observed during verification. */
     var lifecycleTruthState: ParticipantLifecycleTruthState? = null
 
+    /** Optional post-graduation governance snapshot observed during verification. */
+    var governanceSnapshot: DelegatedRuntimeGovernanceSnapshot? = null
+
     // ── Stage recording API ───────────────────────────────────────────────────
 
     /**
@@ -236,7 +239,183 @@ class DualRepoE2EVerificationHarness(
     }
 
     /**
-     * Clears all recorded stage outcomes and the [lifecycleTruthState].
+     * Records lifecycle truth derived from Android runtime state so the harness can use
+     * structured lifecycle evidence instead of test-only stubs.
+     */
+    fun recordLifecycleTruth(report: ParticipantLifecycleTruthReport) {
+        lifecycleTruthState = report.lifecycleTruthState
+        if (report.registrationStatus == RegistrationTruthStatus.REGISTERED) {
+            recordStageOutcome(
+                stage = DualRepoE2EVerificationStage.DEVICE_REGISTER,
+                status = ScenarioOutcomeStatus.PASSED
+            )
+        }
+        if (report.reconnectObserved &&
+            report.lifecycleTruthState != ParticipantLifecycleTruthState.UNREGISTERED &&
+            report.lifecycleTruthState != ParticipantLifecycleTruthState.UNAVAILABLE
+        ) {
+            recordStageOutcome(
+                stage = DualRepoE2EVerificationStage.RECONNECT_RECOVERY,
+                status = ScenarioOutcomeStatus.PASSED
+            )
+        }
+        if (report.lifecycleTruthState in DEGRADED_LIFECYCLE_STATES) {
+            recordStageOutcome(
+                stage = DualRepoE2EVerificationStage.DEGRADED_OUTCOME_RECORDING,
+                status = ScenarioOutcomeStatus.PASSED
+            )
+        }
+    }
+
+    /**
+     * Records a real Android goal-execution receipt decision into the cross-repo harness.
+     */
+    fun recordGoalExecutionReceipt(
+        flowBridge: AndroidDelegatedFlowBridge,
+        acceptanceDecision: AndroidExecutionGovernanceContract.AcceptanceDecision
+    ) {
+        require(flowBridge.entryKind == DelegatedFlowEntryKind.GOAL_EXECUTION) {
+            "Goal-execution receipt hooks require GOAL_EXECUTION flow bridges"
+        }
+        when (acceptanceDecision) {
+            AndroidExecutionGovernanceContract.AcceptanceDecision.Accepted -> {
+                recordStageOutcome(
+                    stage = DualRepoE2EVerificationStage.TASK_ASSIGNMENT_RECEPTION,
+                    status = ScenarioOutcomeStatus.PASSED
+                )
+                recordVerificationHook(
+                    kind = DualRepoE2EVerificationHookKind.EXECUTION_RECEIVED,
+                    status = ScenarioOutcomeStatus.PASSED,
+                    traceId = flowBridge.traceId,
+                    runtimeSessionId = flowBridge.attachedSessionId,
+                    taskId = flowBridge.taskId
+                )
+            }
+            is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected -> {
+                recordStageOutcome(
+                    stage = DualRepoE2EVerificationStage.TASK_ASSIGNMENT_RECEPTION,
+                    status = ScenarioOutcomeStatus.FAILED,
+                    reason = acceptanceDecision.reason
+                )
+                recordVerificationHook(
+                    kind = DualRepoE2EVerificationHookKind.EXECUTION_RECEIVED,
+                    status = ScenarioOutcomeStatus.FAILED,
+                    traceId = flowBridge.traceId,
+                    runtimeSessionId = flowBridge.attachedSessionId,
+                    taskId = flowBridge.taskId,
+                    reason = acceptanceDecision.reason
+                )
+            }
+        }
+    }
+
+    /**
+     * Records runtime-available evidence from the Android canonical execution-event layer.
+     */
+    fun recordGoalExecutionRuntimeAvailable(
+        flowBridge: AndroidDelegatedFlowBridge,
+        emitDecision: CanonicalExecutionEventEmitDecision
+    ) {
+        require(flowBridge.entryKind == DelegatedFlowEntryKind.GOAL_EXECUTION) {
+            "Goal-execution runtime hooks require GOAL_EXECUTION flow bridges"
+        }
+        when (emitDecision) {
+            is CanonicalExecutionEventEmitDecision.EmitEvent -> {
+                if (flowBridge.androidExecutionPhase != AndroidFlowExecutionPhase.RECEIVED &&
+                    flowBridge.androidExecutionPhase != AndroidFlowExecutionPhase.REJECTED
+                ) {
+                    recordStageOutcome(
+                        stage = DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE,
+                        status = ScenarioOutcomeStatus.PASSED
+                    )
+                }
+                recordVerificationHook(
+                    kind = DualRepoE2EVerificationHookKind.SIGNAL_EMITTED,
+                    status = ScenarioOutcomeStatus.PASSED,
+                    traceId = flowBridge.traceId,
+                    runtimeSessionId = flowBridge.attachedSessionId,
+                    taskId = flowBridge.taskId,
+                    delegatedSignalKind = emitDecision.event.eventType.wireValue
+                )
+            }
+            is CanonicalExecutionEventEmitDecision.HoldForReconnectAlignment ->
+                recordRuntimeAvailabilityFailure(flowBridge, emitDecision.reason)
+            is CanonicalExecutionEventEmitDecision.SuppressDuplicateEvent ->
+                recordRuntimeAvailabilityFailure(flowBridge, emitDecision.semanticTag)
+            is CanonicalExecutionEventEmitDecision.SuppressHighFrequencyNoise ->
+                recordRuntimeAvailabilityFailure(flowBridge, emitDecision.reason)
+            is CanonicalExecutionEventEmitDecision.SuppressPostTerminal ->
+                recordRuntimeAvailabilityFailure(flowBridge, emitDecision.terminalReason)
+        }
+    }
+
+    /**
+     * Records the terminal goal-execution feedback path that closes the runtime loop back to V2.
+     */
+    fun recordGoalExecutionResult(
+        flowBridge: AndroidDelegatedFlowBridge,
+        status: ScenarioOutcomeStatus,
+        reason: String? = null,
+        delegatedSignalKind: String = "result"
+    ) {
+        require(flowBridge.entryKind == DelegatedFlowEntryKind.GOAL_EXECUTION) {
+            "Goal-execution result hooks require GOAL_EXECUTION flow bridges"
+        }
+        recordStageOutcome(
+            stage = DualRepoE2EVerificationStage.TASK_RESULT_RETURN,
+            status = status,
+            reason = reason
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.RESULT_FEEDBACK,
+            status = status,
+            traceId = flowBridge.traceId,
+            runtimeSessionId = flowBridge.attachedSessionId,
+            taskId = flowBridge.taskId,
+            delegatedSignalKind = delegatedSignalKind,
+            reason = reason
+        )
+    }
+
+    /**
+     * Records Android governance output so cross-repo validation can use real governance
+     * snapshots rather than only synthetic harness state.
+     */
+    fun recordGovernanceSnapshot(
+        snapshot: DelegatedRuntimeGovernanceSnapshot,
+        flowBridge: AndroidDelegatedFlowBridge? = null
+    ) {
+        governanceSnapshot = snapshot
+        val reason = when (val artifact = snapshot.artifact) {
+            is DeviceGovernanceArtifact.DeviceGovernanceUnknownDueToMissingSignal ->
+                "Missing governance dimensions: ${artifact.missingDimensions.joinToString { it.wireValue }}"
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToTruthRegression ->
+                artifact.regressionReason
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToResultRegression ->
+                artifact.regressionReason
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToExecutionVisibilityRegression ->
+                artifact.regressionReason
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToCompatBypass ->
+                artifact.regressionReason
+            is DeviceGovernanceArtifact.DeviceGovernanceCompliant -> null
+        }
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.STATE_CORRELATED,
+            status = if (snapshot.artifact is DeviceGovernanceArtifact.DeviceGovernanceUnknownDueToMissingSignal) {
+                ScenarioOutcomeStatus.FAILED
+            } else {
+                ScenarioOutcomeStatus.PASSED
+            },
+            traceId = flowBridge?.traceId,
+            runtimeSessionId = flowBridge?.attachedSessionId,
+            taskId = flowBridge?.taskId,
+            reason = reason
+        )
+    }
+
+    /**
+     * Clears all recorded stage outcomes, verification hooks, [lifecycleTruthState], and
+     * [governanceSnapshot].
      *
      * After calling this, a subsequent [buildReport] will produce a
      * [DualRepoE2EVerificationArtifact.E2EAbsent] artifact.
@@ -245,6 +424,7 @@ class DualRepoE2EVerificationHarness(
         stageOutcomes.clear()
         verificationHooks.clear()
         lifecycleTruthState = null
+        governanceSnapshot = null
     }
 
     // ── Artifact derivation ───────────────────────────────────────────────────
@@ -370,6 +550,7 @@ class DualRepoE2EVerificationHarness(
             verificationKind = verificationKind,
             stageOutcomes = stageOutcomes.toMap(),
             verificationHooks = verificationHooks.toMap(),
+            governanceSnapshot = governanceSnapshot,
             overallArtifact = artifact,
             bridgeReport = bridgeReport,
             lifecycleTruthState = lifecycleTruthState,
@@ -408,6 +589,25 @@ class DualRepoE2EVerificationHarness(
     private fun buildPartialReason(
         missing: Set<DualRepoE2EVerificationStage>
     ): String = "Required E2E stages not passed: ${missing.joinToString { it.wireValue }}"
+
+    private fun recordRuntimeAvailabilityFailure(
+        flowBridge: AndroidDelegatedFlowBridge,
+        reason: String
+    ) {
+        recordStageOutcome(
+            stage = DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE,
+            status = ScenarioOutcomeStatus.FAILED,
+            reason = reason
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.SIGNAL_EMITTED,
+            status = ScenarioOutcomeStatus.FAILED,
+            traceId = flowBridge.traceId,
+            runtimeSessionId = flowBridge.attachedSessionId,
+            taskId = flowBridge.taskId,
+            reason = reason
+        )
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -479,6 +679,13 @@ class DualRepoE2EVerificationHarness(
             ARTIFACT_E2E_STALE,
             ARTIFACT_E2E_ABSENT,
             ARTIFACT_E2E_BLOCKED_NO_DEVICE
+        )
+
+        private val DEGRADED_LIFECYCLE_STATES: Set<ParticipantLifecycleTruthState> = setOf(
+            ParticipantLifecycleTruthState.DEGRADED,
+            ParticipantLifecycleTruthState.RECOVERING,
+            ParticipantLifecycleTruthState.RECOVERED,
+            ParticipantLifecycleTruthState.CAPABILITY_RE_ALIGNED
         )
     }
 }

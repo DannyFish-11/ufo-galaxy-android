@@ -106,6 +106,8 @@ data class DualRepoE2EVerificationHookRecord(
  * @property verificationKind [RealDeviceVerificationKind] classifying the provenance of this
  *                            report.
  * @property stageOutcomes Per-stage outcome map; keys are [DualRepoE2EVerificationStage].
+ * @property verificationHooks Android-side hook evidence for runtime roundtrip correlation.
+ * @property governanceSnapshot Optional Android governance snapshot captured during verification.
  * @property overallArtifact Typed [DualRepoE2EVerificationArtifact] for the overall verdict.
  * @property bridgeReport  Embedded [RealDeviceParticipantVerificationReport] from the
  *                         lower-level bridge (backward-compatible; includes the three original
@@ -127,6 +129,7 @@ data class DualRepoE2EVerificationReport(
     val verificationKind: RealDeviceVerificationKind,
     val stageOutcomes: Map<DualRepoE2EVerificationStage, DualRepoE2EStageOutcome>,
     val verificationHooks: Map<DualRepoE2EVerificationHookKind, DualRepoE2EVerificationHookRecord>,
+    val governanceSnapshot: DelegatedRuntimeGovernanceSnapshot?,
     val overallArtifact: DualRepoE2EVerificationArtifact,
     val bridgeReport: RealDeviceParticipantVerificationReport,
     val lifecycleTruthState: ParticipantLifecycleTruthState?,
@@ -206,6 +209,10 @@ data class DualRepoE2EVerificationReport(
             stageOutcomes[DualRepoE2EVerificationStage.TASK_RESULT_RETURN]?.outcomeStatus ==
             ScenarioOutcomeStatus.PASSED
 
+    /** `true` when Android provided a structured governance snapshot alongside the E2E report. */
+    val hasGovernanceSignal: Boolean
+        get() = governanceSnapshot != null
+
     /**
      * Produces a stable, V2-consumable key-value map for cross-repo serialization.
      *
@@ -226,8 +233,11 @@ data class DualRepoE2EVerificationReport(
      * | `reported_at_ms`                 | Long                | [reportedAtMs]                                         |
      * | `is_real_device_e2e_verified`    | Boolean             | [isRealDeviceE2EVerified]                              |
      * | `is_v2_consumable`               | Boolean             | [isV2Consumable]                                       |
+     * | `has_governance_signal`          | Boolean             | Whether [governanceSnapshot] is present.               |
      * | `stage_outcomes`                 | Map<String, String> | Stage wireValue → outcome wireValue                    |
      * | `stage_reasons`                  | Map<String, String> | Stage wireValue → reason (only when present)           |
+     * | `governance_artifact_tag`        | String?             | [governanceSnapshot.artifact.semanticTag]              |
+     * | `governance_dimension_states`    | Map<String, String> | Governance dimension wireValue → status wireValue      |
      * | `bridge_artifact_tag`            | String              | [bridgeReport.overallVerificationArtifact.artifactTag] |
      * | `bridge_is_real_device_verified` | Boolean             | [bridgeReport.isRealDeviceVerified]                    |
      */
@@ -262,6 +272,33 @@ data class DualRepoE2EVerificationReport(
             .filter { !it.value.delegatedSignalKind.isNullOrBlank() }
             .mapKeys { it.key.wireValue }
             .mapValues { it.value.delegatedSignalKind!! }
+        val governanceDimensionStatesWire: Map<String, String> = governanceSnapshot
+            ?.dimensionStates
+            ?.mapKeys { it.key.wireValue }
+            ?.mapValues { it.value.status.wireValue }
+            ?: emptyMap()
+        val governanceDimensionReasonsWire: Map<String, String> = governanceSnapshot
+            ?.dimensionStates
+            ?.filter { !it.value.regressionReason.isNullOrBlank() }
+            ?.mapKeys { it.key.wireValue }
+            ?.mapValues { it.value.regressionReason!! }
+            ?: emptyMap()
+        val governanceMissingDimensionsWire: List<String> = when (val artifact = governanceSnapshot?.artifact) {
+            is DeviceGovernanceArtifact.DeviceGovernanceUnknownDueToMissingSignal ->
+                artifact.missingDimensions.map { it.wireValue }
+            else -> emptyList()
+        }
+        val governanceBlockingDimensionWire: String? = when (val artifact = governanceSnapshot?.artifact) {
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToTruthRegression ->
+                artifact.dimension.wireValue
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToResultRegression ->
+                artifact.dimension.wireValue
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToExecutionVisibilityRegression ->
+                artifact.dimension.wireValue
+            is DeviceGovernanceArtifact.DeviceGovernanceViolationDueToCompatBypass ->
+                artifact.dimension.wireValue
+            else -> null
+        }
         return mapOf(
             "schema_version" to schemaVersion,
             "report_id" to reportId,
@@ -277,6 +314,7 @@ data class DualRepoE2EVerificationReport(
             "is_identity_correlated" to isIdentityCorrelated,
             "is_participation_ready_evidence" to isParticipationReadyEvidence,
             "is_runtime_closed_evidence" to isRuntimeClosedEvidence,
+            "has_governance_signal" to hasGovernanceSignal,
             "correlated_trace_id" to correlatedTraceId,
             "correlated_runtime_session_id" to correlatedRuntimeSessionId,
             "correlated_task_id" to correlatedTaskId,
@@ -288,6 +326,14 @@ data class DualRepoE2EVerificationReport(
             "verification_hook_runtime_session_ids" to verificationHookRuntimeSessionIdsWire,
             "verification_hook_task_ids" to verificationHookTaskIdsWire,
             "verification_hook_delegated_signal_kinds" to delegatedSignalKindsWire,
+            "governance_snapshot_id" to governanceSnapshot?.snapshotId,
+            "governance_device_id" to governanceSnapshot?.deviceId,
+            "governance_artifact_tag" to governanceSnapshot?.artifact?.semanticTag,
+            "governance_reported_at_ms" to governanceSnapshot?.reportedAtMs,
+            "governance_blocking_dimension" to governanceBlockingDimensionWire,
+            "governance_missing_dimensions" to governanceMissingDimensionsWire,
+            "governance_dimension_states" to governanceDimensionStatesWire,
+            "governance_dimension_reasons" to governanceDimensionReasonsWire,
             "bridge_artifact_tag" to bridgeReport.overallVerificationArtifact.artifactTag,
             "bridge_is_real_device_verified" to bridgeReport.isRealDeviceVerified
         )
