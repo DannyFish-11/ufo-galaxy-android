@@ -11,23 +11,25 @@ import org.junit.Test
 class Pr8AndroidMeshParticipationContractTest {
 
     @Test
-    fun `evaluate returns PARTIAL when mesh subtask and delegated takeover are executable but full mesh is deferred`() {
+    fun `evaluate returns READY when mesh subtask, delegated takeover, and all required capabilities are available`() {
         val report = AndroidMeshParticipationContract.evaluate(
             orchestration = createHealthyOrchestrationRecord(),
             rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
         )
 
-        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, report.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.READY, report.readinessLevel)
         assertEquals(AndroidMeshParticipationContract.ContinuityLevel.STABLE, report.continuityLevel)
         assertTrue(report.meshSubtaskExecutable)
         assertTrue(report.delegatedTakeoverExecutable)
-        assertFalse(report.fullMeshRuntimeExecutable)
-        assertTrue(
+        assertTrue(report.fullMeshRuntimeExecutable)
+        assertFalse(
+            "No deferred_capability:hybrid_execute_full reason expected when HYBRID_EXECUTE_FULL is AVAILABLE",
             report.constrainedReasons.contains(
                 "${AndroidMeshParticipationContract.REASON_DEFERRED_CAPABILITY_PREFIX}:hybrid_execute_full"
             )
         )
-        assertTrue(
+        assertFalse(
+            "No deferred_capability:barrier_coordination reason expected when BARRIER_COORDINATION is AVAILABLE",
             report.constrainedReasons.contains(
                 "${AndroidMeshParticipationContract.REASON_DEFERRED_CAPABILITY_PREFIX}:barrier_coordination"
             )
@@ -136,8 +138,9 @@ class Pr8AndroidMeshParticipationContractTest {
         val doesNotOwn = scope["does_not_own"] as List<*>
         assertTrue(owns.contains("parallel_subtask_payload_execution"))
         assertTrue(owns.contains("group_id_subtask_index_result_echo"))
+        assertTrue(owns.contains("barrier_coordination_participant_response"))
         assertTrue(doesNotOwn.contains("mesh_session_join_leave_lifecycle"))
-        assertTrue(doesNotOwn.contains("barrier_coordination"))
+        assertTrue(doesNotOwn.contains("barrier_coordination_authority"))
     }
 
     @Test
@@ -168,11 +171,11 @@ class Pr8AndroidMeshParticipationContractTest {
         )
 
         val wireMap = report.toWireMap()
-        assertEquals("partial", wireMap[AndroidMeshParticipationContract.KEY_READINESS_LEVEL])
+        assertEquals("ready", wireMap[AndroidMeshParticipationContract.KEY_READINESS_LEVEL])
         assertEquals("stable", wireMap[AndroidMeshParticipationContract.KEY_CONTINUITY_LEVEL])
         assertEquals(true, wireMap[AndroidMeshParticipationContract.KEY_MESH_SUBTASK_EXECUTABLE])
         assertEquals(true, wireMap[AndroidMeshParticipationContract.KEY_DELEGATED_TAKEOVER_EXECUTABLE])
-        assertEquals(false, wireMap[AndroidMeshParticipationContract.KEY_FULL_MESH_RUNTIME_EXECUTABLE])
+        assertEquals(true, wireMap[AndroidMeshParticipationContract.KEY_FULL_MESH_RUNTIME_EXECUTABLE])
         assertEquals(
             AndroidMeshParticipationContract.RELATIONSHIP_GRAPH_VERSION,
             wireMap[AndroidMeshParticipationContract.KEY_RELATIONSHIP_GRAPH_VERSION]
@@ -238,7 +241,7 @@ class Pr8AndroidMeshParticipationContractTest {
         assertEquals(AndroidMeshParticipationContract.ContinuityLevel.DETACHED, disconnectedReport.continuityLevel)
         assertEquals(AndroidMeshParticipationContract.ReadinessLevel.DEFERRED, reconnectingReport.readinessLevel)
         assertEquals(AndroidMeshParticipationContract.ContinuityLevel.RECOVERING, reconnectingReport.continuityLevel)
-        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, reconnectedReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.READY, reconnectedReport.readinessLevel)
         assertEquals(AndroidMeshParticipationContract.ContinuityLevel.STABLE, reconnectedReport.continuityLevel)
 
         val phaseSequence = UnifiedReplayRecoveryContract.canonicalPhaseSequence
@@ -295,7 +298,7 @@ class Pr8AndroidMeshParticipationContractTest {
             orchestration = createHealthyOrchestrationRecord(),
             rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true)
         )
-        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.PARTIAL, recoveredReport.readinessLevel)
+        assertEquals(AndroidMeshParticipationContract.ReadinessLevel.READY, recoveredReport.readinessLevel)
         assertTrue(recoveredReport.delegatedTakeoverExecutable)
         assertTrue(recoveredReport.meshSubtaskExecutable)
     }

@@ -41,9 +41,9 @@ package com.ufo.galaxy.runtime
  * |---|---|
  * | [STAGED_MESH_SUBTASK] | `AVAILABLE` — fully implemented in [StagedMeshExecutionTarget] |
  * | [PARALLEL_SUBTASK] | `AVAILABLE` — handled via [com.ufo.galaxy.service.GalaxyConnectionService] |
- * | [HYBRID_EXECUTE_FULL] | `NOT_YET_IMPLEMENTED` — degrade reply sent; intentional deferral |
+ * | [HYBRID_EXECUTE_FULL] | `AVAILABLE` — implemented by [HybridExecuteFullCoordinator] |
+ * | [BARRIER_COORDINATION] | `AVAILABLE` — implemented by [BarrierCoordinationParticipant] |
  * | [WEBRTC_PEER_TRANSPORT] | `MINIMAL_COMPAT` — stubs present; not production-ready |
- * | [BARRIER_COORDINATION] | `NOT_YET_IMPLEMENTED` — V2-coordinated; Android not a barrier authority |
  *
  * ## Wire values
  *
@@ -65,20 +65,18 @@ enum class HybridParticipantCapability(
      * Full hybrid-execute coordination (inbound `hybrid_execute` from V2 requesting
      * partial-local + partial-remote task execution with V2-side coordination).
      *
-     * **Current status**: [SupportLevel.NOT_YET_IMPLEMENTED] — Android sends a
-     * structured `hybrid_degrade` reply indicating the hybrid executor is not
-     * implemented.  V2 must treat this as an explicit capability unavailability signal
-     * and apply its own fallback policy (e.g., full remote execution).
-     *
-     * **Intentional deferral**: full hybrid-execute requires a dedicated Android-side
-     * hybrid executor component that is not yet in scope.  This is NOT an accidental
-     * omission; it is a tracked intentional limitation.
+     * **Current status**: [SupportLevel.AVAILABLE] — implemented by
+     * [HybridExecuteFullCoordinator].  Android accepts the `hybrid_execute` payload,
+     * executes the local portion through the existing goal-execution pipeline, and
+     * returns a structured [HybridExecutionResult] that the caller converts to
+     * [com.ufo.galaxy.protocol.HybridResultPayload] for uplink.  V2 coordinates the
+     * remote portion independently.
      */
     HYBRID_EXECUTE_FULL(
         wireValue = "hybrid_execute_full",
-        supportLevel = SupportLevel.NOT_YET_IMPLEMENTED,
+        supportLevel = SupportLevel.AVAILABLE,
         description = "Full hybrid_execute with partial-local + partial-remote V2 coordination: " +
-            "degrade reply sent; hybrid executor intentionally deferred"
+            "implemented by HybridExecuteFullCoordinator; local steps executed via goal pipeline"
     ),
 
     /**
@@ -127,18 +125,18 @@ enum class HybridParticipantCapability(
      * Barrier coordination participation (Android acting as a barrier participant in a V2
      * multi-device barrier/merge coordination protocol).
      *
-     * **Current status**: [SupportLevel.NOT_YET_IMPLEMENTED] — Android is a participant,
-     * not a barrier authority.  Barrier coordination decisions are made by V2.  Android
-     * can report task completion (which V2 uses to evaluate barrier conditions) but does
-     * not directly participate in barrier signalling or merge coordination.
-     *
-     * **Intentional scope constraint**: Android is deliberately excluded from barrier
-     * authority to avoid creating a second orchestration authority.
+     * **Current status**: [SupportLevel.AVAILABLE] — implemented by
+     * [BarrierCoordinationParticipant].  Android can enter barrier-wait state, acknowledge
+     * V2 barrier release signals, report timeout, and reset for the next rendezvous.
+     * Barrier state is reported via [BarrierParticipationState] in
+     * [com.ufo.galaxy.protocol.DeviceStateSnapshotPayload.barrier_participation_state].
+     * V2 remains the barrier authority; Android is the barrier participant.
      */
     BARRIER_COORDINATION(
         wireValue = "barrier_coordination",
-        supportLevel = SupportLevel.NOT_YET_IMPLEMENTED,
-        description = "Barrier/merge coordination: V2-side authority; Android not a barrier participant"
+        supportLevel = SupportLevel.AVAILABLE,
+        description = "Barrier/merge coordination: implemented by BarrierCoordinationParticipant; " +
+            "Android participates as a barrier responder; V2 holds barrier authority"
     );
 
     /**
