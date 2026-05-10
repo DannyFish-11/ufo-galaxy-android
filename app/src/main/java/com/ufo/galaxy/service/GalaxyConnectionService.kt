@@ -2454,15 +2454,15 @@ class GalaxyConnectionService : Service() {
         errorContext: String
     ) {
         val safeTaskId = taskId.ifBlank { "runtime" }
-        val sent = webSocketClient.sendDiagnostics(
+        val diagnosticsSent = webSocketClient.sendDiagnostics(
             taskId = safeTaskId,
             nodeName = nodeName,
             errorType = errorType,
             errorContext = errorContext
         )
         crossRepoRegressionHooks.recordDiagnostics(
-            status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
-            reason = if (sent) null else "runtime_diagnostics_send_failed:$errorType@$nodeName"
+            status = if (diagnosticsSent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+            reason = if (diagnosticsSent) null else "runtime_diagnostics_send_failed"
         )
         emitCrossRepoRegressionSnapshot("cross_repo_runtime_diagnostics")
         GalaxyLogger.log(

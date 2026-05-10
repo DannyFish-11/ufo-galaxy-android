@@ -157,14 +157,14 @@ class AndroidCrossRepoRegressionRuntimeHooks(
         startResult: RuntimeStartResult,
         reason: String? = null
     ) {
-        val status = if (startResult.isUsable) {
-            ScenarioOutcomeStatus.PASSED
-        } else {
-            ScenarioOutcomeStatus.FAILED
+        val status = when (startResult) {
+            RuntimeStartResult.Success,
+            is RuntimeStartResult.Degraded -> ScenarioOutcomeStatus.PASSED
+            is RuntimeStartResult.Failure -> ScenarioOutcomeStatus.FAILED
         }
         val resolvedReason = when (startResult) {
-            RuntimeStartResult.Success -> reason
-            is RuntimeStartResult.Degraded -> reason ?: startResult.message
+            RuntimeStartResult.Success,
+            is RuntimeStartResult.Degraded -> reason
             is RuntimeStartResult.Failure -> reason ?: "${startResult.stage}:${startResult.message}"
         }
         harness.recordStageOutcome(
@@ -193,6 +193,11 @@ class AndroidCrossRepoRegressionRuntimeHooks(
         setFlowOutcome(AndroidCrossRepoRegressionFlow.TAKEOVER, status)
     }
 
+    /**
+     * Semantic alias for ownership-transfer lifecycle reporting.
+     *
+     * The underlying dual-runtime harness signal is still the canonical TAKEOVER flow.
+     */
     fun recordOwnershipTransfer(status: ScenarioOutcomeStatus, reason: String? = null) {
         recordTakeover(status = status, reason = reason)
     }
