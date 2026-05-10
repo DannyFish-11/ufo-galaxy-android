@@ -204,6 +204,8 @@ class GalaxyWebSocketClient(
         fun onDisconnected()
         fun onMessage(message: String)
         fun onError(error: String)
+        fun onDeviceRegisterSent(deviceId: String, traceId: String?) = Unit
+        fun onCapabilityReportSent(deviceId: String, traceId: String?) = Unit
 
         /**
          * Called when a strong-typed task_assign message is received.
@@ -1018,7 +1020,10 @@ class GalaxyWebSocketClient(
                 addProperty(RuntimeHostDescriptor.KEY_PARTICIPATION_STATE, hostDescriptor.participationState.wireValue)
             }
         }
-        sendJson(gson.toJson(register))
+        val registerSent = sendJson(gson.toJson(register))
+        if (registerSent) {
+            listeners.forEach { it.onDeviceRegisterSent(deviceId, sessionTraceId) }
+        }
         Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId" +
                 (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
                 (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
@@ -1141,7 +1146,10 @@ class GalaxyWebSocketClient(
         }
         // Route through sendJson() so the cross-device gate is uniformly enforced
         // across all uplink message types, including the initial capability_report.
-        sendJson(handshakeJson)
+        val capabilitySent = sendJson(handshakeJson)
+        if (capabilitySent) {
+            listeners.forEach { it.onCapabilityReportSent(report.device_id, sessionTraceId) }
+        }
         Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
                 " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
                 " required_complete=${missingRequired.isEmpty()}" +

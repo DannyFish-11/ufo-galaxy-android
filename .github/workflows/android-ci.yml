@@ -166,6 +166,8 @@ jobs:
   #   - DualRepoE2EVerificationStage wire values and required-stage set
   #   - DualRepoE2EVerificationHarness artifact derivation rules
   #   - DualRepoE2EVerificationReport toWireMap / isRealDeviceE2EVerified
+  #   - AndroidCrossRepoRegressionRuntimeHooks coverage for capability/execution/
+  #     recovery/takeover/mesh runtime-hook closure in dual-runtime regression
   #   - Honest no-device output: harness must produce e2e_blocked_no_device
   #     in CI, never falsely claim real-device verification
   #   - Bridge wiring: CAPABILITY_REPORT and TASK_RESULT_RETURN are new
@@ -200,7 +202,8 @@ jobs:
       - name: Run E2E verification harness unit tests
         run: |
           ./gradlew :app:test \
-            --tests "com.ufo.galaxy.runtime.Pr72DualRepoE2EVerificationHarnessTest"
+            --tests "com.ufo.galaxy.runtime.Pr72DualRepoE2EVerificationHarnessTest" \
+            --tests "com.ufo.galaxy.runtime.Pr11BAndroidCrossRepoRegressionRuntimeHooksTest"
 
       - name: Generate CI-level E2E verification status artifact (tests passed)
         if: success()

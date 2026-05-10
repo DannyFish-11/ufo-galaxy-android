@@ -30,6 +30,7 @@ import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
+import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
@@ -51,6 +52,8 @@ import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.runtime.LocalRuntimeContext
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.runtime.RuntimeStateTruthSequencer
+import com.ufo.galaxy.runtime.RealDeviceVerificationKind
+import com.ufo.galaxy.runtime.ScenarioOutcomeStatus
 import com.ufo.galaxy.session.DurableParticipantIdentity
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
@@ -215,6 +218,19 @@ class GalaxyConnectionService : Service() {
 
     /** Tracks active goal_execution / parallel_subtask coroutine jobs for cancel support. */
     private val taskCancelRegistry = TaskCancelRegistry()
+    @Volatile
+    private var hasObservedWsConnection = false
+
+    private val crossRepoRegressionHooks: AndroidCrossRepoRegressionRuntimeHooks by lazy {
+        val participantId = UFOGalaxyApplication.appSettings.durableParticipantId
+            .takeIf { it.isNotBlank() }
+            ?: localDeviceId
+        AndroidCrossRepoRegressionRuntimeHooks(
+            deviceId = localDeviceId,
+            participantId = participantId,
+            verificationKind = detectVerificationKind()
+        )
+    }
 
     // ── PR-3: Canonical takeover state ────────────────────────────────────────
 
@@ -266,6 +282,30 @@ class GalaxyConnectionService : Service() {
 
     private fun resolveExecutionTraceId(inboundTraceId: String?): String =
         inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
+
+    private fun detectVerificationKind(): RealDeviceVerificationKind {
+        val fingerprint = android.os.Build.FINGERPRINT?.lowercase().orEmpty()
+        val model = android.os.Build.MODEL?.lowercase().orEmpty()
+        val isEmulator = fingerprint.contains("generic") ||
+            fingerprint.contains("emulator") ||
+            fingerprint.contains("sdk_gphone") ||
+            model.contains("emulator")
+        return if (isEmulator) RealDeviceVerificationKind.EMULATOR else RealDeviceVerificationKind.REAL_DEVICE
+    }
+
+    private fun emitCrossRepoRegressionSnapshot(event: String) {
+        val snapshot = crossRepoRegressionHooks.buildSnapshot()
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to event,
+                "cross_repo_regression_ready" to snapshot.isDualRuntimeRegressionReady,
+                "e2e_artifact_tag" to snapshot.e2eReport.overallArtifact.artifactTag,
+                "flow_outcomes" to snapshot.flowOutcomes
+                    .mapKeys { it.key.wireValue }
+                    .mapValues { it.value.wireValue }
+            )
+        )
+    }
 
     /** Canonical assessor that evaluates takeover eligibility based on device readiness. */
     private val takeoverEligibilityAssessor: TakeoverEligibilityAssessor by lazy {
@@ -437,7 +477,16 @@ class GalaxyConnectionService : Service() {
                     "source_component" to closedLoopPayload.source_component
                 )
             )
-            webSocketClient.sendDeviceExecutionEvent(closedLoopPayload)
+            val sent = webSocketClient.sendDeviceExecutionEvent(closedLoopPayload)
+            crossRepoRegressionHooks.recordExecutionSignal(
+                taskId = closedLoopPayload.task_id,
+                traceId = closedLoopPayload.trace_id,
+                runtimeSessionId = closedLoopPayload.runtime_session_id,
+                signalKind = closedLoopPayload.phase,
+                status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+                reason = if (sent) null else "device_execution_event_send_failed"
+            )
+            emitCrossRepoRegressionSnapshot("cross_repo_execution_event")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_EXEC_EVENT] sink error task_id=${payload.task_id} phase=${payload.phase}: ${e.message}", e)
         }
@@ -591,6 +640,13 @@ class GalaxyConnectionService : Service() {
             override fun onConnected() {
                 Log.d(TAG, "已连接到 Galaxy")
                 updateNotification("已连接")
+                if (hasObservedWsConnection) {
+                    crossRepoRegressionHooks.recordReconnectRecovery(
+                        status = ScenarioOutcomeStatus.PASSED
+                    )
+                    emitCrossRepoRegressionSnapshot("cross_repo_reconnect_recovery")
+                }
+                hasObservedWsConnection = true
                 // PR-RT: emit a device_state_snapshot on every WS connect / reconnect so V2
                 // always has a fresh runtime-state projection immediately after the connection
                 // is established.  This covers both the initial connect and reconnect/recovery
@@ -648,6 +704,16 @@ class GalaxyConnectionService : Service() {
                 )
             }
 
+            override fun onDeviceRegisterSent(deviceId: String, traceId: String?) {
+                crossRepoRegressionHooks.recordDeviceRegisterSent()
+                emitCrossRepoRegressionSnapshot("cross_repo_device_register_sent")
+            }
+
+            override fun onCapabilityReportSent(deviceId: String, traceId: String?) {
+                crossRepoRegressionHooks.recordCapabilityReportSent()
+                emitCrossRepoRegressionSnapshot("cross_repo_capability_report_sent")
+            }
+
             override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String?) {
                 Log.i(TAG, "收到 task_assign: task_id=$taskId trace_id=$traceId")
                 GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "task_assign", "trace_id" to (traceId ?: "")))
@@ -659,6 +725,13 @@ class GalaxyConnectionService : Service() {
             override fun onGoalExecution(taskId: String, goalPayloadJson: String, traceId: String?) {
                 Log.i(TAG, "收到 goal_execution: task_id=$taskId trace_id=$traceId")
                 GalaxyLogger.log(GalaxyLogger.TAG_TASK_RECV, mapOf("task_id" to taskId, "type" to "goal_execution", "trace_id" to (traceId ?: "")))
+                crossRepoRegressionHooks.recordExecutionReceipt(
+                    taskId = taskId,
+                    traceId = traceId,
+                    runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
+                    status = ScenarioOutcomeStatus.PASSED
+                )
+                emitCrossRepoRegressionSnapshot("cross_repo_goal_execution_received")
                 serviceScope.launch {
                     // Register inside the coroutine to avoid any race between launch and register.
                     taskCancelRegistry.register(taskId, coroutineContext[Job]!!)
@@ -1305,6 +1378,14 @@ class GalaxyConnectionService : Service() {
         )
         if (governanceDecision is AndroidExecutionGovernanceContract.AcceptanceDecision.Rejected) {
             val traceId = resolveExecutionTraceId(inboundTraceId)
+            crossRepoRegressionHooks.recordExecutionReceipt(
+                taskId = taskId,
+                traceId = traceId,
+                runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
+                status = ScenarioOutcomeStatus.FAILED,
+                reason = governanceDecision.reason
+            )
+            emitCrossRepoRegressionSnapshot("cross_repo_goal_execution_rejected")
             emitRuntimeDiagnostics(
                 taskId = taskId,
                 nodeName = "goal_execution_governance_gate",
@@ -1792,7 +1873,15 @@ class GalaxyConnectionService : Service() {
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(taskId, MsgType.CANCEL_RESULT)
         )
-        webSocketClient.sendJson(gson.toJson(envelope))
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        if (!sent) {
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "cancel_result_send_failed",
+                    "task_id" to taskId
+                )
+            )
+        }
     }
 
     // ── PR-H: HandoffEnvelopeV2 native consumption handler ───────────────────────────────
@@ -2266,7 +2355,15 @@ class GalaxyConnectionService : Service() {
             dispatch_trace_id = enriched.dispatch_trace_id,
             source_runtime_posture = enriched.source_runtime_posture
         )
-        webSocketClient.sendJson(gson.toJson(envelope))
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        crossRepoRegressionHooks.recordGoalResultFeedback(
+            taskId = enriched.task_id,
+            traceId = traceId,
+            runtimeSessionId = runtimeSession,
+            status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+            reason = if (sent) null else "goal_execution_result_send_failed"
+        )
+        emitCrossRepoRegressionSnapshot("cross_repo_goal_result_return")
     }
 
     /**
@@ -3872,6 +3969,11 @@ class GalaxyConnectionService : Service() {
                 "message_id" to (messageId ?: "")
             )
         )
+        crossRepoRegressionHooks.recordMesh(
+            status = if (payload.mesh_id.isNotBlank()) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+            reason = if (payload.mesh_id.isNotBlank()) null else "mesh_topology_missing_mesh_id"
+        )
+        emitCrossRepoRegressionSnapshot("cross_repo_mesh_topology")
         Log.i(TAG, "[MESH_TOPOLOGY] mesh_id=${payload.mesh_id} nodes=${payload.nodes.size} seq=${payload.topology_seq} accepted=$accepted")
     }
 
@@ -4504,6 +4606,11 @@ class GalaxyConnectionService : Service() {
             source_runtime_posture = response.source_runtime_posture
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        crossRepoRegressionHooks.recordTakeover(
+            status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+            reason = if (sent) null else "takeover_response_send_failed"
+        )
+        emitCrossRepoRegressionSnapshot("cross_repo_takeover_response")
         Log.i(
             TAG,
             "[PR3:TAKEOVER] takeover_response sent takeover_id=${response.takeover_id} " +
