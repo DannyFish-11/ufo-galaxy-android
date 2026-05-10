@@ -10,6 +10,7 @@ import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.protocol.DiagnosticsPayload
@@ -678,6 +679,8 @@ class GalaxyWebSocketClient(
         merged["local_intelligence_status"] = status
         merged["local_inference_ready"] = localInferenceReady
         merged["local_inference_available"] = localInferenceAvailable
+        merged[AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION_KEY] =
+            AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION
 
         return merged
     }
