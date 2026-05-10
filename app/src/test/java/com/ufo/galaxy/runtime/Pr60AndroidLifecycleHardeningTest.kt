@@ -55,11 +55,11 @@ import org.junit.rules.TemporaryFolder
  *  - all wire values are distinct
  *
  * ### HybridParticipantCapability — support levels
- *  - HYBRID_EXECUTE_FULL supportLevel is NOT_YET_IMPLEMENTED
+ *  - HYBRID_EXECUTE_FULL supportLevel is AVAILABLE
  *  - STAGED_MESH_SUBTASK supportLevel is AVAILABLE
  *  - PARALLEL_SUBTASK supportLevel is AVAILABLE
  *  - WEBRTC_PEER_TRANSPORT supportLevel is MINIMAL_COMPAT
- *  - BARRIER_COORDINATION supportLevel is NOT_YET_IMPLEMENTED
+ *  - BARRIER_COORDINATION supportLevel is AVAILABLE
  *
  * ### HybridParticipantCapability.SupportLevel — wire values
  *  - AVAILABLE wireValue is "available"
@@ -69,8 +69,9 @@ import org.junit.rules.TemporaryFolder
  *
  * ### HybridParticipantCapability — availableCapabilities() / deferredCapabilities()
  *  - availableCapabilities includes STAGED_MESH_SUBTASK and PARALLEL_SUBTASK
- *  - availableCapabilities does NOT include HYBRID_EXECUTE_FULL
- *  - deferredCapabilities includes HYBRID_EXECUTE_FULL and BARRIER_COORDINATION
+ *  - availableCapabilities includes HYBRID_EXECUTE_FULL
+ *  - deferredCapabilities does NOT include HYBRID_EXECUTE_FULL
+ *  - deferredCapabilities does NOT include BARRIER_COORDINATION
  *  - deferredCapabilities does NOT include STAGED_MESH_SUBTASK
  *
  * ### HybridParticipantCapability — fromWireValue()
@@ -272,9 +273,9 @@ class Pr60AndroidLifecycleHardeningTest {
     // ── HybridParticipantCapability — support levels ──────────────────────────
 
     @Test
-    fun `HYBRID_EXECUTE_FULL supportLevel is NOT_YET_IMPLEMENTED`() {
+    fun `HYBRID_EXECUTE_FULL supportLevel is AVAILABLE`() {
         assertEquals(
-            HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED,
+            HybridParticipantCapability.SupportLevel.AVAILABLE,
             HybridParticipantCapability.HYBRID_EXECUTE_FULL.supportLevel
         )
     }
@@ -304,9 +305,9 @@ class Pr60AndroidLifecycleHardeningTest {
     }
 
     @Test
-    fun `BARRIER_COORDINATION supportLevel is NOT_YET_IMPLEMENTED`() {
+    fun `BARRIER_COORDINATION supportLevel is AVAILABLE`() {
         assertEquals(
-            HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED,
+            HybridParticipantCapability.SupportLevel.AVAILABLE,
             HybridParticipantCapability.BARRIER_COORDINATION.supportLevel
         )
     }
@@ -359,27 +360,27 @@ class Pr60AndroidLifecycleHardeningTest {
     }
 
     @Test
-    fun `availableCapabilities does NOT include HYBRID_EXECUTE_FULL`() {
-        assertFalse(
-            "HYBRID_EXECUTE_FULL must NOT be in availableCapabilities",
+    fun `availableCapabilities includes HYBRID_EXECUTE_FULL`() {
+        assertTrue(
+            "HYBRID_EXECUTE_FULL must be in availableCapabilities",
             HybridParticipantCapability.availableCapabilities()
                 .contains(HybridParticipantCapability.HYBRID_EXECUTE_FULL)
         )
     }
 
     @Test
-    fun `deferredCapabilities includes HYBRID_EXECUTE_FULL`() {
-        assertTrue(
-            "HYBRID_EXECUTE_FULL must be in deferredCapabilities",
+    fun `deferredCapabilities does NOT include HYBRID_EXECUTE_FULL`() {
+        assertFalse(
+            "HYBRID_EXECUTE_FULL must NOT be in deferredCapabilities",
             HybridParticipantCapability.deferredCapabilities()
                 .contains(HybridParticipantCapability.HYBRID_EXECUTE_FULL)
         )
     }
 
     @Test
-    fun `deferredCapabilities includes BARRIER_COORDINATION`() {
-        assertTrue(
-            "BARRIER_COORDINATION must be in deferredCapabilities",
+    fun `deferredCapabilities does NOT include BARRIER_COORDINATION`() {
+        assertFalse(
+            "BARRIER_COORDINATION must NOT be in deferredCapabilities",
             HybridParticipantCapability.deferredCapabilities()
                 .contains(HybridParticipantCapability.BARRIER_COORDINATION)
         )

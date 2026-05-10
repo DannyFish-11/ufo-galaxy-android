@@ -216,25 +216,31 @@ object AndroidLifecycleRecoveryContract {
             "Android does not self-authorize session continuation — only V2 decides."
 
     /**
-     * Summary of the intentional hybrid participant limitations on the Android side.
+     * Summary of Android-side hybrid participant capability notes for V2 reference.
      *
-     * These are tracked, explicit deferrals — not accidental omissions.  See
-     * [HybridParticipantCapability.deferredCapabilities] for the machine-readable list.
+     * Updated in PR-A1: [HybridParticipantCapability.HYBRID_EXECUTE_FULL] and
+     * [HybridParticipantCapability.BARRIER_COORDINATION] are now
+     * [HybridParticipantCapability.SupportLevel.AVAILABLE] and are no longer deferrals.
+     * Entries are retained to document lifecycle and continuity considerations that
+     * V2 should still be aware of even for implemented capabilities.
      *
-     * For each limitation, V2's expected fallback behaviour is noted.
+     * See [HybridParticipantCapability.deferredCapabilities] for the machine-readable
+     * list of any remaining not-yet-implemented capabilities.
      */
     val HYBRID_LIMITATIONS = mapOf(
         HybridParticipantCapability.HYBRID_EXECUTE_FULL.wireValue to (
-            "Full hybrid_execute not implemented; Android sends hybrid_degrade reply. " +
-                "V2 must apply full-remote-execution fallback."
+            "Full hybrid_execute implemented by HybridExecuteFullCoordinator (PR-A1). " +
+                "Android executes local steps; V2 coordinates remote steps. " +
+                "If interrupted mid-execution, V2 must re-dispatch or apply fallback."
         ),
         HybridParticipantCapability.WEBRTC_PEER_TRANSPORT.wireValue to (
             "WebRTC peer transport has minimal-compat stubs only; not production-ready. " +
                 "V2 must not rely on WebRTC for correctness-critical flows."
         ),
         HybridParticipantCapability.BARRIER_COORDINATION.wireValue to (
-            "Android is not a barrier participant; barrier decisions belong to V2. " +
-                "Android contributes task completion signals only."
+            "Barrier coordination implemented by BarrierCoordinationParticipant (PR-A1). " +
+                "Android participates as a barrier responder; V2 retains barrier authority. " +
+                "Android reports WAITING/RELEASED/TIMED_OUT state via DeviceStateSnapshotPayload."
         )
     )
 }

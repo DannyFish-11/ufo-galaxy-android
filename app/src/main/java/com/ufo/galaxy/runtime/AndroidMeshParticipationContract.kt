@@ -120,8 +120,11 @@ object AndroidMeshParticipationContract {
      * Explicit runtime ownership boundary for LocalCollaborationAgent.
      *
      * Android executes assigned subtask payloads and echoes result identity fields,
-     * but does not own mesh session lifecycle, barrier coordination, or final mesh
-     * convergence authority.
+     * and participates as a barrier responder via [BarrierCoordinationParticipant].
+     * Android does not own mesh session lifecycle or final mesh convergence authority.
+     *
+     * Updated in PR-A1: "barrier_coordination" moved from "does_not_own" to
+     * "owns" as a participant-role responsibility backed by [BarrierCoordinationParticipant].
      */
     val LOCAL_COLLABORATION_AGENT_SCOPE: Map<String, Any> = mapOf(
         "owner" to "LocalCollaborationAgent",
@@ -129,11 +132,12 @@ object AndroidMeshParticipationContract {
         "owns" to listOf(
             "parallel_subtask_payload_execution",
             "group_id_subtask_index_result_echo",
-            "local_pipeline_terminal_status_emission"
+            "local_pipeline_terminal_status_emission",
+            "barrier_coordination_participant_response"
         ),
         "does_not_own" to listOf(
             "mesh_session_join_leave_lifecycle",
-            "barrier_coordination",
+            "barrier_coordination_authority",
             "global_mesh_result_convergence_authority"
         )
     )
@@ -164,10 +168,14 @@ object AndroidMeshParticipationContract {
 
     /**
      * Explicit partial/deferred scope constraints when full mesh runtime is not closed.
+     *
+     * Updated in PR-A1: `HYBRID_EXECUTE_FULL` and `BARRIER_COORDINATION` are now
+     * [HybridParticipantCapability.SupportLevel.AVAILABLE], so the previous deferred
+     * scope entries for those capabilities have been removed.  The remaining constraint
+     * reflects the permanent ownership boundary: Android is a mesh execution participant,
+     * not a mesh coordinator.
      */
     val MESH_PARTIAL_DEFERRED_SCOPE: List<String> = listOf(
-        "full_mesh_runtime_execution_deferred_until_hybrid_execute_full_is_available",
-        "barrier_coordination_deferred_until_cross_repo_runtime_contract_is_closed",
         "android_participates_as_execution_participant_not_mesh_coordinator"
     )
 
