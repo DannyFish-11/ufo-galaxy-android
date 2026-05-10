@@ -25,6 +25,8 @@ import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
+import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
+import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
@@ -966,6 +968,11 @@ class GalaxyConnectionService : Service() {
                 // ── PR-2: emit fallback_transition when delegated path falls back ─────
                 // PR-6: capture session identity at fallback emission point.
                 val durFallback = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
+                val fallbackOutcome = AndroidMissionCompletionSemanticsContract.classifyLocalTerminalOutcome(
+                    phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
+                    blockingReason = handoffResult.error,
+                    fallbackTier = "local_fallback"
+                )
                 deviceExecutionEventSink.onEvent(
                     DeviceExecutionEventPayload(
                         flow_id = taskId,
@@ -983,7 +990,14 @@ class GalaxyConnectionService : Service() {
                         interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                             UFOGalaxyApplication.appSettings.overlayReady,
                         // PR-10: carrier runtime state at fallback point.
-                        carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                        carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                        reported_state_semantic_class =
+                            AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.ACTIVE_RUNTIME.wireValue,
+                        result_uplink_semantic_class =
+                            AndroidMissionCompletionSemanticsContract
+                                .classifyReportedResultSemantic(fallbackOutcome)
+                                .wireValue,
+                        terminal_outcome_kind = fallbackOutcome.wireValue
                     )
                 )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
@@ -2406,6 +2420,16 @@ class GalaxyConnectionService : Service() {
 
         // PR-10: capture carrier runtime state for coherent event-snapshot alignment.
         val carrierRuntimeState = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+        val localTerminalOutcome = AndroidMissionCompletionSemanticsContract.classifyLocalTerminalOutcome(
+            phase = phase,
+            status = result.status,
+            blockingReason = blockingReason,
+            details = result.details,
+            interruptionReason = result.interruption_reason,
+            fallbackTier = result.policy_routing_outcome
+        )
+        val reportedResultSemantic =
+            AndroidMissionCompletionSemanticsContract.classifyReportedResultSemantic(localTerminalOutcome)
 
         return DeviceExecutionEventPayload(
             flow_id = flowId,
@@ -2426,7 +2450,12 @@ class GalaxyConnectionService : Service() {
             carrier_foreground_visible = carrierForegroundVisible,
             interaction_surface_ready = interactionSurfaceReady,
             // PR-10: carrier runtime state for coherent carrier status in every event.
-            carrier_runtime_state = carrierRuntimeState
+            carrier_runtime_state = carrierRuntimeState,
+            // PR-10 completion hardening: separate local terminal observation from reported semantics.
+            reported_state_semantic_class =
+                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING.wireValue,
+            result_uplink_semantic_class = reportedResultSemantic.wireValue,
+            terminal_outcome_kind = localTerminalOutcome.wireValue
         )
     }
 
@@ -2924,6 +2953,29 @@ class GalaxyConnectionService : Service() {
                 Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not derive participant freshness: ${e.message}")
                 null
             }
+            val reportedStateSemanticClass = AndroidCanonicalRuntimeTruthContract.classifySnapshot(
+                carrierRuntimeState = carrierRuntimeState,
+                reconnectRecoveryState = reconnectRecoveryState,
+                executionModeState = modeState.executionModeState,
+                executionBusy = snapshotStamp.executionBusy,
+                meshParticipationLifecycle = meshRuntimeStateReport?.participationLifecycle?.wireValue,
+                carrierForegroundVisible = carrierForegroundVisible,
+                plannerFallbackTier = plannerFallbackTier,
+                groundingFallbackTier = groundingFallbackTier
+            )
+            val degradedConditionClass = AndroidCanonicalRuntimeTruthContract.classifyDegradedCondition(
+                reconnectRecoveryState = reconnectRecoveryState,
+                degradedReasons = degradedReasons,
+                executionModeState = modeState.executionModeState,
+                plannerFallbackTier = plannerFallbackTier,
+                groundingFallbackTier = groundingFallbackTier,
+                currentFallbackTier = currentFallbackTier,
+                meshConstrainedReasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList(),
+                crossDeviceEligibility = modeState.crossDeviceEligibility,
+                plannerReady = capabilityAuthority?.plannerReady,
+                groundingReady = capabilityAuthority?.groundingReady,
+                offlineQueueDepth = offlineQueueDepth
+            )
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -2996,7 +3048,11 @@ class GalaxyConnectionService : Service() {
                 // durable_participant_id without inferring them from field combinations.
                 execution_mode_state = modeState.executionModeState,
                 durable_participant_id = snapshotDurableParticipantId,
-                participant_identity_freshness = snapshotParticipantFreshness
+                participant_identity_freshness = snapshotParticipantFreshness,
+                reported_state_semantic_class = reportedStateSemanticClass.wireValue,
+                degraded_condition_class = degradedConditionClass.wireValue,
+                local_observation_basis =
+                    AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
             )
 
             val envelope = AipMessage(
@@ -4052,6 +4108,15 @@ class GalaxyConnectionService : Service() {
                                     DeviceExecutionEventPayload.PHASE_CANCELLED
                                 else -> DeviceExecutionEventPayload.PHASE_FAILED
                             }
+                            val failureOutcome = AndroidMissionCompletionSemanticsContract.classifyLocalTerminalOutcome(
+                                phase = failurePhase,
+                                status = when (outcome.ledger.lastResult?.resultKind) {
+                                    DelegatedExecutionSignal.ResultKind.TIMEOUT -> EdgeExecutor.STATUS_TIMEOUT
+                                    DelegatedExecutionSignal.ResultKind.CANCELLED -> EdgeExecutor.STATUS_CANCELLED
+                                    else -> EdgeExecutor.STATUS_ERROR
+                                },
+                                blockingReason = outcome.error
+                            )
                             deviceExecutionEventSink.onEvent(
                                 DeviceExecutionEventPayload(
                                     flow_id = envelope.takeover_id,
@@ -4070,7 +4135,14 @@ class GalaxyConnectionService : Service() {
                                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                                         UFOGalaxyApplication.appSettings.overlayReady,
                                     // PR-10: carrier runtime state at takeover failure.
-                                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                                    reported_state_semantic_class =
+                                        AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING.wireValue,
+                                    result_uplink_semantic_class =
+                                        AndroidMissionCompletionSemanticsContract
+                                            .classifyReportedResultSemantic(failureOutcome)
+                                            .wireValue,
+                                    terminal_outcome_kind = failureOutcome.wireValue
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —

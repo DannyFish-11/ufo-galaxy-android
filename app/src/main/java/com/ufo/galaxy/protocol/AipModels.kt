@@ -2302,8 +2302,16 @@ data class DeviceExecutionEventPayload(
     //     - authoritative_recovery: close interruption era; resume normal policy.
     //     - informational: record progress; no terminal action.
     //   Null only as defensive default; populated at event-emission call sites.
+    //
+    // terminal_outcome_kind: deterministic local terminal observation class for this event.
+    //   Values: "completion" | "partial_completion" | "failure" | "interruption" |
+    //           "abort" | "timeout" | "fallback" | "recovery" | "non_terminal".
+    //   This is Android's local observed terminal taxonomy (not the center-facing reducer class).
+    //   V2 can compare this with result_uplink_semantic_class to distinguish local observation
+    //   from reported authoritative semantics.
     val reported_state_semantic_class: String? = null,
-    val result_uplink_semantic_class: String? = null
+    val result_uplink_semantic_class: String? = null,
+    val terminal_outcome_kind: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
