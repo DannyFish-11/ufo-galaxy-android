@@ -63,12 +63,15 @@ class RuntimeStateTruthSequencer(
         requestedTimestampMs: Long? = null,
         taskId: String = ""
     ): EventStamp {
-        val lifecyclePhase = mapExecutionEventToLifecyclePhase(phase)
         val previousLifecyclePhase = if (taskId.isNotBlank()) {
             lastLifecyclePhaseByTaskId[taskId]
         } else {
             null
         }
+        val lifecyclePhase = mapExecutionEventToLifecyclePhase(
+            phase = phase,
+            previousLifecyclePhase = previousLifecyclePhase
+        )
         val lifecycleTransitionValid = previousLifecyclePhase?.let { previous ->
             AndroidExecutionLifecycleContract.isValidTransition(previous, lifecyclePhase)
         } ?: true
@@ -122,17 +125,21 @@ class RuntimeStateTruthSequencer(
     }
 
     private fun mapExecutionEventToLifecyclePhase(
-        phase: String
+        phase: String,
+        previousLifecyclePhase: AndroidExecutionLifecycleContract.ExecutionLifecyclePhase?
     ): AndroidExecutionLifecycleContract.ExecutionLifecyclePhase {
         val P = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
         return when (phase) {
-            DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED -> P.ACTIVE
+            DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED -> when (previousLifecyclePhase) {
+                P.RETRYING -> P.ACTIVATING
+                else -> P.ACTIVE
+            }
             DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS -> P.ACTIVE
             DeviceExecutionEventPayload.PHASE_COMPLETED -> P.COMPLETED
             DeviceExecutionEventPayload.PHASE_FAILED,
             DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
             DeviceExecutionEventPayload.PHASE_CANCELLED -> P.FAILED
-            DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION -> P.DEGRADED
+            DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION -> P.INTERRUPTED
             DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE -> P.RETRYING
             else -> P.UNKNOWN
         }
