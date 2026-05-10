@@ -365,13 +365,20 @@ class GalaxyConnectionService : Service() {
             )
             val eventStamp = runtimeStateTruthSequencer.nextEventStamp(
                 phase = payload.phase,
-                requestedTimestampMs = payload.timestamp_ms
+                requestedTimestampMs = payload.timestamp_ms,
+                taskId = payload.task_id
             )
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
                 active_execution_count = eventStamp.activeExecutionCount,
                 execution_busy = eventStamp.executionBusy,
+                execution_lifecycle_phase = eventStamp.executionLifecyclePhase,
+                previous_execution_lifecycle_phase = eventStamp.previousExecutionLifecyclePhase,
+                lifecycle_transition_valid = eventStamp.lifecycleTransitionValid,
+                lifecycle_result_uplink_required = eventStamp.lifecycleResultUplinkRequired,
+                lifecycle_state_uplink_required = eventStamp.lifecycleStateUplinkRequired,
+                lifecycle_terminal_phase = eventStamp.lifecycleTerminalPhase,
                 mode_state = modeState.modeState,
                 mode_readiness_state = modeState.modeReadinessState,
                 cross_device_eligibility = modeState.crossDeviceEligibility,
@@ -397,6 +404,12 @@ class GalaxyConnectionService : Service() {
                     "execution_event_sequence" to (closedLoopPayload.execution_event_sequence ?: -1L),
                     "active_execution_count" to (closedLoopPayload.active_execution_count ?: -1),
                     "execution_busy" to (closedLoopPayload.execution_busy ?: false),
+                    "execution_lifecycle_phase" to (closedLoopPayload.execution_lifecycle_phase ?: ""),
+                    "previous_execution_lifecycle_phase" to (closedLoopPayload.previous_execution_lifecycle_phase ?: ""),
+                    "lifecycle_transition_valid" to (closedLoopPayload.lifecycle_transition_valid ?: true),
+                    "lifecycle_result_uplink_required" to (closedLoopPayload.lifecycle_result_uplink_required ?: false),
+                    "lifecycle_state_uplink_required" to (closedLoopPayload.lifecycle_state_uplink_required ?: false),
+                    "lifecycle_terminal_phase" to (closedLoopPayload.lifecycle_terminal_phase ?: false),
                     "event_id" to closedLoopPayload.event_id,
                     "source_component" to closedLoopPayload.source_component
                 )

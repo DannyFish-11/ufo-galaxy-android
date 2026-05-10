@@ -2326,9 +2326,31 @@ data class DeviceExecutionEventPayload(
     //   This is Android's local observed terminal taxonomy (not the center-facing reducer class).
     //   V2 can compare this with result_uplink_semantic_class to distinguish local observation
     //   from reported authoritative semantics.
+    //
+    // execution_lifecycle_phase / previous_execution_lifecycle_phase:
+    //   Canonical lifecycle phase projection from AndroidExecutionLifecycleContract.
+    //   V2 can use these fields as protocol-level truth instead of inferring lifecycle from
+    //   ad-hoc event phase strings.
+    //
+    // lifecycle_transition_valid:
+    //   True when previous_execution_lifecycle_phase -> execution_lifecycle_phase exists in
+    //   AndroidExecutionLifecycleContract.TRANSITION_TABLE. Null when no prior phase is known.
+    //
+    // lifecycle_result_uplink_required / lifecycle_state_uplink_required:
+    //   Canonical requirement projection from ExecutionUplinkDiscipline for the reported
+    //   execution_lifecycle_phase.
+    //
+    // lifecycle_terminal_phase:
+    //   True when execution_lifecycle_phase is terminal under AndroidExecutionLifecycleContract.
     val reported_state_semantic_class: String? = null,
     val result_uplink_semantic_class: String? = null,
-    val terminal_outcome_kind: String? = null
+    val terminal_outcome_kind: String? = null,
+    val execution_lifecycle_phase: String? = null,
+    val previous_execution_lifecycle_phase: String? = null,
+    val lifecycle_transition_valid: Boolean? = null,
+    val lifecycle_result_uplink_required: Boolean? = null,
+    val lifecycle_state_uplink_required: Boolean? = null,
+    val lifecycle_terminal_phase: Boolean? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
