@@ -11,6 +11,13 @@ import java.util.Locale
  * outcomes so local observations and center-facing reports can remain distinct and stable.
  */
 object AndroidMissionCompletionSemanticsContract {
+    private const val KEYWORD_TIMEOUT = EdgeExecutor.STATUS_TIMEOUT
+    private const val KEYWORD_INTERRUPT = "interrupt"
+    private const val KEYWORD_DISCONNECT = "disconnect"
+    private const val KEYWORD_SESSION_INVALID = "session_invalid"
+    private const val KEYWORD_FALLBACK = "fallback"
+    private const val KEYWORD_PARTIAL = "partial"
+    private const val KEYWORD_RECOVER = "recover"
 
     enum class TerminalOutcomeKind(val wireValue: String, val isTerminal: Boolean) {
         COMPLETION("completion", true),
@@ -35,18 +42,18 @@ object AndroidMissionCompletionSemanticsContract {
         interruptionReason: String? = null,
         fallbackTier: String? = null
     ): TerminalOutcomeKind {
-        val normalizedStatus = status?.trim()?.lowercase(Locale.ROOT)
+        val normalizedStatus = status?.trim()?.toLowerCase(Locale.ROOT)
         val reasonText = listOfNotNull(blockingReason, details, interruptionReason)
             .joinToString(" ")
-            .lowercase(Locale.ROOT)
-        val hasFallback = !fallbackTier.isNullOrBlank() || reasonText.contains("fallback")
+            .toLowerCase(Locale.ROOT)
+        val hasFallback = !fallbackTier.isNullOrBlank() || reasonText.contains(KEYWORD_FALLBACK)
         val hasInterruption =
             !interruptionReason.isNullOrBlank() ||
-                reasonText.contains("interrupt") ||
-                reasonText.contains("disconnect") ||
-                reasonText.contains("session_invalid")
-        val hasPartial = reasonText.contains("partial")
-        val hasRecovery = reasonText.contains("recover")
+                reasonText.contains(KEYWORD_INTERRUPT) ||
+                reasonText.contains(KEYWORD_DISCONNECT) ||
+                reasonText.contains(KEYWORD_SESSION_INVALID)
+        val hasPartial = reasonText.contains(KEYWORD_PARTIAL)
+        val hasRecovery = reasonText.contains(KEYWORD_RECOVER)
 
         return when (phase) {
             DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
@@ -71,7 +78,7 @@ object AndroidMissionCompletionSemanticsContract {
 
             DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
             DeviceExecutionEventPayload.PHASE_FAILED -> when {
-                normalizedStatus == EdgeExecutor.STATUS_TIMEOUT || reasonText.contains("timeout") ->
+                normalizedStatus == EdgeExecutor.STATUS_TIMEOUT || reasonText.contains(KEYWORD_TIMEOUT) ->
                     TerminalOutcomeKind.TIMEOUT
                 hasInterruption ->
                     TerminalOutcomeKind.INTERRUPTION
