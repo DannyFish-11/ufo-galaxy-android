@@ -1,6 +1,6 @@
 # Android Truth Publication Semantics
 
-**PR-9B** — Android-owned documentation for the truth surfaces consumed by
+Android-owned documentation for the truth surfaces consumed by
 `DannyFish-11/ufo-galaxy-realization-v2`.
 
 This document is the reviewer-facing summary of what Android actually publishes as:
@@ -114,6 +114,15 @@ recovery, or failure, but it must label that publication honestly.
 ## 3. Evidence semantics: positive, unknown, missing, stale, partial
 
 `AndroidTruthPublicationSemanticsContract` defines the concrete evidence vocabulary consumed by V2.
+
+The six evidence kinds are:
+
+1. `positive_evidence`
+2. `unknown`
+3. `unavailable`
+4. `delayed`
+5. `partial`
+6. `failed_observation`
 
 Current implementation note:
 
