@@ -414,7 +414,7 @@ class DualRepoE2EVerificationHarness(
     }
 
     /**
-     * Clears all recorded stage outcomes, hook evidence, [lifecycleTruthState], and
+     * Clears all recorded stage outcomes, verification hooks, [lifecycleTruthState], and
      * [governanceSnapshot].
      *
      * After calling this, a subsequent [buildReport] will produce a
