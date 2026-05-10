@@ -28,7 +28,7 @@ import java.util.ArrayDeque
  *
  * **Types that are queued**: Only messages whose JSON `type` field is listed in
  * [QUEUEABLE_TYPES] ("task_result", "goal_result", "goal_execution_result",
- * "delegated_execution_signal") are candidates
+ * "delegated_execution_signal", "device_execution_event") are candidates
  * for queuing.  Heartbeats, handshakes, and diagnostics are never queued.
  *
  * **JVM / unit-test compatible**: no Android framework references other than
@@ -60,6 +60,10 @@ class OfflineTaskQueue(
          * lifecycle updates.  It must also be queueable so takeover recovery remains
          * observable and idempotent across disconnect/reconnect transport interruptions.
          *
+         * "device_execution_event" carries canonical Android execution lifecycle truth.
+         * It must be queueable so start/progress/retry/interruption/terminal evidence
+         * can be replayed on reconnect instead of being silently dropped.
+         *
          * "task_result" and "goal_result" are retained for backward-compatibility with legacy
          * paths and REST-fallback callers.
          */
@@ -67,7 +71,8 @@ class OfflineTaskQueue(
             "task_result",
             "goal_result",
             "goal_execution_result",
-            "delegated_execution_signal"
+            "delegated_execution_signal",
+            "device_execution_event"
         )
     }
 

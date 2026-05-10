@@ -112,6 +112,15 @@ class OfflineQueueTest {
     }
 
     @Test
+    fun `QUEUEABLE_TYPES contains device_execution_event`() {
+        assertTrue(
+            "device_execution_event must be queueable so canonical execution lifecycle truth " +
+                "can replay across reconnect without loss",
+            "device_execution_event" in OfflineTaskQueue.QUEUEABLE_TYPES
+        )
+    }
+
+    @Test
     fun `heartbeat type is NOT in QUEUEABLE_TYPES`() {
         assertFalse("heartbeat" in OfflineTaskQueue.QUEUEABLE_TYPES)
     }

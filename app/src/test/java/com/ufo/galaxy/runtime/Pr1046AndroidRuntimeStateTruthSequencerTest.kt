@@ -154,6 +154,65 @@ class Pr1046AndroidRuntimeStateTruthSequencerTest {
     }
 
     @Test
+    fun `fallback transition is projected as interrupted lifecycle truth`() {
+        val sequencer = RuntimeStateTruthSequencer { 1_700_000_000_000L }
+        sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+            taskId = "task-a"
+        )
+        val fallback = sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
+            taskId = "task-a"
+        )
+
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.INTERRUPTED.wireValue,
+            fallback.executionLifecyclePhase
+        )
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE.wireValue,
+            fallback.previousExecutionLifecyclePhase
+        )
+        assertTrue(fallback.lifecycleTransitionValid)
+        assertTrue(fallback.lifecycleResultUplinkRequired)
+        assertTrue(fallback.lifecycleStateUplinkRequired)
+        assertFalse(fallback.lifecycleTerminalPhase)
+    }
+
+    @Test
+    fun `retry re-entry start is projected as activating after retrying`() {
+        val sequencer = RuntimeStateTruthSequencer { 1_700_000_000_000L }
+        sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+            taskId = "task-a"
+        )
+        sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
+            taskId = "task-a"
+        )
+        sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+            taskId = "task-a"
+        )
+        val restart = sequencer.nextEventStamp(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
+            taskId = "task-a"
+        )
+
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVATING.wireValue,
+            restart.executionLifecyclePhase
+        )
+        assertEquals(
+            AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.RETRYING.wireValue,
+            restart.previousExecutionLifecyclePhase
+        )
+        assertTrue(restart.lifecycleTransitionValid)
+        assertFalse(restart.lifecycleResultUplinkRequired)
+        assertTrue(restart.lifecycleStateUplinkRequired)
+    }
+
+    @Test
     fun `reconnect-like backward clock inputs keep global ordering stable`() {
         val sequencer = RuntimeStateTruthSequencer { 1_700_000_000_000L }
         val e1 = sequencer.nextEventStamp(
