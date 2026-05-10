@@ -228,7 +228,11 @@ class GalaxyConnectionService : Service() {
     private var activeTakeoverId: String? = null
     private val activeTakeoverLock = Any()
     private val delegatedSignalAttemptLock = Any()
-    private val delegatedSignalAttemptCounts: MutableMap<String, Int> = mutableMapOf()
+    private val delegatedSignalAttemptCounts: LinkedHashMap<String, Int> =
+        object : LinkedHashMap<String, Int>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean =
+                size > 2048
+        }
 
     private fun currentActiveTakeoverId(): String? =
         synchronized(activeTakeoverLock) { activeTakeoverId }
@@ -247,21 +251,15 @@ class GalaxyConnectionService : Service() {
         }
     }
 
-    private fun nextDelegatedSignalAttempt(signalId: String): Int =
+    private fun getAndIncrementDelegatedSignalAttempt(signalId: String): Int =
         synchronized(delegatedSignalAttemptLock) {
             val next = (delegatedSignalAttemptCounts[signalId] ?: 0) + 1
             delegatedSignalAttemptCounts[signalId] = next
             next
         }
 
-    private fun clearDelegatedSignalAttempt(signalId: String) {
-        synchronized(delegatedSignalAttemptLock) {
-            delegatedSignalAttemptCounts.remove(signalId)
-        }
-    }
-
     private fun delegatedSignalAttempt(signal: DelegatedExecutionSignal): Int =
-        if (signal.isResult) nextDelegatedSignalAttempt(signal.signalId) else 1
+        if (signal.isResult) getAndIncrementDelegatedSignalAttempt(signal.signalId) else 1
 
     private fun resolveExecutionTraceId(inboundTraceId: String?): String =
         inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
@@ -2436,9 +2434,6 @@ class GalaxyConnectionService : Service() {
             )
             val sent = webSocketClient.sendJson(gson.toJson(envelope))
             if (sent) {
-                if (signal.isResult) {
-                    clearDelegatedSignalAttempt(signal.signalId)
-                }
                 Log.d(TAG, "[DELEGATED_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
             } else {
                 val failureOwnershipState = if (signal.isResult) {
