@@ -166,6 +166,9 @@ class GalaxyConnectionService : Service() {
         private const val FALLBACK_TIER_CENTER_DELEGATED_WITH_LOCAL = "center_delegated_with_local_fallback"
         private const val FALLBACK_TIER_ACTIVE = "active"
         private const val BARRIER_SESSION_PREFIX_HYBRID = "hybrid"
+        private const val DELEGATED_SIGNAL_ATTEMPT_INITIAL_CAPACITY = 512
+        private const val DELEGATED_SIGNAL_ATTEMPT_MAX_ENTRIES = 2048
+        private const val SIGNAL_ATTEMPT_FIRST = 1
     }
     
     private val binder = LocalBinder()
@@ -229,9 +232,9 @@ class GalaxyConnectionService : Service() {
     private val activeTakeoverLock = Any()
     private val delegatedSignalAttemptLock = Any()
     private val delegatedSignalAttemptCounts: LinkedHashMap<String, Int> =
-        object : LinkedHashMap<String, Int>(256, 0.75f, true) {
+        object : LinkedHashMap<String, Int>(DELEGATED_SIGNAL_ATTEMPT_INITIAL_CAPACITY, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean =
-                size > 2048
+                size > DELEGATED_SIGNAL_ATTEMPT_MAX_ENTRIES
         }
 
     private fun currentActiveTakeoverId(): String? =
@@ -259,7 +262,7 @@ class GalaxyConnectionService : Service() {
         }
 
     private fun delegatedSignalAttempt(signal: DelegatedExecutionSignal): Int =
-        if (signal.isResult) getAndIncrementDelegatedSignalAttempt(signal.signalId) else 1
+        if (signal.isResult) getAndIncrementDelegatedSignalAttempt(signal.signalId) else SIGNAL_ATTEMPT_FIRST
 
     private fun resolveExecutionTraceId(inboundTraceId: String?): String =
         inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
