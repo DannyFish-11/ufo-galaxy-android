@@ -39,7 +39,6 @@ import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceSnapshot
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
 import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
-import com.ufo.galaxy.runtime.HybridParticipantCapability
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.runtime.toOutboundPayload
@@ -58,6 +57,8 @@ import com.ufo.galaxy.protocol.CancelResultPayload
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.HybridDegradePayload
+import com.ufo.galaxy.protocol.HybridExecutePayload
+import com.ufo.galaxy.protocol.HybridResultPayload
 import com.ufo.galaxy.protocol.MeshTopologyPayload
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.MeshSubtaskResult
@@ -73,8 +74,11 @@ import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
 import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import com.ufo.galaxy.runtime.BarrierCoordinationParticipant
+import com.ufo.galaxy.runtime.CollaborationLifecycleState
 import com.ufo.galaxy.runtime.DeviceExecutionEventSink
 import com.ufo.galaxy.runtime.DevicePerceptionEmissionSink
+import com.ufo.galaxy.runtime.HybridExecuteFullCoordinator
 import com.ufo.galaxy.runtime.NativeInferenceLoader
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
@@ -157,6 +161,7 @@ class GalaxyConnectionService : Service() {
         // Used in sendDeviceStateSnapshot() to derive mesh participation fallback state.
         private const val FALLBACK_TIER_CENTER_DELEGATED_WITH_LOCAL = "center_delegated_with_local_fallback"
         private const val FALLBACK_TIER_ACTIVE = "active"
+        private const val BARRIER_SESSION_PREFIX_HYBRID = "hybrid"
     }
     
     private val binder = LocalBinder()
@@ -164,11 +169,42 @@ class GalaxyConnectionService : Service() {
     private val gson = Gson()
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val runtimeStateTruthSequencer = RuntimeStateTruthSequencer()
+    private val barrierCoordinationParticipant = BarrierCoordinationParticipant()
+    private val meshRuntimeSignalLock = Any()
+    @Volatile
+    private var meshCollaborationLifecycleState: CollaborationLifecycleState =
+        CollaborationLifecycleState.IDLE
+    @Volatile
+    private var meshRuntimeParticipationActive: Boolean = false
 
     /** Stable device identifier used in all outbound AIP v3 message envelopes. */
     private val localDeviceId: String by lazy {
         "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
     }
+
+    private val hybridExecuteCoordinator: HybridExecuteFullCoordinator by lazy {
+        HybridExecuteFullCoordinator(
+            localExecutor = HybridExecuteFullCoordinator.LocalStepExecutor { payload ->
+                UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
+            },
+            deviceId = localDeviceId
+        )
+    }
+
+    private fun updateMeshRuntimeSignalState(
+        collaborationState: CollaborationLifecycleState? = null,
+        participationActive: Boolean? = null
+    ) {
+        synchronized(meshRuntimeSignalLock) {
+            collaborationState?.let { meshCollaborationLifecycleState = it }
+            participationActive?.let { meshRuntimeParticipationActive = it }
+        }
+    }
+
+    private fun readMeshRuntimeSignalState(): Pair<CollaborationLifecycleState, Boolean> =
+        synchronized(meshRuntimeSignalLock) {
+            meshCollaborationLifecycleState to meshRuntimeParticipationActive
+        }
 
     /** Tracks active goal_execution / parallel_subtask coroutine jobs for cancel support. */
     private val taskCancelRegistry = TaskCancelRegistry()
@@ -675,6 +711,13 @@ class GalaxyConnectionService : Service() {
                         serviceScope.launch { handlePeerAnnounce(messageId, rawJson) }
                         return
                     }
+                    MsgType.HYBRID_EXECUTE -> {
+                        serviceScope.launch {
+                            sendAdvancedAck(type, messageId)
+                            handleHybridExecute(messageId, rawJson)
+                        }
+                        return
+                    }
                     else -> Unit
                 }
 
@@ -691,13 +734,6 @@ class GalaxyConnectionService : Service() {
                 if (type in MsgType.ACK_ON_RECEIPT_TYPES) {
                     serviceScope.launch {
                         sendAdvancedAck(type, messageId)
-                    }
-                }
-                // HYBRID_EXECUTE: respond with a degrade payload because the full hybrid
-                // executor is not yet implemented.
-                if (type == MsgType.HYBRID_EXECUTE) {
-                    serviceScope.launch {
-                        sendHybridDegrade(rawJson)
                     }
                 }
                 // TAKEOVER_REQUEST (PR-5): parse the canonical TakeoverRequestEnvelope,
@@ -2803,6 +2839,8 @@ class GalaxyConnectionService : Service() {
             // no fake placeholder values are emitted.
             val durableRecord = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
             val snapshotAttachedSessionId = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId
+            val (snapshotCollaborationState, snapshotParticipationActive) =
+                readMeshRuntimeSignalState()
 
             // ── PR-8: Carrier manifestation/presence hints ────────────────────────────────
             // Both values are sourced from existing real Android state; null is emitted when
@@ -2845,20 +2883,13 @@ class GalaxyConnectionService : Service() {
             // participantHealthState: derived from the manager state that is already read above.
             //   This avoids a second read of the same state and keeps derivation consistent.
             //
-            // participationHostState: derived from whether a session is currently attached.
-            //   ACTIVE when a session is attached (snapshotAttachedSessionId != null);
-            //   INACTIVE otherwise.  This is a conservative derivation from available snapshot
-            //   state; it matches the ACTIVE/INACTIVE semantic used by RuntimeHostDescriptor.
+            // participationHostState: ACTIVE only while a real mesh runtime cycle is active
+            // and an attached session is present.  This avoids declaration-only "always active"
+            // semantics and allows terminal cycles to truthfully close.
             //
-            // barrierState: defaults to NOT_APPLICABLE — barrier state is an ephemeral
-            //   per-execution-cycle concept.  Android reports NOT_APPLICABLE in state snapshots
-            //   (which are emitted at connect/reconnect/periodic intervals) rather than
-            //   attempting to reconstruct transient barrier state from persistent state.
-            //   Barrier wait/release events are reported via the execution-event uplink.
+            // barrierState: sourced from BarrierCoordinationParticipant runtime state.
             //
-            // collaborationState: defaults to IDLE — collaboration state is a per-subtask
-            //   execution concept.  The snapshot reflects the steady-state between subtask
-            //   assignments.  Subtask execution state is reported via the execution-event uplink.
+            // collaborationState: sourced from live mesh collaboration lifecycle tracking.
             //
             // fallbackActive: true when the active fallback tier is not the primary tier.
             //   Matches the condition under which Android reports a degraded/fallback path.
@@ -2878,7 +2909,7 @@ class GalaxyConnectionService : Service() {
                 else -> com.ufo.galaxy.runtime.ParticipantHealthState.UNKNOWN
             }
             val snapshotParticipationHostState =
-                if (snapshotAttachedSessionId != null) {
+                if (snapshotParticipationActive && snapshotAttachedSessionId != null) {
                     com.ufo.galaxy.runtime.RuntimeHostDescriptor.HostParticipationState.ACTIVE
                 } else {
                     com.ufo.galaxy.runtime.RuntimeHostDescriptor.HostParticipationState.INACTIVE
@@ -2890,8 +2921,8 @@ class GalaxyConnectionService : Service() {
                 com.ufo.galaxy.runtime.AndroidMeshParticipationRuntimeContract.derive(
                     rollout = rolloutSnapshot,
                     healthState = snapshotParticipantHealth,
-                    barrierState = com.ufo.galaxy.runtime.BarrierParticipationState.NOT_APPLICABLE,
-                    collaborationState = com.ufo.galaxy.runtime.CollaborationLifecycleState.IDLE,
+                    barrierState = barrierCoordinationParticipant.currentState,
+                    collaborationState = snapshotCollaborationState,
                     fallbackActive = snapshotFallbackActive,
                     participationState = snapshotParticipationHostState
                 )
@@ -3046,6 +3077,10 @@ class GalaxyConnectionService : Service() {
                 barrier_participation_state = meshRuntimeStateReport?.barrierState?.wireValue,
                 collaboration_lifecycle_state = meshRuntimeStateReport?.collaborationLifecycle?.wireValue,
                 mesh_constrained_reasons = meshRuntimeStateReport?.constrainedReasons ?: emptyList(),
+                mesh_participation_ready = meshRuntimeStateReport?.isParticipationReady,
+                mesh_runtime_engaged = meshRuntimeStateReport?.isRuntimeEngaged,
+                mesh_runtime_closed = meshRuntimeStateReport?.isRuntimeClosed,
+                mesh_runtime_proof_quality = meshRuntimeStateReport?.proofQuality?.wireValue,
                 // PR-8Android: canonical execution mode state and participant identity fields.
                 // These close the R8 gap: V2 can read execution_mode_state and
                 // durable_participant_id without inferring them from field combinations.
@@ -3355,18 +3390,101 @@ class GalaxyConnectionService : Service() {
             )
         }
     }
-     * [HybridParticipantCapability.SupportLevel.NOT_YET_IMPLEMENTED] — this is an
-     * intentional, tracked deferral (not an accidental omission).  The degrade reply
-     * explicitly informs the gateway of the capability limitation so V2 can apply its
-     * own fallback policy rather than silently receiving an empty/error response.
-     *
-     * V2 must treat this reply as an explicit capability unavailability signal and apply
-     * its own fallback policy (e.g., full remote execution).
-     *
-     * @param rawHybridJson The raw JSON of the inbound hybrid_execute envelope, used to
-     *                      extract [task_id] for the degrade reply.
+
+    private suspend fun handleHybridExecute(messageId: String?, rawHybridJson: String) {
+        val payload = try {
+            val jsonObj = gson.fromJson(rawHybridJson, com.google.gson.JsonObject::class.java)
+            val p = jsonObj?.getAsJsonObject("payload") ?: jsonObj
+            gson.fromJson(p, HybridExecutePayload::class.java)
+        } catch (e: Exception) {
+            Log.w(TAG, "[ADVANCED:HYBRID_EXECUTE] failed to parse payload message_id=$messageId: ${e.message}")
+            null
+        }
+
+        if (payload == null || payload.task_id.isBlank()) {
+            sendHybridDegrade(
+                rawHybridJson = rawHybridJson,
+                reason = "hybrid_execute_bad_payload"
+            )
+            return
+        }
+
+        val taskId = payload.task_id
+        val barrierSessionId = "$BARRIER_SESSION_PREFIX_HYBRID:$taskId"
+        val rolloutSnapshot = UFOGalaxyApplication.runtimeController.rolloutControlSnapshot.value
+
+        updateMeshRuntimeSignalState(
+            collaborationState = CollaborationLifecycleState.SUBTASK_ASSIGNED,
+            participationActive = true
+        )
+        barrierCoordinationParticipant.enterBarrierWait(barrierSessionId)
+        updateMeshRuntimeSignalState(collaborationState = CollaborationLifecycleState.EXECUTING)
+        // Emit the live barrier-wait/executing state before terminal handling.
+        sendDeviceStateSnapshot()
+
+        val executionResult = try {
+            hybridExecuteCoordinator.acceptHybridExecute(payload, rolloutSnapshot)
+        } catch (e: Exception) {
+            Log.e(TAG, "[ADVANCED:HYBRID_EXECUTE] task_id=$taskId execution error: ${e.message}", e)
+            com.ufo.galaxy.runtime.HybridExecutionResult(
+                taskId = taskId,
+                deviceId = localDeviceId,
+                status = com.ufo.galaxy.runtime.HybridExecutionResult.Status.LOCAL_FAILURE,
+                localResult = null,
+                error = e.message ?: "hybrid_execute_runtime_error",
+                localStepCount = 0,
+                latencyMs = 0L
+            )
+        }
+
+        val terminalCollaborationState = when (executionResult.status) {
+            com.ufo.galaxy.runtime.HybridExecutionResult.Status.LOCAL_SUCCESS ->
+                CollaborationLifecycleState.COMPLETED
+            com.ufo.galaxy.runtime.HybridExecutionResult.Status.CANCELLED ->
+                CollaborationLifecycleState.CANCELLED
+            com.ufo.galaxy.runtime.HybridExecutionResult.Status.BLOCKED,
+            com.ufo.galaxy.runtime.HybridExecutionResult.Status.LOCAL_FAILURE ->
+                CollaborationLifecycleState.FAILED
+        }
+        updateMeshRuntimeSignalState(
+            collaborationState = terminalCollaborationState,
+            participationActive = false
+        )
+
+        if (executionResult.status == com.ufo.galaxy.runtime.HybridExecutionResult.Status.BLOCKED) {
+            barrierCoordinationParticipant.handleBarrierTimeout()
+        } else {
+            barrierCoordinationParticipant.acknowledgeBarrierRelease(barrierSessionId)
+        }
+        // Emit the terminal collaboration + barrier outcome (released or timed_out).
+        sendDeviceStateSnapshot()
+
+        // Reset local barrier state for the next cycle after terminal emission.
+        barrierCoordinationParticipant.resetBarrier(barrierSessionId)
+
+        sendHybridResult(hybridExecuteCoordinator.toHybridResultPayload(executionResult))
+    }
+
+    private fun sendHybridResult(payload: HybridResultPayload) {
+        val envelope = AipMessage(
+            type = MsgType.HYBRID_RESULT,
+            payload = payload,
+            correlation_id = payload.correlation_id ?: payload.task_id,
+            device_id = localDeviceId,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(payload.task_id, MsgType.HYBRID_RESULT)
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        Log.i(
+            TAG,
+            "[ADVANCED:HYBRID_RESULT] task_id=${payload.task_id} status=${payload.status} sent=$sent"
+        )
+    }
+
+    /**
+     * Emits HYBRID_DEGRADE for malformed HYBRID_EXECUTE payloads.
      */
-    private fun sendHybridDegrade(rawHybridJson: String) {
+    private fun sendHybridDegrade(rawHybridJson: String, reason: String) {
         val taskId = try {
             gson.fromJson(rawHybridJson, com.google.gson.JsonObject::class.java)
                 ?.getAsJsonObject("payload")?.get("task_id")?.asString ?: ""
@@ -3375,25 +3493,10 @@ class GalaxyConnectionService : Service() {
             ""
         }
 
-        // PR-60: Log a structured hybrid-participant capability limitation before sending
-        // the degrade reply so V2 and log-analysis tooling can distinguish "capability
-        // not available" from a generic error.
-        val capability = HybridParticipantCapability.HYBRID_EXECUTE_FULL
-        GalaxyLogger.log(
-            GalaxyLogger.TAG_HYBRID_PARTICIPANT,
-            mapOf(
-                "event" to "hybrid_capability_limitation",
-                "capability" to capability.wireValue,
-                "support_level" to capability.supportLevel.wireValue,
-                "task_id" to taskId,
-                "reason" to capability.description
-            )
-        )
-
         val degradePayload = HybridDegradePayload(
             task_id = taskId,
             correlation_id = taskId.ifEmpty { null },
-            reason = "hybrid_executor_not_implemented",
+            reason = reason,
             fallback_mode = "local_only",
             device_id = localDeviceId
         )
@@ -3406,13 +3509,12 @@ class GalaxyConnectionService : Service() {
             idempotency_key = buildIdempotencyKey(taskId.ifBlank { "hybrid_degrade" }, MsgType.HYBRID_DEGRADE)
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
-        Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent capability=${capability.wireValue}")
+        Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent reason=$reason")
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "hybrid_degrade_sent",
                 "task_id" to taskId,
-                "reason" to "hybrid_executor_not_implemented",
-                "capability" to capability.wireValue
+                "reason" to reason
             )
         )
     }

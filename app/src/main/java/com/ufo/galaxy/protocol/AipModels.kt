@@ -2096,10 +2096,27 @@ data class DeviceStateSnapshotPayload(
     //   mesh participation is degraded, constrained, or using a fallback path.  Each entry
     //   corresponds to a specific runtime condition that limits participation quality.
     //   Empty list when participation is fully healthy and unconstrained.
+    //
+    // mesh_participation_ready: Android-side boolean readiness projection from
+    //   AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport.isParticipationReady.
+    //
+    // mesh_runtime_engaged: Android-side execution-engagement projection from
+    //   AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport.isRuntimeEngaged.
+    //
+    // mesh_runtime_closed: Android-side runtime-closure projection from
+    //   AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport.isRuntimeClosed.
+    //
+    // mesh_runtime_proof_quality: proof grade string from
+    //   AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport.proofQuality.
+    //   Values: "live" | "partial" | "stale" | "missing".
     val mesh_participation_lifecycle_state: String? = null,
     val barrier_participation_state: String? = null,
     val collaboration_lifecycle_state: String? = null,
     val mesh_constrained_reasons: List<String> = emptyList(),
+    val mesh_participation_ready: Boolean? = null,
+    val mesh_runtime_engaged: Boolean? = null,
+    val mesh_runtime_closed: Boolean? = null,
+    val mesh_runtime_proof_quality: String? = null,
 
     // PR-8Android: Canonical execution mode state from LocalExecutionModeGate.
     //
