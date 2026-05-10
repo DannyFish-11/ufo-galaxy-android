@@ -7,6 +7,8 @@ package com.ufo.galaxy.runtime
 enum class AndroidCrossRepoRegressionFlow(val wireValue: String) {
     CAPABILITY("capability"),
     EXECUTION("execution"),
+    LOCAL_RUNTIME("local_runtime"),
+    DIAGNOSTICS("diagnostics"),
     RECOVERY("recovery"),
     TAKEOVER("takeover"),
     MESH("mesh");
@@ -151,6 +153,37 @@ class AndroidCrossRepoRegressionRuntimeHooks(
         setFlowOutcome(AndroidCrossRepoRegressionFlow.RECOVERY, status)
     }
 
+    fun recordLocalRuntimeBehavior(
+        startResult: RuntimeStartResult,
+        reason: String? = null
+    ) {
+        val status = when (startResult) {
+            RuntimeStartResult.Success,
+            is RuntimeStartResult.Degraded -> ScenarioOutcomeStatus.PASSED
+            is RuntimeStartResult.Failure -> ScenarioOutcomeStatus.FAILED
+        }
+        val resolvedReason = when (startResult) {
+            RuntimeStartResult.Success,
+            is RuntimeStartResult.Degraded -> reason
+            is RuntimeStartResult.Failure -> reason ?: "${startResult.stage}:${startResult.message}"
+        }
+        harness.recordStageOutcome(
+            stage = DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE,
+            status = status,
+            reason = resolvedReason
+        )
+        setFlowOutcome(AndroidCrossRepoRegressionFlow.LOCAL_RUNTIME, status)
+    }
+
+    fun recordDiagnostics(status: ScenarioOutcomeStatus, reason: String? = null) {
+        harness.recordStageOutcome(
+            stage = DualRepoE2EVerificationStage.DEGRADED_OUTCOME_RECORDING,
+            status = status,
+            reason = reason
+        )
+        setFlowOutcome(AndroidCrossRepoRegressionFlow.DIAGNOSTICS, status)
+    }
+
     fun recordTakeover(status: ScenarioOutcomeStatus, reason: String? = null) {
         harness.recordVerificationHook(
             kind = DualRepoE2EVerificationHookKind.STATE_CORRELATED,
@@ -158,6 +191,15 @@ class AndroidCrossRepoRegressionRuntimeHooks(
             reason = reason
         )
         setFlowOutcome(AndroidCrossRepoRegressionFlow.TAKEOVER, status)
+    }
+
+    /**
+     * Semantic alias for ownership-transfer lifecycle reporting.
+     *
+     * The underlying dual-runtime harness signal is still the canonical TAKEOVER flow.
+     */
+    fun recordOwnershipTransfer(status: ScenarioOutcomeStatus, reason: String? = null) {
+        recordTakeover(status = status, reason = reason)
     }
 
     fun recordMesh(status: ScenarioOutcomeStatus, reason: String? = null) {

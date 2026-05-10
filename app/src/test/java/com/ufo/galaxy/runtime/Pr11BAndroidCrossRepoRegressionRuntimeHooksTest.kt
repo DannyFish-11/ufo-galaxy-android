@@ -36,8 +36,10 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
             runtimeSessionId = "runtime-pr11b",
             status = ScenarioOutcomeStatus.PASSED
         )
+        hooks.recordLocalRuntimeBehavior(RuntimeStartResult.Success)
+        hooks.recordDiagnostics(ScenarioOutcomeStatus.PASSED)
         hooks.recordReconnectRecovery(ScenarioOutcomeStatus.PASSED)
-        hooks.recordTakeover(ScenarioOutcomeStatus.PASSED)
+        hooks.recordOwnershipTransfer(ScenarioOutcomeStatus.PASSED)
         hooks.recordMesh(ScenarioOutcomeStatus.PASSED)
 
         val snapshot = hooks.buildSnapshot(nowMs = 1234L)
@@ -52,6 +54,14 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
         assertEquals(
             ScenarioOutcomeStatus.PASSED,
             snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.EXECUTION]
+        )
+        assertEquals(
+            ScenarioOutcomeStatus.PASSED,
+            snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.LOCAL_RUNTIME]
+        )
+        assertEquals(
+            ScenarioOutcomeStatus.PASSED,
+            snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.DIAGNOSTICS]
         )
         assertEquals(
             ScenarioOutcomeStatus.PASSED,
@@ -76,7 +86,7 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
         )
 
         hooks.recordTakeover(ScenarioOutcomeStatus.FAILED, "timeout")
-        hooks.recordTakeover(ScenarioOutcomeStatus.PASSED)
+        hooks.recordOwnershipTransfer(ScenarioOutcomeStatus.PASSED)
 
         val snapshot = hooks.buildSnapshot(nowMs = 5678L)
         assertEquals(
@@ -95,6 +105,8 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
         )
         hooks.recordDeviceRegisterSent()
         hooks.recordCapabilityReportSent()
+        hooks.recordLocalRuntimeBehavior(RuntimeStartResult.Degraded("planner_only"))
+        hooks.recordDiagnostics(ScenarioOutcomeStatus.PASSED)
 
         val snapshot = hooks.buildSnapshot(nowMs = 42L)
         val wire = snapshot.toWireMap()
@@ -102,5 +114,35 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
         assertEquals("1.0", wire["schema_version"])
         assertTrue(wire.containsKey("flow_outcomes"))
         assertTrue(wire.containsKey("dual_repo_e2e"))
+    }
+
+    @Test
+    fun `failing local runtime and diagnostics keep snapshot not ready`() {
+        val hooks = AndroidCrossRepoRegressionRuntimeHooks(
+            deviceId = "device-pr11b",
+            participantId = "participant-pr11b",
+            verificationKind = RealDeviceVerificationKind.REAL_DEVICE
+        )
+        hooks.recordLocalRuntimeBehavior(
+            RuntimeStartResult.Failure(
+                stage = RuntimeStartResult.StartStage.HEALTH_CHECK,
+                message = "planner unavailable"
+            )
+        )
+        hooks.recordDiagnostics(
+            status = ScenarioOutcomeStatus.FAILED,
+            reason = "runtime_diagnostics_send_failed"
+        )
+
+        val snapshot = hooks.buildSnapshot(nowMs = 99L)
+        assertEquals(
+            ScenarioOutcomeStatus.FAILED,
+            snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.LOCAL_RUNTIME]
+        )
+        assertEquals(
+            ScenarioOutcomeStatus.FAILED,
+            snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.DIAGNOSTICS]
+        )
+        assertFalse(snapshot.isDualRuntimeRegressionReady)
     }
 }
