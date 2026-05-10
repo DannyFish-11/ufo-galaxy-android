@@ -2,6 +2,7 @@ package com.ufo.galaxy.runtime
 
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import java.util.Locale
 
 /**
  * PR-10 (Android) — Mission completion semantics hardening contract.
@@ -34,10 +35,10 @@ object AndroidMissionCompletionSemanticsContract {
         interruptionReason: String? = null,
         fallbackTier: String? = null
     ): TerminalOutcomeKind {
-        val normalizedStatus = status?.trim()?.lowercase()
+        val normalizedStatus = status?.trim()?.lowercase(Locale.ROOT)
         val reasonText = listOfNotNull(blockingReason, details, interruptionReason)
             .joinToString(" ")
-            .lowercase()
+            .lowercase(Locale.ROOT)
         val hasFallback = !fallbackTier.isNullOrBlank() || reasonText.contains("fallback")
         val hasInterruption =
             !interruptionReason.isNullOrBlank() ||
