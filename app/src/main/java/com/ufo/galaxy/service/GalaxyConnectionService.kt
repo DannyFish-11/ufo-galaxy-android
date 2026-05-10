@@ -24,6 +24,7 @@ import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
+import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
@@ -342,27 +343,29 @@ class GalaxyConnectionService : Service() {
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 execution_mode_state = modeState.executionModeState
             )
+            val closedLoopPayload =
+                AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_EXECUTION_EVENT,
                 mapOf(
                     "event" to "device_execution_event_sent",
                     "device_id" to localDeviceId,
-                    "task_id" to enrichedPayload.task_id,
-                    "phase" to enrichedPayload.phase,
-                    "flow_id" to enrichedPayload.flow_id,
-                    "step_index" to enrichedPayload.step_index,
-                    "is_blocking" to enrichedPayload.is_blocking,
-                    "blocking_reason" to enrichedPayload.blocking_reason,
-                    "stagnation_detected" to enrichedPayload.stagnation_detected,
-                    "fallback_tier" to (enrichedPayload.fallback_tier ?: ""),
-                    "execution_event_sequence" to (enrichedPayload.execution_event_sequence ?: -1L),
-                    "active_execution_count" to (enrichedPayload.active_execution_count ?: -1),
-                    "execution_busy" to (enrichedPayload.execution_busy ?: false),
-                    "event_id" to enrichedPayload.event_id,
-                    "source_component" to enrichedPayload.source_component
+                    "task_id" to closedLoopPayload.task_id,
+                    "phase" to closedLoopPayload.phase,
+                    "flow_id" to closedLoopPayload.flow_id,
+                    "step_index" to closedLoopPayload.step_index,
+                    "is_blocking" to closedLoopPayload.is_blocking,
+                    "blocking_reason" to closedLoopPayload.blocking_reason,
+                    "stagnation_detected" to closedLoopPayload.stagnation_detected,
+                    "fallback_tier" to (closedLoopPayload.fallback_tier ?: ""),
+                    "execution_event_sequence" to (closedLoopPayload.execution_event_sequence ?: -1L),
+                    "active_execution_count" to (closedLoopPayload.active_execution_count ?: -1),
+                    "execution_busy" to (closedLoopPayload.execution_busy ?: false),
+                    "event_id" to closedLoopPayload.event_id,
+                    "source_component" to closedLoopPayload.source_component
                 )
             )
-            webSocketClient.sendDeviceExecutionEvent(enrichedPayload)
+            webSocketClient.sendDeviceExecutionEvent(closedLoopPayload)
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_EXEC_EVENT] sink error task_id=${payload.task_id} phase=${payload.phase}: ${e.message}", e)
         }
