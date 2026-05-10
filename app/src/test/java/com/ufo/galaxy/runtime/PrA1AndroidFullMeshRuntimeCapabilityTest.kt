@@ -73,14 +73,12 @@ import org.junit.Test
  * ### BarrierCoordinationParticipant — acknowledgeBarrierRelease
  *  - acknowledgeBarrierRelease transitions from WAITING to RELEASED
  *  - acknowledgeBarrierRelease returns true from WAITING state
- *  - acknowledgeBarrierRelease returns false when not in WAITING state
- *  - acknowledgeBarrierRelease from NOT_APPLICABLE returns false
+ *  - acknowledgeBarrierRelease returns false when not in WAITING state (state unchanged)
  *
  * ### BarrierCoordinationParticipant — handleBarrierTimeout
  *  - handleBarrierTimeout transitions from WAITING to TIMED_OUT
  *  - handleBarrierTimeout returns true from WAITING state
- *  - handleBarrierTimeout returns false when not in WAITING state
- *  - handleBarrierTimeout from NOT_APPLICABLE returns false
+ *  - handleBarrierTimeout returns false when not in WAITING state (state unchanged)
  *
  * ### BarrierCoordinationParticipant — resetBarrier
  *  - resetBarrier transitions from RELEASED to NOT_APPLICABLE
@@ -389,12 +387,6 @@ class PrA1AndroidFullMeshRuntimeCapabilityTest {
         val participant = BarrierCoordinationParticipant()
         assertFalse("acknowledgeBarrierRelease from NOT_APPLICABLE must return false",
             participant.acknowledgeBarrierRelease("session-1"))
-    }
-
-    @Test
-    fun `acknowledgeBarrierRelease from NOT_APPLICABLE returns false`() {
-        val participant = BarrierCoordinationParticipant()
-        assertFalse(participant.acknowledgeBarrierRelease("session-1"))
         assertEquals(BarrierParticipationState.NOT_APPLICABLE, participant.currentState)
     }
 
@@ -420,12 +412,6 @@ class PrA1AndroidFullMeshRuntimeCapabilityTest {
         val participant = BarrierCoordinationParticipant()
         assertFalse("handleBarrierTimeout from NOT_APPLICABLE must return false",
             participant.handleBarrierTimeout())
-    }
-
-    @Test
-    fun `handleBarrierTimeout from NOT_APPLICABLE returns false`() {
-        val participant = BarrierCoordinationParticipant()
-        assertFalse(participant.handleBarrierTimeout())
         assertEquals(BarrierParticipationState.NOT_APPLICABLE, participant.currentState)
     }
 
