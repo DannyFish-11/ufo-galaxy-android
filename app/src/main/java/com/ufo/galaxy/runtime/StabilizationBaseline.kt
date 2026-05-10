@@ -1838,6 +1838,31 @@ object StabilizationBaseline {
                 "per-field knowledge of derivation paths.",
             introducedPr = 81
         )
+    ) + listOf(
+
+        // ── PR-3: Canonical capability export contract ────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-capability-export-contract",
+            displayName = "AndroidCapabilityExportContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCapabilityExportContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-3 canonical Android capability export contract for cross-repository V2 validation. " +
+                "Replaces the scattered capability schema definition (split across CapabilityReport, " +
+                "AndroidCapabilityVector, and GalaxyWebSocketClient) with a single, versioned, " +
+                "machine-verifiable contract object. Introduces CONTRACT_SCHEMA_VERSION (emitted as " +
+                "'contract_schema_version' in capability_report metadata) so V2's capability_registry.py " +
+                "can detect Android-side schema drift without diffing individual field lists. Provides " +
+                "TOP_LEVEL_FIELD_DESCRIPTORS (11 required fields), METADATA_FIELD_DESCRIPTORS (29 required " +
+                "fields: 8 core readiness + 4 scheduling basis + 16 canonical gate + 1 contract version), " +
+                "validate() and validateMetadata() producing ValidationResult, and regression-anchor " +
+                "constants EXPECTED_REQUIRED_TOP_LEVEL_FIELD_COUNT / EXPECTED_REQUIRED_METADATA_FIELD_COUNT. " +
+                "GalaxyWebSocketClient.normalizedCapabilityMetadata() emits contract_schema_version = '1' " +
+                "in every capability_report metadata map. Pr3AndroidCapabilityExportContractTest provides " +
+                "the blocking CI gate protecting schema stability.",
+            introducedPr = 82
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
