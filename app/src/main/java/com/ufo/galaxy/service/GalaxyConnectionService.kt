@@ -2454,12 +2454,17 @@ class GalaxyConnectionService : Service() {
         errorContext: String
     ) {
         val safeTaskId = taskId.ifBlank { "runtime" }
-        webSocketClient.sendDiagnostics(
+        val sent = webSocketClient.sendDiagnostics(
             taskId = safeTaskId,
             nodeName = nodeName,
             errorType = errorType,
             errorContext = errorContext
         )
+        crossRepoRegressionHooks.recordDiagnostics(
+            status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+            reason = if (sent) null else "runtime_diagnostics_send_failed:$errorType@$nodeName"
+        )
+        emitCrossRepoRegressionSnapshot("cross_repo_runtime_diagnostics")
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "runtime_diagnostics_emitted",
@@ -4606,7 +4611,7 @@ class GalaxyConnectionService : Service() {
             source_runtime_posture = response.source_runtime_posture
         )
         val sent = webSocketClient.sendJson(gson.toJson(envelope))
-        crossRepoRegressionHooks.recordTakeover(
+        crossRepoRegressionHooks.recordOwnershipTransfer(
             status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
             reason = if (sent) null else "takeover_response_send_failed"
         )
@@ -4722,6 +4727,8 @@ class GalaxyConnectionService : Service() {
         Log.i(TAG, "开始加载本地模型 (via LocalInferenceRuntimeManager)...")
         val runtimeManager = UFOGalaxyApplication.localInferenceRuntimeManager
         val startResult = runtimeManager.start()
+        crossRepoRegressionHooks.recordLocalRuntimeBehavior(startResult)
+        emitCrossRepoRegressionSnapshot("cross_repo_local_runtime_behavior")
 
         val plannerLoaded = UFOGalaxyApplication.plannerService.isModelLoaded()
         val groundingLoaded = UFOGalaxyApplication.groundingService.isModelLoaded()
