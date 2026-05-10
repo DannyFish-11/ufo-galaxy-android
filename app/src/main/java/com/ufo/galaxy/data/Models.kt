@@ -439,6 +439,10 @@ data class DiagnosticsPayload(
     val error_context: String,
     val task_id: String,
     val node_name: String,
+    val diagnostic_schema_version: String? = null,
+    val diagnostic_domain: String? = null,
+    val diagnostic_reason: String? = null,
+    val local_cause: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 

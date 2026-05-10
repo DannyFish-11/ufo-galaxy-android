@@ -1906,6 +1906,24 @@ object StabilizationBaseline {
                 "fields at sendDeviceStateSnapshot() call time. Test: Pr12AndroidReconnectRecoveryParticipationTest.",
             introducedPr = 84
         )
+    ) + listOf(
+
+        // ── PR-11B: Local diagnostics reason closure ───────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-local-diagnostic-reason-contract",
+            displayName = "AndroidLocalDiagnosticReasonContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-11B stable local diagnostics reason contract for V2 canonical diagnosis. " +
+                "Defines versioned, code-backed diagnostic reason structures (domain + reason + " +
+                "local cause) for runtime/capability/recovery/takeover/mesh-participation paths, " +
+                "replacing ad hoc text-only diagnostics. GalaxyWebSocketClient.sendDiagnostics now " +
+                "emits diagnostic_schema_version, diagnostic_domain, diagnostic_reason, and local_cause " +
+                "in DiagnosticsPayload so local causes are explicit and machine-reconcilable by V2.",
+            introducedPr = 85
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

@@ -451,6 +451,10 @@ class AipModelsTest {
         assertEquals("android_edge", payload.node_name)
         assertEquals("network_timeout", payload.error_type)
         assertEquals("connect timed out after 30s", payload.error_context)
+        assertNull(payload.diagnostic_schema_version)
+        assertNull(payload.diagnostic_domain)
+        assertNull(payload.diagnostic_reason)
+        assertNull(payload.local_cause)
         assertTrue(payload.timestamp in before..after)
     }
 
@@ -474,6 +478,26 @@ class AipModelsTest {
         assertEquals("AIP/1.0", envelope.protocol)
         assertEquals("3.0", envelope.version)
         assertEquals("trace-001", envelope.trace_id)
+    }
+
+    @Test
+    fun `DiagnosticsPayload accepts stable local diagnostic reason surface`() {
+        val payload = DiagnosticsPayload(
+            task_id = "task-diag-structured-01",
+            device_id = "device-structured-1",
+            node_name = "parallel_subtask_pipeline",
+            error_type = "parallel_subtask_timeout",
+            error_context = "timeout_ms=120000",
+            diagnostic_schema_version = "1",
+            diagnostic_domain = "mesh_participation",
+            diagnostic_reason = "parallel_subtask_timeout",
+            local_cause = "parallel_subtask_pipeline"
+        )
+
+        assertEquals("1", payload.diagnostic_schema_version)
+        assertEquals("mesh_participation", payload.diagnostic_domain)
+        assertEquals("parallel_subtask_timeout", payload.diagnostic_reason)
+        assertEquals("parallel_subtask_pipeline", payload.local_cause)
     }
 
     // ── MeshJoinPayload (H5) ──────────────────────────────────────────────────
