@@ -3112,10 +3112,19 @@ class GalaxyConnectionService : Service() {
             }
             val snapshotQueueSessionTagMatches = run {
                 val currentSession = durableRecord?.durableSessionId
-                // Offline queue messages tagged with the current session are eligible for replay;
-                // messages with a different (or null) tag are stale.  If the queue is empty this
-                // flag is irrelevant — classifyReplayEligibility handles depth == 0 first.
-                currentSession != null && offlineQueueDepth > 0
+                // Replay eligibility requires a non-empty queue whose messages were enqueued
+                // during the current durable session era.  We conservatively consider the queue
+                // session-matched only when both conditions hold:
+                //   1. A current durable session ID exists (messages could only be tagged with it).
+                //   2. The WS is in a transport reconnect state (recovering/recovered), which means
+                //      the offline queue accumulated during the same durable era — the session ID
+                //      at enqueue time equals the current durable session ID.
+                // Outside a transport reconnect (fresh attach / idle), any queued messages may be
+                // from a prior era and must be treated as stale-session (STALE_SESSION_BLOCKED or
+                // QUEUE_EMPTY by the classifier).
+                val isTransportReconnect = reconnectRecoveryState == ReconnectRecoveryState.RECOVERING.wireValue ||
+                    reconnectRecoveryState == ReconnectRecoveryState.RECOVERED.wireValue
+                currentSession != null && offlineQueueDepth > 0 && isTransportReconnect
             }
             val reconnectParticipationSnapshot = try {
                 com.ufo.galaxy.runtime.AndroidReconnectRecoveryParticipationContract.classify(
