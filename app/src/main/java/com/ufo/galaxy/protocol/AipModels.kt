@@ -1930,6 +1930,30 @@ data class DeviceAuditReportPayload(
  *                                   during a reconnect recovery cycle so V2 can handle them
  *                                   correctly.  `null` only as a defensive default (same as above).
  *
+ * PR-12: Android real reconnect/recovery participation fields.
+ * These three fields close the gap between scattered reconnect components and expose a
+ * coherent, wire-stable participation model that V2 can act on during recovery closure
+ * without inferring participation kind from field combinations.
+ * @param reconnect_participation_kind Classification of the reconnect/re-attach scenario
+ *                                   from [com.ufo.galaxy.runtime.AndroidReconnectRecoveryParticipationContract].
+ *                                   Values: `"fresh_attach"` | `"transport_reconnect"` |
+ *                                   `"process_recreation_with_context"` |
+ *                                   `"process_recreation_without_context"`.
+ *                                   V2 MUST use this field to select the correct recovery closure
+ *                                   path.  `null` only as a defensive default.
+ * @param identity_reuse_decision    How Android reuses its durable identity during reconnect.
+ *                                   Values: `"reuse_durable_participant"` | `"reuse_session_only"` |
+ *                                   `"fresh_identity"`.
+ *                                   V2 MUST use this field to determine whether to look up a prior
+ *                                   participant record or initialise a new one.  `null` only as a
+ *                                   defensive default.
+ * @param replay_eligibility         Whether offline-queued messages are eligible for replay.
+ *                                   Values: `"eligible_for_replay"` | `"stale_session_blocked"` |
+ *                                   `"queue_empty"`.
+ *                                   V2 MUST use this field to decide whether to expect a replay
+ *                                   flush from Android before treating the session as fully
+ *                                   recovered.  `null` only as a defensive default.
+ *
  * PR-4: Authoritative capability authority fields.
  * These four fields are the stable, first-class projection of the
  * [com.ufo.galaxy.runtime.CapabilityAuthoritySnapshot] that V2 can use for dispatch
@@ -2178,7 +2202,29 @@ data class DeviceStateSnapshotPayload(
     //     - "partial": limit dispatch to confirmed subsystems only.
     //     - "failed_observation": apply recovery policy; MUST NOT assume healthy state.
     //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
-    val evidence_presence_kind: String? = null
+    val evidence_presence_kind: String? = null,
+
+    // PR-12: Reconnect/recovery participation fields — real participation semantics for
+    //   cross-repository continuity and recovery closure with V2.
+    //
+    // reconnect_participation_kind: classification of the reconnect/re-attach scenario.
+    //   Values: "fresh_attach" | "transport_reconnect" |
+    //           "process_recreation_with_context" | "process_recreation_without_context".
+    //   V2 MUST use this field to select the correct recovery closure path.
+    //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
+    //
+    // identity_reuse_decision: how Android reuses its durable identity during reconnect.
+    //   Values: "reuse_durable_participant" | "reuse_session_only" | "fresh_identity".
+    //   V2 MUST use this field to determine whether to look up a prior participant record
+    //   or initialise a new one.  Null only as a defensive default.
+    //
+    // replay_eligibility: whether offline-queued messages are eligible for replay.
+    //   Values: "eligible_for_replay" | "stale_session_blocked" | "queue_empty".
+    //   V2 MUST use this field to decide whether to expect a replay flush from Android
+    //   before treating the session as fully recovered.  Null only as defensive default.
+    val reconnect_participation_kind: String? = null,
+    val identity_reuse_decision: String? = null,
+    val replay_eligibility: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────

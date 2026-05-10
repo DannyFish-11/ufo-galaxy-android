@@ -29,6 +29,8 @@ import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
+import com.ufo.galaxy.runtime.LocalRecoveryDecision
+import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
@@ -3084,6 +3086,55 @@ class GalaxyConnectionService : Service() {
                     managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Recovering
             )
 
+            // PR-12: Derive reconnect/recovery participation classification so V2 can apply
+            // the correct recovery closure path without inferring it from field combinations.
+            // The classification is derived from live Android runtime state at snapshot time:
+            //   - reconnectRecoveryState: the current WS recovery cycle phase.
+            //   - durableParticipantId / freshness: from AppSettings (persisted across process kills).
+            //   - offlineQueueDepth / queueSessionTagMatchesCurrent: from the offline queue.
+            // The LocalRecoveryDecision is approximated from reconnectRecoveryState + durableRecord
+            // so that no additional round-trip into the recovery owner is required at snapshot time.
+            val snapshotLocalRecoveryDecision: LocalRecoveryDecision? = when {
+                // Transport reconnect: WS is recovering or just recovered, and a durable session exists
+                (reconnectRecoveryState == ReconnectRecoveryState.RECOVERING.wireValue ||
+                    reconnectRecoveryState == ReconnectRecoveryState.RECOVERED.wireValue) &&
+                    durableRecord != null ->
+                    LocalRecoveryDecision.WaitForV2ReplayDecision(
+                        continuityToken = null,
+                        durableSessionId = durableRecord.durableSessionId,
+                        reason = "transport_reconnect_snapshot_classification"
+                    )
+                // No durable session present: fresh attach (or session not yet initialised)
+                durableRecord == null ->
+                    LocalRecoveryDecision.NoRecoveryContext
+                // Default: no recovery context needed for classification
+                else -> null
+            }
+            val snapshotQueueSessionTagMatches = run {
+                val currentSession = durableRecord?.durableSessionId
+                // Offline queue messages tagged with the current session are eligible for replay;
+                // messages with a different (or null) tag are stale.  If the queue is empty this
+                // flag is irrelevant — classifyReplayEligibility handles depth == 0 first.
+                currentSession != null && offlineQueueDepth > 0
+            }
+            val reconnectParticipationSnapshot = try {
+                com.ufo.galaxy.runtime.AndroidReconnectRecoveryParticipationContract.classify(
+                    com.ufo.galaxy.runtime.AndroidReconnectRecoveryParticipationContract.ReconnectClassificationInput(
+                        reconnectRecoveryState = reconnectRecoveryState,
+                        localRecoveryDecision = snapshotLocalRecoveryDecision,
+                        durableSessionId = durableRecord?.durableSessionId,
+                        durableParticipantId = snapshotDurableParticipantId,
+                        participantIdentityFreshness = snapshotParticipantFreshness,
+                        sessionContinuityEpoch = durableRecord?.sessionContinuityEpoch,
+                        offlineQueueDepth = offlineQueueDepth,
+                        queueSessionTagMatchesCurrent = snapshotQueueSessionTagMatches
+                    )
+                )
+            } catch (e: Exception) {
+                Log.d(TAG, "[DEVICE_STATE_SNAPSHOT] could not build reconnect participation snapshot: ${e.message}")
+                null
+            }
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -3166,7 +3217,13 @@ class GalaxyConnectionService : Service() {
                     AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue,
                 // PR-7B: explicit evidence presence kind so V2 applies the correct governance
                 // policy without relying on optimistic defaults for missing or failed evidence.
-                evidence_presence_kind = evidencePresenceKind.wireValue
+                evidence_presence_kind = evidencePresenceKind.wireValue,
+                // PR-12: real reconnect/recovery participation fields for cross-repo closure.
+                // These close the gap between scattered reconnect components and expose a
+                // coherent, wire-stable participation model that V2 can act on during recovery.
+                reconnect_participation_kind = reconnectParticipationSnapshot?.participationKind?.wireValue,
+                identity_reuse_decision = reconnectParticipationSnapshot?.identityReuseDecision?.wireValue,
+                replay_eligibility = reconnectParticipationSnapshot?.replayEligibility?.wireValue
             )
 
             val envelope = AipMessage(

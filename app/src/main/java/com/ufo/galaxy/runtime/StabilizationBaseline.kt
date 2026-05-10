@@ -1884,6 +1884,27 @@ object StabilizationBaseline {
                 "GalaxyConnectionService populates evidence_presence_kind at all snapshot and event " +
                 "emission call sites. Test: Pr7BAndroidTruthPublicationSemanticsTest.",
             introducedPr = 83
+        ),
+
+        // ── PR-12: Android real reconnect/recovery participation contract ──────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-reconnect-recovery-participation",
+            displayName = "AndroidReconnectRecoveryParticipationContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidReconnectRecoveryParticipationContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-12 canonical Android reconnect/recovery participation contract. Makes Android a " +
+                "true runtime recovery participant rather than a simulated source of reconnect-like messages. " +
+                "Introduces ReconnectParticipationKind (4 values: FRESH_ATTACH/TRANSPORT_RECONNECT/" +
+                "PROCESS_RECREATION_WITH_CONTEXT/PROCESS_RECREATION_WITHOUT_CONTEXT), IdentityReuseDecision " +
+                "(3 values: REUSE_DURABLE_PARTICIPANT/REUSE_SESSION_ONLY/FRESH_IDENTITY), and " +
+                "ReplayEligibility (3 values: ELIGIBLE_FOR_REPLAY/STALE_SESSION_BLOCKED/QUEUE_EMPTY). " +
+                "Adds reconnect_participation_kind, identity_reuse_decision, and replay_eligibility wire " +
+                "fields to DeviceStateSnapshotPayload so V2 can apply the correct recovery closure path " +
+                "without inferring it from field combinations. GalaxyConnectionService populates all three " +
+                "fields at sendDeviceStateSnapshot() call time. Test: Pr12AndroidReconnectRecoveryParticipationTest.",
+            introducedPr = 84
         )
     )
 
