@@ -260,6 +260,9 @@ class GalaxyConnectionService : Service() {
         }
     }
 
+    private fun delegatedSignalAttempt(signal: DelegatedExecutionSignal): Int =
+        if (signal.isResult) nextDelegatedSignalAttempt(signal.signalId) else 1
+
     private fun resolveExecutionTraceId(inboundTraceId: String?): String =
         inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
 
@@ -2413,11 +2416,7 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendDelegatedExecutionSignal(signal: DelegatedExecutionSignal) {
         try {
-            val takeoverAttempt = if (signal.isResult) {
-                nextDelegatedSignalAttempt(signal.signalId)
-            } else {
-                1
-            }
+            val takeoverAttempt = delegatedSignalAttempt(signal)
             val takeoverSemantics = AndroidTakeoverOwnershipTransferContract.classify(
                 signal = signal,
                 takeoverResultUplinkAttempt = takeoverAttempt

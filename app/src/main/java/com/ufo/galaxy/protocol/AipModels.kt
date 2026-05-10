@@ -1265,7 +1265,8 @@ data class HybridDegradePayload(
  *                               signal: `"pending"`, `"completed"`, `"failed"`, `"interrupted"`,
  *                               `"rejected"`, or `"unknown"`.
  * @param ownership_return_state  (PR-11B Android) Ownership-return status for resumed transfer:
- *                               `"ownership_held_android"`,
+ *                               `"ownership_held_by_android"`,
+ *                               `"ownership_return_pending_uplink"`,
  *                               `"ownership_return_signalled_to_v2"`, or
  *                               `"ownership_return_signalled_to_v2_retried"`.
  * @param takeover_outcome_visibility (PR-11B Android) Observation quality for this takeover

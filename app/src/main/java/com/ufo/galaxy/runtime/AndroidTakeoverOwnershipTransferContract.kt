@@ -25,7 +25,7 @@ object AndroidTakeoverOwnershipTransferContract {
     }
 
     enum class OwnershipReturnState(val wireValue: String) {
-        OWNERSHIP_HELD_BY_ANDROID("ownership_held_android"),
+        OWNERSHIP_HELD_BY_ANDROID("ownership_held_by_android"),
         OWNERSHIP_RETURN_PENDING_UPLINK("ownership_return_pending_uplink"),
         OWNERSHIP_RETURN_SIGNALLED_TO_V2("ownership_return_signalled_to_v2"),
         OWNERSHIP_RETURN_SIGNALLED_TO_V2_RETRIED("ownership_return_signalled_to_v2_retried");
