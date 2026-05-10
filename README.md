@@ -169,6 +169,7 @@ ufo-galaxy-android/
 | [`docs/execution-flows.md`](docs/execution-flows.md) | Local and cross-device execution flow maps, gateway task dispatch, runtime lifecycle |
 | [`docs/maintainer-guide.md`](docs/maintainer-guide.md) | Onboarding guide, canonical vs deprecated API, configuration model, build guidance |
 | [`docs/DUAL_REPO_SETUP.md`](docs/DUAL_REPO_SETUP.md) | **Joint setup guide** — clone both repos, start V2 backend, configure Android, grant permissions, run first task |
+| [`docs/ANDROID_TRUTH_PUBLICATION_SEMANTICS.md`](docs/ANDROID_TRUTH_PUBLICATION_SEMANTICS.md) | Android-owned contract for capability truth, lifecycle/runtime truth, evidence semantics, and the regression tests V2 depends on |
 | [`docs/ugcp/ANDROID_UGCP_CONSTITUTION.md`](docs/ugcp/ANDROID_UGCP_CONSTITUTION.md) | Android-side UGCP Runtime WS Profile declaration, constitution, canonical vocabulary, and control-plane phase/field alignment |
 | [`docs/PR_FIX_WORKFLOW.md`](docs/PR_FIX_WORKFLOW.md) | Standard workflow for bug-fix / regression-fix PRs |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Logging, metrics, tracing |
