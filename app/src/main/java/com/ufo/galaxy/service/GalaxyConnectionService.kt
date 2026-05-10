@@ -28,6 +28,7 @@ import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
+import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
@@ -165,6 +166,9 @@ class GalaxyConnectionService : Service() {
         private const val FALLBACK_TIER_CENTER_DELEGATED_WITH_LOCAL = "center_delegated_with_local_fallback"
         private const val FALLBACK_TIER_ACTIVE = "active"
         private const val BARRIER_SESSION_PREFIX_HYBRID = "hybrid"
+        private const val DELEGATED_SIGNAL_ATTEMPT_INITIAL_CAPACITY = 512
+        private const val DELEGATED_SIGNAL_ATTEMPT_MAX_ENTRIES = 2048
+        private const val SIGNAL_ATTEMPT_FIRST = 1
     }
     
     private val binder = LocalBinder()
@@ -226,6 +230,12 @@ class GalaxyConnectionService : Service() {
     @Volatile
     private var activeTakeoverId: String? = null
     private val activeTakeoverLock = Any()
+    private val delegatedSignalAttemptLock = Any()
+    private val delegatedSignalAttemptCounts: LinkedHashMap<String, Int> =
+        object : LinkedHashMap<String, Int>(DELEGATED_SIGNAL_ATTEMPT_INITIAL_CAPACITY, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean =
+                size > DELEGATED_SIGNAL_ATTEMPT_MAX_ENTRIES
+        }
 
     private fun currentActiveTakeoverId(): String? =
         synchronized(activeTakeoverLock) { activeTakeoverId }
@@ -243,6 +253,16 @@ class GalaxyConnectionService : Service() {
             }
         }
     }
+
+    private fun getAndIncrementDelegatedSignalAttempt(signalId: String): Int =
+        synchronized(delegatedSignalAttemptLock) {
+            val next = (delegatedSignalAttemptCounts[signalId] ?: 0) + 1
+            delegatedSignalAttemptCounts[signalId] = next
+            next
+        }
+
+    private fun delegatedSignalAttempt(signal: DelegatedExecutionSignal): Int =
+        if (signal.isResult) getAndIncrementDelegatedSignalAttempt(signal.signalId) else SIGNAL_ATTEMPT_FIRST
 
     private fun resolveExecutionTraceId(inboundTraceId: String?): String =
         inboundTraceId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
@@ -2397,7 +2417,15 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendDelegatedExecutionSignal(signal: DelegatedExecutionSignal) {
         try {
-            val payload = signal.toOutboundPayload(deviceId = localDeviceId)
+            val takeoverAttempt = delegatedSignalAttempt(signal)
+            val takeoverSemantics = AndroidTakeoverOwnershipTransferContract.classify(
+                signal = signal,
+                takeoverResultUplinkAttempt = takeoverAttempt
+            )
+            val payload = signal.toOutboundPayload(
+                deviceId = localDeviceId,
+                takeoverClosureSemantics = takeoverSemantics
+            )
             val envelope = AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
                 payload = payload,
@@ -2411,6 +2439,12 @@ class GalaxyConnectionService : Service() {
             if (sent) {
                 Log.d(TAG, "[DELEGATED_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
             } else {
+                val failureOwnershipState = if (signal.isResult) {
+                    AndroidTakeoverOwnershipTransferContract
+                        .OwnershipReturnState.OWNERSHIP_RETURN_PENDING_UPLINK.wireValue
+                } else {
+                    takeoverSemantics.ownershipReturnState.wireValue
+                }
                 Log.w(
                     TAG,
                     "[DELEGATED_SIGNAL] send failed signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}"
@@ -2422,7 +2456,11 @@ class GalaxyConnectionService : Service() {
                         "signal_kind" to signal.kind.wireValue,
                         "task_id" to signal.taskId,
                         "trace_id" to signal.traceId,
-                        "emission_seq" to signal.emissionSeq
+                        "emission_seq" to signal.emissionSeq,
+                        "takeover_completion_kind" to takeoverSemantics.takeoverCompletionKind.wireValue,
+                        "ownership_return_state" to failureOwnershipState,
+                        "takeover_outcome_visibility" to takeoverSemantics.takeoverOutcomeVisibility.wireValue,
+                        "takeover_result_uplink_attempt" to takeoverSemantics.takeoverResultUplinkAttempt
                     )
                 )
             }
