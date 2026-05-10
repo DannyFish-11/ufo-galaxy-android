@@ -1,8 +1,10 @@
 package com.ufo.galaxy.protocol
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.data.InMemoryAppSettings
+import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -418,6 +420,120 @@ class AndroidParticipantProtocolGuardTest {
             "Default correlation_id is null — callers must explicitly set it to task_id before sending",
             resultWithoutCorrelation.correlation_id
         )
+    }
+
+    // ── 5. hardened Android truth publication contract for V2 consumers ───────
+
+    @Test
+    fun `device_state_snapshot publishes hardened truth fields for V2`() {
+        val payload = DeviceStateSnapshotPayload(
+            device_id = "guard-truth-snapshot-01",
+            llama_cpp_available = false,
+            ncnn_available = false,
+            active_runtime_type = "CENTER",
+            model_ready = false,
+            accessibility_ready = false,
+            overlay_ready = false,
+            local_loop_ready = false,
+            model_id = null,
+            runtime_type = null,
+            checksum_ok = null,
+            mobilevlm_present = false,
+            mobilevlm_checksum_ok = false,
+            seeclick_present = false,
+            pending_first_download = true,
+            warmup_result = "not_started",
+            offline_queue_depth = 0,
+            current_fallback_tier = null,
+            carrier_runtime_state = "starting",
+            reconnect_recovery_state = ReconnectRecoveryState.RECOVERING.wireValue,
+            reported_state_semantic_class = "active_runtime",
+            local_observation_basis = "live_runtime",
+            evidence_presence_kind = AndroidTruthPublicationSemanticsContract
+                .EvidencePresenceKind.UNKNOWN.wireValue
+        )
+
+        val obj = gson.fromJson(gson.toJson(payload), JsonObject::class.java)
+        assertTrue(obj.has("carrier_runtime_state"))
+        assertTrue(obj.has("reconnect_recovery_state"))
+        assertTrue(obj.has("reported_state_semantic_class"))
+        assertTrue(obj.has("local_observation_basis"))
+        assertTrue(obj.has("evidence_presence_kind"))
+        assertEquals("starting", obj.get("carrier_runtime_state").asString)
+        assertEquals("recovering", obj.get("reconnect_recovery_state").asString)
+        assertEquals("active_runtime", obj.get("reported_state_semantic_class").asString)
+        assertEquals("live_runtime", obj.get("local_observation_basis").asString)
+        assertEquals("unknown", obj.get("evidence_presence_kind").asString)
+    }
+
+    @Test
+    fun `device_execution_event publishes hardened lifecycle runtime and evidence truth fields for V2`() {
+        val payload = DeviceExecutionEventPayload(
+            flow_id = "guard-flow-01",
+            task_id = "guard-task-01",
+            phase = DeviceExecutionEventPayload.PHASE_FAILED,
+            carrier_runtime_state = "active",
+            reported_state_semantic_class = "terminal_reporting",
+            result_uplink_semantic_class = "authoritative_terminal",
+            terminal_outcome_kind = "failure",
+            execution_lifecycle_phase = "failed",
+            previous_execution_lifecycle_phase = "active",
+            lifecycle_transition_valid = true,
+            lifecycle_result_uplink_required = true,
+            lifecycle_state_uplink_required = true,
+            lifecycle_terminal_phase = true,
+            evidence_presence_kind = AndroidTruthPublicationSemanticsContract
+                .EvidencePresenceKind.FAILED_OBSERVATION.wireValue
+        )
+
+        val obj = gson.fromJson(gson.toJson(payload), JsonObject::class.java)
+        assertTrue(obj.has("carrier_runtime_state"))
+        assertTrue(obj.has("reported_state_semantic_class"))
+        assertTrue(obj.has("result_uplink_semantic_class"))
+        assertTrue(obj.has("terminal_outcome_kind"))
+        assertTrue(obj.has("execution_lifecycle_phase"))
+        assertTrue(obj.has("previous_execution_lifecycle_phase"))
+        assertTrue(obj.has("lifecycle_transition_valid"))
+        assertTrue(obj.has("lifecycle_result_uplink_required"))
+        assertTrue(obj.has("lifecycle_state_uplink_required"))
+        assertTrue(obj.has("lifecycle_terminal_phase"))
+        assertTrue(obj.has("evidence_presence_kind"))
+        assertEquals("failed", obj.get("execution_lifecycle_phase").asString)
+        assertEquals("active", obj.get("previous_execution_lifecycle_phase").asString)
+        assertEquals("failed_observation", obj.get("evidence_presence_kind").asString)
+    }
+
+    @Test
+    fun `snapshot classifier with incomplete evidence never overclaims positive evidence`() {
+        val kind = AndroidTruthPublicationSemanticsContract.classifySnapshotEvidencePresence(
+            warmupResult = "ok",
+            pendingFirstDownload = false,
+            localLoopReady = null,
+            plannerReady = true,
+            groundingReady = true,
+            offlineQueueDepth = 0,
+            managerStateIsRunning = true,
+            managerStateIsFailed = false,
+            managerStateIsStarting = false
+        )
+        assertEquals(
+            "Incomplete evidence must stay UNKNOWN, never POSITIVE_EVIDENCE",
+            AndroidTruthPublicationSemanticsContract.EvidencePresenceKind.UNKNOWN,
+            kind
+        )
+    }
+
+    @Test
+    fun `non-positive evidence kinds never advertise standard dispatch`() {
+        val nonPositiveKinds = AndroidTruthPublicationSemanticsContract.EvidencePresenceKind.entries
+            .filter { !it.isPositiveEvidence }
+
+        for (kind in nonPositiveKinds) {
+            assertFalse(
+                "${kind.name} must not advertise optimistic standard dispatch",
+                kind.v2GovernanceHint.contains("standard_dispatch")
+            )
+        }
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

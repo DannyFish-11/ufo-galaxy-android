@@ -295,6 +295,7 @@ The following tests are the regression fence future changes must preserve.
 | Test | What it protects |
 |---|---|
 | `Pr3AndroidCapabilityExportContractTest` | `capability_report` schema/version stability, required top-level and metadata fields, and drift detection |
+| `AndroidParticipantProtocolGuardTest` | V2-facing protocol wire compatibility, including hardened snapshot/event truth fields and evidence semantics that downstream governance consumes |
 | `CapabilityReportTest` | metadata completeness/validity accounting, canonical gate consistency, and evidence-surface reporting for capability metadata |
 | `Pr7BAndroidTruthPublicationSemanticsTest` | the six evidence kinds, classifier priority, no optimistic fallback for missing evidence, wire-field presence, and `CLOSURE_INVARIANTS` |
 | `Pr85AndroidExecutionLifecycleHardeningTest` | lifecycle phase set, valid transitions, terminal vs non-terminal meaning, and uplink discipline |
