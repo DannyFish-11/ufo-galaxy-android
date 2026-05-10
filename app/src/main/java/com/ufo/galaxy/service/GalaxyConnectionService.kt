@@ -2413,7 +2413,11 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendDelegatedExecutionSignal(signal: DelegatedExecutionSignal) {
         try {
-            val takeoverAttempt = nextDelegatedSignalAttempt(signal.signalId)
+            val takeoverAttempt = if (signal.isResult) {
+                nextDelegatedSignalAttempt(signal.signalId)
+            } else {
+                1
+            }
             val takeoverSemantics = AndroidTakeoverOwnershipTransferContract.classify(
                 signal = signal,
                 takeoverResultUplinkAttempt = takeoverAttempt
