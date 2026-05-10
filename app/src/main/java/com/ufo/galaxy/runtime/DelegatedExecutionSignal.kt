@@ -620,7 +620,8 @@ data class DelegatedExecutionSignal(
  *         JSON serialisation and uplink via [com.ufo.galaxy.network.GalaxyWebSocketClient.sendJson].
  */
 fun DelegatedExecutionSignal.toOutboundPayload(
-    deviceId: String
+    deviceId: String,
+    takeoverClosureSemantics: AndroidTakeoverOwnershipTransferContract.TakeoverClosureSemantics? = null
 ): com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload =
     com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload(
         signal_id              = signalId,
@@ -638,5 +639,10 @@ fun DelegatedExecutionSignal.toOutboundPayload(
         result_kind            = resultKind?.wireValue,
         // ── PR-bridge: propagate flow bridge identity for end-to-end V2 correlation ──
         delegated_flow_id      = delegatedFlowId,
-        flow_lineage_id        = flowLineageId
+        flow_lineage_id        = flowLineageId,
+        // ── PR-11B (Android): takeover completion + ownership-return semantics ──
+        takeover_completion_kind = takeoverClosureSemantics?.takeoverCompletionKind?.wireValue,
+        ownership_return_state = takeoverClosureSemantics?.ownershipReturnState?.wireValue,
+        takeover_outcome_visibility = takeoverClosureSemantics?.takeoverOutcomeVisibility?.wireValue,
+        takeover_result_uplink_attempt = takeoverClosureSemantics?.takeoverResultUplinkAttempt
     )

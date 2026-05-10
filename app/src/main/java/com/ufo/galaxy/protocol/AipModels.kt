@@ -1261,6 +1261,19 @@ data class HybridDegradePayload(
  *                               entity.  Allows the main-repo host to correlate this signal with
  *                               other signals from the same flow family.  `null` when the signal
  *                               was emitted by a flow created before PR-bridge.
+ * @param takeover_completion_kind (PR-11B Android) Classified takeover completion truth for this
+ *                               signal: `"pending"`, `"completed"`, `"failed"`, `"interrupted"`,
+ *                               `"rejected"`, or `"unknown"`.
+ * @param ownership_return_state  (PR-11B Android) Ownership-return status for resumed transfer:
+ *                               `"ownership_held_android"`,
+ *                               `"ownership_return_signalled_to_v2"`, or
+ *                               `"ownership_return_signalled_to_v2_retried"`.
+ * @param takeover_outcome_visibility (PR-11B Android) Observation quality for this takeover
+ *                               outcome: `"partially_observed"`, `"terminal_observed"`,
+ *                               `"interrupted_terminal_observed"`, `"retried_terminal_observed"`,
+ *                               `"retried_interrupted_terminal_observed"`.
+ * @param takeover_result_uplink_attempt (PR-11B Android) Monotonic send-attempt count for this
+ *                               signal id. `1` means first observation; `>1` means delayed/retried.
  */
 data class DelegatedExecutionSignalPayload(
     val signal_id: String,
@@ -1278,7 +1291,12 @@ data class DelegatedExecutionSignalPayload(
     val result_kind: String? = null,
     // ── PR-bridge: Delegated flow bridge identity (optional; null for pre-bridge signals) ──
     val delegated_flow_id: String? = null,
-    val flow_lineage_id: String? = null
+    val flow_lineage_id: String? = null,
+    // ── PR-11B (Android): takeover completion + ownership-return semantics ──
+    val takeover_completion_kind: String? = null,
+    val ownership_return_state: String? = null,
+    val takeover_outcome_visibility: String? = null,
+    val takeover_result_uplink_attempt: Int? = null
 )
 
 // ── PR-35: Promoted long-tail payload models ──────────────────────────────────────────────

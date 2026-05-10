@@ -28,6 +28,7 @@ import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
+import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
@@ -226,6 +227,8 @@ class GalaxyConnectionService : Service() {
     @Volatile
     private var activeTakeoverId: String? = null
     private val activeTakeoverLock = Any()
+    private val delegatedSignalAttemptLock = Any()
+    private val delegatedSignalAttemptCounts: MutableMap<String, Int> = mutableMapOf()
 
     private fun currentActiveTakeoverId(): String? =
         synchronized(activeTakeoverLock) { activeTakeoverId }
@@ -241,6 +244,19 @@ class GalaxyConnectionService : Service() {
             if (activeTakeoverId == expectedTakeoverId) {
                 activeTakeoverId = null
             }
+        }
+    }
+
+    private fun nextDelegatedSignalAttempt(signalId: String): Int =
+        synchronized(delegatedSignalAttemptLock) {
+            val next = (delegatedSignalAttemptCounts[signalId] ?: 0) + 1
+            delegatedSignalAttemptCounts[signalId] = next
+            next
+        }
+
+    private fun clearDelegatedSignalAttempt(signalId: String) {
+        synchronized(delegatedSignalAttemptLock) {
+            delegatedSignalAttemptCounts.remove(signalId)
         }
     }
 
@@ -2397,7 +2413,15 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendDelegatedExecutionSignal(signal: DelegatedExecutionSignal) {
         try {
-            val payload = signal.toOutboundPayload(deviceId = localDeviceId)
+            val takeoverAttempt = nextDelegatedSignalAttempt(signal.signalId)
+            val takeoverSemantics = AndroidTakeoverOwnershipTransferContract.classify(
+                signal = signal,
+                takeoverResultUplinkAttempt = takeoverAttempt
+            )
+            val payload = signal.toOutboundPayload(
+                deviceId = localDeviceId,
+                takeoverClosureSemantics = takeoverSemantics
+            )
             val envelope = AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
                 payload = payload,
@@ -2409,8 +2433,17 @@ class GalaxyConnectionService : Service() {
             )
             val sent = webSocketClient.sendJson(gson.toJson(envelope))
             if (sent) {
+                if (signal.isResult) {
+                    clearDelegatedSignalAttempt(signal.signalId)
+                }
                 Log.d(TAG, "[DELEGATED_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
             } else {
+                val failureOwnershipState = if (signal.isResult) {
+                    AndroidTakeoverOwnershipTransferContract
+                        .OwnershipReturnState.OWNERSHIP_RETURN_PENDING_UPLINK.wireValue
+                } else {
+                    takeoverSemantics.ownershipReturnState.wireValue
+                }
                 Log.w(
                     TAG,
                     "[DELEGATED_SIGNAL] send failed signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}"
@@ -2422,7 +2455,11 @@ class GalaxyConnectionService : Service() {
                         "signal_kind" to signal.kind.wireValue,
                         "task_id" to signal.taskId,
                         "trace_id" to signal.traceId,
-                        "emission_seq" to signal.emissionSeq
+                        "emission_seq" to signal.emissionSeq,
+                        "takeover_completion_kind" to takeoverSemantics.takeoverCompletionKind.wireValue,
+                        "ownership_return_state" to failureOwnershipState,
+                        "takeover_outcome_visibility" to takeoverSemantics.takeoverOutcomeVisibility.wireValue,
+                        "takeover_result_uplink_attempt" to takeoverSemantics.takeoverResultUplinkAttempt
                     )
                 )
             }
