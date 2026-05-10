@@ -28,6 +28,7 @@ import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
+import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
@@ -1049,7 +1050,12 @@ class GalaxyConnectionService : Service() {
                             AndroidMissionCompletionSemanticsContract
                                 .classifyReportedResultSemantic(fallbackOutcome)
                                 .wireValue,
-                        terminal_outcome_kind = fallbackOutcome.wireValue
+                        terminal_outcome_kind = fallbackOutcome.wireValue,
+                        // PR-7B: explicit evidence presence kind for fallback transition.
+                        evidence_presence_kind =
+                            AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                                DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION
+                            ).wireValue
                     )
                 )
                 executeLocalTaskAssign(taskId, payload, traceId, routeMode)
@@ -1135,7 +1141,12 @@ class GalaxyConnectionService : Service() {
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                         UFOGalaxyApplication.appSettings.overlayReady,
                     // PR-10: carrier runtime state at local-start emission.
-                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    // PR-7B: explicit evidence presence kind at execution start.
+                    evidence_presence_kind =
+                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                            DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
+                        ).wireValue
                 )
             )
 
@@ -1212,7 +1223,12 @@ class GalaxyConnectionService : Service() {
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                         UFOGalaxyApplication.appSettings.overlayReady,
                     // PR-10: carrier runtime state at exception point.
-                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    // PR-7B: explicit evidence presence kind at execution failure.
+                    evidence_presence_kind =
+                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                            DeviceExecutionEventPayload.PHASE_FAILED
+                        ).wireValue
                 )
             )
         } finally {
@@ -1347,7 +1363,12 @@ class GalaxyConnectionService : Service() {
                 interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                     UFOGalaxyApplication.appSettings.overlayReady,
                 // PR-10: carrier runtime state at goal-start emission.
-                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                // PR-7B: explicit evidence presence kind at execution start.
+                evidence_presence_kind =
+                    AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                        DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
+                    ).wireValue
             )
         )
 
@@ -1408,7 +1429,12 @@ class GalaxyConnectionService : Service() {
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                         UFOGalaxyApplication.appSettings.overlayReady,
                     // PR-10: carrier runtime state at timeout point.
-                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    // PR-7B: explicit evidence presence kind at execution failure (timeout).
+                    evidence_presence_kind =
+                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                            DeviceExecutionEventPayload.PHASE_FAILED
+                        ).wireValue
                 )
             )
         } finally {
@@ -1544,7 +1570,12 @@ class GalaxyConnectionService : Service() {
                 interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                     UFOGalaxyApplication.appSettings.overlayReady,
                 // PR-10: carrier runtime state at parallel-start emission.
-                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                // PR-7B: explicit evidence presence kind at execution start.
+                evidence_presence_kind =
+                    AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                        DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
+                    ).wireValue
             )
         )
 
@@ -1644,7 +1675,12 @@ class GalaxyConnectionService : Service() {
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                         UFOGalaxyApplication.appSettings.overlayReady,
                     // PR-10: carrier runtime state at parallel timeout.
-                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    // PR-7B: explicit evidence presence kind at execution failure (timeout).
+                    evidence_presence_kind =
+                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                            DeviceExecutionEventPayload.PHASE_FAILED
+                        ).wireValue
                 )
             )
         } finally {
@@ -1974,7 +2010,12 @@ class GalaxyConnectionService : Service() {
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                         UFOGalaxyApplication.appSettings.overlayReady,
                     // PR-10: carrier runtime state at handoff-start emission.
-                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    // PR-7B: explicit evidence presence kind at execution start.
+                    evidence_presence_kind =
+                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                            DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
+                        ).wireValue
                 )
             )
 
@@ -2507,7 +2548,11 @@ class GalaxyConnectionService : Service() {
             reported_state_semantic_class =
                 AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING.wireValue,
             result_uplink_semantic_class = reportedResultSemantic.wireValue,
-            terminal_outcome_kind = localTerminalOutcome.wireValue
+            terminal_outcome_kind = localTerminalOutcome.wireValue,
+            // PR-7B: explicit evidence presence kind for this terminal event so V2 applies
+            // the correct governance policy without relying on optimistic defaults.
+            evidence_presence_kind =
+                AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(phase).wireValue
         )
     }
 
@@ -3023,6 +3068,21 @@ class GalaxyConnectionService : Service() {
                 groundingReady = capabilityAuthority?.groundingReady,
                 offlineQueueDepth = offlineQueueDepth
             )
+            // PR-7B: Derive evidence_presence_kind so V2 can determine what governance
+            // policy to apply without relying on optimistic defaults for missing evidence.
+            val evidencePresenceKind = AndroidTruthPublicationSemanticsContract.classifySnapshotEvidencePresence(
+                warmupResult = warmupResult,
+                pendingFirstDownload = pendingFirstDownload,
+                localLoopReady = if (localLoopReady) true else null,
+                plannerReady = capabilityAuthority?.plannerReady,
+                groundingReady = capabilityAuthority?.groundingReady,
+                offlineQueueDepth = offlineQueueDepth,
+                managerStateIsRunning = managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running,
+                managerStateIsFailed = managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed ||
+                    managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.FailedStartup,
+                managerStateIsStarting = managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Starting ||
+                    managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Recovering
+            )
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -3103,7 +3163,10 @@ class GalaxyConnectionService : Service() {
                 reported_state_semantic_class = reportedStateSemanticClass.wireValue,
                 degraded_condition_class = degradedConditionClass.wireValue,
                 local_observation_basis =
-                    AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
+                    AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue,
+                // PR-7B: explicit evidence presence kind so V2 applies the correct governance
+                // policy without relying on optimistic defaults for missing or failed evidence.
+                evidence_presence_kind = evidencePresenceKind.wireValue
             )
 
             val envelope = AipMessage(
@@ -4168,7 +4231,12 @@ class GalaxyConnectionService : Service() {
                     interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
                         UFOGalaxyApplication.appSettings.overlayReady,
                     // PR-10: carrier runtime state at takeover start.
-                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
+                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    // PR-7B: explicit evidence presence kind at takeover milestone.
+                    evidence_presence_kind =
+                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                            DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE
+                        ).wireValue
                 )
             )
 
@@ -4260,7 +4328,12 @@ class GalaxyConnectionService : Service() {
                                         AndroidMissionCompletionSemanticsContract
                                             .classifyReportedResultSemantic(failureOutcome)
                                             .wireValue,
-                                    terminal_outcome_kind = failureOutcome.wireValue
+                                    terminal_outcome_kind = failureOutcome.wireValue,
+                                    // PR-7B: explicit evidence presence kind for takeover failure phase.
+                                    evidence_presence_kind =
+                                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
+                                            failurePhase
+                                        ).wireValue
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —
