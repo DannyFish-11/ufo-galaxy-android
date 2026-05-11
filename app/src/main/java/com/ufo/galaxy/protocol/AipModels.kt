@@ -534,13 +534,34 @@ data class TaskSubmitPayload(
     val nl_initiation_lineage: String? = null
 ) {
     /**
-     * Returns `true` when all required fields are non-blank.
+     * Returns `true` when all required fields are non-blank and any NL initiation fields
+     * present are consistent (authority scope must be `"v2_central"` when origin is set).
      *
      * Callers (e.g. [com.ufo.galaxy.input.InputRouter]) should call [validate] before
      * sending the payload and reject messages that fail.  For a human-readable description
      * of the first failing field, use [validationError].
      */
-    fun validate(): Boolean = task_text.isNotBlank() && device_id.isNotBlank() && session_id.isNotBlank()
+    fun validate(): Boolean =
+        task_text.isNotBlank() &&
+            device_id.isNotBlank() &&
+            session_id.isNotBlank() &&
+            nlInitiationFieldsValid()
+
+    /**
+     * Returns `true` when the NL initiation fields are internally consistent.
+     *
+     * If [nl_initiation_origin] is non-null (Android-originated NL initiation), then
+     * [nl_initiation_authority_scope] MUST be `"v2_central"`. Any other scope value
+     * (or an absent scope when origin is present) constitutes a governance violation and
+     * must be rejected before the payload is sent uplink.
+     *
+     * If [nl_initiation_origin] is null, all other NL initiation fields are expected to
+     * be null as well (non-NL source); this method returns `true` in that case.
+     */
+    private fun nlInitiationFieldsValid(): Boolean {
+        if (nl_initiation_origin == null) return true
+        return nl_initiation_authority_scope == "v2_central"
+    }
 
     /**
      * Returns a debug-friendly description of the first failing required field, or `null` when
@@ -550,6 +571,9 @@ data class TaskSubmitPayload(
         task_text.isBlank()  -> "task_text is blank"
         device_id.isBlank()  -> "device_id is blank"
         session_id.isBlank() -> "session_id is blank"
+        nl_initiation_origin != null && nl_initiation_authority_scope != "v2_central" ->
+            "nl_initiation_authority_scope must be 'v2_central' when nl_initiation_origin is present " +
+            "(got: ${nl_initiation_authority_scope ?: "null"})"
         else                 -> null
     }
 }

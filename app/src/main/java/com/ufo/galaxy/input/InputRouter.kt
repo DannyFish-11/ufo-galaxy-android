@@ -163,7 +163,7 @@ class InputRouter(
                 RouteMode.LOCAL
             }
             wsConnected -> {
-                sendViaWebSocket(trimmed, deviceId, taskId, posture)
+                sendViaWebSocket(trimmed, deviceId, taskId, posture, crossDevice)
             }
             else -> {
                 // crossDeviceEnabled=true but WS not connected → explicit error, no silent fallback.
@@ -231,14 +231,21 @@ class InputRouter(
      *
      * The payload is validated via [TaskSubmitPayload.validate] before sending; a validation
      * failure is treated as an internal error and surfaced via [onError].
+     *
+     * @param crossDeviceEnabled The already-snapshotted value of [AppSettings.crossDeviceEnabled]
+     *                           from [routeInternal]. Passed explicitly to prevent a race condition
+     *                           where the setting could be toggled between the gate check in
+     *                           [routeInternal] and the [AndroidNlInitiationContract.build] call here,
+     *                           which would cause NL initiation metadata to be silently absent from
+     *                           the outbound payload (metadata drift).
      */
-    private fun sendViaWebSocket(text: String, deviceId: String, taskId: String, posture: String): RouteMode {
+    private fun sendViaWebSocket(text: String, deviceId: String, taskId: String, posture: String, crossDeviceEnabled: Boolean): RouteMode {
         val conversationSessionId = UUID.randomUUID().toString()
 
-        // PR-993: Build Android NL initiation metadata. crossDeviceEnabled is true here
-        // (we are on the WS-connected branch), so build() will return non-null metadata.
+        // PR-993: Build Android NL initiation metadata. crossDeviceEnabled is the value already
+        // captured in routeInternal (not re-read from settings) to prevent metadata drift.
         val nlInitiation = AndroidNlInitiationContract.build(
-            crossDeviceEnabled = settings.crossDeviceEnabled,
+            crossDeviceEnabled = crossDeviceEnabled,
             deviceId = deviceId,
             runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
             correlationId = taskId
