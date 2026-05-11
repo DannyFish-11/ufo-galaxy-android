@@ -2282,8 +2282,39 @@ data class DeviceStateSnapshotPayload(
     //   Null only as a defensive default; populated at sendDeviceStateSnapshot().
     val evidence_presence_kind: String? = null,
 
-    // PR-12: Reconnect/recovery participation fields — real participation semantics for
-    //   cross-repository continuity and recovery closure with V2.
+     // Unified operational/readiness surface fields.
+     //
+     // operational_surface_schema_version: version of the Android-side structured operational
+     //   surface contract. Populated from
+     //   com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract.SCHEMA_VERSION.
+     //
+     // operational_surface_states: compact per-axis state map for cross-repo aggregation.
+     //   Keys:
+     //     - registration_discoverability
+     //     - capability_visibility
+     //     - operational_readiness
+     //     - active_usable_path
+     //     - degraded_mode
+     //     - recovery_repair
+     //     - cross_device_participation
+     //     - session_continuity
+     //     - task_initiation_eligibility
+     //     - result_closure
+     //     - minimum_access_admission
+     //
+     // operational_surface_authority: per-axis authority classification. Makes explicit where
+     //   Android is locally authoritative versus where V2 retains final admission / closure /
+     //   aggregation authority.
+     //
+     // operational_surface_limitations: machine-readable limitation list describing why Android
+     //   still cannot claim full symmetry or final aggregation authority on its own.
+     val operational_surface_schema_version: String? = null,
+     val operational_surface_states: Map<String, String> = emptyMap(),
+     val operational_surface_authority: Map<String, String> = emptyMap(),
+     val operational_surface_limitations: List<String> = emptyList(),
+
+     // PR-12: Reconnect/recovery participation fields — real participation semantics for
+     //   cross-repository continuity and recovery closure with V2.
     //
     // reconnect_participation_kind: classification of the reconnect/re-attach scenario.
     //   Values: "fresh_attach" | "transport_reconnect" |
@@ -2299,10 +2330,10 @@ data class DeviceStateSnapshotPayload(
     // replay_eligibility: whether offline-queued messages are eligible for replay.
     //   Values: "eligible_for_replay" | "stale_session_blocked" | "queue_empty".
     //   V2 MUST use this field to decide whether to expect a replay flush from Android
-    //   before treating the session as fully recovered.  Null only as defensive default.
-    val reconnect_participation_kind: String? = null,
-    val identity_reuse_decision: String? = null,
-    val replay_eligibility: String? = null
+     //   before treating the session as fully recovered.  Null only as defensive default.
+     val reconnect_participation_kind: String? = null,
+     val identity_reuse_decision: String? = null,
+     val replay_eligibility: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────

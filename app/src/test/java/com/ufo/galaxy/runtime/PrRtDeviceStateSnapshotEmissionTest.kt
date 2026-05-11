@@ -143,6 +143,22 @@ class PrRtDeviceStateSnapshotEmissionTest {
             current_fallback_tier = "local_only"
         )
 
+    private fun snapshotWithOperationalSurface(): DeviceStateSnapshotPayload =
+        fullyReadySnapshot().copy(
+            operational_surface_schema_version = "1",
+            operational_surface_states = mapOf(
+                "operational_readiness" to "ready",
+                "minimum_access_admission" to "minimum_access_ready_v2_admission_required"
+            ),
+            operational_surface_authority = mapOf(
+                "operational_readiness" to "android_local_authoritative",
+                "minimum_access_admission" to "v2_authoritative"
+            ),
+            operational_surface_limitations = listOf(
+                "v2_retains_final_admission_authority"
+            )
+        )
+
     // ═════════════════════════════════════════════════════════════════════════
     // MsgType wire-value stability
     // ═════════════════════════════════════════════════════════════════════════
@@ -201,6 +217,40 @@ class PrRtDeviceStateSnapshotEmissionTest {
             "runtime_type must equal active_runtime_type to avoid V2 field ambiguity",
             json.get("active_runtime_type").asString,
             json.get("runtime_type").asString
+        )
+    }
+
+    @Test
+    fun `operational_surface_schema_version round-trips through Gson`() {
+        val snap = snapshotWithOperationalSurface()
+        val json = gson.toJsonTree(snap).asJsonObject
+        assertEquals("1", json.get("operational_surface_schema_version").asString)
+    }
+
+    @Test
+    fun `operational_surface_states serialise as a JSON object`() {
+        val snap = snapshotWithOperationalSurface()
+        val json = gson.toJsonTree(snap).asJsonObject
+        assertTrue(json.get("operational_surface_states").isJsonObject)
+        assertEquals(
+            "ready",
+            json.getAsJsonObject("operational_surface_states").get("operational_readiness").asString
+        )
+    }
+
+    @Test
+    fun `operational_surface_authority and limitations round-trip through Gson`() {
+        val snap = snapshotWithOperationalSurface()
+        val json = gson.toJsonTree(snap).asJsonObject
+        assertEquals(
+            "v2_authoritative",
+            json.getAsJsonObject("operational_surface_authority")
+                .get("minimum_access_admission").asString
+        )
+        assertTrue(
+            json.getAsJsonArray("operational_surface_limitations")
+                .map { it.asString }
+                .contains("v2_retains_final_admission_authority")
         )
     }
 
