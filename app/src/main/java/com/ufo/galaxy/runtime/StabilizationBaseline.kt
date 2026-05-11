@@ -1948,6 +1948,37 @@ object StabilizationBaseline {
                 "V2 main chain. Test: AndroidNlInitiationContractTest.",
             introducedPr = 86
         )
+    ) + listOf(
+
+        // ── Operational state surface symmetry PR ─────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-operational-state-surface",
+            displayName = "AndroidOperationalStateSurfaceContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Unified Android operational/readiness surface contract establishing Android as a " +
+                "first-class, structured participant in the cross-repo state model rather than only a partial " +
+                "signal source. Introduces SurfaceAxis (11 axes: REGISTRATION_DISCOVERABILITY/CAPABILITY_VISIBILITY/" +
+                "OPERATIONAL_READINESS/ACTIVE_USABLE_PATH/DEGRADED_MODE/RECOVERY_REPAIR/CROSS_DEVICE_PARTICIPATION/" +
+                "SESSION_CONTINUITY/TASK_INITIATION_ELIGIBILITY/RESULT_CLOSURE/MINIMUM_ACCESS_ADMISSION) and " +
+                "AuthorityScope (5 values: ANDROID_LOCAL_AUTHORITATIVE/ANDROID_LOCAL_SIGNAL_V2_COORDINATED/" +
+                "ANDROID_PREREQUISITE_V2_ADMITS/ANDROID_LOCAL_COMPLETION_V2_CLOSES/V2_AUTHORITATIVE). " +
+                "derive() produces a SurfaceProjection with per-axis state strings, per-axis authority " +
+                "classification, and a machine-readable limitations list that explicitly records where V2 " +
+                "retains final admission, aggregation, and closure authority. " +
+                "DeviceStateSnapshotPayload gains operational_surface_schema_version, operational_surface_states, " +
+                "operational_surface_authority, and operational_surface_limitations fields. " +
+                "GalaxyConnectionService populates all four fields at sendDeviceStateSnapshot() time. " +
+                "Authority boundaries: Android is locally authoritative for identity, capability visibility, " +
+                "readiness, active path, degraded mode, and recovery-repair; cross-device participation and " +
+                "session continuity are android-local-signal-v2-coordinated; task initiation eligibility is " +
+                "android-prerequisite-v2-admits; result closure is android-local-completion-v2-closes; " +
+                "minimum_access_admission remains v2_authoritative. " +
+                "Test: AndroidOperationalStateSurfaceContractTest.",
+            introducedPr = 87
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
