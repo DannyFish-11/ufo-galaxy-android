@@ -28,6 +28,7 @@ import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
+import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
@@ -3283,6 +3284,32 @@ class GalaxyConnectionService : Service() {
                 Log.d(TAG, "[DEVICE_STATE_SNAPSHOT] could not build reconnect participation snapshot: ${e.message}")
                 null
             }
+            val readinessSurfaceSnapshot = delegatedRuntimeReadinessEvaluator.buildSnapshot(deviceId)
+            val acceptanceSurfaceSnapshot = delegatedRuntimeAcceptanceEvaluator.buildSnapshot(deviceId)
+            val operationalSurface = AndroidOperationalStateSurfaceContract.derive(
+                AndroidOperationalStateSurfaceContract.DerivationInput(
+                    deviceId = deviceId,
+                    durableParticipantId = snapshotDurableParticipantId,
+                    runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
+                    attachedSessionId = snapshotAttachedSessionId,
+                    capabilitySchemaVersion = capabilityAuthority?.schemaVersion,
+                    localIntelligenceStatus = capabilityAuthority?.localIntelligenceStatus,
+                    readinessArtifact = readinessSurfaceSnapshot.artifact,
+                    acceptanceArtifact = acceptanceSurfaceSnapshot.artifact,
+                    executionModeState = modeState.executionModeState,
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    goalExecutionEligibility = modeState.goalExecutionEligibility,
+                    localLoopReady = localLoopReady,
+                    degradedConditionClass = degradedConditionClass.wireValue,
+                    reconnectRecoveryState = reconnectRecoveryState,
+                    evidencePresenceKind = evidencePresenceKind.wireValue,
+                    replayEligibility = reconnectParticipationSnapshot?.replayEligibility?.wireValue,
+                    participantIdentityFreshness = snapshotParticipantFreshness,
+                    meshRuntimeClosed = meshRuntimeStateReport?.isRuntimeClosed,
+                    executionBusy = snapshotStamp.executionBusy,
+                    activeExecutionCount = snapshotStamp.activeExecutionCount
+                )
+            )
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -3367,6 +3394,10 @@ class GalaxyConnectionService : Service() {
                 // PR-7B: explicit evidence presence kind so V2 applies the correct governance
                 // policy without relying on optimistic defaults for missing or failed evidence.
                 evidence_presence_kind = evidencePresenceKind.wireValue,
+                operational_surface_schema_version = operationalSurface.schemaVersion,
+                operational_surface_states = operationalSurface.states,
+                operational_surface_authority = operationalSurface.authority,
+                operational_surface_limitations = operationalSurface.limitations,
                 // PR-12: real reconnect/recovery participation fields for cross-repo closure.
                 // These close the gap between scattered reconnect components and expose a
                 // coherent, wire-stable participation model that V2 can act on during recovery.
