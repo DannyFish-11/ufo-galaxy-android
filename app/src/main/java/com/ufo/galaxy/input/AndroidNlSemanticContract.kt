@@ -1,5 +1,7 @@
 package com.ufo.galaxy.input
 
+import com.ufo.galaxy.runtime.AndroidNlInitiationContract
+
 /**
  * Canonical Android-side metadata contract for natural-language input routing.
  *
@@ -7,6 +9,11 @@ package com.ufo.galaxy.input
  * avoiding ambiguity about system-level semantic authority:
  * - Local path: Android executes locally; authority is device-local only.
  * - Handoff path: Android acts as source/carrier and hands semantic authority to V2.
+ *
+ * PR-993: [handoffToV2Metadata] and [nlInitiationMetadata] now include the full
+ * Android NL initiation metadata as defined by [AndroidNlInitiationContract], so that
+ * V2's intake layer can identify and admit Android-originated NL initiations into the
+ * main intent/governance/execution/truth/reconciliation/closure chain.
  */
 internal object AndroidNlSemanticContract {
     const val KEY_NL_SOURCE = "nl_source"
@@ -44,4 +51,29 @@ internal object AndroidNlSemanticContract {
         KEY_LOCAL_NL_LAYER_ROLE to LOCAL_NL_LAYER_ROLE,
         "source_runtime_posture" to posture
     )
+
+    /**
+     * Produces the merged context-extra metadata map for an Android NL cross-device
+     * initiation — combining the standard handoff metadata with the PR-993 NL
+     * initiation contract wire fields.
+     *
+     * When [initiationMetadata] is non-null (i.e. `cross_device_enabled = true` and
+     * [AndroidNlInitiationContract.build] succeeded), its [AndroidNlInitiationContract.NlInitiationMetadata.toWireMap]
+     * entries are merged in, enriching the [com.ufo.galaxy.protocol.TaskSubmitContext.extra]
+     * map that V2's intake layer reads.
+     *
+     * When [initiationMetadata] is `null` (local path or gate not met), only the base
+     * handoff metadata is returned — preserving backwards compatibility.
+     *
+     * @param posture            Source-device participation posture wire value.
+     * @param initiationMetadata PR-993 NL initiation metadata, or `null` when the gate was
+     *                           not met (cross_device_enabled=false).
+     */
+    fun nlInitiationMetadata(
+        posture: String,
+        initiationMetadata: AndroidNlInitiationContract.NlInitiationMetadata?
+    ): Map<String, String> {
+        val base = handoffToV2Metadata(posture)
+        return if (initiationMetadata != null) base + initiationMetadata.toWireMap() else base
+    }
 }

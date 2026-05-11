@@ -14,6 +14,7 @@ import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskSubmitContext
 import com.ufo.galaxy.protocol.TaskSubmitPayload
+import com.ufo.galaxy.runtime.AndroidNlInitiationContract
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,6 +108,10 @@ class InputRouter(
      *
      * Blank / whitespace-only input is ignored and [RouteMode.LOCAL] is returned without
      * invoking any callbacks.
+     *
+     * When `crossDeviceEnabled=true` and WS is connected, [AndroidNlInitiationContract] metadata
+     * is automatically built and embedded into the outbound [TaskSubmitPayload] so that the V2
+     * central authority can admit this Android-originated NL initiation to the main chain.
      *
      * @param text                 Natural-language input from the user (text or voice transcript).
      * @param deviceId             Stable device identifier. Defaults to the Android build identity.
@@ -216,20 +221,45 @@ class InputRouter(
      * the payload level and the envelope level — matching the dual-field convention established
      * by the main-repo PR #533 contract.
      *
+     * PR-993: [AndroidNlInitiationContract] metadata is built and embedded into:
+     *  - [TaskSubmitPayload.nl_initiation_origin], [TaskSubmitPayload.nl_initiation_mode],
+     *    [TaskSubmitPayload.nl_initiation_authority_scope], [TaskSubmitPayload.nl_initiation_lineage]
+     *  - [TaskSubmitContext.extra] (full wire map including schema_version, lineage, correlation_id)
+     *
+     * This ensures V2's intake layer can identify and admit this Android-originated NL initiation
+     * to the main intent/governance/execution/truth/reconciliation/closure chain.
+     *
      * The payload is validated via [TaskSubmitPayload.validate] before sending; a validation
      * failure is treated as an internal error and surfaced via [onError].
      */
     private fun sendViaWebSocket(text: String, deviceId: String, taskId: String, posture: String): RouteMode {
         val conversationSessionId = UUID.randomUUID().toString()
+
+        // PR-993: Build Android NL initiation metadata. crossDeviceEnabled is true here
+        // (we are on the WS-connected branch), so build() will return non-null metadata.
+        val nlInitiation = AndroidNlInitiationContract.build(
+            crossDeviceEnabled = settings.crossDeviceEnabled,
+            deviceId = deviceId,
+            runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
+            correlationId = taskId
+        )
+
+        val contextExtra = AndroidNlSemanticContract.nlInitiationMetadata(posture, nlInitiation)
+
         val payload = TaskSubmitPayload(
             task_text = text,
             device_id = deviceId,
             session_id = conversationSessionId,
             task_id = taskId,
             context = TaskSubmitContext(
-                extra = AndroidNlSemanticContract.handoffToV2Metadata(posture)
+                extra = contextExtra
             ),
-            source_runtime_posture = posture
+            source_runtime_posture = posture,
+            // PR-993: embed NL initiation fields directly in the payload for V2 intake
+            nl_initiation_origin = nlInitiation?.origin,
+            nl_initiation_mode = nlInitiation?.initiationMode?.wireValue,
+            nl_initiation_authority_scope = nlInitiation?.authorityScope?.wireValue,
+            nl_initiation_lineage = nlInitiation?.lineage
         )
         if (!payload.validate()) {
             val fieldError = payload.validationError() ?: "unknown field"
@@ -253,14 +283,16 @@ class InputRouter(
         val json = gson.toJson(envelope)
         val sent = webSocketClient.sendJson(json)
         return if (sent) {
-            Log.i(TAG, "[ROUTE] route_mode=cross_device task_id=$taskId device_id=$deviceId posture=$posture text=${text.take(60)}")
+            Log.i(TAG, "[ROUTE] route_mode=cross_device task_id=$taskId device_id=$deviceId posture=$posture text=${text.take(60)} nl_initiation=${nlInitiation != null}")
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "route_cross_device",
                     "task_id" to taskId,
                     "session_id" to conversationSessionId,
-                    "posture" to posture
-                ) + AndroidNlSemanticContract.handoffToV2Metadata(posture)
+                    "posture" to posture,
+                    "nl_initiation_mode" to (nlInitiation?.initiationMode?.wireValue ?: "none"),
+                    "nl_initiation_authority_scope" to (nlInitiation?.authorityScope?.wireValue ?: "none")
+                ) + AndroidNlSemanticContract.nlInitiationMetadata(posture, nlInitiation)
             )
             RouteMode.CROSS_DEVICE
         } else {
