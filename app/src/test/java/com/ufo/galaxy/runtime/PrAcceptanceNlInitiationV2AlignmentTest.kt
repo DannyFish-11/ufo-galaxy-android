@@ -489,7 +489,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
 
         val json = gateway.sentMessages.first()
         // lineage 格式：android/{deviceId}/{sessionId}
-        assertTrue("lineage 必须以 android/ 开头", json.contains("android\\/") || json.contains("android/"))
+        assertTrue("lineage 必须以 android/ 开头", json.contains("android/"))
     }
 
     @Test

@@ -573,7 +573,7 @@ data class TaskSubmitPayload(
         session_id.isBlank() -> "session_id is blank"
         nl_initiation_origin != null && nl_initiation_authority_scope != "v2_central" ->
             "nl_initiation_authority_scope must be 'v2_central' when nl_initiation_origin is present " +
-                "(got: ${nl_initiation_authority_scope ?: "null"})"
+            "(got: ${nl_initiation_authority_scope ?: "null"})"
         else                 -> null
     }
 }
