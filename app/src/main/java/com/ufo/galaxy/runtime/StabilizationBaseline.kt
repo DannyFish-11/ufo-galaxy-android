@@ -1923,6 +1923,30 @@ object StabilizationBaseline {
                 "emits diagnostic_schema_version, diagnostic_domain, diagnostic_reason, and local_cause " +
                 "in DiagnosticsPayload so local causes are explicit and machine-reconcilable by V2.",
             introducedPr = 85
+        ),
+
+        // ── PR-993: Android NL initiation contract ────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-nl-initiation-contract",
+            displayName = "AndroidNlInitiationContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidNlInitiationContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-993 canonical Android NL initiation contract. Defines the authority-bounded " +
+                "natural-language initiation capability for Android in cross-device mode. Introduces " +
+                "NlInitiationMode (1 value: ANDROID_NL_CROSS_DEVICE), NlAuthorityScope (1 value: V2_CENTRAL), " +
+                "and NlInitiationMetadata (origin/initiationMode/authorityScope/lineage/correlationId/ " +
+                "runtimeSessionId/deviceContext). Enforces the cross_device_enabled gate: build() returns " +
+                "null when cross-device is off, preventing NL initiation in local mode. InputRouter.sendViaWebSocket() " +
+                "now calls AndroidNlInitiationContract.build() and embeds nl_initiation_origin, " +
+                "nl_initiation_mode, nl_initiation_authority_scope, nl_initiation_lineage into the outbound " +
+                "TaskSubmitPayload, and includes the full wire map in TaskSubmitContext.extra. " +
+                "AndroidNlSemanticContract.nlInitiationMetadata() merges standard handoff metadata with the " +
+                "PR-993 wire fields. INITIATION_INVARIANTS declares: cross_device gate required, V2 central " +
+                "authority required, no parallel intent system, semantic authority transfers to V2, enters " +
+                "V2 main chain. Test: AndroidNlInitiationContractTest.",
+            introducedPr = 86
         )
     )
 

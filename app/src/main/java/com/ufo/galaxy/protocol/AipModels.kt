@@ -497,6 +497,28 @@ data class TaskSubmitContext(
  *                   a pure control/initiator) or `"join_runtime"` (source also participates as
  *                   a runtime executor). Defaults to `null`; the gateway treats `null` as
  *                   `"control_only"` for backwards compatibility.
+ *
+ * ## Android NL initiation metadata (PR-993 compatibility)
+ *
+ * The following fields carry Android-originated natural-language initiation metadata
+ * introduced by PR-993. They are required when the request originates from an Android NL
+ * input in cross-device mode, and must be absent (null) for all other sources so that V2
+ * can distinguish Android-originated initiations from server-dispatched tasks.
+ *
+ * @param nl_initiation_origin      Originating device/system identity. Must be
+ *                   `"android_device"` for Android NL initiations; `null` for all other sources.
+ * @param nl_initiation_mode        NL initiation mode from
+ *                   [com.ufo.galaxy.runtime.AndroidNlInitiationContract.NlInitiationMode].
+ *                   Must be `"android_nl_cross_device"` for Android NL initiations; `null`
+ *                   for all other sources.
+ * @param nl_initiation_authority_scope  Authority scope from
+ *                   [com.ufo.galaxy.runtime.AndroidNlInitiationContract.NlAuthorityScope].
+ *                   Must be `"v2_central"` for all valid Android NL initiations; `null` for
+ *                   other sources. V2 MUST NOT admit an Android NL initiation that declares
+ *                   any scope other than `"v2_central"`.
+ * @param nl_initiation_lineage     Session/device lineage string of the form
+ *                   `"android/{deviceId}/{runtimeSessionId}"` for Android NL initiations;
+ *                   `null` for all other sources.
  */
 data class TaskSubmitPayload(
     val task_text: String,
@@ -504,7 +526,12 @@ data class TaskSubmitPayload(
     val session_id: String,
     val task_id: String = "",
     val context: TaskSubmitContext = TaskSubmitContext(),
-    val source_runtime_posture: String? = null
+    val source_runtime_posture: String? = null,
+    // ── PR-993: Android NL initiation metadata (null for non-Android-NL sources) ──
+    val nl_initiation_origin: String? = null,
+    val nl_initiation_mode: String? = null,
+    val nl_initiation_authority_scope: String? = null,
+    val nl_initiation_lineage: String? = null
 ) {
     /**
      * Returns `true` when all required fields are non-blank.
