@@ -4,6 +4,25 @@
 
 ---
 
+## [3.1.0] — 2026-05-11
+
+> PR-87：Android 操作状态面对称性（unified operational/readiness surface symmetry）
+
+### 新增
+- **合约**：`AndroidOperationalStateSurfaceContract` — Android 侧统一操作/就绪状态面合约，覆盖 11 个轴：`registration_discoverability`、`capability_visibility`、`operational_readiness`、`active_usable_path`、`degraded_mode`、`recovery_repair`、`cross_device_participation`、`session_continuity`、`task_initiation_eligibility`、`result_closure`、`minimum_access_admission`。
+- **合约**：`AuthorityScope` 枚举明确区分 Android 本地权威、V2 协调信号、V2 准入前提、本地完成 V2 关闭、V2 权威五种边界场景。
+- **协议**：`DeviceStateSnapshotPayload` 新增四个字段：`operational_surface_schema_version`、`operational_surface_states`、`operational_surface_authority`、`operational_surface_limitations`，由 `GalaxyConnectionService.sendDeviceStateSnapshot()` 填充。
+- **基线**：`StabilizationBaseline` 新增 `android-operational-state-surface` 条目（`introducedPr = 87`，`CANONICAL_STABLE`，`EXTEND` 指引）。
+- **文档**：`docs/ANDROID_OPERATIONAL_STATE_SURFACE.md` — 描述面轴、权威语义及已知限制。
+- **测试**：`AndroidOperationalStateSurfaceContractTest` — 覆盖全轴全权威映射、跨设备就绪路径、降级/恢复/compat 路径、本地专属路径、设备 ID 缺失路径、失败观测修复需要路径，以及 `SCHEMA_VERSION`/`ALL_WIRE_KEYS` 不变量。
+
+### 设计约束
+- Android 不声明最终准入权威；V2 保留跨仓聚合、最终准入和最终关闭权威。
+- `minimum_access_admission` 始终为 `v2_authoritative`，不被 Android 本地化。
+- `operational_surface_limitations` 始终包含三条基线限制，视运行时状态追加额外限制。
+
+---
+
 ## [3.0.0] — 2026-03-16
 
 > PR-C5：文档/示例 & 自动化测试收尾
