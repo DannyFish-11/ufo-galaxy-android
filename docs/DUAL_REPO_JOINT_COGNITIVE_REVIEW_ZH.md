@@ -3,6 +3,7 @@
 > 审查对象：`DannyFish-11/ufo-galaxy-android` + `DannyFish-11/ufo-galaxy-realization-v2`  
 > PR 落点：`DannyFish-11/ufo-galaxy-android`  
 > 审查原则：仅基于真实代码路径、类、函数、协议流，不基于愿景描述推断。
+> 说明：文中“完成度百分比/区间”均为**代码证据级评估**，不等同于生产 SLA 或全场景实机验证结果。
 
 ---
 
@@ -166,16 +167,20 @@
 ### P0（不做就不能称为真实闭环）
 1. **双仓协议/状态/任务接管对齐**
    - 固化 `device_register` reconnect canonical path 与 `durable_session_id/session_continuity_epoch` 的端到端回归。
+   - 验收标准：在双仓自动化回归中，按“100 个独立会话 × 每会话 10 次重连（总计 1000 次重连操作）”执行，session continuity 断言通过率 ≥99.9%，且无不可恢复 session 错绑。
 2. **跨设备链路**
    - 以多设备实机场景验证 `parallel_subtask → goal_execution_result → canonical truth chain` 全链路。
+   - 验收标准：至少 2 台设备、500 轮并发任务，结果回传与 canonical completion 一致率 ≥99.5%。
 3. **真实验证与交付证明**
    - 建立“Android 真设备 + V2 网关”自动回归流水线，产出可追溯报告。
+   - 验收标准：主分支每次变更自动产出结构化报告（通过/失败、失败阶段、trace_id、session_id）。
 
 ### P1（影响体系成立质量）
 1. **Android 仓侧**
    - 强化 `OfflineTaskQueue` 与 continuity 的组合回归（断线、重连、会话切换、幂等）。
 2. **realization-v2 仓侧**
    - 继续压缩 `DeviceRegistry` / `SessionRoamingManager` / `CrossDeviceCoordinator` 的非 canonical 调用面。
+   - retirement 验收条件：连续 90 天生产零调用，且 canonical 主路径同类能力成功率 ≥99.9% 后进入 30 天移除窗口；窗口第 1 天发布下线公告、第 15 天做回滚演练检查、第 30 天通过评审闸门后执行代码删除。
 3. **本地链路**
    - 明确本地推理激活路径与失败降级的统一验收标准。
 
