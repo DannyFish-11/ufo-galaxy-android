@@ -94,6 +94,7 @@ data class AndroidParticipantRuntimeTruth(
     val readinessState: ParticipantReadinessState,
     val activeTaskId: String?,
     val activeTaskStatus: ActiveTaskStatus?,
+    val authoritativeParticipationState: String = AndroidAuthoritativeParticipationTruth.State.LOCAL_ONLY.wireValue,
     val runtimeNodeIdentity: AndroidRuntimeNodeIdentity? = null,
     val reportedAtMs: Long,
     val reconciliationEpoch: Int
@@ -162,6 +163,7 @@ data class AndroidParticipantRuntimeTruth(
         put(KEY_READINESS_STATE, readinessState.wireValue)
         activeTaskId?.let { put(KEY_ACTIVE_TASK_ID, it) }
         activeTaskStatus?.let { put(KEY_ACTIVE_TASK_STATUS, it.wireValue) }
+        put(KEY_AUTHORITATIVE_PARTICIPATION_STATE, authoritativeParticipationState)
         runtimeNodeIdentity?.let { put(KEY_RUNTIME_NODE_IDENTITY, it.toMap()) }
         put(KEY_REPORTED_AT_MS, reportedAtMs)
         put(KEY_RECONCILIATION_EPOCH, reconciliationEpoch)
@@ -216,6 +218,9 @@ data class AndroidParticipantRuntimeTruth(
         /** Wire key for [activeTaskStatus] ([ActiveTaskStatus.wireValue]); absent when null. */
         const val KEY_ACTIVE_TASK_STATUS = "active_task_status"
 
+        /** Wire key for [authoritativeParticipationState]. */
+        const val KEY_AUTHORITATIVE_PARTICIPATION_STATE = "authoritative_participation_state"
+
         /** Wire key for consolidated [runtimeNodeIdentity] map; absent when null. */
         const val KEY_RUNTIME_NODE_IDENTITY = "runtime_node_identity"
 
@@ -255,6 +260,7 @@ data class AndroidParticipantRuntimeTruth(
             activeTaskId: String? = null,
             activeTaskStatus: ActiveTaskStatus? = null,
             carrierForegroundVisible: Boolean? = null,
+            authoritativeParticipationState: String? = null,
             reconciliationEpoch: Int = 0,
             reportedAtMs: Long = System.currentTimeMillis()
         ): AndroidParticipantRuntimeTruth {
@@ -270,6 +276,29 @@ data class AndroidParticipantRuntimeTruth(
                     ParticipantCoordinationRole.PARTICIPANT
             }
             val driftCheckedSessionSnapshot = alignSessionSnapshot(descriptor, sessionSnapshot)
+            val runtimePosture = driftCheckedSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY
+            val derivedParticipationState = authoritativeParticipationState
+                ?: AndroidAuthoritativeParticipationTruth.derive(
+                    AndroidAuthoritativeParticipationTruth.DerivationInput(
+                        crossDeviceEnabled = runtimePosture == SourceRuntimePosture.JOIN_RUNTIME,
+                        wsConnected = driftCheckedSessionSnapshot?.attachmentState ==
+                            AttachedRuntimeSession.State.ATTACHED.wireValue,
+                        registrationInFlight = false,
+                        capabilityVisible = descriptor.participationState !=
+                            RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                        readinessSatisfied = readinessState == ParticipantReadinessState.READY,
+                        runtimeSessionAvailable = driftCheckedSessionSnapshot?.runtimeSessionId != null,
+                        fullyAttached = driftCheckedSessionSnapshot?.attachmentState ==
+                            AttachedRuntimeSession.State.ATTACHED.wireValue,
+                        dispatchEligible = readinessState == ParticipantReadinessState.READY &&
+                            descriptor.participationState == RuntimeHostDescriptor.HostParticipationState.ACTIVE &&
+                            healthState == ParticipantHealthState.HEALTHY,
+                        continuityIntact = true,
+                        operatorSuspendedOrIsolated = descriptor.participationState ==
+                            RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                        distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
+                    )
+                ).wireValue
             return AndroidParticipantRuntimeTruth(
                 participantId = participantId,
                 deviceId = descriptor.deviceId,
@@ -277,7 +306,7 @@ data class AndroidParticipantRuntimeTruth(
                 deviceRole = descriptor.deviceRole,
                 participationState = descriptor.participationState,
                 coordinationRole = coordinationRole,
-                sourceRuntimePosture = driftCheckedSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                sourceRuntimePosture = runtimePosture,
                 sessionId = driftCheckedSessionSnapshot?.sessionId,
                 sessionState = driftCheckedSessionSnapshot?.attachmentState?.let {
                     AttachedRuntimeSession.State.fromValue(it)
@@ -287,6 +316,7 @@ data class AndroidParticipantRuntimeTruth(
                 readinessState = readinessState,
                 activeTaskId = activeTaskId,
                 activeTaskStatus = activeTaskStatus,
+                authoritativeParticipationState = derivedParticipationState,
                 runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
                     descriptor = descriptor,
                     sessionSnapshot = driftCheckedSessionSnapshot,
