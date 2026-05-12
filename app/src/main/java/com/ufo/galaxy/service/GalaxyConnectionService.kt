@@ -430,6 +430,8 @@ class GalaxyConnectionService : Service() {
             )
             val runtimeController = UFOGalaxyApplication.runtimeController
             val dispatchReadiness = runtimeController.currentDispatchReadiness()
+            val distributedRuntimeActivity =
+                isDistributedParticipationActivePhase(payload.phase)
             val participationState = AndroidAuthoritativeParticipationTruth.derive(
                 AndroidAuthoritativeParticipationTruth.DerivationInput(
                     crossDeviceEnabled = settings.crossDeviceEnabled,
@@ -442,12 +444,7 @@ class GalaxyConnectionService : Service() {
                     dispatchEligible = dispatchReadiness.isEligible,
                     continuityIntact = runtimeController.reconnectRecoveryState.value != ReconnectRecoveryState.FAILED,
                     operatorSuspendedOrIsolated = false,
-                    distributedRuntimeActivity = payload.phase !in setOf(
-                        DeviceExecutionEventPayload.PHASE_COMPLETED,
-                        DeviceExecutionEventPayload.PHASE_FAILED,
-                        DeviceExecutionEventPayload.PHASE_CANCELLED,
-                        DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED
-                    )
+                    distributedRuntimeActivity = distributedRuntimeActivity
                 )
             )
             val eventStamp = runtimeStateTruthSequencer.nextEventStamp(
@@ -4948,6 +4945,14 @@ class GalaxyConnectionService : Service() {
             else -> false
         }
     }
+
+    private fun isDistributedParticipationActivePhase(phase: String): Boolean =
+        phase !in setOf(
+            DeviceExecutionEventPayload.PHASE_COMPLETED,
+            DeviceExecutionEventPayload.PHASE_FAILED,
+            DeviceExecutionEventPayload.PHASE_CANCELLED,
+            DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED
+        )
 
     private fun storeMemoryEntry(
         taskId: String,

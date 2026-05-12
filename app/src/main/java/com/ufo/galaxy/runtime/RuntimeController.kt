@@ -2612,8 +2612,9 @@ class RuntimeController(
                 crossDeviceEnabled = settings.crossDeviceEnabled,
                 wsConnected = webSocketClient.isConnected(),
                 registrationInFlight = runtimeState is RuntimeState.Starting,
-                capabilityVisible = descriptor?.participationState !=
-                    RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                capabilityVisible = descriptor?.participationState
+                    ?.let { it != RuntimeHostDescriptor.HostParticipationState.INACTIVE }
+                    ?: false,
                 readinessSatisfied = readinessState == ParticipantReadinessState.READY,
                 runtimeSessionAvailable = _currentRuntimeSessionId != null,
                 fullyAttached = _attachedSession.value?.isAttached == true,
