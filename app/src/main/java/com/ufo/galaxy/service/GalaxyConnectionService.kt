@@ -437,7 +437,10 @@ class GalaxyConnectionService : Service() {
                     crossDeviceEnabled = settings.crossDeviceEnabled,
                     wsConnected = webSocketClient.isConnected(),
                     registrationInFlight = runtimeController.state.value is com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Starting,
-                    capabilityVisible = modeState.crossDeviceEligibility || dispatchReadiness.sessionIsAttached,
+                    capabilityVisible = hasVisibleCrossDeviceCapability(
+                        crossDeviceEligibility = modeState.crossDeviceEligibility,
+                        sessionIsAttached = dispatchReadiness.sessionIsAttached
+                    ),
                     readinessSatisfied = modeState.crossDeviceEligibility,
                     runtimeSessionAvailable = !UFOGalaxyApplication.runtimeSessionId.isNullOrBlank(),
                     fullyAttached = dispatchReadiness.sessionIsAttached,
@@ -3313,7 +3316,10 @@ class GalaxyConnectionService : Service() {
                     crossDeviceEnabled = settings.crossDeviceEnabled,
                     wsConnected = webSocketClient.isConnected(),
                     registrationInFlight = runtimeController.state.value is com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Starting,
-                    capabilityVisible = modeState.crossDeviceEligibility || dispatchReadiness.sessionIsAttached,
+                    capabilityVisible = hasVisibleCrossDeviceCapability(
+                        crossDeviceEligibility = modeState.crossDeviceEligibility,
+                        sessionIsAttached = dispatchReadiness.sessionIsAttached
+                    ),
                     readinessSatisfied = modeState.crossDeviceEligibility,
                     runtimeSessionAvailable = !UFOGalaxyApplication.runtimeSessionId.isNullOrBlank(),
                     fullyAttached = dispatchReadiness.sessionIsAttached,
@@ -4953,6 +4959,11 @@ class GalaxyConnectionService : Service() {
             DeviceExecutionEventPayload.PHASE_CANCELLED,
             DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED
         )
+
+    private fun hasVisibleCrossDeviceCapability(
+        crossDeviceEligibility: Boolean,
+        sessionIsAttached: Boolean
+    ): Boolean = crossDeviceEligibility || sessionIsAttached
 
     private fun storeMemoryEntry(
         taskId: String,

@@ -94,7 +94,15 @@ data class AndroidParticipantRuntimeTruth(
     val readinessState: ParticipantReadinessState,
     val activeTaskId: String?,
     val activeTaskStatus: ActiveTaskStatus?,
-    val authoritativeParticipationState: String = AndroidAuthoritativeParticipationTruth.State.LOCAL_ONLY.wireValue,
+    val authoritativeParticipationState: String = defaultAuthoritativeParticipationState(
+        sourceRuntimePosture = sourceRuntimePosture,
+        sessionState = sessionState,
+        participationState = participationState,
+        healthState = healthState,
+        readinessState = readinessState,
+        activeTaskId = activeTaskId,
+        activeTaskStatus = activeTaskStatus
+    ),
     val runtimeNodeIdentity: AndroidRuntimeNodeIdentity? = null,
     val reportedAtMs: Long,
     val reconciliationEpoch: Int
@@ -278,27 +286,17 @@ data class AndroidParticipantRuntimeTruth(
             val driftCheckedSessionSnapshot = alignSessionSnapshot(descriptor, sessionSnapshot)
             val runtimePosture = driftCheckedSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY
             val derivedParticipationState = authoritativeParticipationState
-                ?: AndroidAuthoritativeParticipationTruth.derive(
-                    AndroidAuthoritativeParticipationTruth.DerivationInput(
-                        crossDeviceEnabled = runtimePosture == SourceRuntimePosture.JOIN_RUNTIME,
-                        wsConnected = driftCheckedSessionSnapshot?.attachmentState ==
-                            AttachedRuntimeSession.State.ATTACHED.wireValue,
-                        registrationInFlight = false,
-                        capabilityVisible = descriptor.participationState !=
-                            RuntimeHostDescriptor.HostParticipationState.INACTIVE,
-                        readinessSatisfied = readinessState == ParticipantReadinessState.READY,
-                        runtimeSessionAvailable = driftCheckedSessionSnapshot?.runtimeSessionId != null,
-                        fullyAttached = driftCheckedSessionSnapshot?.attachmentState ==
-                            AttachedRuntimeSession.State.ATTACHED.wireValue,
-                        dispatchEligible = readinessState == ParticipantReadinessState.READY &&
-                            descriptor.participationState == RuntimeHostDescriptor.HostParticipationState.ACTIVE &&
-                            healthState == ParticipantHealthState.HEALTHY,
-                        continuityIntact = true,
-                        operatorSuspendedOrIsolated = descriptor.participationState ==
-                            RuntimeHostDescriptor.HostParticipationState.INACTIVE,
-                        distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
-                    )
-                ).wireValue
+                ?: defaultAuthoritativeParticipationState(
+                    sourceRuntimePosture = runtimePosture,
+                    sessionState = driftCheckedSessionSnapshot?.attachmentState?.let {
+                        AttachedRuntimeSession.State.fromValue(it)
+                    },
+                    participationState = descriptor.participationState,
+                    healthState = healthState,
+                    readinessState = readinessState,
+                    activeTaskId = activeTaskId,
+                    activeTaskStatus = activeTaskStatus
+                )
             return AndroidParticipantRuntimeTruth(
                 participantId = participantId,
                 deviceId = descriptor.deviceId,
@@ -338,8 +336,38 @@ data class AndroidParticipantRuntimeTruth(
             if (snapshot.hostRole != descriptor.formationRole.wireValue) return null
             return snapshot
         }
+
     }
 }
+
+private fun defaultAuthoritativeParticipationState(
+    sourceRuntimePosture: String,
+    sessionState: AttachedRuntimeSession.State?,
+    participationState: RuntimeHostDescriptor.HostParticipationState,
+    healthState: ParticipantHealthState,
+    readinessState: ParticipantReadinessState,
+    activeTaskId: String?,
+    activeTaskStatus: ActiveTaskStatus?
+): String =
+    AndroidAuthoritativeParticipationTruth.derive(
+        AndroidAuthoritativeParticipationTruth.DerivationInput(
+            crossDeviceEnabled = sourceRuntimePosture == SourceRuntimePosture.JOIN_RUNTIME,
+            wsConnected = sessionState == AttachedRuntimeSession.State.ATTACHED,
+            registrationInFlight = false,
+            capabilityVisible = participationState !=
+                RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+            readinessSatisfied = readinessState == ParticipantReadinessState.READY,
+            runtimeSessionAvailable = sessionState != null,
+            fullyAttached = sessionState == AttachedRuntimeSession.State.ATTACHED,
+            dispatchEligible = readinessState == ParticipantReadinessState.READY &&
+                participationState == RuntimeHostDescriptor.HostParticipationState.ACTIVE &&
+                healthState == ParticipantHealthState.HEALTHY,
+            continuityIntact = true,
+            operatorSuspendedOrIsolated = participationState ==
+                RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+            distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
+        )
+    ).wireValue
 
 /**
  * In-flight task execution status reported as part of [AndroidParticipantRuntimeTruth].
