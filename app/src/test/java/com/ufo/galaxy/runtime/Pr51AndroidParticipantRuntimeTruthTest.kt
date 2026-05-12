@@ -508,6 +508,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         assertTrue(map.containsKey(keys.KEY_DELEGATED_EXECUTION_COUNT))
         assertTrue(map.containsKey(keys.KEY_HEALTH_STATE))
         assertTrue(map.containsKey(keys.KEY_READINESS_STATE))
+        assertTrue(map.containsKey(keys.KEY_AUTHORITATIVE_PARTICIPATION_STATE))
         assertTrue(map.containsKey(keys.KEY_REPORTED_AT_MS))
         assertTrue(map.containsKey(keys.KEY_RECONCILIATION_EPOCH))
         assertTrue(map.containsKey(keys.KEY_IS_FULLY_RECONCILABLE))
@@ -1028,6 +1029,14 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     }
 
     @Test
+    fun `KEY_AUTHORITATIVE_PARTICIPATION_STATE is authoritative_participation_state`() {
+        assertEquals(
+            "authoritative_participation_state",
+            AndroidParticipantRuntimeTruth.KEY_AUTHORITATIVE_PARTICIPATION_STATE
+        )
+    }
+
+    @Test
     fun `KEY_REPORTED_AT_MS is reported_at_ms`() {
         assertEquals("reported_at_ms", AndroidParticipantRuntimeTruth.KEY_REPORTED_AT_MS)
     }
@@ -1059,6 +1068,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
             AndroidParticipantRuntimeTruth.KEY_READINESS_STATE,
             AndroidParticipantRuntimeTruth.KEY_ACTIVE_TASK_ID,
             AndroidParticipantRuntimeTruth.KEY_ACTIVE_TASK_STATUS,
+            AndroidParticipantRuntimeTruth.KEY_AUTHORITATIVE_PARTICIPATION_STATE,
             AndroidParticipantRuntimeTruth.KEY_REPORTED_AT_MS,
             AndroidParticipantRuntimeTruth.KEY_RECONCILIATION_EPOCH,
             AndroidParticipantRuntimeTruth.KEY_IS_FULLY_RECONCILABLE

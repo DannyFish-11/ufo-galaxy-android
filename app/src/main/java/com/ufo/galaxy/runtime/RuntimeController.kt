@@ -2057,6 +2057,11 @@ class RuntimeController(
             activeTaskId = activeTaskId,
             activeTaskStatus = activeTaskStatus,
             carrierForegroundVisible = appForegroundVisible.value,
+            authoritativeParticipationState = deriveAuthoritativeParticipationState(
+                readinessState = readinessState,
+                activeTaskId = activeTaskId,
+                activeTaskStatus = activeTaskStatus
+            ),
             reconciliationEpoch = epoch
         )
         emitReconciliationSignal(
@@ -2265,6 +2270,11 @@ class RuntimeController(
                     activeTaskId = null,
                     activeTaskStatus = null,
                     carrierForegroundVisible = appForegroundVisible.value,
+                    authoritativeParticipationState = deriveAuthoritativeParticipationState(
+                        readinessState = ParticipantReadinessState.UNKNOWN,
+                        activeTaskId = null,
+                        activeTaskStatus = null
+                    ),
                     reconciliationEpoch = epoch
                 )
                 emitReconciliationSignal(
@@ -2588,6 +2598,35 @@ class RuntimeController(
             attachedSession = _attachedSession.value,
             rollout         = _rolloutControlSnapshot.value
         )
+
+    private fun deriveAuthoritativeParticipationState(
+        readinessState: ParticipantReadinessState,
+        activeTaskId: String?,
+        activeTaskStatus: ActiveTaskStatus?
+    ): String {
+        val runtimeState = _state.value
+        val descriptor = hostDescriptor
+        val dispatchReadiness = currentDispatchReadiness()
+        val state = AndroidAuthoritativeParticipationTruth.derive(
+            AndroidAuthoritativeParticipationTruth.DerivationInput(
+                crossDeviceEnabled = settings.crossDeviceEnabled,
+                wsConnected = webSocketClient.isConnected(),
+                registrationInFlight = runtimeState is RuntimeState.Starting,
+                capabilityVisible = descriptor?.participationState
+                    ?.let { it != RuntimeHostDescriptor.HostParticipationState.INACTIVE }
+                    ?: false,
+                readinessSatisfied = readinessState == ParticipantReadinessState.READY,
+                runtimeSessionAvailable = _currentRuntimeSessionId != null,
+                fullyAttached = _attachedSession.value?.isAttached == true,
+                dispatchEligible = dispatchReadiness.isEligible,
+                continuityIntact = _reconnectRecoveryState.value != ReconnectRecoveryState.FAILED,
+                operatorSuspendedOrIsolated = descriptor?.participationState ==
+                    RuntimeHostDescriptor.HostParticipationState.INACTIVE,
+                distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
+            )
+        )
+        return state.wireValue
+    }
 
     /**
      * PR-37 — Checks that the current session state is consistent with the current

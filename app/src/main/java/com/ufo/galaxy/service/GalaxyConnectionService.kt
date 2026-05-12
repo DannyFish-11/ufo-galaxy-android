@@ -29,6 +29,7 @@ import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
+import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
@@ -427,6 +428,28 @@ class GalaxyConnectionService : Service() {
                 wsConnected = webSocketClient.isConnected(),
                 capabilityDegraded = managerStateDegraded()
             )
+            val runtimeController = UFOGalaxyApplication.runtimeController
+            val dispatchReadiness = runtimeController.currentDispatchReadiness()
+            val distributedRuntimeActivity =
+                isDistributedParticipationActivePhase(payload.phase)
+            val participationState = AndroidAuthoritativeParticipationTruth.derive(
+                AndroidAuthoritativeParticipationTruth.DerivationInput(
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = webSocketClient.isConnected(),
+                    registrationInFlight = runtimeController.state.value is com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Starting,
+                    capabilityVisible = hasVisibleCrossDeviceCapability(
+                        crossDeviceEligibility = modeState.crossDeviceEligibility,
+                        sessionIsAttached = dispatchReadiness.sessionIsAttached
+                    ),
+                    readinessSatisfied = modeState.crossDeviceEligibility,
+                    runtimeSessionAvailable = !UFOGalaxyApplication.runtimeSessionId.isNullOrBlank(),
+                    fullyAttached = dispatchReadiness.sessionIsAttached,
+                    dispatchEligible = dispatchReadiness.isEligible,
+                    continuityIntact = runtimeController.reconnectRecoveryState.value != ReconnectRecoveryState.FAILED,
+                    operatorSuspendedOrIsolated = false,
+                    distributedRuntimeActivity = distributedRuntimeActivity
+                )
+            )
             val eventStamp = runtimeStateTruthSequencer.nextEventStamp(
                 phase = payload.phase,
                 requestedTimestampMs = payload.timestamp_ms,
@@ -448,6 +471,7 @@ class GalaxyConnectionService : Service() {
                 cross_device_eligibility = modeState.crossDeviceEligibility,
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
+                authoritative_participation_state = participationState.wireValue,
                 execution_mode_state = modeState.executionModeState
             )
             val closedLoopPayload =
@@ -3286,6 +3310,25 @@ class GalaxyConnectionService : Service() {
             }
             val readinessSurfaceSnapshot = delegatedRuntimeReadinessEvaluator.buildSnapshot(deviceId)
             val acceptanceSurfaceSnapshot = delegatedRuntimeAcceptanceEvaluator.buildSnapshot(deviceId)
+            val dispatchReadiness = runtimeController.currentDispatchReadiness()
+            val authoritativeParticipationState = AndroidAuthoritativeParticipationTruth.derive(
+                AndroidAuthoritativeParticipationTruth.DerivationInput(
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = webSocketClient.isConnected(),
+                    registrationInFlight = runtimeController.state.value is com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Starting,
+                    capabilityVisible = hasVisibleCrossDeviceCapability(
+                        crossDeviceEligibility = modeState.crossDeviceEligibility,
+                        sessionIsAttached = dispatchReadiness.sessionIsAttached
+                    ),
+                    readinessSatisfied = modeState.crossDeviceEligibility,
+                    runtimeSessionAvailable = !UFOGalaxyApplication.runtimeSessionId.isNullOrBlank(),
+                    fullyAttached = dispatchReadiness.sessionIsAttached,
+                    dispatchEligible = dispatchReadiness.isEligible,
+                    continuityIntact = reconnectRecoveryState != ReconnectRecoveryState.FAILED.wireValue,
+                    operatorSuspendedOrIsolated = false,
+                    distributedRuntimeActivity = snapshotStamp.executionBusy
+                )
+            )
             val operationalSurface = AndroidOperationalStateSurfaceContract.derive(
                 AndroidOperationalStateSurfaceContract.DerivationInput(
                     deviceId = deviceId,
@@ -3361,6 +3404,7 @@ class GalaxyConnectionService : Service() {
                 cross_device_eligibility = modeState.crossDeviceEligibility,
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
+                authoritative_participation_state = authoritativeParticipationState.wireValue,
                 // PR-10: cross-cutting carrier state backed by real RuntimeController state.
                 carrier_runtime_state = carrierRuntimeState,
                 reconnect_recovery_state = reconnectRecoveryState,
@@ -4907,6 +4951,19 @@ class GalaxyConnectionService : Service() {
             else -> false
         }
     }
+
+    private fun isDistributedParticipationActivePhase(phase: String): Boolean =
+        phase !in setOf(
+            DeviceExecutionEventPayload.PHASE_COMPLETED,
+            DeviceExecutionEventPayload.PHASE_FAILED,
+            DeviceExecutionEventPayload.PHASE_CANCELLED,
+            DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED
+        )
+
+    private fun hasVisibleCrossDeviceCapability(
+        crossDeviceEligibility: Boolean,
+        sessionIsAttached: Boolean
+    ): Boolean = crossDeviceEligibility || sessionIsAttached
 
     private fun storeMemoryEntry(
         taskId: String,

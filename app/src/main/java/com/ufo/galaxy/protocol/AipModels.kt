@@ -2136,6 +2136,11 @@ data class DeviceStateSnapshotPayload(
     val cross_device_eligibility: Boolean? = null,
     val goal_execution_eligibility: Boolean? = null,
     val parallel_execution_eligibility: Boolean? = null,
+    // PR-1 Android authoritative participation truth.
+    // Values:
+    //  "local_only" | "control_only" | "cross_device_capable" | "cross_device_enabled" |
+    //  "fully_attached" | "dispatch_eligible" | "distributed_participant".
+    val authoritative_participation_state: String? = null,
 
     // PR-10: Final Android carrier consolidation — cross-cutting carrier state fields.
     //
@@ -2456,6 +2461,11 @@ data class DeviceExecutionEventPayload(
     val cross_device_eligibility: Boolean? = null,
     val goal_execution_eligibility: Boolean? = null,
     val parallel_execution_eligibility: Boolean? = null,
+    // PR-1 Android authoritative participation truth.
+    // Values:
+    //  "local_only" | "control_only" | "cross_device_capable" | "cross_device_enabled" |
+    //  "fully_attached" | "dispatch_eligible" | "distributed_participant".
+    val authoritative_participation_state: String? = null,
 
     // PR-10: Final carrier consolidation — runtime state included in every execution event
     // so V2 can correlate event emission with the carrier's cross-device participation mode.
