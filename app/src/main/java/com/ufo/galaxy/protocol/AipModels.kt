@@ -902,7 +902,13 @@ data class GoalExecutionPayload(
     val readiness_degradation_hint: String? = null,
     // ── PR-bridge: Delegated flow bridge identity (optional; null-safe for legacy senders) ──
     val delegated_flow_id: String? = null,
-    val flow_lineage_id: String? = null
+    val flow_lineage_id: String? = null,
+    // ── PR-2: NL-driven execution spine context (optional; null-safe for legacy senders) ──
+    // problem_context: V2-originated NL problem description that this execution contributes to.
+    // problem_solving_role: V2-declared execution spine participation kind for this dispatch.
+    // Both are null for legacy senders; Android MUST operate correctly without them.
+    val problem_context: String? = null,
+    val problem_solving_role: String? = null
 ) {
     companion object {
         /** Default per-task timeout when [timeout_ms] is 0 or not specified (30 s). */
@@ -1061,7 +1067,17 @@ data class GoalResultPayload(
     // Mirrors the result_summary field in TaskResultPayload and HandoffEnvelopeV2ResultPayload
     // so that all uplink result payloads carry a consistent human-readable one-line outcome.
     // Populated by GalaxyConnectionService.sendGoalResult from the `result` field when absent.
-    val result_summary: String? = null
+    val result_summary: String? = null,
+    // ── PR-2: NL-driven execution spine closure reporting ──────────────────────────────────────
+    // problem_solving_closure_class: Android's contribution to V2 canonical problem-solving
+    // closure. Wire value of AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.
+    // Allows V2 unified_result_ingress / canonical_completion_ingress to distinguish task
+    // completion from problem-solving progress. Null only for pre-emission payloads.
+    val problem_solving_closure_class: String? = null,
+    // execution_spine_participation_kind: The spine participation mode Android used.
+    // Wire value of AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.
+    // Echoed in results for V2 task_result_canonical_truth_chain correlation. Null for legacy.
+    val execution_spine_participation_kind: String? = null
 )
 
 /**

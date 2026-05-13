@@ -4,6 +4,7 @@ import android.util.Log
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.runtime.AndroidNlDrivenExecutionSpineContract
 import com.ufo.galaxy.runtime.ContinuityRecoveryContext
 import com.ufo.galaxy.runtime.ExecutorTargetType
 import com.ufo.galaxy.runtime.RuntimeObservabilityMetadata
@@ -228,7 +229,24 @@ class AutonomousExecutionPipeline(
                     "task_id=${payload.task_id}"
             )
         }
-        return goalExecutor.executeGoal(payload)
+        val spineParticipationKind = AndroidNlDrivenExecutionSpineContract.classifyParticipationKind(
+            executionRuntimeKind = payload.execution_runtime_kind,
+            declaredRole = payload.problem_solving_role
+        )
+        Log.i(
+            TAG,
+            "goal_execution spine_participation_kind=${spineParticipationKind.wireValue} " +
+                "declared_role=${payload.problem_solving_role} " +
+                "execution_runtime_kind=${payload.execution_runtime_kind} " +
+                "task_id=${payload.task_id}"
+        )
+        val baseResult = goalExecutor.executeGoal(payload)
+        val taskSucceeded = baseResult.status == "success"
+        val closureClass = AndroidNlDrivenExecutionSpineContract.classifyClosureClass(
+            participationKind = spineParticipationKind,
+            taskSucceeded = taskSucceeded
+        )
+        return baseResult
             .copy(
                 device_role = deviceRole,
                 execution_runtime_kind = payload.execution_runtime_kind,
@@ -243,7 +261,10 @@ class AutonomousExecutionPipeline(
                 dispatch_trace_id = payload.dispatch_trace_id,
                 dispatch_plan_id = payload.dispatch_plan_id,
                 policy_routing_outcome = payload.policy_routing_outcome,
-                is_continuation = if (isContinuation) true else null
+                is_continuation = if (isContinuation) true else null,
+                // ── PR-2: NL-driven execution spine closure reporting ─────────────────
+                problem_solving_closure_class = closureClass.wireValue,
+                execution_spine_participation_kind = spineParticipationKind.wireValue
             )
     }
 
@@ -361,7 +382,17 @@ class AutonomousExecutionPipeline(
                     "task_id=${payload.task_id}"
             )
         }
-        return collaborationAgent.handleParallelSubtask(payload)
+        val spineParticipationKind = AndroidNlDrivenExecutionSpineContract.classifyParticipationKind(
+            executionRuntimeKind = payload.execution_runtime_kind,
+            declaredRole = payload.problem_solving_role
+        )
+        val baseResult = collaborationAgent.handleParallelSubtask(payload)
+        val taskSucceeded = baseResult.status == "success"
+        val closureClass = AndroidNlDrivenExecutionSpineContract.classifyClosureClass(
+            participationKind = spineParticipationKind,
+            taskSucceeded = taskSucceeded
+        )
+        return baseResult
             .copy(
                 device_role = deviceRole,
                 execution_runtime_kind = payload.execution_runtime_kind,
@@ -376,7 +407,10 @@ class AutonomousExecutionPipeline(
                 dispatch_trace_id = payload.dispatch_trace_id,
                 dispatch_plan_id = payload.dispatch_plan_id,
                 policy_routing_outcome = payload.policy_routing_outcome,
-                is_continuation = if (isContinuation) true else null
+                is_continuation = if (isContinuation) true else null,
+                // ── PR-2: NL-driven execution spine closure reporting ─────────────────
+                problem_solving_closure_class = closureClass.wireValue,
+                execution_spine_participation_kind = spineParticipationKind.wireValue
             )
     }
 

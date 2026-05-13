@@ -1979,6 +1979,41 @@ object StabilizationBaseline {
                 "Test: AndroidOperationalStateSurfaceContractTest.",
             introducedPr = 87
         )
+    ) + listOf(
+
+        // ── PR-2: NL-driven execution spine contract ───────────────────────────
+        // NOTE: introducedPr=88 is the GitHub PR number for the PR-2 convergence item.
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-nl-driven-execution-spine-contract",
+            displayName = "AndroidNlDrivenExecutionSpineContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidNlDrivenExecutionSpineContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-2 Android-side natural-language-driven execution spine participation " +
+                "contract. Integrates Android as a real participant in the system's full " +
+                "problem-solving spine (NL request → center routing → Android execution → " +
+                "result return → problem closure). Introduces ExecutionSpineParticipationKind " +
+                "(4 values: TAKEOVER_INTERACTIVE/DELEGATED_EXECUTION/LOCAL_ASSISTIVE/DEGRADED_FALLBACK), " +
+                "ProblemSolvingClosureClass (5 values: TASK_COMPLETED_PROBLEM_SOLVED/" +
+                "TASK_COMPLETED_PROBLEM_PARTIAL/TASK_COMPLETED_PROBLEM_OPEN/" +
+                "TASK_INCOMPLETE_PROBLEM_OPEN/EXECUTION_DELEGATED_FURTHER), " +
+                "ExecutionSpineTraceContribution (structured trace record per execution), and " +
+                "SPINE_PARTICIPATION_INVARIANTS. GoalResultPayload gains " +
+                "problem_solving_closure_class and execution_spine_participation_kind fields. " +
+                "GoalExecutionPayload gains problem_context and problem_solving_role fields. " +
+                "HandoffEnvelopeV2 gains problem_context and problem_solving_role fields. " +
+                "AutonomousExecutionPipeline.handleGoalExecution/handleParallelSubtask now " +
+                "classify spine participation and populate problem_solving_closure_class in " +
+                "emitted GoalResultPayload so V2 unified_result_ingress and " +
+                "canonical_completion_ingress can distinguish task completion from " +
+                "problem-solving progress without raw-status inspection. V2 integration points: " +
+                "core/unified_result_ingress.py (problem_solving_closure_class), " +
+                "core/canonical_completion_ingress.py (problem_solving_closure_class), " +
+                "core/task_result_canonical_truth_chain.py (execution_spine_participation_kind). " +
+                "Test: Pr2AndroidNlDrivenExecutionSpineTest.",
+            introducedPr = 88
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
