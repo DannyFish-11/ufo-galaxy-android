@@ -568,7 +568,7 @@ class AndroidContinuityIntegration {
                     axis = axis,
                     reason = "queued_result_without_durable_authority"
                 )
-            queuedSessionTag != null && queuedSessionTag != durableSession.durableSessionId ->
+            queuedSessionTag != null && queuedSessionTag != durableSession?.durableSessionId ->
                 ContinuityGovernanceDecision(
                     disposition = ContinuityDisposition.STALE_RESULT,
                     action = ContinuityGovernanceAction.REJECT_STALE,

@@ -217,7 +217,7 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    fun assessRecoveryGovernance(envelope: TakeoverRequestEnvelope): RecoveryGovernanceAssessment {
+    internal fun assessRecoveryGovernance(envelope: TakeoverRequestEnvelope): RecoveryGovernanceAssessment {
         val isRecoveryDispatch = envelope.is_resumable == true ||
             !envelope.interruption_reason.isNullOrBlank() ||
             envelope.recovery_context.isNotEmpty()
