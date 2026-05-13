@@ -10,6 +10,7 @@ import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
@@ -608,7 +609,17 @@ class GalaxyWebSocketClient(
             "parallel_execution_eligibility" to false,
             "local_intelligence_status" to "disabled",
             "local_inference_ready" to false,
-            "local_inference_available" to false
+            "local_inference_available" to false,
+            "authoritative_participation_state" to
+                AndroidAuthoritativeParticipationTruth.State.LOCAL_ONLY.wireValue,
+            "authoritative_participation_transition_sequence" to 0L,
+            "authoritative_participation_transition_trigger" to
+                AndroidAuthoritativeParticipationTruth.TransitionTrigger.INITIALIZED.wireValue,
+            "authoritative_participation_transition_history" to emptyList<String>(),
+            "authoritative_participation_connected" to false,
+            "authoritative_participation_attached" to false,
+            "authoritative_participation_dispatch_eligible" to false,
+            "authoritative_participation_distributed_participant" to false
         )
         merged.putAll(metadata)
 
@@ -682,6 +693,26 @@ class GalaxyWebSocketClient(
         merged["local_intelligence_status"] = status
         merged["local_inference_ready"] = localInferenceReady
         merged["local_inference_available"] = localInferenceAvailable
+        val hasAuthoritativeState =
+            (merged["authoritative_participation_state"] as? String)?.isNotBlank() == true
+        if (!hasAuthoritativeState) {
+            val fallbackState = AndroidAuthoritativeParticipationTruth.derive(
+                AndroidAuthoritativeParticipationTruth.DerivationInput(
+                    crossDeviceEnabled = crossDeviceEnabledValue,
+                    wsConnected = isConnected,
+                    registrationInFlight = false,
+                    capabilityVisible = modeSemantics.acceptsCrossDeviceTasks,
+                    readinessSatisfied = modeSemantics.acceptsCrossDeviceTasks,
+                    runtimeSessionAvailable = false,
+                    fullyAttached = false,
+                    dispatchEligible = false,
+                    continuityIntact = true,
+                    operatorSuspendedOrIsolated = false,
+                    distributedRuntimeActivity = false
+                )
+            )
+            merged["authoritative_participation_state"] = fallbackState.wireValue
+        }
         merged[AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION_KEY] =
             AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION
 
