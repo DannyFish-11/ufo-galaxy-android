@@ -2014,6 +2014,39 @@ object StabilizationBaseline {
                 "Test: Pr2AndroidNlDrivenExecutionSpineTest.",
             introducedPr = 88
         )
+    ) + listOf(
+
+        // ── PR-5: Runtime observability and problem-solving audit contract ─────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-runtime-observability-audit-contract",
+            displayName = "AndroidRuntimeObservabilityAuditContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-5 Android-side runtime observability and problem-solving audit contract. " +
+                "Introduces ExecutionPathTag (6 values: LOCAL_PATH/CROSS_DEVICE_PATH/DELEGATED_PATH/" +
+                "TAKEOVER_PATH/DEGRADED_PATH/UNKNOWN) for canonical tagging of execution paths; " +
+                "AuditContributionClass (9 values: PARTICIPATION_ATTESTATION/EXECUTION_CONTRIBUTION/" +
+                "EXECUTION_OUTCOME/INTERRUPTION_RECORD/RECOVERY_CONTRIBUTION/TAKEOVER_CONTRIBUTION/" +
+                "DELEGATED_CONTRIBUTION/OPERATOR_ACTION_OUTCOME/INFORMATIONAL) for end-to-end " +
+                "problem-solving audit; ObservabilityReliabilityClass (5 values: HIGH_FIDELITY/" +
+                "REDUCED_FIDELITY/STALE/INTERRUPTED/UNKNOWN) for V2-side SLO computation. " +
+                "Classifiers classifyExecutionPath(), classifyAuditContribution(), and " +
+                "classifyObservabilityReliability() derive all classes from existing runtime signals " +
+                "without new probes. DeviceStateSnapshotPayload gains observability_audit_schema_version, " +
+                "execution_path_tag, audit_contribution_class, observability_reliability_class fields. " +
+                "DeviceExecutionEventPayload gains the same four fields. GalaxyConnectionService populates " +
+                "all four fields in sendDeviceStateSnapshot() and in deviceExecutionEventSink enrichment. " +
+                "V2 integration points: core/android_device_state_store.py (execution_path_tag), " +
+                "core/problem_solving_audit_chain.py (audit_contribution_class), " +
+                "metrics/android_slo_metrics.py (observability_reliability_class), " +
+                "board/reliability_surface.py (audit_contribution_class). " +
+                "OBSERVABILITY_AUDIT_INVARIANTS declares 10 invariants covering path-tag, audit-class, " +
+                "and reliability-class emission requirements. " +
+                "Test: Pr89AndroidRuntimeObservabilityAuditTest.",
+            introducedPr = 89
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
