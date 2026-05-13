@@ -275,7 +275,26 @@ class DelegatedTakeoverExecutor(
             task_id = unit.taskId,
             goal = unit.goal,
             constraints = unit.constraints,
-            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME,
+            execution_runtime_kind = unit.executionRuntimeKind,
+            dispatch_intent = unit.dispatchIntent,
+            dispatch_origin = unit.dispatchOrigin,
+            orchestration_stage = unit.orchestrationStage,
+            execution_context = unit.executionContext,
+            executor_target_type = unit.executorTargetType,
+            continuity_token = unit.continuityToken,
+            recovery_context = unit.recoveryContext,
+            is_resumable = unit.isResumable,
+            interruption_reason = unit.interruptionReason,
+            dispatch_trace_id = unit.dispatchTraceId,
+            lifecycle_event_id = unit.lifecycleEventId,
+            dispatch_plan_id = unit.dispatchPlanId,
+            source_dispatch_strategy = unit.sourceDispatchStrategy,
+            policy_routing_outcome = unit.policyRoutingOutcome,
+            policy_failure_reason = unit.policyFailureReason,
+            readiness_degradation_hint = unit.readinessDegradationHint,
+            delegated_flow_id = unit.delegatedFlowId.ifBlank { null },
+            flow_lineage_id = unit.flowLineageId.ifBlank { null }
         )
 
         // ── 5. Advance to ACTIVE — pipeline is about to begin ─────────────────

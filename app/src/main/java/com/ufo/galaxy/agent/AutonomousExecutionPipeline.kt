@@ -231,6 +231,10 @@ class AutonomousExecutionPipeline(
         return goalExecutor.executeGoal(payload)
             .copy(
                 device_role = deviceRole,
+                execution_runtime_kind = payload.execution_runtime_kind,
+                dispatch_intent = payload.dispatch_intent,
+                dispatch_origin = payload.dispatch_origin,
+                orchestration_stage = payload.orchestration_stage,
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
                 recovery_context = payload.recovery_context.takeIf { it.isNotEmpty() },
@@ -360,6 +364,10 @@ class AutonomousExecutionPipeline(
         return collaborationAgent.handleParallelSubtask(payload)
             .copy(
                 device_role = deviceRole,
+                execution_runtime_kind = payload.execution_runtime_kind,
+                dispatch_intent = payload.dispatch_intent,
+                dispatch_origin = payload.dispatch_origin,
+                orchestration_stage = payload.orchestration_stage,
                 executor_target_type = payload.executor_target_type,
                 continuity_token = payload.continuity_token,
                 recovery_context = payload.recovery_context.takeIf { it.isNotEmpty() },
@@ -482,6 +490,10 @@ class AutonomousExecutionPipeline(
         latency_ms = 0L,
         device_id = deviceId,
         device_role = deviceRole,
+        execution_runtime_kind = payload.execution_runtime_kind,
+        dispatch_intent = payload.dispatch_intent,
+        dispatch_origin = payload.dispatch_origin,
+        orchestration_stage = payload.orchestration_stage,
         executor_target_type = payload.executor_target_type,
         // PR-F: echo continuity/recovery fields in disabled results so V2 can correlate
         continuity_token = payload.continuity_token,
@@ -519,6 +531,10 @@ class AutonomousExecutionPipeline(
         latency_ms = 0L,
         device_id = deviceId,
         device_role = deviceRole,
+        execution_runtime_kind = payload.execution_runtime_kind,
+        dispatch_intent = payload.dispatch_intent,
+        dispatch_origin = payload.dispatch_origin,
+        orchestration_stage = payload.orchestration_stage,
         executor_target_type = payload.executor_target_type,
         // PR-F: echo continuity/recovery fields in hold results so V2 can correlate
         continuity_token = payload.continuity_token,

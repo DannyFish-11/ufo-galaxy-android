@@ -107,14 +107,18 @@ class DelegatedTakeoverExecutorTest {
         traceId: String = "trace-12",
         goal: String = "open settings",
         sessionId: String = "sess-pr12",
-        constraints: List<String> = emptyList()
+        constraints: List<String> = emptyList(),
+        executionRuntimeKind: String = DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_DELEGATED,
+        dispatchIntent: String? = null
     ) = DelegatedRuntimeUnit(
         unitId = unitId,
         taskId = taskId,
         traceId = traceId,
         goal = goal,
         attachedSessionId = sessionId,
-        constraints = constraints
+        constraints = constraints,
+        executionRuntimeKind = executionRuntimeKind,
+        dispatchIntent = dispatchIntent
     )
 
     private fun pendingRecord(unit: DelegatedRuntimeUnit = makeUnit()) =
@@ -490,6 +494,30 @@ class DelegatedTakeoverExecutorTest {
         }
         buildExecutor(pipeline = capturingPipeline).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
         assertEquals(SourceRuntimePosture.JOIN_RUNTIME, capturedPayload?.source_runtime_posture)
+    }
+
+    @Test
+    fun `GoalExecutionPayload execution_runtime_kind echoes delegated unit semantics`() {
+        var capturedPayload: GoalExecutionPayload? = null
+        val capturingPipeline = GoalExecutionPipeline { payload ->
+            capturedPayload = payload
+            GoalResultPayload(task_id = payload.task_id, status = "success")
+        }
+        val unit = makeUnit(executionRuntimeKind = DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK)
+        buildExecutor(pipeline = capturingPipeline).execute(unit, pendingRecord(unit), nowMs = 1_000L)
+        assertEquals(DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK, capturedPayload?.execution_runtime_kind)
+    }
+
+    @Test
+    fun `GoalExecutionPayload dispatch_intent echoes delegated unit dispatch intent`() {
+        var capturedPayload: GoalExecutionPayload? = null
+        val capturingPipeline = GoalExecutionPipeline { payload ->
+            capturedPayload = payload
+            GoalResultPayload(task_id = payload.task_id, status = "success")
+        }
+        val unit = makeUnit(dispatchIntent = "assistive_followup")
+        buildExecutor(pipeline = capturingPipeline).execute(unit, pendingRecord(unit), nowMs = 1_000L)
+        assertEquals("assistive_followup", capturedPayload?.dispatch_intent)
     }
 
     // ── Identity continuity ───────────────────────────────────────────────────

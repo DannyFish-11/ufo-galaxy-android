@@ -60,7 +60,10 @@ class DelegatedRuntimeUnitTest {
         sourceDeviceId: String? = null,
         posture: String? = null,
         checkpoint: String? = null,
-        constraints: List<String> = emptyList()
+        constraints: List<String> = emptyList(),
+        dispatchIntent: String? = null,
+        sourceDispatchStrategy: String? = null,
+        isResumable: Boolean? = null
     ) = TakeoverRequestEnvelope(
         takeover_id = takeoverId,
         task_id = taskId,
@@ -69,7 +72,10 @@ class DelegatedRuntimeUnitTest {
         source_device_id = sourceDeviceId,
         source_runtime_posture = posture,
         checkpoint = checkpoint,
-        constraints = constraints
+        constraints = constraints,
+        dispatch_intent = dispatchIntent,
+        source_dispatch_strategy = sourceDispatchStrategy,
+        is_resumable = isResumable
     )
 
     private fun fromEnvelope(
@@ -190,6 +196,39 @@ class DelegatedRuntimeUnitTest {
     fun `receivedAtMs uses the supplied timestamp`() {
         val unit = fromEnvelope(receivedAtMs = 12345L)
         assertEquals("receivedAtMs must use the caller-supplied timestamp", 12345L, unit.receivedAtMs)
+    }
+
+    @Test
+    fun `dispatch intent metadata is mapped from envelope`() {
+        val unit = fromEnvelope(minimalEnvelope(dispatchIntent = "takeover_interactive"))
+        assertEquals("takeover_interactive", unit.dispatchIntent)
+    }
+
+    @Test
+    fun `runtime kind resolves to degraded fallback when source strategy is fallback local`() {
+        val unit = fromEnvelope(minimalEnvelope(sourceDispatchStrategy = "fallback_local"))
+        assertEquals(
+            DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK,
+            unit.executionRuntimeKind
+        )
+    }
+
+    @Test
+    fun `runtime kind resolves to local assistive when dispatch intent contains assist`() {
+        val unit = fromEnvelope(minimalEnvelope(dispatchIntent = "local_assistive_execution"))
+        assertEquals(
+            DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE,
+            unit.executionRuntimeKind
+        )
+    }
+
+    @Test
+    fun `runtime kind resolves to takeover interactive when resumable is true`() {
+        val unit = fromEnvelope(minimalEnvelope(isResumable = true))
+        assertEquals(
+            DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_TAKEOVER_INTERACTIVE,
+            unit.executionRuntimeKind
+        )
     }
 
     // ── Posture derived helpers ───────────────────────────────────────────────
