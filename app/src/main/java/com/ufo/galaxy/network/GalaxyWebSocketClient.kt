@@ -1616,9 +1616,18 @@ class GalaxyWebSocketClient(
                 }
                 "operator_action_request" -> {
                     val payloadObj = json.getAsJsonObject("payload")
-                    val actionId = payloadObj?.get("action_id")?.asString
-                        ?: json.get("message_id")?.asString
-                        ?: ""
+                    val payloadActionId = payloadObj?.get("action_id")?.asString
+                        ?.takeIf { it.isNotBlank() }
+                    val messageActionId = json.get("message_id")?.asString
+                        ?.takeIf { it.isNotBlank() }
+                    val actionId = payloadActionId
+                        ?: messageActionId
+                        ?: java.util.UUID.randomUUID().toString().also {
+                            Log.w(
+                                TAG,
+                                "[WS:DOWNLINK] operator_action_request missing action_id and message_id; generated fallback action_id=$it"
+                            )
+                        }
                     val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
                         ?: payloadObj?.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
                     val payloadJson = payloadObj?.toString() ?: "{}"

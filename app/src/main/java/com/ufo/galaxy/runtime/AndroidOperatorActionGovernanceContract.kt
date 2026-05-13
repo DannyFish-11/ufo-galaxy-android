@@ -21,9 +21,9 @@ object AndroidOperatorActionGovernanceContract {
         REOPEN_CLOSURE("reopen_closure");
 
         companion object {
-            private val INDEX = entries.associateBy { it.wireValue }
+            private val wireValueIndex = entries.associateBy { it.wireValue.lowercase() }
             fun fromWire(value: String?): ActionKind? =
-                value?.trim()?.lowercase()?.let(INDEX::get)
+                value?.trim()?.lowercase()?.let(wireValueIndex::get)
         }
     }
 

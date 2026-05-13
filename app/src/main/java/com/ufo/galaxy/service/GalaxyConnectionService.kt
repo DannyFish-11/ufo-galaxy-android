@@ -104,6 +104,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 
@@ -250,6 +252,7 @@ class GalaxyConnectionService : Service() {
     @Volatile
     private var activeTakeoverId: String? = null
     private val activeTakeoverLock = Any()
+    private val operatorRecoveryActionMutex = Mutex()
     private val delegatedSignalAttemptLock = Any()
     private val delegatedSignalAttemptCounts: LinkedHashMap<String, Int> =
         object : LinkedHashMap<String, Int>(DELEGATED_SIGNAL_ATTEMPT_INITIAL_CAPACITY, 0.75f, true) {
@@ -4725,15 +4728,25 @@ class GalaxyConnectionService : Service() {
         val details: Map<String, String> = emptyMap()
     )
 
+    private fun resolveOperatorActionId(
+        requestActionId: String?,
+        inboundActionId: String?
+    ): String {
+        return requestActionId
+            ?.takeIf { it.isNotBlank() }
+            ?: inboundActionId?.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.randomUUID().toString()
+    }
+
     private suspend fun handleOperatorActionRequest(
-        messageId: String?,
+        inboundActionId: String?,
         payloadJson: String,
         traceId: String?
     ) {
         val request = try {
             gson.fromJson(payloadJson, OperatorActionRequestPayload::class.java)
         } catch (e: Exception) {
-            val actionId = messageId?.ifBlank { null } ?: java.util.UUID.randomUUID().toString()
+            val actionId = resolveOperatorActionId(null, inboundActionId)
             sendOperatorActionResult(
                 OperatorActionResultPayload(
                     action_id = actionId,
@@ -4741,14 +4754,12 @@ class GalaxyConnectionService : Service() {
                     phase = OperatorActionResultPayload.PHASE_DECISION,
                     decision_status = OperatorActionResultPayload.DECISION_REJECTED,
                     execution_status = OperatorActionResultPayload.EXECUTION_REJECTED,
-                    error = "operator_action_parse_error:${e.message}"
+                    error = "operator_action_parse_error:failed_to_parse_operator_action_request_payload"
                 )
             )
             return
         }
-        val actionId = request.action_id.ifBlank {
-            messageId?.ifBlank { null } ?: java.util.UUID.randomUUID().toString()
-        }
+        val actionId = resolveOperatorActionId(request.action_id, inboundActionId)
         val resolvedTraceId = resolveExecutionTraceId(traceId ?: request.trace_id)
         val actionKind = AndroidOperatorActionGovernanceContract.ActionKind.fromWire(request.action_kind)
         if (actionKind == null) {
@@ -4852,8 +4863,13 @@ class GalaxyConnectionService : Service() {
                 )
             }
             AndroidOperatorActionGovernanceContract.ActionKind.FORCE_REATTACH -> {
+                if (!UFOGalaxyApplication.appSettings.crossDeviceEnabled) {
+                    return OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                        error = "operator_action_failed:cross_device_disabled"
+                    )
+                }
                 runtimeController.invalidateSession()
-                UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
                 runtimeController.connectIfEnabled()
                 val attached = runtimeController.attachedSession.value?.isAttached == true
                 OperatorActionExecutionOutcome(
@@ -4887,27 +4903,29 @@ class GalaxyConnectionService : Service() {
             }
             AndroidOperatorActionGovernanceContract.ActionKind.TRIGGER_RECOVERY,
             AndroidOperatorActionGovernanceContract.ActionKind.REOPEN_REBIND_SESSION -> {
-                val wasEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
-                UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
-                val recovered = runtimeController.reconnect()
-                if (recovered) {
-                    OperatorActionExecutionOutcome(
-                        executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED
-                    )
-                } else {
-                    if (wasEnabled) {
-                        UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
-                        runtimeController.connectIfEnabled()
+                operatorRecoveryActionMutex.withLock {
+                    val wasEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
+                    UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
+                    val recovered = runtimeController.reconnect()
+                    if (recovered) {
+                        OperatorActionExecutionOutcome(
+                            executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED
+                        )
+                    } else {
+                        UFOGalaxyApplication.appSettings.crossDeviceEnabled = wasEnabled
+                        if (wasEnabled) {
+                            runtimeController.connectIfEnabled()
+                        }
+                        OperatorActionExecutionOutcome(
+                            executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                            rollbackStatus = if (wasEnabled) {
+                                OperatorActionResultPayload.ROLLBACK_COMPENSATING_ACTION_REQUESTED
+                            } else {
+                                OperatorActionResultPayload.ROLLBACK_COMPLETED
+                            },
+                            error = "operator_action_failed:reconnect_unsuccessful"
+                        )
                     }
-                    OperatorActionExecutionOutcome(
-                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
-                        rollbackStatus = if (wasEnabled) {
-                            OperatorActionResultPayload.ROLLBACK_COMPENSATING_ACTION_REQUESTED
-                        } else {
-                            OperatorActionResultPayload.ROLLBACK_NOT_REQUIRED
-                        },
-                        error = "operator_action_failed:reconnect_unsuccessful"
-                    )
                 }
             }
             AndroidOperatorActionGovernanceContract.ActionKind.SUSPEND_ISOLATE_DEVICE -> {
@@ -4983,7 +5001,7 @@ class GalaxyConnectionService : Service() {
             trace_id = result.trace_id,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(
-                taskId = result.task_id?.ifBlank { result.action_id } ?: result.action_id,
+                taskId = result.task_id?.takeIf { it.isNotBlank() } ?: result.action_id,
                 type = MsgType.OPERATOR_ACTION_RESULT,
                 traceId = result.trace_id?.ifBlank { null } ?: result.action_id
             )
