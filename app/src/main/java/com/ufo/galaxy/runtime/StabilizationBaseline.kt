@@ -1982,6 +1982,7 @@ object StabilizationBaseline {
     ) + listOf(
 
         // ── PR-2: NL-driven execution spine contract ───────────────────────────
+        // NOTE: introducedPr=88 is the GitHub PR number for the PR-2 convergence item.
 
         BaselineSurfaceEntry(
             surfaceId = "android-nl-driven-execution-spine-contract",

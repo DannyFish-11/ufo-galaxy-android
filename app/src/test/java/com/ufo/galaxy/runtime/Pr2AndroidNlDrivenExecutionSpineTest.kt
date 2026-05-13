@@ -218,6 +218,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val c = AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_COMPLETED_PROBLEM_SOLVED
         assertEquals("task_completed_problem_solved", c.wireValue)
         assertTrue(c.isTaskComplete)
+        assertEquals("android_signals_problem_resolved", c.v2ClosureSignal)
     }
 
     @Test
@@ -225,6 +226,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val c = AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_COMPLETED_PROBLEM_PARTIAL
         assertEquals("task_completed_problem_partial", c.wireValue)
         assertTrue(c.isTaskComplete)
+        assertEquals("android_signals_partial_progress", c.v2ClosureSignal)
     }
 
     @Test
@@ -232,6 +234,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val c = AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_COMPLETED_PROBLEM_OPEN
         assertEquals("task_completed_problem_open", c.wireValue)
         assertTrue(c.isTaskComplete)
+        assertEquals("android_signals_task_done_problem_continues", c.v2ClosureSignal)
     }
 
     @Test
@@ -239,6 +242,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val c = AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_INCOMPLETE_PROBLEM_OPEN
         assertEquals("task_incomplete_problem_open", c.wireValue)
         assertFalse(c.isTaskComplete)
+        assertEquals("android_signals_execution_incomplete", c.v2ClosureSignal)
     }
 
     @Test
@@ -246,6 +250,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val c = AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.EXECUTION_DELEGATED_FURTHER
         assertEquals("execution_delegated_further", c.wireValue)
         assertFalse(c.isTaskComplete)
+        assertEquals("android_signals_requires_further_delegation", c.v2ClosureSignal)
     }
 
     @Test
