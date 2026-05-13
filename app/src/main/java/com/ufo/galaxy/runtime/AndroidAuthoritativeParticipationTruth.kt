@@ -70,7 +70,7 @@ object AndroidAuthoritativeParticipationTruth {
         val state: State,
         val connected: Boolean,
         val attached: Boolean,
-        val dispatchEligible: Boolean,
+        val canDispatch: Boolean,
         val distributedParticipant: Boolean,
         val transitionSequence: Long,
         val lastTransitionTrigger: String,
@@ -98,38 +98,90 @@ object AndroidAuthoritativeParticipationTruth {
             val trigger = inferTrigger(previousInput, input)
             val previousState = currentState
 
-            if (previousState == null || previousState != nextState) {
+            if (previousState == null) {
+                currentState = nextState
+                lastTrigger = TransitionTrigger.INITIALIZED
+            } else if (previousState != nextState) {
                 transitionSequence += 1L
-                if (previousState != null) {
-                    transitionHistory.addLast(
-                        TransitionRecord(
-                            sequence = transitionSequence,
-                            fromState = previousState.wireValue,
-                            toState = nextState.wireValue,
-                            trigger = trigger.wireValue,
-                            occurredAtMs = timestampMs
-                        )
+                transitionHistory.addLast(
+                    TransitionRecord(
+                        sequence = transitionSequence,
+                        fromState = previousState.wireValue,
+                        toState = nextState.wireValue,
+                        trigger = trigger.wireValue,
+                        occurredAtMs = timestampMs
                     )
-                    while (transitionHistory.size > historyLimit) {
-                        transitionHistory.removeFirst()
-                    }
+                )
+                while (transitionHistory.size > historyLimit) {
+                    transitionHistory.removeFirst()
                 }
                 currentState = nextState
+                lastTrigger = trigger
             }
 
             previousInput = input
-            lastTrigger = trigger
 
             Snapshot(
                 state = nextState,
                 connected = input.wsConnected,
                 attached = input.fullyAttached,
-                dispatchEligible = input.readinessSatisfied && input.dispatchEligible,
+                canDispatch = input.readinessSatisfied && input.dispatchEligible,
                 distributedParticipant = nextState == State.DISTRIBUTED_PARTICIPANT,
                 transitionSequence = transitionSequence,
                 lastTransitionTrigger = lastTrigger.wireValue,
                 transitionHistory = transitionHistory.toList()
             )
+        }
+
+        private fun inferTrigger(
+            previous: DerivationInput?,
+            current: DerivationInput
+        ): TransitionTrigger {
+            if (previous == null) return TransitionTrigger.INITIALIZED
+            return when {
+                !previous.crossDeviceEnabled && current.crossDeviceEnabled ->
+                    TransitionTrigger.CROSS_DEVICE_ENABLED
+                previous.crossDeviceEnabled && !current.crossDeviceEnabled ->
+                    TransitionTrigger.CROSS_DEVICE_DISABLED
+                !previous.wsConnected && current.wsConnected ->
+                    TransitionTrigger.WS_CONNECTED
+                previous.wsConnected && !current.wsConnected ->
+                    TransitionTrigger.WS_DISCONNECTED
+                !previous.registrationInFlight && current.registrationInFlight ->
+                    TransitionTrigger.REGISTRATION_STARTED
+                previous.registrationInFlight && !current.registrationInFlight ->
+                    TransitionTrigger.REGISTRATION_RESOLVED
+                !previous.capabilityVisible && current.capabilityVisible ->
+                    TransitionTrigger.CAPABILITY_VISIBLE
+                previous.capabilityVisible && !current.capabilityVisible ->
+                    TransitionTrigger.CAPABILITY_LOST
+                !previous.runtimeSessionAvailable && current.runtimeSessionAvailable ->
+                    TransitionTrigger.SESSION_ESTABLISHED
+                previous.runtimeSessionAvailable && !current.runtimeSessionAvailable ->
+                    TransitionTrigger.SESSION_BROKEN
+                !previous.readinessSatisfied && current.readinessSatisfied ->
+                    TransitionTrigger.READINESS_SATISFIED
+                previous.readinessSatisfied && !current.readinessSatisfied ->
+                    TransitionTrigger.READINESS_LOST
+                previous.continuityIntact && !current.continuityIntact ->
+                    TransitionTrigger.CONTINUITY_BROKEN
+                !previous.continuityIntact && current.continuityIntact ->
+                    TransitionTrigger.CONTINUITY_RESTORED
+                !previous.operatorSuspendedOrIsolated && current.operatorSuspendedOrIsolated ->
+                    TransitionTrigger.OPERATOR_SUSPENDED
+                previous.operatorSuspendedOrIsolated && !current.operatorSuspendedOrIsolated ->
+                    TransitionTrigger.OPERATOR_RESUMED
+                !previous.distributedRuntimeActivity && current.distributedRuntimeActivity ->
+                    TransitionTrigger.DISTRIBUTED_ACTIVITY_STARTED
+                previous.distributedRuntimeActivity && !current.distributedRuntimeActivity ->
+                    TransitionTrigger.DISTRIBUTED_ACTIVITY_STOPPED
+                else ->
+                    TransitionTrigger.STATE_REEVALUATED
+            }
+        }
+
+        private companion object {
+            const val DEFAULT_HISTORY_LIMIT = 24
         }
     }
 
@@ -144,53 +196,4 @@ object AndroidAuthoritativeParticipationTruth {
         if (input.distributedRuntimeActivity) return State.DISTRIBUTED_PARTICIPANT
         return State.DISPATCH_ELIGIBLE
     }
-
-    private fun inferTrigger(
-        previous: DerivationInput?,
-        current: DerivationInput
-    ): TransitionTrigger {
-        if (previous == null) return TransitionTrigger.INITIALIZED
-        return when {
-            !previous.crossDeviceEnabled && current.crossDeviceEnabled ->
-                TransitionTrigger.CROSS_DEVICE_ENABLED
-            previous.crossDeviceEnabled && !current.crossDeviceEnabled ->
-                TransitionTrigger.CROSS_DEVICE_DISABLED
-            !previous.wsConnected && current.wsConnected ->
-                TransitionTrigger.WS_CONNECTED
-            previous.wsConnected && !current.wsConnected ->
-                TransitionTrigger.WS_DISCONNECTED
-            !previous.registrationInFlight && current.registrationInFlight ->
-                TransitionTrigger.REGISTRATION_STARTED
-            previous.registrationInFlight && !current.registrationInFlight ->
-                TransitionTrigger.REGISTRATION_RESOLVED
-            !previous.capabilityVisible && current.capabilityVisible ->
-                TransitionTrigger.CAPABILITY_VISIBLE
-            previous.capabilityVisible && !current.capabilityVisible ->
-                TransitionTrigger.CAPABILITY_LOST
-            !previous.runtimeSessionAvailable && current.runtimeSessionAvailable ->
-                TransitionTrigger.SESSION_ESTABLISHED
-            previous.runtimeSessionAvailable && !current.runtimeSessionAvailable ->
-                TransitionTrigger.SESSION_BROKEN
-            !previous.readinessSatisfied && current.readinessSatisfied ->
-                TransitionTrigger.READINESS_SATISFIED
-            previous.readinessSatisfied && !current.readinessSatisfied ->
-                TransitionTrigger.READINESS_LOST
-            previous.continuityIntact && !current.continuityIntact ->
-                TransitionTrigger.CONTINUITY_BROKEN
-            !previous.continuityIntact && current.continuityIntact ->
-                TransitionTrigger.CONTINUITY_RESTORED
-            !previous.operatorSuspendedOrIsolated && current.operatorSuspendedOrIsolated ->
-                TransitionTrigger.OPERATOR_SUSPENDED
-            previous.operatorSuspendedOrIsolated && !current.operatorSuspendedOrIsolated ->
-                TransitionTrigger.OPERATOR_RESUMED
-            !previous.distributedRuntimeActivity && current.distributedRuntimeActivity ->
-                TransitionTrigger.DISTRIBUTED_ACTIVITY_STARTED
-            previous.distributedRuntimeActivity && !current.distributedRuntimeActivity ->
-                TransitionTrigger.DISTRIBUTED_ACTIVITY_STOPPED
-            else ->
-                TransitionTrigger.STATE_REEVALUATED
-        }
-    }
-
-    private const val DEFAULT_HISTORY_LIMIT = 24
 }

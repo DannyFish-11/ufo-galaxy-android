@@ -73,6 +73,7 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
         tracker.evaluate(baseInput(crossDeviceEnabled = false), timestampMs = 10L)
         val snapshot = tracker.evaluate(
             baseInput(
+                crossDeviceEnabled = true,
                 wsConnected = true,
                 capabilityVisible = true,
                 runtimeSessionAvailable = true,
@@ -86,7 +87,7 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
 
         assertEquals(AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT, snapshot.state)
         assertEquals("cross_device_enabled", snapshot.lastTransitionTrigger)
-        assertEquals(2L, snapshot.transitionSequence)
+        assertEquals(1L, snapshot.transitionSequence)
         assertTrue(snapshot.transitionHistory.isNotEmpty())
         assertTrue(snapshot.transitionHistoryWire.first().contains("local_only->distributed_participant"))
     }

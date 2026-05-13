@@ -4881,7 +4881,7 @@ class GalaxyConnectionService : Service() {
                 "authoritative_participation_connected" to participationSnapshot.connected,
                 "authoritative_participation_attached" to participationSnapshot.attached,
                 "authoritative_participation_dispatch_eligible" to
-                    participationSnapshot.dispatchEligible,
+                    participationSnapshot.canDispatch,
                 "authoritative_participation_distributed_participant" to
                     participationSnapshot.distributedParticipant,
                 // Keep mode-gate projections explicit in capability metadata.

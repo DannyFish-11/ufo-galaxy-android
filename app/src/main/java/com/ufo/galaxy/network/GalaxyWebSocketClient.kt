@@ -696,22 +696,17 @@ class GalaxyWebSocketClient(
         val hasAuthoritativeState =
             (merged["authoritative_participation_state"] as? String)?.isNotBlank() == true
         if (!hasAuthoritativeState) {
-            val fallbackState = AndroidAuthoritativeParticipationTruth.derive(
-                AndroidAuthoritativeParticipationTruth.DerivationInput(
-                    crossDeviceEnabled = crossDeviceEnabledValue,
-                    wsConnected = isConnected,
-                    registrationInFlight = false,
-                    capabilityVisible = modeSemantics.acceptsCrossDeviceTasks,
-                    readinessSatisfied = modeSemantics.acceptsCrossDeviceTasks,
-                    runtimeSessionAvailable = false,
-                    fullyAttached = false,
-                    dispatchEligible = false,
-                    continuityIntact = true,
-                    operatorSuspendedOrIsolated = false,
-                    distributedRuntimeActivity = false
-                )
-            )
-            merged["authoritative_participation_state"] = fallbackState.wireValue
+            // Capability metadata fallback: this path only prevents empty wire fields during
+            // early startup. RuntimeController remains the sole source of authoritative
+            // transition-tracked participation truth used for snapshots/events/reconciliation.
+            merged["authoritative_participation_state"] = when {
+                !crossDeviceEnabledValue ->
+                    AndroidAuthoritativeParticipationTruth.State.LOCAL_ONLY.wireValue
+                modeSemantics.acceptsCrossDeviceTasks ->
+                    AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_CAPABLE.wireValue
+                else ->
+                    AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_ENABLED.wireValue
+            }
         }
         merged[AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION_KEY] =
             AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION

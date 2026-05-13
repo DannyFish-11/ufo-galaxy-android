@@ -2611,11 +2611,8 @@ class RuntimeController(
     fun evaluateAuthoritativeParticipationSnapshot(
         readinessSatisfied: Boolean,
         distributedRuntimeActivity: Boolean,
-        capabilityVisible: Boolean = hostDescriptor?.participationState
-            ?.let { it != RuntimeHostDescriptor.HostParticipationState.INACTIVE }
-            ?: false,
-        operatorSuspendedOrIsolated: Boolean = hostDescriptor?.participationState ==
-            RuntimeHostDescriptor.HostParticipationState.INACTIVE
+        capabilityVisible: Boolean = defaultCapabilityVisible(),
+        operatorSuspendedOrIsolated: Boolean = defaultOperatorSuspendedOrIsolated()
     ): AndroidAuthoritativeParticipationTruth.Snapshot {
         val runtimeState = _state.value
         val dispatchReadiness = currentDispatchReadiness()
@@ -2648,6 +2645,15 @@ class RuntimeController(
             .state
             .wireValue
     }
+
+    private fun defaultCapabilityVisible(): Boolean =
+        hostDescriptor?.participationState
+            ?.let { it != RuntimeHostDescriptor.HostParticipationState.INACTIVE }
+            ?: false
+
+    private fun defaultOperatorSuspendedOrIsolated(): Boolean =
+        hostDescriptor?.participationState ==
+            RuntimeHostDescriptor.HostParticipationState.INACTIVE
 
     /**
      * PR-37 — Checks that the current session state is consistent with the current
