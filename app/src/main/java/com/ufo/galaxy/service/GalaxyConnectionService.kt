@@ -33,6 +33,7 @@ import com.ufo.galaxy.runtime.AndroidOperatorActionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
+import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
@@ -473,7 +474,39 @@ class GalaxyConnectionService : Service() {
                     participationSnapshot.lastTransitionTrigger,
                 authoritative_participation_transition_history =
                     participationSnapshot.transitionHistoryWire,
-                execution_mode_state = modeState.executionModeState
+                execution_mode_state = modeState.executionModeState,
+                // PR-5 (Android): observability audit fields enriched at the canonical sink
+                // so every execution event carries coherent path tagging, audit class, and
+                // fidelity classification regardless of which execution entry point produced it.
+                observability_audit_schema_version = AndroidRuntimeObservabilityAuditContract.SCHEMA_VERSION,
+                execution_path_tag = AndroidRuntimeObservabilityAuditContract.classifyExecutionPath(
+                    spineParticipationKind = null,
+                    executionModeState = modeState.executionModeState,
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    isTakeoverPath = payload.phase == DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                    isDelegated = modeState.crossDeviceEligibility == true &&
+                        payload.phase != DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                    currentFallbackTier = payload.fallback_tier
+                ).wireValue,
+                audit_contribution_class = AndroidRuntimeObservabilityAuditContract.classifyAuditContribution(
+                    eventPhase = payload.phase,
+                    isTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
+                    isTakeoverEvent = payload.phase == DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                    isDelegatedEvent = modeState.crossDeviceEligibility == true &&
+                        payload.phase != DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                    isInterruptionPhase = payload.is_blocking && payload.blocking_reason.isNotBlank() ||
+                        payload.phase == DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
+                    isRecoveryPhase = payload.phase == DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
+                    isParticipationSnapshot = false,
+                    isOperatorActionEvent = false
+                ).wireValue,
+                observability_reliability_class = AndroidRuntimeObservabilityAuditContract.classifyObservabilityReliability(
+                    evidencePresenceKind = payload.evidence_presence_kind,
+                    degradedConditionClass = null,
+                    reconnectRecoveryState = UFOGalaxyApplication.runtimeController
+                        .reconnectRecoveryState.value.wireValue,
+                    localObservationBasis = AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
+                ).wireValue
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -3457,7 +3490,38 @@ class GalaxyConnectionService : Service() {
                 // coherent, wire-stable participation model that V2 can act on during recovery.
                 reconnect_participation_kind = reconnectParticipationSnapshot?.participationKind?.wireValue,
                 identity_reuse_decision = reconnectParticipationSnapshot?.identityReuseDecision?.wireValue,
-                replay_eligibility = reconnectParticipationSnapshot?.replayEligibility?.wireValue
+                replay_eligibility = reconnectParticipationSnapshot?.replayEligibility?.wireValue,
+                // PR-5 (Android): runtime observability and problem-solving audit fields.
+                // All three fields are derived from existing runtime signals via the
+                // AndroidRuntimeObservabilityAuditContract classifiers.  No new probes are
+                // required; the classifiers produce coherent, machine-readable audit metadata
+                // from signal combinations already computed above.
+                observability_audit_schema_version = AndroidRuntimeObservabilityAuditContract.SCHEMA_VERSION,
+                execution_path_tag = AndroidRuntimeObservabilityAuditContract.classifyExecutionPath(
+                    spineParticipationKind = null,
+                    executionModeState = modeState.executionModeState,
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    isTakeoverPath = false,
+                    isDelegated = false,
+                    currentFallbackTier = currentFallbackTier
+                ).wireValue,
+                audit_contribution_class = AndroidRuntimeObservabilityAuditContract.classifyAuditContribution(
+                    eventPhase = null,
+                    isTerminalPhase = false,
+                    isTakeoverEvent = false,
+                    isDelegatedEvent = false,
+                    isInterruptionPhase = false,
+                    isRecoveryPhase = reconnectRecoveryState == ReconnectRecoveryState.RECOVERING.wireValue ||
+                        reconnectRecoveryState == ReconnectRecoveryState.RECOVERED.wireValue,
+                    isParticipationSnapshot = true,
+                    isOperatorActionEvent = false
+                ).wireValue,
+                observability_reliability_class = AndroidRuntimeObservabilityAuditContract.classifyObservabilityReliability(
+                    evidencePresenceKind = evidencePresenceKind.wireValue,
+                    degradedConditionClass = degradedConditionClass.wireValue,
+                    reconnectRecoveryState = reconnectRecoveryState,
+                    localObservationBasis = AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
+                ).wireValue
             )
 
             val envelope = AipMessage(

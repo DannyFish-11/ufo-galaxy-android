@@ -2434,7 +2434,38 @@ data class DeviceStateSnapshotPayload(
      //   before treating the session as fully recovered.  Null only as defensive default.
      val reconnect_participation_kind: String? = null,
      val identity_reuse_decision: String? = null,
-     val replay_eligibility: String? = null
+     val replay_eligibility: String? = null,
+
+    // PR-5 (Android): Runtime observability and problem-solving audit fields.
+    //
+    // observability_audit_schema_version: version of the Android-side observability audit
+    //   contract fields. Populated from
+    //   com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract.SCHEMA_VERSION.
+    //
+    // execution_path_tag: canonical tag for the execution path active at snapshot time.
+    //   Values: "local_path" | "cross_device_path" | "delegated_path" |
+    //           "takeover_path" | "degraded_path" | "unknown".
+    //   V2's android_device_state_store.py and metrics/android_slo_metrics.py MUST use this
+    //   field to distinguish local-only execution from cross-device execution without
+    //   combining multiple field heuristics.
+    //
+    // audit_contribution_class: role of this snapshot in the end-to-end problem-solving
+    //   audit trail.
+    //   Values: "participation_attestation" | "execution_contribution" |
+    //           "execution_outcome" | "interruption_record" | "recovery_contribution" |
+    //           "takeover_contribution" | "delegated_contribution" |
+    //           "operator_action_outcome" | "informational".
+    //   V2's problem_solving_audit_chain.py and board/reliability_surface.py read this
+    //   field to determine which audit tier the snapshot belongs to.
+    //
+    // observability_reliability_class: fidelity of this snapshot for SLO computation.
+    //   Values: "high_fidelity" | "reduced_fidelity" | "stale" | "interrupted" | "unknown".
+    //   V2's SLO metrics pipeline MUST NOT treat reduced_fidelity/stale/interrupted
+    //   signals as confirmed execution data points without applying uncertainty adjustment.
+    val observability_audit_schema_version: String? = null,
+    val execution_path_tag: String? = null,
+    val audit_contribution_class: String? = null,
+    val observability_reliability_class: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2643,7 +2674,30 @@ data class DeviceExecutionEventPayload(
     //     - "partial": primary path unavailable; limit to confirmed fallback subsystems.
     //     - "failed_observation": runtime or stagnation failure observed; apply recovery policy.
     //   Null only as a defensive default; populated at event-emission call sites.
-    val evidence_presence_kind: String? = null
+    val evidence_presence_kind: String? = null,
+
+    // PR-5 (Android): Runtime observability and problem-solving audit fields for execution
+    // events. Same semantics as the corresponding DeviceStateSnapshotPayload fields; see
+    // AndroidRuntimeObservabilityAuditContract for full classification rules.
+    //
+    // execution_path_tag: canonical tag for the execution path taken for this event.
+    //   Values: "local_path" | "cross_device_path" | "delegated_path" |
+    //           "takeover_path" | "degraded_path" | "unknown".
+    //
+    // audit_contribution_class: role of this event in the problem-solving audit trail.
+    //   Values: "participation_attestation" | "execution_contribution" |
+    //           "execution_outcome" | "interruption_record" | "recovery_contribution" |
+    //           "takeover_contribution" | "delegated_contribution" |
+    //           "operator_action_outcome" | "informational".
+    //
+    // observability_reliability_class: fidelity of this event for SLO computation.
+    //   Values: "high_fidelity" | "reduced_fidelity" | "stale" | "interrupted" | "unknown".
+    //
+    // observability_audit_schema_version: version of the observability audit contract.
+    val observability_audit_schema_version: String? = null,
+    val execution_path_tag: String? = null,
+    val audit_contribution_class: String? = null,
+    val observability_reliability_class: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
