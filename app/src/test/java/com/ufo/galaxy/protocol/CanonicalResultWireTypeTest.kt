@@ -493,4 +493,28 @@ class CanonicalResultWireTypeTest {
         val copied = result.copy(status = "error")
         assertEquals("done", copied.result_summary)
     }
+
+    @Test
+    fun `GoalResultPayload execution spine semantic fields default to null`() {
+        val result = buildNormalResult()
+        assertNull(result.execution_semantic_class)
+        assertNull(result.problem_progress_semantic_class)
+        assertNull(result.closure_reporting_semantic_class)
+    }
+
+    @Test
+    fun `GoalResultPayload copy preserves execution spine semantic fields`() {
+        val result = GoalResultPayload(
+            task_id = "semantic-copy",
+            status = "success",
+            device_id = "dev",
+            execution_semantic_class = "delegated_execution",
+            problem_progress_semantic_class = "problem_closure_candidate",
+            closure_reporting_semantic_class = "closure_candidate_signal"
+        )
+        val copied = result.copy(result = "done")
+        assertEquals("delegated_execution", copied.execution_semantic_class)
+        assertEquals("problem_closure_candidate", copied.problem_progress_semantic_class)
+        assertEquals("closure_candidate_signal", copied.closure_reporting_semantic_class)
+    }
 }

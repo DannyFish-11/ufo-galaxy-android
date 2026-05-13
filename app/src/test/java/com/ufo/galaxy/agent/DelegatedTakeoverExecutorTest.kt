@@ -492,6 +492,38 @@ class DelegatedTakeoverExecutorTest {
         assertEquals(SourceRuntimePosture.JOIN_RUNTIME, capturedPayload?.source_runtime_posture)
     }
 
+    @Test
+    fun `GoalExecutionPayload carries delegated intent binding metadata`() {
+        var capturedPayload: GoalExecutionPayload? = null
+        val capturingPipeline = GoalExecutionPipeline { payload ->
+            capturedPayload = payload
+            GoalResultPayload(task_id = payload.task_id, status = "success")
+        }
+        val unit = makeUnit().copy(
+            executionContext = mapOf("intent" to "close_user_problem"),
+            executorTargetType = "android_device",
+            continuityToken = "continuity-22",
+            recoveryContext = mapOf("resume_from" to "checkpoint-3"),
+            isResumable = true,
+            interruptionReason = "reconnect",
+            dispatchPlanId = "dispatch-plan-3",
+            sourceDispatchStrategy = "remote_handoff",
+            delegatedFlowId = "flow-12",
+            flowLineageId = "lineage-77"
+        )
+        buildExecutor(pipeline = capturingPipeline).execute(unit, pendingRecord(unit), nowMs = 1_000L)
+        assertEquals("close_user_problem", capturedPayload?.execution_context?.get("intent"))
+        assertEquals("android_device", capturedPayload?.executor_target_type)
+        assertEquals("continuity-22", capturedPayload?.continuity_token)
+        assertEquals("checkpoint-3", capturedPayload?.recovery_context?.get("resume_from"))
+        assertEquals(true, capturedPayload?.is_resumable)
+        assertEquals("reconnect", capturedPayload?.interruption_reason)
+        assertEquals("dispatch-plan-3", capturedPayload?.dispatch_plan_id)
+        assertEquals("remote_handoff", capturedPayload?.source_dispatch_strategy)
+        assertEquals("flow-12", capturedPayload?.delegated_flow_id)
+        assertEquals("lineage-77", capturedPayload?.flow_lineage_id)
+    }
+
     // ── Identity continuity ───────────────────────────────────────────────────
 
     @Test

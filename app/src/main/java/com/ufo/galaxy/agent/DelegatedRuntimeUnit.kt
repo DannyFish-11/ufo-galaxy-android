@@ -110,6 +110,15 @@ data class DelegatedRuntimeUnit(
     val originatingFormationRole: String? = null,
     val requiredCapabilityDimensions: List<String> = emptyList(),
     val continuationToken: String? = null,
+    // ── PR-2 Android execution-spine intent binding fields ─────────────────────
+    val executionContext: Map<String, String> = emptyMap(),
+    val executorTargetType: String? = null,
+    val continuityToken: String? = null,
+    val recoveryContext: Map<String, String> = emptyMap(),
+    val isResumable: Boolean? = null,
+    val interruptionReason: String? = null,
+    val dispatchPlanId: String? = null,
+    val sourceDispatchStrategy: String? = null,
     // ── PR-bridge: Delegated flow bridge identity ─────────────────────────────
     val delegatedFlowId: String = "",
     val flowLineageId: String = ""
@@ -170,6 +179,14 @@ data class DelegatedRuntimeUnit(
             put(KEY_REQUIRED_CAPABILITY_DIMENSIONS, requiredCapabilityDimensions.joinToString(","))
         }
         continuationToken?.let { put(KEY_CONTINUATION_TOKEN, it) }
+        if (executionContext.isNotEmpty()) put(KEY_EXECUTION_CONTEXT, executionContext.toString())
+        executorTargetType?.let { put(KEY_EXECUTOR_TARGET_TYPE, it) }
+        continuityToken?.let { put(KEY_CONTINUITY_TOKEN, it) }
+        if (recoveryContext.isNotEmpty()) put(KEY_RECOVERY_CONTEXT, recoveryContext.toString())
+        isResumable?.let { put(KEY_IS_RESUMABLE, it) }
+        interruptionReason?.let { put(KEY_INTERRUPTION_REASON, it) }
+        dispatchPlanId?.let { put(KEY_DISPATCH_PLAN_ID, it) }
+        sourceDispatchStrategy?.let { put(KEY_SOURCE_DISPATCH_STRATEGY, it) }
         // ── PR-bridge: Delegated flow bridge identity ─────────────────────────
         if (delegatedFlowId.isNotEmpty()) put(KEY_DELEGATED_FLOW_ID, delegatedFlowId)
         if (flowLineageId.isNotEmpty()) put(KEY_FLOW_LINEAGE_ID, flowLineageId)
@@ -248,6 +265,15 @@ data class DelegatedRuntimeUnit(
          */
         const val KEY_CONTINUATION_TOKEN = "delegated_unit_continuation_token"
 
+        const val KEY_EXECUTION_CONTEXT = "delegated_unit_execution_context"
+        const val KEY_EXECUTOR_TARGET_TYPE = "delegated_unit_executor_target_type"
+        const val KEY_CONTINUITY_TOKEN = "delegated_unit_continuity_token"
+        const val KEY_RECOVERY_CONTEXT = "delegated_unit_recovery_context"
+        const val KEY_IS_RESUMABLE = "delegated_unit_is_resumable"
+        const val KEY_INTERRUPTION_REASON = "delegated_unit_interruption_reason"
+        const val KEY_DISPATCH_PLAN_ID = "delegated_unit_dispatch_plan_id"
+        const val KEY_SOURCE_DISPATCH_STRATEGY = "delegated_unit_source_dispatch_strategy"
+
         // ── PR-bridge: Delegated flow bridge identity key constants ───────────
 
         /**
@@ -304,6 +330,14 @@ data class DelegatedRuntimeUnit(
             originatingFormationRole = envelope.originating_formation_role,
             requiredCapabilityDimensions = envelope.required_capability_dimensions,
             continuationToken = envelope.continuation_token,
+            executionContext = envelope.context,
+            executorTargetType = envelope.executor_target_type,
+            continuityToken = envelope.continuity_token,
+            recoveryContext = envelope.recovery_context,
+            isResumable = envelope.is_resumable,
+            interruptionReason = envelope.interruption_reason,
+            dispatchPlanId = envelope.dispatch_plan_id,
+            sourceDispatchStrategy = envelope.source_dispatch_strategy,
             // ── PR-bridge: Delegated flow bridge identity ──────────────────────────
             delegatedFlowId = envelope.delegated_flow_id ?: "",
             flowLineageId = envelope.flow_lineage_id ?: ""
