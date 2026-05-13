@@ -29,6 +29,7 @@ import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
+import com.ufo.galaxy.runtime.AndroidOperatorActionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
@@ -75,6 +76,8 @@ import com.ufo.galaxy.protocol.PeerAnnouncePayload
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
+import com.ufo.galaxy.protocol.OperatorActionRequestPayload
+import com.ufo.galaxy.protocol.OperatorActionResultPayload
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
 import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
@@ -787,6 +790,17 @@ class GalaxyConnectionService : Service() {
                 )
                 serviceScope.launch {
                     handleHandoffEnvelopeV2(taskId, envelopePayloadJson, traceId)
+                }
+            }
+
+            override fun onOperatorAction(
+                actionId: String,
+                operatorActionPayloadJson: String,
+                traceId: String?
+            ) {
+                Log.i(TAG, "[OPERATOR_ACTION] received action_id=$actionId trace_id=$traceId")
+                serviceScope.launch {
+                    handleOperatorActionRequest(actionId, operatorActionPayloadJson, traceId)
                 }
             }
 
@@ -4699,6 +4713,291 @@ class GalaxyConnectionService : Service() {
                 "accepted" to response.accepted,
                 "rejection_reason" to (response.rejection_reason ?: ""),
                 "source_runtime_posture" to (response.source_runtime_posture ?: ""),
+                "sent" to sent
+            )
+        )
+    }
+
+    private data class OperatorActionExecutionOutcome(
+        val executionStatus: String,
+        val rollbackStatus: String = OperatorActionResultPayload.ROLLBACK_NOT_REQUIRED,
+        val error: String? = null,
+        val details: Map<String, String> = emptyMap()
+    )
+
+    private suspend fun handleOperatorActionRequest(
+        messageId: String?,
+        payloadJson: String,
+        traceId: String?
+    ) {
+        val request = try {
+            gson.fromJson(payloadJson, OperatorActionRequestPayload::class.java)
+        } catch (e: Exception) {
+            val actionId = messageId?.ifBlank { null } ?: java.util.UUID.randomUUID().toString()
+            sendOperatorActionResult(
+                OperatorActionResultPayload(
+                    action_id = actionId,
+                    action_kind = "unknown",
+                    phase = OperatorActionResultPayload.PHASE_DECISION,
+                    decision_status = OperatorActionResultPayload.DECISION_REJECTED,
+                    execution_status = OperatorActionResultPayload.EXECUTION_REJECTED,
+                    error = "operator_action_parse_error:${e.message}"
+                )
+            )
+            return
+        }
+        val actionId = request.action_id.ifBlank {
+            messageId?.ifBlank { null } ?: java.util.UUID.randomUUID().toString()
+        }
+        val resolvedTraceId = resolveExecutionTraceId(traceId ?: request.trace_id)
+        val actionKind = AndroidOperatorActionGovernanceContract.ActionKind.fromWire(request.action_kind)
+        if (actionKind == null) {
+            sendOperatorActionResult(
+                OperatorActionResultPayload(
+                    action_id = actionId,
+                    action_kind = request.action_kind,
+                    phase = OperatorActionResultPayload.PHASE_DECISION,
+                    decision_status = OperatorActionResultPayload.DECISION_REJECTED,
+                    execution_status = OperatorActionResultPayload.EXECUTION_REJECTED,
+                    trace_id = resolvedTraceId,
+                    error = "operator_action_rejected:unknown_action_kind"
+                )
+            )
+            return
+        }
+        val governanceContext = UFOGalaxyApplication.runtimeController
+            .buildOperatorActionEligibilityContext(currentActiveTakeoverId())
+        val targetTaskId = request.task_id ?: UFOGalaxyApplication.runtimeController.activeTaskId
+        val eligibility = AndroidOperatorActionGovernanceContract.evaluateEligibility(
+            action = actionKind,
+            context = governanceContext,
+            taskId = targetTaskId
+        )
+        val participationSnapshot = UFOGalaxyApplication.runtimeController
+            .evaluateAuthoritativeParticipationSnapshot(
+                readinessSatisfied = governanceContext.dispatchEligible,
+                distributedRuntimeActivity = governanceContext.activeTaskId != null
+            )
+        val decisionPayloadBase = OperatorActionResultPayload(
+            action_id = actionId,
+            action_kind = actionKind.wireValue,
+            phase = OperatorActionResultPayload.PHASE_DECISION,
+            decision_status = when (eligibility) {
+                AndroidOperatorActionGovernanceContract.EligibilityDecision.Accepted ->
+                    OperatorActionResultPayload.DECISION_ACCEPTED
+                is AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected ->
+                    OperatorActionResultPayload.DECISION_REJECTED
+            },
+            execution_status = when (eligibility) {
+                AndroidOperatorActionGovernanceContract.EligibilityDecision.Accepted ->
+                    OperatorActionResultPayload.EXECUTION_PENDING
+                is AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected ->
+                    OperatorActionResultPayload.EXECUTION_REJECTED
+            },
+            task_id = targetTaskId,
+            trace_id = resolvedTraceId,
+            runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+            reconnect_recovery_state = UFOGalaxyApplication.runtimeController
+                .reconnectRecoveryState.value.wireValue,
+            authoritative_participation_state = participationSnapshot.state.wireValue,
+            attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+            active_takeover_id = currentActiveTakeoverId(),
+            error = (eligibility as? AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected)?.reason
+        )
+        sendOperatorActionResult(decisionPayloadBase)
+        if (eligibility is AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected) {
+            GalaxyLogger.log(
+                TAG, mapOf(
+                    "event" to "operator_action_rejected",
+                    "action_id" to actionId,
+                    "action_kind" to actionKind.wireValue,
+                    "reason" to eligibility.reason
+                )
+            )
+            return
+        }
+
+        val executionOutcome = executeOperatorAction(actionKind, targetTaskId, actionId)
+        val refreshedParticipation = UFOGalaxyApplication.runtimeController
+            .refreshOperatorGovernanceTruthSnapshot()
+        sendOperatorActionResult(
+            decisionPayloadBase.copy(
+                phase = OperatorActionResultPayload.PHASE_EXECUTION,
+                execution_status = executionOutcome.executionStatus,
+                rollback_status = executionOutcome.rollbackStatus,
+                authoritative_participation_state = refreshedParticipation.state.wireValue,
+                runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                reconnect_recovery_state = UFOGalaxyApplication.runtimeController
+                    .reconnectRecoveryState.value.wireValue,
+                attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
+                active_takeover_id = currentActiveTakeoverId(),
+                error = executionOutcome.error,
+                details = executionOutcome.details
+            )
+        )
+    }
+
+    private suspend fun executeOperatorAction(
+        action: AndroidOperatorActionGovernanceContract.ActionKind,
+        taskId: String?,
+        actionId: String
+    ): OperatorActionExecutionOutcome {
+        val runtimeController = UFOGalaxyApplication.runtimeController
+        return when (action) {
+            AndroidOperatorActionGovernanceContract.ActionKind.REVALIDATE_PARTICIPATION -> {
+                val snapshot = runtimeController.refreshOperatorGovernanceTruthSnapshot()
+                OperatorActionExecutionOutcome(
+                    executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED,
+                    details = mapOf("participation_state" to snapshot.state.wireValue)
+                )
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.FORCE_REATTACH -> {
+                runtimeController.invalidateSession()
+                UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
+                runtimeController.connectIfEnabled()
+                val attached = runtimeController.attachedSession.value?.isAttached == true
+                OperatorActionExecutionOutcome(
+                    executionStatus = if (attached) {
+                        OperatorActionResultPayload.EXECUTION_EXECUTED
+                    } else {
+                        OperatorActionResultPayload.EXECUTION_PARTIAL
+                    },
+                    error = if (attached) null else "operator_action_partial:reattach_pending_connect",
+                    details = mapOf("attached_session" to attached.toString())
+                )
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.RETRY_DELEGATED_EXECUTION -> {
+                val effectiveTaskId = taskId ?: runtimeController.activeTaskId
+                if (effectiveTaskId.isNullOrBlank()) {
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                        error = "operator_action_failed:missing_active_task"
+                    )
+                } else {
+                    runtimeController.publishTaskStatusUpdate(
+                        taskId = effectiveTaskId,
+                        correlationId = effectiveTaskId,
+                        progressDetail = "operator_retry_delegated_execution_requested"
+                    )
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED,
+                        details = mapOf("task_id" to effectiveTaskId)
+                    )
+                }
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.TRIGGER_RECOVERY,
+            AndroidOperatorActionGovernanceContract.ActionKind.REOPEN_REBIND_SESSION -> {
+                val wasEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled
+                UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
+                val recovered = runtimeController.reconnect()
+                if (recovered) {
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED
+                    )
+                } else {
+                    if (wasEnabled) {
+                        UFOGalaxyApplication.appSettings.crossDeviceEnabled = true
+                        runtimeController.connectIfEnabled()
+                    }
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                        rollbackStatus = if (wasEnabled) {
+                            OperatorActionResultPayload.ROLLBACK_COMPENSATING_ACTION_REQUESTED
+                        } else {
+                            OperatorActionResultPayload.ROLLBACK_NOT_REQUIRED
+                        },
+                        error = "operator_action_failed:reconnect_unsuccessful"
+                    )
+                }
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.SUSPEND_ISOLATE_DEVICE -> {
+                runtimeController.applyKillSwitch("operator_action:$actionId")
+                OperatorActionExecutionOutcome(
+                    executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED
+                )
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.FINALIZE_CLOSURE -> {
+                val effectiveTaskId = taskId ?: runtimeController.activeTaskId
+                if (effectiveTaskId.isNullOrBlank()) {
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                        error = "operator_action_failed:missing_task_id"
+                    )
+                } else {
+                    runtimeController.publishTaskResult(
+                        taskId = effectiveTaskId,
+                        correlationId = effectiveTaskId
+                    )
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED,
+                        details = mapOf("task_id" to effectiveTaskId)
+                    )
+                }
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.REJECT_CLOSURE -> {
+                val effectiveTaskId = taskId ?: runtimeController.activeTaskId
+                if (effectiveTaskId.isNullOrBlank()) {
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                        error = "operator_action_failed:missing_task_id"
+                    )
+                } else {
+                    runtimeController.publishTaskCancelled(
+                        taskId = effectiveTaskId,
+                        correlationId = effectiveTaskId
+                    )
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED,
+                        details = mapOf("task_id" to effectiveTaskId)
+                    )
+                }
+            }
+            AndroidOperatorActionGovernanceContract.ActionKind.REOPEN_CLOSURE -> {
+                val effectiveTaskId = taskId ?: runtimeController.activeTaskId
+                if (effectiveTaskId.isNullOrBlank()) {
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_FAILED,
+                        error = "operator_action_failed:missing_task_id"
+                    )
+                } else {
+                    runtimeController.publishTaskStatusUpdate(
+                        taskId = effectiveTaskId,
+                        correlationId = effectiveTaskId,
+                        progressDetail = "operator_reopen_closure_requested"
+                    )
+                    OperatorActionExecutionOutcome(
+                        executionStatus = OperatorActionResultPayload.EXECUTION_PARTIAL,
+                        details = mapOf("task_id" to effectiveTaskId)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun sendOperatorActionResult(result: OperatorActionResultPayload) {
+        val envelope = AipMessage(
+            type = MsgType.OPERATOR_ACTION_RESULT,
+            payload = result,
+            correlation_id = result.task_id,
+            device_id = localDeviceId,
+            trace_id = result.trace_id,
+            runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(
+                taskId = result.task_id?.ifBlank { result.action_id } ?: result.action_id,
+                type = MsgType.OPERATOR_ACTION_RESULT,
+                traceId = result.trace_id?.ifBlank { null } ?: result.action_id
+            )
+        )
+        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to "operator_action_result_sent",
+                "action_id" to result.action_id,
+                "action_kind" to result.action_kind,
+                "phase" to result.phase,
+                "decision_status" to result.decision_status,
+                "execution_status" to result.execution_status,
+                "rollback_status" to result.rollback_status,
                 "sent" to sent
             )
         )

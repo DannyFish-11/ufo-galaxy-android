@@ -301,6 +301,16 @@ class GalaxyWebSocketClient(
          * [Listener] implementations that pre-date PR-H.
          */
         fun onHandoffEnvelopeV2(taskId: String, envelopePayloadJson: String, traceId: String? = null) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.OPERATOR_ACTION_REQUEST] message is
+         * received from V2/operator control surfaces.
+         */
+        fun onOperatorAction(
+            actionId: String,
+            operatorActionPayloadJson: String,
+            traceId: String? = null
+        ) = Unit
     }
     
     private val client = buildOkHttpClient(allowSelfSigned)
@@ -1603,6 +1613,17 @@ class GalaxyWebSocketClient(
                         "status" to "dispatching"
                     ))
                     listeners.forEach { it.onHandoffEnvelopeV2(taskId, payloadJson, traceId) }
+                }
+                "operator_action_request" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val actionId = payloadObj?.get("action_id")?.asString
+                        ?: json.get("message_id")?.asString
+                        ?: ""
+                    val traceId = json.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                        ?: payloadObj?.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    Log.i(TAG, "[WS:DOWNLINK] type=operator_action_request action_id=$actionId trace_id=$traceId")
+                    listeners.forEach { it.onOperatorAction(actionId, payloadJson, traceId) }
                 }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")

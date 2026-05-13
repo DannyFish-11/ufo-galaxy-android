@@ -164,6 +164,14 @@ enum class MsgType(val value: String) {
      *  @status pr-h — payload defined; send path present via GalaxyConnectionService. */
     HANDOFF_ENVELOPE_V2_RESULT("handoff_envelope_v2_result"),
 
+    /** Downlink: operator/governance surface requests an Android runtime control action.
+     *  Payload model: [OperatorActionRequestPayload]. */
+    OPERATOR_ACTION_REQUEST("operator_action_request"),
+
+    /** Uplink: Android returns decision/execution outcome for an operator action request.
+     *  Payload model: [OperatorActionResultPayload]. */
+    OPERATOR_ACTION_RESULT("operator_action_result"),
+
     // ── PR-06: Reconciliation signal uplink ────────────────────────────────────────────────
     // Uplink signal emitted by Android RuntimeController for all reconciliation lifecycle
     // events. Carries task and participant state changes from Android to V2 so V2's
@@ -1631,6 +1639,66 @@ data class HandoffEnvelopeV2ResultPayload(
 
         /** Stable status: execution failed (parse error or runtime error); [HandoffEnvelopeV2ResultPayload.error] is set. */
         const val STATUS_FAILURE = "failure"
+    }
+}
+
+/**
+ * Downlink payload for [MsgType.OPERATOR_ACTION_REQUEST].
+ *
+ * Represents an operator/governance action routed from V2/board surfaces into Android's
+ * runtime control plane.
+ */
+data class OperatorActionRequestPayload(
+    val action_id: String,
+    val action_kind: String,
+    val task_id: String? = null,
+    val trace_id: String? = null,
+    val requested_by: String? = null,
+    val reason: String? = null,
+    val session_id: String? = null,
+    val governance_context: Map<String, String> = emptyMap(),
+    val requested_at_ms: Long = System.currentTimeMillis()
+)
+
+/**
+ * Uplink payload for [MsgType.OPERATOR_ACTION_RESULT].
+ *
+ * Carries both decision (accepted/rejected) and execution outcome semantics for operator actions.
+ */
+data class OperatorActionResultPayload(
+    val action_id: String,
+    val action_kind: String,
+    val phase: String,
+    val decision_status: String,
+    val execution_status: String,
+    val rollback_status: String = ROLLBACK_NOT_REQUIRED,
+    val task_id: String? = null,
+    val trace_id: String? = null,
+    val runtime_state: String? = null,
+    val reconnect_recovery_state: String? = null,
+    val authoritative_participation_state: String? = null,
+    val attached_session_id: String? = null,
+    val active_takeover_id: String? = null,
+    val error: String? = null,
+    val details: Map<String, String> = emptyMap(),
+    val reported_at_ms: Long = System.currentTimeMillis()
+) {
+    companion object {
+        const val PHASE_DECISION = "decision"
+        const val PHASE_EXECUTION = "execution"
+
+        const val DECISION_ACCEPTED = "accepted"
+        const val DECISION_REJECTED = "rejected"
+
+        const val EXECUTION_PENDING = "pending"
+        const val EXECUTION_EXECUTED = "executed"
+        const val EXECUTION_FAILED = "failed"
+        const val EXECUTION_REJECTED = "rejected"
+        const val EXECUTION_PARTIAL = "partial"
+
+        const val ROLLBACK_NOT_REQUIRED = "not_required"
+        const val ROLLBACK_COMPLETED = "rollback_completed"
+        const val ROLLBACK_COMPENSATING_ACTION_REQUESTED = "compensating_action_requested"
     }
 }
 

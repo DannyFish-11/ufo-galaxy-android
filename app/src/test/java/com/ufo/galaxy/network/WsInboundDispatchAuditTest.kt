@@ -25,6 +25,7 @@ import java.lang.reflect.Method
  *  - parallel_subtask routing: dispatched to onParallelSubtask
  *  - task_cancel routing: dispatched to onTaskCancel
  *  - handoff_envelope_v2 routing: dispatched to onHandoffEnvelopeV2
+ *  - operator_action_request routing: dispatched to onOperatorAction
  *  - heartbeat_ack: no listener callbacks fire (silent ack path)
  *  - unknown message types: dispatched to onUnknownMessage (not silently dropped)
  *  - response type: dispatches payload.content to onMessage (legacy path)
@@ -299,6 +300,27 @@ class WsInboundDispatchAuditTest {
         )
     }
 
+    @Test
+    fun `operator_action_request routes to onOperatorAction with action_id and trace_id`() {
+        dispatch(
+            """
+            {
+              "type": "operator_action_request",
+              "trace_id": "trace-operator",
+              "payload": {
+                "action_id": "operator-action-001",
+                "action_kind": "trigger_recovery"
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(1, captured.operatorActionCalls)
+        assertEquals("operator-action-001", captured.lastOperatorActionId)
+        assertEquals("trace-operator", captured.lastOperatorActionTraceId)
+        assertEquals(0, captured.unknownMessageCalls)
+    }
+
     // ── heartbeat_ack — no listener dispatch ───────────────────────────────────
 
     @Test
@@ -484,6 +506,10 @@ class WsInboundDispatchAuditTest {
         var lastHandoffTaskId      : String? = null
         var lastHandoffTraceId     : String? = null
 
+        var operatorActionCalls = 0
+        var lastOperatorActionId: String? = null
+        var lastOperatorActionTraceId: String? = null
+
         var advancedMessageCalls = 0
         var lastAdvancedType     : MsgType? = null
         var lastAdvancedMessageId: String?  = null
@@ -526,6 +552,16 @@ class WsInboundDispatchAuditTest {
             handoffEnvelopeV2Calls++
             lastHandoffTaskId  = taskId
             lastHandoffTraceId = traceId
+        }
+
+        override fun onOperatorAction(
+            actionId: String,
+            operatorActionPayloadJson: String,
+            traceId: String?
+        ) {
+            operatorActionCalls++
+            lastOperatorActionId = actionId
+            lastOperatorActionTraceId = traceId
         }
 
         override fun onAdvancedMessage(type: MsgType, messageId: String?, rawJson: String) {

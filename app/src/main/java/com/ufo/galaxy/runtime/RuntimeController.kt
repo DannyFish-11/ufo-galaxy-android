@@ -2608,6 +2608,50 @@ class RuntimeController(
             rollout         = _rolloutControlSnapshot.value
         )
 
+    /**
+     * Builds an operator-action governance context snapshot from live runtime state.
+     */
+    fun buildOperatorActionEligibilityContext(
+        activeTakeoverId: String?
+    ): AndroidOperatorActionGovernanceContract.EligibilityContext {
+        val dispatch = currentDispatchReadiness()
+        return AndroidOperatorActionGovernanceContract.EligibilityContext(
+            runtimeStateWire = _state.value.wireLabel,
+            dispatchEligible = dispatch.isEligible,
+            hasAttachedSession = _attachedSession.value?.isAttached == true,
+            reconnectRecoveryStateWire = _reconnectRecoveryState.value.wireValue,
+            activeTaskId = _activeTaskId,
+            hasActiveTakeover = !activeTakeoverId.isNullOrBlank(),
+            crossDeviceEnabled = settings.crossDeviceEnabled,
+            operatorSuspendedOrIsolated = defaultOperatorSuspendedOrIsolated()
+        )
+    }
+
+    /**
+     * Re-evaluates and publishes authoritative participation truth for operator governance.
+     */
+    fun refreshOperatorGovernanceTruthSnapshot(
+        readinessSatisfied: Boolean = currentDispatchReadiness().isEligible
+    ): AndroidAuthoritativeParticipationTruth.Snapshot {
+        val snapshot = evaluateAuthoritativeParticipationSnapshot(
+            readinessSatisfied = readinessSatisfied,
+            distributedRuntimeActivity = _activeTaskId != null && _activeTaskStatus != null
+        )
+        publishRuntimeTruthSnapshot(
+            readinessState = if (
+                snapshot.state == AndroidAuthoritativeParticipationTruth.State.DISPATCH_ELIGIBLE ||
+                snapshot.state == AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT
+            ) {
+                ParticipantReadinessState.READY
+            } else {
+                ParticipantReadinessState.NOT_READY
+            },
+            activeTaskId = _activeTaskId,
+            activeTaskStatus = _activeTaskStatus
+        )
+        return snapshot
+    }
+
     fun evaluateAuthoritativeParticipationSnapshot(
         readinessSatisfied: Boolean,
         distributedRuntimeActivity: Boolean,
