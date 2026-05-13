@@ -251,6 +251,26 @@ class Pr2DeviceExecutionEventEmissionTest {
         assertEquals("execution_exception", json.get("blocking_reason").asString)
     }
 
+    @Test fun `execution_semantic_class defaults to null`() {
+        val p = DeviceExecutionEventPayload(
+            flow_id = "f",
+            task_id = "t",
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
+        )
+        assertNull(p.execution_semantic_class)
+    }
+
+    @Test fun `execution_semantic_class field round-trips through Gson`() {
+        val p = DeviceExecutionEventPayload(
+            flow_id = "f",
+            task_id = "t",
+            phase = DeviceExecutionEventPayload.PHASE_COMPLETED,
+            execution_semantic_class = "takeover_interactive_execution"
+        )
+        val json = gson.toJsonTree(p).asJsonObject
+        assertEquals("takeover_interactive_execution", json.get("execution_semantic_class").asString)
+    }
+
     @Test fun `stagnation_detected defaults to false`() {
         val p = DeviceExecutionEventPayload(
             flow_id = "f",

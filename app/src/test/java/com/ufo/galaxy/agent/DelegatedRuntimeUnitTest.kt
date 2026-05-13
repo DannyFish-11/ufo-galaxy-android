@@ -60,7 +60,8 @@ class DelegatedRuntimeUnitTest {
         sourceDeviceId: String? = null,
         posture: String? = null,
         checkpoint: String? = null,
-        constraints: List<String> = emptyList()
+        constraints: List<String> = emptyList(),
+        executionContext: Map<String, String> = emptyMap()
     ) = TakeoverRequestEnvelope(
         takeover_id = takeoverId,
         task_id = taskId,
@@ -69,7 +70,8 @@ class DelegatedRuntimeUnitTest {
         source_device_id = sourceDeviceId,
         source_runtime_posture = posture,
         checkpoint = checkpoint,
-        constraints = constraints
+        constraints = constraints,
+        context = executionContext
     )
 
     private fun fromEnvelope(
@@ -184,6 +186,29 @@ class DelegatedRuntimeUnitTest {
     fun `constraints is empty list when envelope has no constraints`() {
         val unit = fromEnvelope(minimalEnvelope(constraints = emptyList()))
         assertTrue(unit.constraints.isEmpty())
+    }
+
+    @Test
+    fun `execution intent fields map from envelope`() {
+        val unit = fromEnvelope(
+            minimalEnvelope(executionContext = mapOf("intent" to "resolve_user_problem")).copy(
+                executor_target_type = "android_device",
+                continuity_token = "continuity-1",
+                recovery_context = mapOf("resume_from" to "step-2"),
+                is_resumable = true,
+                interruption_reason = "reconnect",
+                dispatch_plan_id = "plan-77",
+                source_dispatch_strategy = "remote_handoff"
+            )
+        )
+        assertEquals("resolve_user_problem", unit.executionContext["intent"])
+        assertEquals("android_device", unit.executorTargetType)
+        assertEquals("continuity-1", unit.continuityToken)
+        assertEquals("step-2", unit.recoveryContext["resume_from"])
+        assertEquals(true, unit.isResumable)
+        assertEquals("reconnect", unit.interruptionReason)
+        assertEquals("plan-77", unit.dispatchPlanId)
+        assertEquals("remote_handoff", unit.sourceDispatchStrategy)
     }
 
     @Test
@@ -316,6 +341,22 @@ class DelegatedRuntimeUnitTest {
         val map = unit.toMetadataMap()
         assertTrue(map.containsKey(DelegatedRuntimeUnit.KEY_CHECKPOINT))
         assertEquals("step-7", map[DelegatedRuntimeUnit.KEY_CHECKPOINT])
+    }
+
+    @Test
+    fun `toMetadataMap includes execution intent keys when present`() {
+        val unit = fromEnvelope(
+            minimalEnvelope(executionContext = mapOf("intent" to "nl_execution")).copy(
+                executor_target_type = "android_device",
+                continuity_token = "ct-1",
+                recovery_context = mapOf("k" to "v")
+            )
+        )
+        val map = unit.toMetadataMap()
+        assertTrue(map.containsKey(DelegatedRuntimeUnit.KEY_EXECUTION_CONTEXT))
+        assertTrue(map.containsKey(DelegatedRuntimeUnit.KEY_EXECUTOR_TARGET_TYPE))
+        assertTrue(map.containsKey(DelegatedRuntimeUnit.KEY_CONTINUITY_TOKEN))
+        assertTrue(map.containsKey(DelegatedRuntimeUnit.KEY_RECOVERY_CONTEXT))
     }
 
     // ── Metadata key constant values ──────────────────────────────────────────

@@ -26,6 +26,7 @@ import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
+import com.ufo.galaxy.runtime.AndroidExecutionSpineSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
@@ -1175,14 +1176,30 @@ class GalaxyConnectionService : Service() {
                         evidence_presence_kind =
                             AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                                 DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION
-                            ).wireValue
+                            ).wireValue,
+                        execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                            .ExecutionSemanticClass.DEGRADED_FALLBACK_EXECUTION.wireValue
                     )
                 )
-                executeLocalTaskAssign(taskId, payload, traceId, routeMode)
+                executeLocalTaskAssign(
+                    taskId = taskId,
+                    payload = payload,
+                    traceId = traceId,
+                    routeMode = routeMode,
+                    executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                        .ExecutionSemanticClass.DEGRADED_FALLBACK_EXECUTION.wireValue
+                )
             }
         } else {
             // ── Local path: cross-device OFF or require_local_agent=true ─────────────
-            executeLocalTaskAssign(taskId, payload, traceId, routeMode)
+            executeLocalTaskAssign(
+                taskId = taskId,
+                payload = payload,
+                traceId = traceId,
+                routeMode = routeMode,
+                executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.LOCAL_ASSISTIVE_EXECUTION.wireValue
+            )
         }
     }
 
@@ -1199,7 +1216,8 @@ class GalaxyConnectionService : Service() {
         taskId: String,
         payload: TaskAssignPayload,
         traceId: String,
-        routeMode: String
+        routeMode: String,
+        executionSemanticClass: String
     ) {
         // Build a canonical LocalRuntimeContext at the ingress point so posture is
         // available as a typed, normalised value throughout this execution scope.
@@ -1266,7 +1284,8 @@ class GalaxyConnectionService : Service() {
                     evidence_presence_kind =
                         AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                             DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
-                        ).wireValue
+                        ).wireValue,
+                    execution_semantic_class = executionSemanticClass
                 )
             )
 
@@ -1276,7 +1295,8 @@ class GalaxyConnectionService : Service() {
                 device_id = localDeviceId,
                 device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 latency_ms = rawResult.latency_ms ?: 0L,
-                source_runtime_posture = payload.source_runtime_posture
+                source_runtime_posture = payload.source_runtime_posture,
+                execution_semantic_class = executionSemanticClass
             )
 
             // ── 通过 GOAL_EXECUTION_RESULT 回传（与 goal_execution 路径一致）────────
@@ -1296,7 +1316,8 @@ class GalaxyConnectionService : Service() {
                     taskId = taskId,
                     result = goalResult,
                     stepIndex = goalResult.steps.size - 1,
-                    source = "GalaxyConnectionService.executeLocalTaskAssign"
+                    source = "GalaxyConnectionService.executeLocalTaskAssign",
+                    executionSemanticClass = executionSemanticClass
                 )
             )
         } catch (err: Exception) {
@@ -1319,7 +1340,8 @@ class GalaxyConnectionService : Service() {
                 device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 // Carry source_runtime_posture from the inbound payload so the error result
                 // has the same context fields as a normal execution result.
-                source_runtime_posture = payload.source_runtime_posture
+                source_runtime_posture = payload.source_runtime_posture,
+                execution_semantic_class = executionSemanticClass
             )
             sendGoalResult(errorResult, traceId, routeMode)
             // ── PR-2: emit failed event on exception ─────────────────────────────────
@@ -1348,7 +1370,8 @@ class GalaxyConnectionService : Service() {
                     evidence_presence_kind =
                         AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                             DeviceExecutionEventPayload.PHASE_FAILED
-                        ).wireValue
+                        ).wireValue,
+                    execution_semantic_class = executionSemanticClass
                 )
             )
         } finally {
@@ -1496,7 +1519,9 @@ class GalaxyConnectionService : Service() {
                 evidence_presence_kind =
                     AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                         DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
-                    ).wireValue
+                    ).wireValue,
+                execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
             )
         )
 
@@ -1508,16 +1533,22 @@ class GalaxyConnectionService : Service() {
                 // Enrich result with posture and send with full trace context.
                 val enriched = result.takeIf { it.source_runtime_posture != null }
                     ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
-                sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
-                finalResult = enriched
-                Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${enriched.status} latency=${enriched.latency_ms}ms trace_id=$traceId")
+                val semanticEnriched = enriched.copy(
+                    execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                        .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
+                )
+                sendGoalResult(semanticEnriched, traceId, ROUTE_MODE_CROSS_DEVICE)
+                finalResult = semanticEnriched
+                Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${semanticEnriched.status} latency=${semanticEnriched.latency_ms}ms trace_id=$traceId")
                 // ── PR-2: emit terminal execution event from goal_execution result ─────
                 deviceExecutionEventSink.onEvent(
                     buildTerminalExecutionEvent(
                         taskId = taskId,
-                        result = enriched,
-                        stepIndex = enriched.steps.size - 1,
-                        source = "GalaxyConnectionService.handleGoalExecution"
+                        result = semanticEnriched,
+                        stepIndex = semanticEnriched.steps.size - 1,
+                        source = "GalaxyConnectionService.handleGoalExecution",
+                        executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                            .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
                     )
                 )
             }
@@ -1533,7 +1564,13 @@ class GalaxyConnectionService : Service() {
                 errorType = "goal_execution_timeout",
                 errorContext = "timeout_ms=$timeoutMs"
             )
-            val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
+            val timeoutResult = buildTimeoutGoalResult(
+                taskId = taskId,
+                payload = payload,
+                timeoutMs = timeoutMs,
+                executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
+            )
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
             // ── PR-2: emit failed event on timeout ────────────────────────────────────
@@ -1562,7 +1599,9 @@ class GalaxyConnectionService : Service() {
                     evidence_presence_kind =
                         AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                             DeviceExecutionEventPayload.PHASE_FAILED
-                        ).wireValue
+                        ).wireValue,
+                    execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                        .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
                 )
             )
         } finally {
@@ -1703,7 +1742,9 @@ class GalaxyConnectionService : Service() {
                 evidence_presence_kind =
                     AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                         DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED
-                    ).wireValue
+                    ).wireValue,
+                execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
             )
         )
 
@@ -1722,40 +1763,46 @@ class GalaxyConnectionService : Service() {
                 // Enrich result with posture and send with full trace context.
                 val enriched = result.takeIf { it.source_runtime_posture != null }
                     ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
-                sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
-                finalResult = enriched
+                val semanticEnriched = enriched.copy(
+                    execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                        .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
+                )
+                sendGoalResult(semanticEnriched, traceId, ROUTE_MODE_CROSS_DEVICE)
+                finalResult = semanticEnriched
                 Log.i(
                     TAG,
-                    "goal_result (parallel) 已回传 task_id=$taskId status=${enriched.status} " +
-                        "group_id=${enriched.group_id} subtask_index=${enriched.subtask_index} " +
-                        "latency=${enriched.latency_ms}ms trace_id=$traceId"
+                    "goal_result (parallel) 已回传 task_id=$taskId status=${semanticEnriched.status} " +
+                        "group_id=${semanticEnriched.group_id} subtask_index=${semanticEnriched.subtask_index} " +
+                        "latency=${semanticEnriched.latency_ms}ms trace_id=$traceId"
                 )
                 if (meshId != null && meshJoined) {
                     webSocketClient.sendMeshResult(
                         meshId = meshId,
                         taskId = taskId,
-                        status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
+                        status = if (semanticEnriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
                         results = listOf(
                             MeshSubtaskResult(
                                 device_id = localDeviceId,
-                                subtask_id = "${meshId}_${enriched.subtask_index ?: 0}",
-                                status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
-                                output = enriched.result_summary,
-                                error = enriched.error
+                                subtask_id = "${meshId}_${semanticEnriched.subtask_index ?: 0}",
+                                status = if (semanticEnriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
+                                output = semanticEnriched.result_summary,
+                                error = semanticEnriched.error
                             )
                         ),
-                        summary = "parallel_subtask:${enriched.status}",
-                        latencyMs = enriched.latency_ms ?: 0L
+                        summary = "parallel_subtask:${semanticEnriched.status}",
+                        latencyMs = semanticEnriched.latency_ms ?: 0L
                     )
                 }
                 // ── PR-2: emit terminal execution event from parallel result ──────────
                 deviceExecutionEventSink.onEvent(
                     buildTerminalExecutionEvent(
                         taskId = taskId,
-                        result = enriched,
-                        stepIndex = enriched.steps.size - 1,
+                        result = semanticEnriched,
+                        stepIndex = semanticEnriched.steps.size - 1,
                         source = "GalaxyConnectionService.handleParallelSubtask",
-                        flowId = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId
+                        flowId = payload.group_id?.takeIf { it.isNotBlank() } ?: taskId,
+                        executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                            .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
                     )
                 )
             }
@@ -1779,7 +1826,13 @@ class GalaxyConnectionService : Service() {
                 errorType = "parallel_subtask_timeout",
                 errorContext = "timeout_ms=$timeoutMs group_id=${payload.group_id ?: ""}"
             )
-            val timeoutResult = buildTimeoutGoalResult(taskId, payload, timeoutMs)
+            val timeoutResult = buildTimeoutGoalResult(
+                taskId = taskId,
+                payload = payload,
+                timeoutMs = timeoutMs,
+                executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
+            )
             sendGoalResult(timeoutResult, traceId, ROUTE_MODE_CROSS_DEVICE)
             finalResult = timeoutResult
             // ── PR-2: emit failed event on parallel subtask timeout ───────────────────
@@ -1808,7 +1861,9 @@ class GalaxyConnectionService : Service() {
                     evidence_presence_kind =
                         AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                             DeviceExecutionEventPayload.PHASE_FAILED
-                        ).wireValue
+                        ).wireValue,
+                    execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                        .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
                 )
             )
         } finally {
@@ -2358,13 +2413,29 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendGoalResult(result: GoalResultPayload, traceId: String?, routeMode: String?) {
         val runtimeSession = UFOGalaxyApplication.runtimeSessionId
+        val executionSemanticClass = result.execution_semantic_class
+            ?: when (routeMode) {
+                ROUTE_MODE_CROSS_DEVICE -> AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.DELEGATED_EXECUTION.wireValue
+                else -> AndroidExecutionSpineSemanticsContract
+                    .ExecutionSemanticClass.LOCAL_ASSISTIVE_EXECUTION.wireValue
+            }
+        val problemProgressSemantic = AndroidExecutionSpineSemanticsContract
+            .classifyProblemProgress(result.status, result.hold_reason)
+        val closureReportingSemantic = AndroidExecutionSpineSemanticsContract
+            .classifyClosureReporting(problemProgressSemantic)
         // ── Enrich payload with unified-contract fields (always set at the single emission layer) ──
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
             // Populate result_summary from result when not already set, so all result payloads
             // carry a consistent human-readable summary field regardless of the caller path.
-            result_summary = result.result_summary ?: result.result
+            result_summary = result.result_summary ?: result.result,
+            execution_semantic_class = executionSemanticClass,
+            problem_progress_semantic_class = result.problem_progress_semantic_class
+                ?: problemProgressSemantic.wireValue,
+            closure_reporting_semantic_class = result.closure_reporting_semantic_class
+                ?: closureReportingSemantic.wireValue
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -2427,7 +2498,8 @@ class GalaxyConnectionService : Service() {
         errorMsg: String,
         traceId: String? = null,
         routeMode: String? = null,
-        sourceRuntimePosture: String? = null
+        sourceRuntimePosture: String? = null,
+        executionSemanticClass: String? = null
     ) {
         val errorResult = GoalResultPayload(
             task_id = taskId,
@@ -2438,7 +2510,8 @@ class GalaxyConnectionService : Service() {
             subtask_index = subtaskIndex,
             latency_ms = 0L,
             device_id = localDeviceId,
-            source_runtime_posture = sourceRuntimePosture
+            source_runtime_posture = sourceRuntimePosture,
+            execution_semantic_class = executionSemanticClass
         )
         sendGoalResult(errorResult, traceId, routeMode)
     }
@@ -2452,7 +2525,8 @@ class GalaxyConnectionService : Service() {
     private fun buildTimeoutGoalResult(
         taskId: String,
         payload: GoalExecutionPayload,
-        timeoutMs: Long
+        timeoutMs: Long,
+        executionSemanticClass: String? = null
     ) = GoalResultPayload(
         task_id = taskId,
         correlation_id = taskId,
@@ -2463,7 +2537,8 @@ class GalaxyConnectionService : Service() {
         latency_ms = timeoutMs,
         device_id = localDeviceId,
         source_runtime_posture = payload.source_runtime_posture,
-        executor_target_type = payload.executor_target_type
+        executor_target_type = payload.executor_target_type,
+        execution_semantic_class = executionSemanticClass
     )
 
     private fun buildIdempotencyKey(taskId: String, type: MsgType, traceId: String? = null): String {
@@ -2634,7 +2709,8 @@ class GalaxyConnectionService : Service() {
         result: GoalResultPayload,
         stepIndex: Int,
         source: String,
-        flowId: String = taskId
+        flowId: String = taskId,
+        executionSemanticClass: String? = result.execution_semantic_class
     ): DeviceExecutionEventPayload {
         val phase: String
         val isBlocking: Boolean
@@ -2719,7 +2795,8 @@ class GalaxyConnectionService : Service() {
             // PR-7B: explicit evidence presence kind for this terminal event so V2 applies
             // the correct governance policy without relying on optimistic defaults.
             evidence_presence_kind =
-                AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(phase).wireValue
+                AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(phase).wireValue,
+            execution_semantic_class = executionSemanticClass
         )
     }
 
@@ -4113,6 +4190,35 @@ class GalaxyConnectionService : Service() {
         Log.i(TAG, "[COORD_SYNC] sync_id=$syncId seq=$syncSeq tick=$currentTickCount sent=$sent")
     }
 
+    private fun parseStringMap(obj: com.google.gson.JsonObject?): Map<String, String> {
+        if (obj == null) return emptyMap()
+        val mapped = mutableMapOf<String, String>()
+        obj.entrySet().forEach { (key, value) ->
+            if (value == null || value.isJsonNull) return@forEach
+            mapped[key] = when {
+                value.isJsonPrimitive -> value.asJsonPrimitive.toString().trim('"')
+                else -> value.toString()
+            }
+        }
+        return mapped
+    }
+
+    private fun parseStringList(element: com.google.gson.JsonElement?): List<String> {
+        if (element == null || element.isJsonNull) return emptyList()
+        return when {
+            element.isJsonArray -> element.asJsonArray.mapNotNull {
+                if (it == null || it.isJsonNull) null
+                else if (it.isJsonPrimitive) it.asJsonPrimitive.toString().trim('"')
+                else it.toString()
+            }
+            element.isJsonPrimitive -> element.asString
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            else -> emptyList()
+        }
+    }
+
     // ── PR-3: Canonical takeover request/response path ────────────────────────────────────
 
     /**
@@ -4166,7 +4272,24 @@ class GalaxyConnectionService : Service() {
                 route_mode = payload?.get("route_mode")?.asString ?: AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE,
                 session_id = payload?.get("session_id")?.asString,
                 runtime_session_id = payload?.get("runtime_session_id")?.asString,
-                checkpoint = payload?.get("checkpoint")?.asString
+                context = parseStringMap(payload?.getAsJsonObject("execution_context"))
+                    .ifEmpty { parseStringMap(payload?.getAsJsonObject("context")) },
+                constraints = parseStringList(payload?.get("constraints")),
+                checkpoint = payload?.get("checkpoint")?.asString,
+                handoff_reason = payload?.get("handoff_reason")?.asString,
+                originating_host_id = payload?.get("originating_host_id")?.asString,
+                originating_formation_role = payload?.get("originating_formation_role")?.asString,
+                required_capability_dimensions = parseStringList(payload?.get("required_capability_dimensions")),
+                continuation_token = payload?.get("continuation_token")?.asString,
+                executor_target_type = payload?.get("executor_target_type")?.asString,
+                dispatch_plan_id = payload?.get("dispatch_plan_id")?.asString,
+                source_dispatch_strategy = payload?.get("source_dispatch_strategy")?.asString,
+                continuity_token = payload?.get("continuity_token")?.asString,
+                recovery_context = parseStringMap(payload?.getAsJsonObject("recovery_context")),
+                is_resumable = payload?.get("is_resumable")?.asBoolean,
+                interruption_reason = payload?.get("interruption_reason")?.asString,
+                delegated_flow_id = payload?.get("delegated_flow_id")?.asString,
+                flow_lineage_id = payload?.get("flow_lineage_id")?.asString
             )
         } catch (e: Exception) {
             Log.w(TAG, "[PR3:TAKEOVER] Failed to parse takeover_request: ${e.message}")
@@ -4522,7 +4645,9 @@ class GalaxyConnectionService : Service() {
                     evidence_presence_kind =
                         AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                             DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE
-                        ).wireValue
+                        ).wireValue,
+                    execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                        .ExecutionSemanticClass.TAKEOVER_INTERACTIVE_EXECUTION.wireValue
                 )
             )
 
@@ -4533,7 +4658,9 @@ class GalaxyConnectionService : Service() {
                     when (outcome) {
                         is DelegatedTakeoverExecutor.ExecutionOutcome.Completed -> {
                             val enriched = outcome.goalResult.copy(
-                                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
+                                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME,
+                                execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                                    .ExecutionSemanticClass.TAKEOVER_INTERACTIVE_EXECUTION.wireValue
                             )
                             sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
                             Log.i(
@@ -4551,7 +4678,9 @@ class GalaxyConnectionService : Service() {
                                     result = enriched,
                                     stepIndex = outcome.tracker.stepCount - 1,
                                     source = "GalaxyConnectionService.handleTakeoverRequest",
-                                    flowId = envelope.takeover_id
+                                    flowId = envelope.takeover_id,
+                                    executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                                        .ExecutionSemanticClass.TAKEOVER_INTERACTIVE_EXECUTION.wireValue
                                 )
                             )
                         }
@@ -4564,7 +4693,9 @@ class GalaxyConnectionService : Service() {
                             sendGoalError(
                                 envelope.task_id, null, null,
                                 "takeover_error: ${outcome.error}", envelope.trace_id,
-                                ROUTE_MODE_CROSS_DEVICE
+                                ROUTE_MODE_CROSS_DEVICE,
+                                executionSemanticClass = AndroidExecutionSpineSemanticsContract
+                                    .ExecutionSemanticClass.TAKEOVER_INTERACTIVE_EXECUTION.wireValue
                             )
                             emitRuntimeDiagnostics(
                                 taskId = envelope.task_id,
@@ -4619,7 +4750,9 @@ class GalaxyConnectionService : Service() {
                                     evidence_presence_kind =
                                         AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
                                             failurePhase
-                                        ).wireValue
+                                        ).wireValue,
+                                    execution_semantic_class = AndroidExecutionSpineSemanticsContract
+                                        .ExecutionSemanticClass.TAKEOVER_INTERACTIVE_EXECUTION.wireValue
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —

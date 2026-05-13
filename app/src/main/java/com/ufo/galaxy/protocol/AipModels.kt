@@ -1052,7 +1052,26 @@ data class GoalResultPayload(
     // Mirrors the result_summary field in TaskResultPayload and HandoffEnvelopeV2ResultPayload
     // so that all uplink result payloads carry a consistent human-readable one-line outcome.
     // Populated by GalaxyConnectionService.sendGoalResult from the `result` field when absent.
-    val result_summary: String? = null
+    val result_summary: String? = null,
+    // ── PR-2 Android execution-spine convergence semantics ─────────────────────────────────────
+    // execution_semantic_class:
+    //   runtime participation class used for this execution/result path.
+    //   Values:
+    //     "delegated_execution" | "takeover_interactive_execution" |
+    //     "local_assistive_execution" | "degraded_fallback_execution".
+    val execution_semantic_class: String? = null,
+    // problem_progress_semantic_class:
+    //   separates low-level task terminal state from user-problem progress semantics.
+    //   Values:
+    //     "in_progress" | "task_terminal_only" | "problem_progress_advanced" |
+    //     "problem_closure_candidate" | "problem_closure_deferred".
+    val problem_progress_semantic_class: String? = null,
+    // closure_reporting_semantic_class:
+    //   center-side closure synthesis signal class for this result.
+    //   Values:
+    //     "task_result_only" | "problem_progress_signal" |
+    //     "closure_candidate_signal" | "closure_deferred_signal".
+    val closure_reporting_semantic_class: String? = null
 )
 
 /**
@@ -2544,7 +2563,10 @@ data class DeviceExecutionEventPayload(
     //     - "partial": primary path unavailable; limit to confirmed fallback subsystems.
     //     - "failed_observation": runtime or stagnation failure observed; apply recovery policy.
     //   Null only as a defensive default; populated at event-emission call sites.
-    val evidence_presence_kind: String? = null
+    val evidence_presence_kind: String? = null,
+    // PR-2 Android execution-spine convergence semantics for event-level reporting.
+    // Values match GoalResultPayload.execution_semantic_class.
+    val execution_semantic_class: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
