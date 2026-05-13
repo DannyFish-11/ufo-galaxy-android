@@ -21,6 +21,79 @@ package com.ufo.galaxy.inference
  */
 interface LocalPlannerService {
 
+    /**
+     * Runtime authority boundary for local planning.
+     *
+     * Android local planning may only act as an execution sub-decision for work that is already
+     * committed to Android execution.  It must not silently override center/V2 orchestration
+     * when the inbound constraints explicitly reserve planning authority to the center.
+     */
+    enum class AuthorityBoundary(val wireValue: String, val allowsAutonomousExecution: Boolean) {
+        /** Android may plan and execute locally as a bounded sub-decision. */
+        LOCAL_EXECUTION_SUBDECISION("local_execution_subdecision", true),
+
+        /** Local planning may only produce a suggestion; execution must wait for center review. */
+        LOCAL_SUGGESTION_ONLY("local_suggestion_only", false),
+
+        /** Center/V2 retained planning authority; Android must not plan autonomously. */
+        CENTER_AUTHORITY_REQUIRED("center_authority_required", false);
+
+        companion object {
+            fun fromWireValue(value: String?): AuthorityBoundary? =
+                entries.firstOrNull { it.wireValue == value }
+        }
+    }
+
+    /**
+     * Resolved authority decision for a local planning attempt.
+     *
+     * @property requiresCenterRevalidation True when Android must not continue planning/execution
+     * without an explicit V2 follow-up decision.
+     */
+    data class PlannerAuthorityDecision(
+        val boundary: AuthorityBoundary,
+        val reason: String,
+        val requiresCenterRevalidation: Boolean
+    )
+
+    companion object {
+        const val CONSTRAINT_V2_AUTHORITY_ONLY = "v2_authority_only"
+        const val CONSTRAINT_CENTER_AUTHORITY_LOCKED = "center_authority_locked"
+        const val CONSTRAINT_LOCAL_PLANNER_SUGGESTION_ONLY = "local_planner_suggestion_only"
+
+        /**
+         * Resolves the local-planning authority boundary from inbound constraints.
+         *
+         * This is the Android-side enforcement seam for the V2 authority boundary: when V2 marks
+         * a task as center-authoritative or suggestion-only, Android must not silently continue
+         * with autonomous local planning.
+         */
+        fun classifyAuthority(constraints: List<String>): PlannerAuthorityDecision {
+            val normalized = constraints.map { it.trim().lowercase() }.toSet()
+            return when {
+                CONSTRAINT_V2_AUTHORITY_ONLY in normalized ||
+                    CONSTRAINT_CENTER_AUTHORITY_LOCKED in normalized ->
+                    PlannerAuthorityDecision(
+                        boundary = AuthorityBoundary.CENTER_AUTHORITY_REQUIRED,
+                        reason = "center_authority_locked",
+                        requiresCenterRevalidation = true
+                    )
+                CONSTRAINT_LOCAL_PLANNER_SUGGESTION_ONLY in normalized ->
+                    PlannerAuthorityDecision(
+                        boundary = AuthorityBoundary.LOCAL_SUGGESTION_ONLY,
+                        reason = "local_planner_suggestion_only",
+                        requiresCenterRevalidation = true
+                    )
+                else ->
+                    PlannerAuthorityDecision(
+                        boundary = AuthorityBoundary.LOCAL_EXECUTION_SUBDECISION,
+                        reason = "android_local_execution_subdecision",
+                        requiresCenterRevalidation = false
+                    )
+            }
+        }
+    }
+
     // ── Structured warmup ────────────────────────────────────────────────────
 
     /**

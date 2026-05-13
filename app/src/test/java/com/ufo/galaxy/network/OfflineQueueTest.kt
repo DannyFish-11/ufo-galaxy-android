@@ -34,6 +34,14 @@ class OfflineQueueTest {
     }
 
     @Test
+    fun `exact duplicate enqueue is suppressed`() {
+        queue.enqueue("task_result", """{"id":1}""", sessionTag = "durable-1")
+        queue.enqueue("task_result", """{"id":1}""", sessionTag = "durable-1")
+
+        assertEquals(1, queue.size)
+    }
+
+    @Test
     fun `drainAll returns messages in FIFO order`() {
         queue.enqueue("task_result", """{"id":1}""")
         queue.enqueue("goal_result",  """{"id":2}""")
@@ -198,5 +206,28 @@ class OfflineQueueTest {
         val after = System.currentTimeMillis()
         val msg = queue.drainAll().first()
         assertTrue("queuedAt should be within test window", msg.queuedAt in before..after)
+    }
+
+    @Test
+    fun `previewReplayGovernance marks mismatched session as stale_result`() {
+        queue.enqueue("goal_result", """{"id":1}""", sessionTag = "durable-old")
+
+        val decision = queue.previewReplayGovernance(currentTag = "durable-new").single()
+
+        assertEquals(
+            "stale_result",
+            decision.disposition.wireValue
+        )
+        assertFalse(decision.shouldForward)
+    }
+
+    @Test
+    fun `previewReplayGovernance marks tagged message without authority as attachment_only_recovery`() {
+        queue.enqueue("goal_result", """{"id":2}""", sessionTag = "durable-2")
+
+        val decision = queue.previewReplayGovernance(currentTag = null).single()
+
+        assertEquals("attachment_only_recovery", decision.disposition.wireValue)
+        assertFalse(decision.shouldForward)
     }
 }

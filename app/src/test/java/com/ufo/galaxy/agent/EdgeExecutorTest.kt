@@ -253,6 +253,48 @@ class EdgeExecutorTest {
         assertNull(fakeAccessibility.lastAction)
     }
 
+    @Test
+    fun `center authority locked constraint blocks autonomous local planning`() {
+        val fakeAccessibility = FakeAccessibilityExecutor()
+        val edge = EdgeExecutor(
+            screenshotProvider = FakeScreenshotProvider(),
+            plannerService = SingleStepPlanner(),
+            groundingService = FakeGrounder(),
+            accessibilityExecutor = fakeAccessibility
+        )
+
+        val result = edge.handleTaskAssign(
+            buildTaskAssign(
+                constraints = listOf(LocalPlannerService.CONSTRAINT_CENTER_AUTHORITY_LOCKED)
+            )
+        )
+
+        assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
+        assertEquals("Planning blocked: center_authority_locked", result.error)
+        assertNull(fakeAccessibility.lastAction)
+    }
+
+    @Test
+    fun `suggestion only constraint blocks autonomous local planning`() {
+        val fakeAccessibility = FakeAccessibilityExecutor()
+        val edge = EdgeExecutor(
+            screenshotProvider = FakeScreenshotProvider(),
+            plannerService = SingleStepPlanner(),
+            groundingService = FakeGrounder(),
+            accessibilityExecutor = fakeAccessibility
+        )
+
+        val result = edge.handleTaskAssign(
+            buildTaskAssign(
+                constraints = listOf(LocalPlannerService.CONSTRAINT_LOCAL_PLANNER_SUGGESTION_ONLY)
+            )
+        )
+
+        assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
+        assertEquals("Planning blocked: local_planner_suggestion_only", result.error)
+        assertNull(fakeAccessibility.lastAction)
+    }
+
     // ── Planner failure ───────────────────────────────────────────────────────
 
     @Test

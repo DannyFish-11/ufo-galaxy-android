@@ -263,8 +263,8 @@ class Pr42AndroidRuntimeInvariantEnforcementTest {
     // RuntimeInvariantEnforcer — InvariantId enum
     // ─────────────────────────────────────────────────────────────────────────
 
-    @Test fun `InvariantId has nine values`() {
-        assertEquals(9, RuntimeInvariantEnforcer.InvariantId.entries.size)
+    @Test fun `InvariantId has ten values`() {
+        assertEquals(10, RuntimeInvariantEnforcer.InvariantId.entries.size)
     }
 
     @Test fun `all InvariantId wireValues are distinct`() {
@@ -294,6 +294,10 @@ class Pr42AndroidRuntimeInvariantEnforcementTest {
         assertEquals(
             RuntimeInvariantEnforcer.InvariantId.KILL_SWITCH_CLEARS_CROSS_DEVICE,
             RuntimeInvariantEnforcer.InvariantId.fromValue("kill_switch_clears_cross_device")
+        )
+        assertEquals(
+            RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_REQUIRES_DURABLE_SESSION,
+            RuntimeInvariantEnforcer.InvariantId.fromValue("recovery_state_requires_durable_session")
         )
     }
 
@@ -770,6 +774,27 @@ class Pr42AndroidRuntimeInvariantEnforcementTest {
     @Test fun `RECOVERY_STATE_CONSISTENT RECOVERED with Active is SATISFIED`() {
         val result = RuntimeInvariantEnforcer.checkRecoveryStateConsistentWithRuntime(
             runtimeState = RuntimeController.RuntimeState.Active,
+            recoveryState = ReconnectRecoveryState.RECOVERED
+        )
+        assertEquals(RuntimeInvariantEnforcer.InvariantOutcome.SATISFIED, result.outcome)
+    }
+
+    @Test fun `RECOVERY_STATE_REQUIRES_DURABLE_SESSION RECOVERING with null durable session is VIOLATED`() {
+        val result = RuntimeInvariantEnforcer.checkRecoveryStateRequiresDurableSession(
+            durableRecord = null,
+            recoveryState = ReconnectRecoveryState.RECOVERING
+        )
+        assertEquals(RuntimeInvariantEnforcer.InvariantOutcome.VIOLATED, result.outcome)
+    }
+
+    @Test fun `RECOVERY_STATE_REQUIRES_DURABLE_SESSION RECOVERED with durable session is SATISFIED`() {
+        val result = RuntimeInvariantEnforcer.checkRecoveryStateRequiresDurableSession(
+            durableRecord = DurableSessionContinuityRecord(
+                durableSessionId = "durable-1",
+                sessionContinuityEpoch = 2,
+                activationEpochMs = 1_000L,
+                activationSource = "user_activation"
+            ),
             recoveryState = ReconnectRecoveryState.RECOVERED
         )
         assertEquals(RuntimeInvariantEnforcer.InvariantOutcome.SATISFIED, result.outcome)

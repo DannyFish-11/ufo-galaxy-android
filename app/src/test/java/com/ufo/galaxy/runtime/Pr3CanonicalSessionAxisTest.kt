@@ -779,4 +779,32 @@ class Pr3CanonicalSessionAxisTest {
             )
         }
     }
+
+    @Test
+    fun `buildRuntimeGovernanceSnapshot uses durable session as authority anchor`() {
+        val snapshot = CanonicalSessionAxis.buildRuntimeGovernanceSnapshot(
+            runtimeSessionId = "runtime-1",
+            activeSessionId = "attached-1",
+            durableSessionId = "durable-1",
+            continuityEpoch = 3
+        )
+
+        assertEquals("durable-1", snapshot.authorityContinuityAnchor)
+        assertEquals("durable-1:3", snapshot.replaySessionKey)
+        assertEquals("runtime_attachment_session_id", snapshot.v2RuntimeAttachmentCanonicalField)
+        assertEquals("delegation_transfer_session_id", snapshot.v2DelegationTransferCanonicalField)
+    }
+
+    @Test
+    fun `buildRuntimeGovernanceSnapshot falls back to active session when durable session absent`() {
+        val snapshot = CanonicalSessionAxis.buildRuntimeGovernanceSnapshot(
+            runtimeSessionId = "runtime-2",
+            activeSessionId = "attached-2",
+            durableSessionId = null,
+            continuityEpoch = null
+        )
+
+        assertEquals("attached-2", snapshot.authorityContinuityAnchor)
+        assertEquals("attached-2", snapshot.replaySessionKey)
+    }
 }

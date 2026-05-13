@@ -476,6 +476,64 @@ object CanonicalSessionAxis {
     fun crossRepoTermFor(androidCarrier: String): String? =
         entryForCarrier(androidCarrier)?.crossRepoTerm
 
+    /**
+     * PR-3 convergence — runtime governance snapshot that explicitly separates:
+     *  - transport-facing runtime identity ([runtimeSessionId])
+     *  - attachment identity ([runtimeAttachmentSessionId])
+     *  - durable continuity anchor ([durableSessionId])
+     *  - replay/rebind continuity key ([replaySessionKey])
+     *
+     * This is the Android-side half of the V2 canonical session axis alignment:
+     * Android reports these values as claims, while V2 resolves the canonical authority
+     * boundary for runtime attachment, ownership transfer, and recovery continuity.
+     */
+    data class RuntimeGovernanceSnapshot(
+        val runtimeSessionId: String?,
+        val runtimeAttachmentSessionId: String?,
+        val durableSessionId: String?,
+        val continuityEpoch: Int?,
+        val authorityContinuityAnchor: String?,
+        val replaySessionKey: String,
+        val v2RuntimeAttachmentCanonicalField: String,
+        val v2DelegationTransferCanonicalField: String
+    ) {
+        fun toAuditMap(): Map<String, Any?> = mapOf(
+            "runtime_session_id" to runtimeSessionId,
+            "runtime_attachment_session_id" to runtimeAttachmentSessionId,
+            "durable_session_id" to durableSessionId,
+            "session_continuity_epoch" to continuityEpoch,
+            "authority_continuity_anchor" to authorityContinuityAnchor,
+            "replay_session_key" to replaySessionKey,
+            "v2_runtime_attachment_canonical_field" to v2RuntimeAttachmentCanonicalField,
+            "v2_delegation_transfer_canonical_field" to v2DelegationTransferCanonicalField
+        )
+    }
+
+    fun buildRuntimeGovernanceSnapshot(
+        runtimeSessionId: String?,
+        activeSessionId: String?,
+        durableSessionId: String?,
+        continuityEpoch: Int?
+    ): RuntimeGovernanceSnapshot {
+        val epoch = continuityEpoch?.coerceAtLeast(0)
+        val replayKey = when {
+            durableSessionId != null -> "$durableSessionId:${epoch ?: 0}"
+            activeSessionId != null -> activeSessionId
+            runtimeSessionId != null -> runtimeSessionId
+            else -> "fresh_attach"
+        }
+        return RuntimeGovernanceSnapshot(
+            runtimeSessionId = runtimeSessionId,
+            runtimeAttachmentSessionId = activeSessionId,
+            durableSessionId = durableSessionId,
+            continuityEpoch = epoch,
+            authorityContinuityAnchor = durableSessionId ?: activeSessionId ?: runtimeSessionId,
+            replaySessionKey = replayKey,
+            v2RuntimeAttachmentCanonicalField = "runtime_attachment_session_id",
+            v2DelegationTransferCanonicalField = "delegation_transfer_session_id"
+        )
+    }
+
     // ── PR-39: Session truth binding ─────────────────────────────────────────
 
     /**
@@ -998,7 +1056,8 @@ object CanonicalSessionAxis {
                 RuntimeInvariantEnforcer.InvariantId.ATTACHED_REQUIRES_ACTIVE_OR_RECOVERY,
                 RuntimeInvariantEnforcer.InvariantId.SNAPSHOT_REQUIRES_SESSION,
                 RuntimeInvariantEnforcer.InvariantId.KILL_SWITCH_CLEARS_CROSS_DEVICE,
-                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_CONSISTENT_WITH_RUNTIME
+                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_CONSISTENT_WITH_RUNTIME,
+                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_REQUIRES_DURABLE_SESSION
             ),
             enforcementNote = "Attached session is the primary runtime participation anchor; " +
                 "its lifecycle is guarded by all session-coherence and kill-switch invariants."
@@ -1038,7 +1097,8 @@ object CanonicalSessionAxis {
             guardingInvariants = setOf(
                 RuntimeInvariantEnforcer.InvariantId.DURABLE_SESSION_PRESENT_WHEN_ACTIVE,
                 RuntimeInvariantEnforcer.InvariantId.SESSION_ACTIVE_REQUIRES_ATTACHED,
-                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_CONSISTENT_WITH_RUNTIME
+                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_CONSISTENT_WITH_RUNTIME,
+                RuntimeInvariantEnforcer.InvariantId.RECOVERY_STATE_REQUIRES_DURABLE_SESSION
             ),
             enforcementNote = "Durable session spans multiple reconnects; presence-when-active " +
                 "and recovery state invariants protect the era continuity guarantee."

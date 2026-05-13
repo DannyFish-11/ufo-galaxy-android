@@ -999,6 +999,80 @@ class Pr3AndroidContinuityIntegrationTest {
         assertEquals(expected, LocalExecutionContextSnapshot.ALL_MANDATORY_KEYS)
     }
 
+    @Test
+    fun `classifyContinuityGovernance returns REPLAY for matching queued replay`() {
+        val decision = integration.classifyContinuityGovernance(
+            runtimeSessionId = "runtime-1",
+            activeSession = attachedSession("attached-1"),
+            durableSession = durableSession("durable-1", epoch = 2),
+            queuedSessionTag = "durable-1",
+            hasQueuedReplay = true
+        )
+
+        assertEquals(AndroidContinuityIntegration.ContinuityDisposition.REPLAY, decision.disposition)
+        assertEquals(
+            AndroidContinuityIntegration.ContinuityGovernanceAction.ALLOW_REPLAY,
+            decision.action
+        )
+        assertEquals("durable-1", decision.axis.authorityContinuityAnchor)
+    }
+
+    @Test
+    fun `classifyContinuityGovernance returns STALE_RESULT for mismatched queued session`() {
+        val decision = integration.classifyContinuityGovernance(
+            runtimeSessionId = "runtime-2",
+            activeSession = attachedSession("attached-2"),
+            durableSession = durableSession("durable-current", epoch = 1),
+            queuedSessionTag = "durable-stale"
+        )
+
+        assertEquals(
+            AndroidContinuityIntegration.ContinuityDisposition.STALE_RESULT,
+            decision.disposition
+        )
+        assertEquals(
+            AndroidContinuityIntegration.ContinuityGovernanceAction.REJECT_STALE,
+            decision.action
+        )
+    }
+
+    @Test
+    fun `classifyContinuityGovernance returns RESUMED_CLOSURE for terminal prior flow`() {
+        val decision = integration.classifyContinuityGovernance(
+            runtimeSessionId = "runtime-3",
+            activeSession = attachedSession("attached-3"),
+            durableSession = durableSession("durable-3", epoch = 4),
+            priorFlowRecord = flowContinuityRecord(
+                executionPhase = AndroidFlowExecutionPhase.COMPLETED.wireValue
+            )
+        )
+
+        assertEquals(
+            AndroidContinuityIntegration.ContinuityDisposition.RESUMED_CLOSURE,
+            decision.disposition
+        )
+        assertEquals(
+            AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+            decision.action
+        )
+    }
+
+    @Test
+    fun `classifyContinuityGovernance returns DUPLICATE when duplicate detected`() {
+        val decision = integration.classifyContinuityGovernance(
+            runtimeSessionId = "runtime-4",
+            activeSession = attachedSession("attached-4"),
+            durableSession = durableSession("durable-4", epoch = 0),
+            duplicateDetected = true
+        )
+
+        assertEquals(AndroidContinuityIntegration.ContinuityDisposition.DUPLICATE, decision.disposition)
+        assertEquals(
+            AndroidContinuityIntegration.ContinuityGovernanceAction.DROP_DUPLICATE,
+            decision.action
+        )
+    }
+
     // ── Utility ───────────────────────────────────────────────────────────────
 
     private inline fun <reified T> assertIs(value: Any?) {

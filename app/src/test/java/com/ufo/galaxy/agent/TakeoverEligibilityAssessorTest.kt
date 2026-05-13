@@ -128,6 +128,85 @@ class TakeoverEligibilityAssessorTest {
         assertEquals("overlay_not_ready", result.reason)
     }
 
+    @Test
+    fun `recovery dispatch with stale proof returns BLOCKED_RECOVERY_STALE_EVIDENCE`() {
+        val assessor = TakeoverEligibilityAssessor(fullyReadySettings())
+        val envelope = minimalEnvelope().copy(
+            is_resumable = true,
+            recovery_context = mapOf(
+                TakeoverEligibilityAssessor.KEY_OWNERSHIP_TRANSFER_PROOF_CLASS to
+                    TakeoverEligibilityAssessor.OwnershipTransferProofClass.DEGRADED_STALE.wireValue
+            )
+        )
+
+        val result = assessor.assess(envelope)
+
+        assertFalse(result.eligible)
+        assertEquals(
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_STALE_EVIDENCE,
+            result.outcome
+        )
+    }
+
+    @Test
+    fun `recovery dispatch with partial proof returns BLOCKED_RECOVERY_REQUIRES_REVALIDATION`() {
+        val assessor = TakeoverEligibilityAssessor(fullyReadySettings())
+        val envelope = minimalEnvelope().copy(
+            is_resumable = true,
+            recovery_context = mapOf(
+                TakeoverEligibilityAssessor.KEY_OWNERSHIP_TRANSFER_PROOF_CLASS to
+                    TakeoverEligibilityAssessor.OwnershipTransferProofClass.DEGRADED_PARTIAL.wireValue
+            )
+        )
+
+        val result = assessor.assess(envelope)
+
+        assertFalse(result.eligible)
+        assertEquals(
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_REQUIRES_REVALIDATION,
+            result.outcome
+        )
+    }
+
+    @Test
+    fun `recovery dispatch with forced suspend action returns BLOCKED_RECOVERY_FORCED_SUSPEND`() {
+        val assessor = TakeoverEligibilityAssessor(fullyReadySettings())
+        val envelope = minimalEnvelope().copy(
+            is_resumable = true,
+            recovery_context = mapOf(
+                TakeoverEligibilityAssessor.KEY_OWNERSHIP_TRANSFER_PROOF_CLASS to
+                    TakeoverEligibilityAssessor.OwnershipTransferProofClass.CONFIRMED_STRONG.wireValue,
+                TakeoverEligibilityAssessor.KEY_TAKEOVER_GOVERNANCE_ACTION to
+                    TakeoverEligibilityAssessor.RecoveryGovernanceAction.FORCED_SUSPEND.wireValue
+            )
+        )
+
+        val result = assessor.assess(envelope)
+
+        assertFalse(result.eligible)
+        assertEquals(
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_FORCED_SUSPEND,
+            result.outcome
+        )
+    }
+
+    @Test
+    fun `recovery dispatch with confirmed strong proof remains eligible`() {
+        val assessor = TakeoverEligibilityAssessor(fullyReadySettings())
+        val envelope = minimalEnvelope().copy(
+            is_resumable = true,
+            recovery_context = mapOf(
+                TakeoverEligibilityAssessor.KEY_OWNERSHIP_TRANSFER_PROOF_CLASS to
+                    TakeoverEligibilityAssessor.OwnershipTransferProofClass.CONFIRMED_STRONG.wireValue
+            )
+        )
+
+        val result = assessor.assess(envelope)
+
+        assertTrue(result.eligible)
+        assertEquals(TakeoverEligibilityAssessor.EligibilityOutcome.ELIGIBLE, result.outcome)
+    }
+
     // ── Check ordering ────────────────────────────────────────────────────────
 
     @Test
@@ -275,6 +354,18 @@ class TakeoverEligibilityAssessorTest {
         assertEquals(
             "concurrent_takeover_active",
             TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_CONCURRENT_TAKEOVER.reason
+        )
+        assertEquals(
+            "recovery_requires_revalidation",
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_REQUIRES_REVALIDATION.reason
+        )
+        assertEquals(
+            "recovery_stale_evidence",
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_STALE_EVIDENCE.reason
+        )
+        assertEquals(
+            "recovery_forced_suspend",
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_FORCED_SUSPEND.reason
         )
     }
 

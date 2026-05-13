@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +41,14 @@ class OfflineTaskQueue(
     private val gson: Gson = Gson(),
     val maxQueueSize: Int = MAX_QUEUE_SIZE
 ) {
+
+    data class ReplayGovernanceDecision(
+        val message: QueuedMessage,
+        val disposition: AndroidContinuityIntegration.ContinuityDisposition,
+        val action: AndroidContinuityIntegration.ContinuityGovernanceAction,
+        val shouldForward: Boolean,
+        val reason: String
+    )
 
     companion object {
         const val TAG = "WS:OfflineQueue"
@@ -130,6 +139,17 @@ class OfflineTaskQueue(
      */
     fun enqueue(type: String, json: String, sessionTag: String? = null) {
         val newSize = synchronized(lock) {
+            val duplicate = queue.any {
+                it.type == type && it.json == json && it.sessionTag == sessionTag
+            }
+            if (duplicate) {
+                Log.i(
+                    TAG,
+                    "[WS:OfflineQueue] Suppressed duplicate queued message " +
+                        "type=$type session_tag=${sessionTag ?: "none"}"
+                )
+                return@synchronized queue.size
+            }
             if (queue.size >= maxQueueSize) {
                 val dropped = queue.poll()
                 Log.w(
@@ -145,6 +165,45 @@ class OfflineTaskQueue(
         }
         _sizeFlow.value = newSize
     }
+
+    fun classifyForReplay(
+        message: QueuedMessage,
+        currentTag: String?
+    ): ReplayGovernanceDecision = when {
+        currentTag == null && message.sessionTag != null ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                shouldForward = false,
+                reason = "queued_result_without_current_durable_authority"
+            )
+        message.sessionTag != null && message.sessionTag != currentTag ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.STALE_RESULT,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REJECT_STALE,
+                shouldForward = false,
+                reason = "stale_durable_session_tag"
+            )
+        else ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.REPLAY,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.ALLOW_REPLAY,
+                shouldForward = true,
+                reason = if (message.sessionTag == null) {
+                    "legacy_queue_entry_without_session_tag"
+                } else {
+                    "durable_session_tag_matches_current_authority"
+                }
+            )
+    }
+
+    fun previewReplayGovernance(currentTag: String?): List<ReplayGovernanceDecision> =
+        synchronized(lock) {
+            queue.map { classifyForReplay(it, currentTag) }
+        }
 
     /**
      * Removes and returns all queued messages in FIFO order.
@@ -202,7 +261,8 @@ class OfflineTaskQueue(
             val iter = queue.iterator()
             while (iter.hasNext()) {
                 val msg = iter.next()
-                if (msg.sessionTag != null && msg.sessionTag != currentTag) {
+                val decision = classifyForReplay(msg, currentTag)
+                if (!decision.shouldForward) {
                     iter.remove()
                 }
             }
@@ -236,7 +296,9 @@ class OfflineTaskQueue(
             val before = queue.size
             val iter = queue.iterator()
             while (iter.hasNext()) {
-                if (iter.next().sessionTag != null) {
+                val msg = iter.next()
+                val decision = classifyForReplay(msg, currentTag = null)
+                if (!decision.shouldForward) {
                     iter.remove()
                 }
             }
