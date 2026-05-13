@@ -86,6 +86,16 @@ import com.ufo.galaxy.UFOGalaxyApplication
  * @param handoff_id             Stable V2 handoff identifier for this dispatch; null for legacy
  *                               senders that do not yet include the field.
  * @param interruption_reason    (PR-F) Interruption reason for recovery dispatches; null otherwise.
+ * @param problem_context        (PR-2) V2-originated NL problem description for this execution unit.
+ *                               Allows Android to understand the broader NL problem it is
+ *                               contributing to, not just the raw [goal] string.
+ *                               Null for legacy senders; Android MUST operate without it.
+ * @param problem_solving_role   (PR-2) V2-declared execution spine participation kind for Android.
+ *                               Wire value of
+ *                               [com.ufo.galaxy.runtime.AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind].
+ *                               When present, Android MUST respect this as the classification for
+ *                               spine reporting; when null, Android classifies from [dispatch_intent]
+ *                               and [source_dispatch_strategy].
  */
 data class HandoffEnvelopeV2(
     val trace_id: String,
@@ -115,7 +125,10 @@ data class HandoffEnvelopeV2(
     val continuity_token: String? = null,
     val recovery_context: Map<String, String> = emptyMap(),
     val is_resumable: Boolean? = null,
-    val interruption_reason: String? = null
+    val interruption_reason: String? = null,
+    // ── PR-2: NL-driven execution spine context (optional; null-safe for legacy callers) ──
+    val problem_context: String? = null,
+    val problem_solving_role: String? = null
 )
 
 /**
