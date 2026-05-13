@@ -4190,31 +4190,40 @@ class GalaxyConnectionService : Service() {
         Log.i(TAG, "[COORD_SYNC] sync_id=$syncId seq=$syncSeq tick=$currentTickCount sent=$sent")
     }
 
+    /**
+     * Parses a nullable JsonObject into a string map for takeover metadata fields.
+     *
+     * Null and JsonNull entries are skipped; primitive values are extracted via asString,
+     * and non-primitive values are stringified as JSON.
+     */
     private fun parseStringMap(obj: com.google.gson.JsonObject?): Map<String, String> {
         if (obj == null) return emptyMap()
         val mapped = mutableMapOf<String, String>()
         obj.entrySet().forEach { (key, value) ->
             if (value == null || value.isJsonNull) return@forEach
             mapped[key] = when {
-                value.isJsonPrimitive -> value.asJsonPrimitive.toString().trim('"')
+                value.isJsonPrimitive -> value.asString
                 else -> value.toString()
             }
         }
         return mapped
     }
 
+    /**
+     * Parses a nullable JsonElement into a list of strings for takeover list-like fields.
+     *
+     * Accepts either an array of values or a single primitive value; nulls are ignored and
+     * blank items are filtered from primitive fallbacks.
+     */
     private fun parseStringList(element: com.google.gson.JsonElement?): List<String> {
         if (element == null || element.isJsonNull) return emptyList()
         return when {
             element.isJsonArray -> element.asJsonArray.mapNotNull {
                 if (it == null || it.isJsonNull) null
-                else if (it.isJsonPrimitive) it.asJsonPrimitive.toString().trim('"')
+                else if (it.isJsonPrimitive) it.asString
                 else it.toString()
             }
-            element.isJsonPrimitive -> element.asString
-                .split(",")
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
+            element.isJsonPrimitive -> listOf(element.asString).filter { it.isNotBlank() }
             else -> emptyList()
         }
     }

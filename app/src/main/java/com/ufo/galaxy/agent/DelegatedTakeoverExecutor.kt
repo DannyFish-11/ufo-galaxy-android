@@ -278,7 +278,7 @@ class DelegatedTakeoverExecutor(
             source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME,
             execution_context = unit.executionContext,
             executor_target_type = unit.executorTargetType,
-            continuity_token = unit.continuityToken ?: unit.continuationToken,
+            continuity_token = unit.continuityToken,
             recovery_context = unit.recoveryContext,
             is_resumable = unit.isResumable,
             interruption_reason = unit.interruptionReason,

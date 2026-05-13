@@ -332,7 +332,7 @@ data class DelegatedRuntimeUnit(
             continuationToken = envelope.continuation_token,
             executionContext = envelope.context,
             executorTargetType = envelope.executor_target_type,
-            continuityToken = envelope.continuity_token ?: envelope.continuation_token,
+            continuityToken = envelope.continuity_token,
             recoveryContext = envelope.recovery_context,
             isResumable = envelope.is_resumable,
             interruptionReason = envelope.interruption_reason,
