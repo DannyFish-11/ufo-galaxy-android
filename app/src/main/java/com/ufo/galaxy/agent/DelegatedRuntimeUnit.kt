@@ -104,15 +104,35 @@ data class DelegatedRuntimeUnit(
     val checkpoint: String? = null,
     val constraints: List<String> = emptyList(),
     val receivedAtMs: Long = System.currentTimeMillis(),
+    // ── PR-D: V2 source dispatch intent metadata ───────────────────────────────
+    val dispatchIntent: String? = null,
+    val dispatchOrigin: String? = null,
+    val orchestrationStage: String? = null,
+    val executionContext: Map<String, String> = emptyMap(),
     // ── PR-9: Handoff contract fields ─────────────────────────────────────────
     val handoffReason: String? = null,
     val originatingHostId: String? = null,
     val originatingFormationRole: String? = null,
     val requiredCapabilityDimensions: List<String> = emptyList(),
     val continuationToken: String? = null,
+    // ── PR-E / PR-F / PR-G / PR-I: execution routing semantics and closure fields ─────────────
+    val executorTargetType: String? = null,
+    val dispatchPlanId: String? = null,
+    val sourceDispatchStrategy: String? = null,
+    val continuityToken: String? = null,
+    val recoveryContext: Map<String, String> = emptyMap(),
+    val isResumable: Boolean? = null,
+    val interruptionReason: String? = null,
+    val dispatchTraceId: String? = null,
+    val lifecycleEventId: String? = null,
+    val policyRoutingOutcome: String? = null,
+    val policyFailureReason: String? = null,
+    val readinessDegradationHint: String? = null,
     // ── PR-bridge: Delegated flow bridge identity ─────────────────────────────
     val delegatedFlowId: String = "",
-    val flowLineageId: String = ""
+    val flowLineageId: String = "",
+    // ── PR-2 Android counterpart: explicit runtime execution semantics ────────
+    val executionRuntimeKind: String = EXECUTION_RUNTIME_KIND_DELEGATED
 ) {
 
     // ── Derived helpers ───────────────────────────────────────────────────────
@@ -170,6 +190,23 @@ data class DelegatedRuntimeUnit(
             put(KEY_REQUIRED_CAPABILITY_DIMENSIONS, requiredCapabilityDimensions.joinToString(","))
         }
         continuationToken?.let { put(KEY_CONTINUATION_TOKEN, it) }
+        dispatchIntent?.let { put(KEY_DISPATCH_INTENT, it) }
+        dispatchOrigin?.let { put(KEY_DISPATCH_ORIGIN, it) }
+        orchestrationStage?.let { put(KEY_ORCHESTRATION_STAGE, it) }
+        if (executionContext.isNotEmpty()) put(KEY_EXECUTION_CONTEXT_KEYS, executionContext.keys.joinToString(","))
+        executorTargetType?.let { put(KEY_EXECUTOR_TARGET_TYPE, it) }
+        dispatchPlanId?.let { put(KEY_DISPATCH_PLAN_ID, it) }
+        sourceDispatchStrategy?.let { put(KEY_SOURCE_DISPATCH_STRATEGY, it) }
+        continuityToken?.let { put(KEY_CONTINUITY_TOKEN, it) }
+        if (recoveryContext.isNotEmpty()) put(KEY_RECOVERY_CONTEXT_KEYS, recoveryContext.keys.joinToString(","))
+        isResumable?.let { put(KEY_IS_RESUMABLE, it) }
+        interruptionReason?.let { put(KEY_INTERRUPTION_REASON, it) }
+        dispatchTraceId?.let { put(KEY_DISPATCH_TRACE_ID, it) }
+        lifecycleEventId?.let { put(KEY_LIFECYCLE_EVENT_ID, it) }
+        policyRoutingOutcome?.let { put(KEY_POLICY_ROUTING_OUTCOME, it) }
+        policyFailureReason?.let { put(KEY_POLICY_FAILURE_REASON, it) }
+        readinessDegradationHint?.let { put(KEY_READINESS_DEGRADATION_HINT, it) }
+        put(KEY_EXECUTION_RUNTIME_KIND, executionRuntimeKind)
         // ── PR-bridge: Delegated flow bridge identity ─────────────────────────
         if (delegatedFlowId.isNotEmpty()) put(KEY_DELEGATED_FLOW_ID, delegatedFlowId)
         if (flowLineageId.isNotEmpty()) put(KEY_FLOW_LINEAGE_ID, flowLineageId)
@@ -247,6 +284,23 @@ data class DelegatedRuntimeUnit(
          * Value type: String — opaque token produced by the originating executor.
          */
         const val KEY_CONTINUATION_TOKEN = "delegated_unit_continuation_token"
+        const val KEY_DISPATCH_INTENT = "delegated_unit_dispatch_intent"
+        const val KEY_DISPATCH_ORIGIN = "delegated_unit_dispatch_origin"
+        const val KEY_ORCHESTRATION_STAGE = "delegated_unit_orchestration_stage"
+        const val KEY_EXECUTION_CONTEXT_KEYS = "delegated_unit_execution_context_keys"
+        const val KEY_EXECUTOR_TARGET_TYPE = "delegated_unit_executor_target_type"
+        const val KEY_DISPATCH_PLAN_ID = "delegated_unit_dispatch_plan_id"
+        const val KEY_SOURCE_DISPATCH_STRATEGY = "delegated_unit_source_dispatch_strategy"
+        const val KEY_CONTINUITY_TOKEN = "delegated_unit_continuity_token"
+        const val KEY_RECOVERY_CONTEXT_KEYS = "delegated_unit_recovery_context_keys"
+        const val KEY_IS_RESUMABLE = "delegated_unit_is_resumable"
+        const val KEY_INTERRUPTION_REASON = "delegated_unit_interruption_reason"
+        const val KEY_DISPATCH_TRACE_ID = "delegated_unit_dispatch_trace_id"
+        const val KEY_LIFECYCLE_EVENT_ID = "delegated_unit_lifecycle_event_id"
+        const val KEY_POLICY_ROUTING_OUTCOME = "delegated_unit_policy_routing_outcome"
+        const val KEY_POLICY_FAILURE_REASON = "delegated_unit_policy_failure_reason"
+        const val KEY_READINESS_DEGRADATION_HINT = "delegated_unit_readiness_degradation_hint"
+        const val KEY_EXECUTION_RUNTIME_KIND = "delegated_unit_execution_runtime_kind"
 
         // ── PR-bridge: Delegated flow bridge identity key constants ───────────
 
@@ -265,6 +319,11 @@ data class DelegatedRuntimeUnit(
          * Value type: String — sourced from [TakeoverRequestEnvelope.flow_lineage_id].
          */
         const val KEY_FLOW_LINEAGE_ID = "delegated_unit_flow_lineage_id"
+
+        const val EXECUTION_RUNTIME_KIND_DELEGATED = "delegated_execution"
+        const val EXECUTION_RUNTIME_KIND_TAKEOVER_INTERACTIVE = "takeover_interactive"
+        const val EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE = "local_assistive"
+        const val EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK = "degraded_fallback"
 
         /**
          * Creates a [DelegatedRuntimeUnit] from a [TakeoverRequestEnvelope] and an
@@ -298,15 +357,59 @@ data class DelegatedRuntimeUnit(
             checkpoint = envelope.checkpoint,
             constraints = envelope.constraints,
             receivedAtMs = receivedAtMs,
+            dispatchIntent = envelope.dispatch_intent,
+            dispatchOrigin = envelope.dispatch_origin,
+            orchestrationStage = envelope.orchestration_stage,
+            executionContext = envelope.execution_context,
             // ── PR-9: Handoff contract fields ──────────────────────────────────
             handoffReason = envelope.handoff_reason,
             originatingHostId = envelope.originating_host_id,
             originatingFormationRole = envelope.originating_formation_role,
             requiredCapabilityDimensions = envelope.required_capability_dimensions,
             continuationToken = envelope.continuation_token,
+            executorTargetType = envelope.executor_target_type,
+            dispatchPlanId = envelope.dispatch_plan_id,
+            sourceDispatchStrategy = envelope.source_dispatch_strategy,
+            continuityToken = envelope.continuity_token,
+            recoveryContext = envelope.recovery_context,
+            isResumable = envelope.is_resumable,
+            interruptionReason = envelope.interruption_reason,
+            dispatchTraceId = envelope.dispatch_trace_id,
+            lifecycleEventId = envelope.lifecycle_event_id,
+            policyRoutingOutcome = envelope.policy_routing_outcome,
+            policyFailureReason = envelope.policy_failure_reason,
+            readinessDegradationHint = envelope.readiness_degradation_hint,
             // ── PR-bridge: Delegated flow bridge identity ──────────────────────────
             delegatedFlowId = envelope.delegated_flow_id ?: "",
-            flowLineageId = envelope.flow_lineage_id ?: ""
+            flowLineageId = envelope.flow_lineage_id ?: "",
+            executionRuntimeKind = classifyExecutionRuntimeKind(
+                dispatchIntent = envelope.dispatch_intent,
+                sourceDispatchStrategy = envelope.source_dispatch_strategy,
+                isResumable = envelope.is_resumable,
+                interruptionReason = envelope.interruption_reason,
+                recoveryContext = envelope.recovery_context
+            )
         )
+
+        private fun classifyExecutionRuntimeKind(
+            dispatchIntent: String?,
+            sourceDispatchStrategy: String?,
+            isResumable: Boolean?,
+            interruptionReason: String?,
+            recoveryContext: Map<String, String>
+        ): String {
+            val intent = dispatchIntent?.trim()?.lowercase().orEmpty()
+            val strategy = sourceDispatchStrategy?.trim()?.lowercase().orEmpty()
+            return when {
+                strategy == "fallback_local" || intent.contains("fallback") || intent.contains("degraded") ->
+                    EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK
+                intent.contains("assist") ->
+                    EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE
+                isResumable == true || !interruptionReason.isNullOrBlank() || recoveryContext.isNotEmpty() ->
+                    EXECUTION_RUNTIME_KIND_TAKEOVER_INTERACTIVE
+                else ->
+                    EXECUTION_RUNTIME_KIND_DELEGATED
+            }
+        }
     }
 }

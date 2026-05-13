@@ -874,9 +874,14 @@ data class GoalExecutionPayload(
     val subtask_index: Int? = null,
     val timeout_ms: Long = 0L,
     val source_runtime_posture: String? = null,
+    // Explicit Android runtime execution semantic class used for canonical closure reporting.
+    val execution_runtime_kind: String? = null,
     // ── PR-D: V2 staged dispatch metadata (optional; null-safe for legacy senders) ──
     val staged_mesh_id: String? = null,
     val staged_subtask_id: String? = null,
+    val dispatch_intent: String? = null,
+    val dispatch_origin: String? = null,
+    val orchestration_stage: String? = null,
     val execution_context: Map<String, String> = emptyMap(),
     // ── PR-E: V2 explicit executor target typing (optional; null-safe for legacy senders) ──
     val executor_target_type: String? = null,
@@ -1026,6 +1031,10 @@ data class GoalResultPayload(
     val outputs: List<String> = emptyList(),
     val error: String? = null,
     val source_runtime_posture: String? = null,
+    val execution_runtime_kind: String? = null,
+    val dispatch_intent: String? = null,
+    val dispatch_origin: String? = null,
+    val orchestration_stage: String? = null,
     // ── PR-E: V2 explicit executor target typing (optional; echoed for full-chain correlation) ──
     val executor_target_type: String? = null,
     // ── PR-F: V2 durable continuity and recovery context (optional; echoed for full-chain correlation) ──

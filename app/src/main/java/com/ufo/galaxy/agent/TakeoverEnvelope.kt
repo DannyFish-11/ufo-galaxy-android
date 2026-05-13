@@ -135,6 +135,11 @@ data class TakeoverRequestEnvelope(
     val context: Map<String, String> = emptyMap(),
     val constraints: List<String> = emptyList(),
     val checkpoint: String? = null,
+    // ── PR-D: V2 source dispatch intent metadata (optional; null-safe for legacy senders) ──
+    val dispatch_intent: String? = null,
+    val dispatch_origin: String? = null,
+    val orchestration_stage: String? = null,
+    val execution_context: Map<String, String> = emptyMap(),
     // ── PR-9: Handoff contract fields ─────────────────────────────────────────
     val handoff_reason: String? = null,
     val originating_host_id: String? = null,
@@ -151,6 +156,13 @@ data class TakeoverRequestEnvelope(
     val recovery_context: Map<String, String> = emptyMap(),
     val is_resumable: Boolean? = null,
     val interruption_reason: String? = null,
+    // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
+    val dispatch_trace_id: String? = null,
+    val lifecycle_event_id: String? = null,
+    // ── PR-49 (PR-I): V2 policy-driven routing metadata (optional; null-safe for legacy senders) ──
+    val policy_routing_outcome: String? = null,
+    val policy_failure_reason: String? = null,
+    val readiness_degradation_hint: String? = null,
     // ── PR-bridge: Delegated flow bridge identity (optional; null-safe for legacy senders) ──
     val delegated_flow_id: String? = null,
     val flow_lineage_id: String? = null
