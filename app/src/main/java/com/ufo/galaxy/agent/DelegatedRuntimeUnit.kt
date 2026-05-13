@@ -199,7 +199,7 @@ data class DelegatedRuntimeUnit(
         sourceDispatchStrategy?.let { put(KEY_SOURCE_DISPATCH_STRATEGY, it) }
         continuityToken?.let { put(KEY_CONTINUITY_TOKEN, it) }
         if (recoveryContext.isNotEmpty()) put(KEY_RECOVERY_CONTEXT_KEYS, recoveryContext.keys.joinToString(","))
-        isResumable?.let { put(KEY_IS_RESUMABLE, it) }
+        isResumable?.let { put(KEY_IS_RESUMABLE, it.toString()) }
         interruptionReason?.let { put(KEY_INTERRUPTION_REASON, it) }
         dispatchTraceId?.let { put(KEY_DISPATCH_TRACE_ID, it) }
         lifecycleEventId?.let { put(KEY_LIFECYCLE_EVENT_ID, it) }
@@ -328,6 +328,7 @@ data class DelegatedRuntimeUnit(
         private const val INTENT_KEYWORD_FALLBACK_LOWERCASE = "fallback"
         private const val INTENT_KEYWORD_DEGRADED_LOWERCASE = "degraded"
         private const val INTENT_KEYWORD_ASSIST_LOWERCASE = "assist"
+        private val INTENT_SPLIT_REGEX = Regex("[^a-z0-9]+")
 
         /**
          * Creates a [DelegatedRuntimeUnit] from a [TakeoverRequestEnvelope] and an
@@ -409,7 +410,7 @@ data class DelegatedRuntimeUnit(
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
                 ?.lowercase()
-                ?.split(Regex("[^a-z0-9]+"))
+                ?.split(INTENT_SPLIT_REGEX)
                 ?.filter(String::isNotBlank)
                 .orEmpty()
             return when {
