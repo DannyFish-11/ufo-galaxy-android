@@ -115,6 +115,7 @@ class DelegatedTakeoverExecutor(
     private val signalSink: DelegatedExecutionSignalSink,
     private val emittedSignalLedgerStore: PersistentEmittedSignalLedgerStore? = null
 ) {
+    private val emittedLifecycleMarkers = mutableSetOf<String>()
 
     // ── Outcome types ─────────────────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ class DelegatedTakeoverExecutor(
         // ── 2. Emit ACK signal — host can mark unit as acknowledged ───────────
         val ackSignal = DelegatedExecutionSignal.ack(tracker, nowMs)
         recordEmitted(ledgerExecutionKey, ledger, ackSignal)
-        signalSink.onSignal(ackSignal)
+        emitSignalIfNew(ackSignal)
 
         Log.d(
             TAG,
@@ -307,7 +308,7 @@ class DelegatedTakeoverExecutor(
         // at ACTIVE is guaranteed by the executor regardless of pipeline implementation.
         val progressSignal = DelegatedExecutionSignal.progress(tracker, nowMs)
         recordEmitted(ledgerExecutionKey, ledger, progressSignal)
-        signalSink.onSignal(progressSignal)
+        emitSignalIfNew(progressSignal)
 
         Log.d(
             TAG,
@@ -330,7 +331,7 @@ class DelegatedTakeoverExecutor(
                 resultKind = DelegatedExecutionSignal.ResultKind.COMPLETED
             )
             recordEmitted(ledgerExecutionKey, ledger, resultSignal)
-            signalSink.onSignal(resultSignal)
+            emitSignalIfNew(resultSignal)
 
             Log.d(
                 TAG,
@@ -348,7 +349,7 @@ class DelegatedTakeoverExecutor(
 
             val timeoutSignal = DelegatedExecutionSignal.timeout(tracker = tracker)
             recordEmitted(ledgerExecutionKey, ledger, timeoutSignal)
-            signalSink.onSignal(timeoutSignal)
+            emitSignalIfNew(timeoutSignal)
 
             val errorMessage = e.message ?: "execution_timeout"
             Log.w(
@@ -367,7 +368,7 @@ class DelegatedTakeoverExecutor(
 
             val cancelledSignal = DelegatedExecutionSignal.cancelled(tracker = tracker)
             recordEmitted(ledgerExecutionKey, ledger, cancelledSignal)
-            signalSink.onSignal(cancelledSignal)
+            emitSignalIfNew(cancelledSignal)
 
             val errorMessage = e.message ?: "execution_cancelled"
             Log.w(
@@ -387,7 +388,7 @@ class DelegatedTakeoverExecutor(
                 resultKind = DelegatedExecutionSignal.ResultKind.FAILED
             )
             recordEmitted(ledgerExecutionKey, ledger, failedSignal)
-            signalSink.onSignal(failedSignal)
+            emitSignalIfNew(failedSignal)
 
             val errorMessage = e.message ?: "execution_error"
             Log.w(
@@ -409,6 +410,32 @@ class DelegatedTakeoverExecutor(
         ledger.recordEmitted(signal)
         emittedSignalLedgerStore?.save(executionKey, ledger)
     }
+
+    private fun emitSignalIfNew(signal: DelegatedExecutionSignal) {
+        val marker = buildLifecycleMarker(signal)
+        val shouldEmit = synchronized(emittedLifecycleMarkers) {
+            emittedLifecycleMarkers.add(marker)
+        }
+        if (!shouldEmit) {
+            Log.i(
+                TAG,
+                "[PR3:TAKEOVER] Suppressed duplicate lifecycle emission marker=$marker " +
+                    "signal_id=${signal.signalId}"
+            )
+            return
+        }
+        signalSink.onSignal(signal)
+    }
+
+    private fun buildLifecycleMarker(signal: DelegatedExecutionSignal): String =
+        listOf(
+            signal.unitId,
+            signal.taskId,
+            signal.traceId,
+            signal.attachedSessionId,
+            signal.kind.wireValue,
+            signal.resultKind?.wireValue.orEmpty()
+        ).joinToString("|")
 
     // ── Companion ─────────────────────────────────────────────────────────────
 

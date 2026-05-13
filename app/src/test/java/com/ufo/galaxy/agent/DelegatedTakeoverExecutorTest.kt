@@ -216,6 +216,22 @@ class DelegatedTakeoverExecutorTest {
         assertEquals("sess-ack", ack.attachedSessionId)
     }
 
+    @Test
+    fun `duplicate lifecycle emissions are suppressed for repeated execution of same unit`() {
+        val (captured, sink) = captureSignals()
+        val unit = makeUnit(unitId = "unit-dup", taskId = "task-dup", traceId = "trace-dup", sessionId = "sess-dup")
+        val executor = buildExecutor(sink = sink)
+
+        executor.execute(unit, pendingRecord(unit), nowMs = 1_000L)
+        executor.execute(unit, pendingRecord(unit), nowMs = 2_000L)
+
+        assertEquals(
+            "ACK, PROGRESS, and RESULT should only be emitted once for the same lifecycle marker set",
+            3,
+            captured.size
+        )
+    }
+
     // ── Tracker lifecycle on success ──────────────────────────────────────────
 
     @Test

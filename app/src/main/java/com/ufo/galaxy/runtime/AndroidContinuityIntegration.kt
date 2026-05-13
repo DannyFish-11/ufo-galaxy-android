@@ -298,6 +298,48 @@ class AndroidContinuityIntegration {
         data class Rejected(val reason: String) : TakeoverRecoveryAuthorityResult()
     }
 
+    enum class ContinuityDisposition(val wireValue: String) {
+        RESUME("resume"),
+        REPLAY("replay"),
+        RESTART("restart"),
+        DUPLICATE("duplicate"),
+        STALE_RESULT("stale_result"),
+        RESUMED_CLOSURE("resumed_closure"),
+        ATTACHMENT_ONLY_RECOVERY("attachment_only_recovery");
+
+        companion object {
+            fun fromWireValue(value: String?): ContinuityDisposition? =
+                entries.firstOrNull { it.wireValue == value }
+        }
+    }
+
+    enum class ContinuityGovernanceAction(val wireValue: String) {
+        ALLOW_RESUME("allow_resume"),
+        ALLOW_REPLAY("allow_replay"),
+        START_FRESH("start_fresh"),
+        DROP_DUPLICATE("drop_duplicate"),
+        REJECT_STALE("reject_stale"),
+        REQUIRE_V2_REVALIDATION("require_v2_revalidation");
+
+        companion object {
+            fun fromWireValue(value: String?): ContinuityGovernanceAction? =
+                entries.firstOrNull { it.wireValue == value }
+        }
+    }
+
+    data class ContinuityGovernanceDecision(
+        val disposition: ContinuityDisposition,
+        val action: ContinuityGovernanceAction,
+        val axis: CanonicalSessionAxis.RuntimeGovernanceSnapshot,
+        val reason: String
+    ) {
+        fun toAuditMap(): Map<String, Any?> = mapOf(
+            "continuity_disposition" to disposition.wireValue,
+            "governance_action" to action.wireValue,
+            "reason" to reason
+        ) + axis.toAuditMap()
+    }
+
     // ── Core API ──────────────────────────────────────────────────────────────
 
     /**
@@ -486,6 +528,89 @@ class AndroidContinuityIntegration {
             }
         }
         return TakeoverRecoveryAuthorityResult.Valid
+    }
+
+    /**
+     * Classifies Android-side continuity behavior into one executable governance outcome.
+     *
+     * This explicitly separates resume, replay, restart, duplicate suppression, stale-result
+     * rejection, resumed-closure revalidation, and attachment-only recovery so reconnect paths
+     * cannot silently blur them together.
+     */
+    fun classifyContinuityGovernance(
+        runtimeSessionId: String?,
+        activeSession: AttachedRuntimeSession?,
+        durableSession: DurableSessionContinuityRecord?,
+        priorFlowRecord: DelegatedFlowContinuityRecord? = null,
+        queuedSessionTag: String? = null,
+        duplicateDetected: Boolean = false,
+        hasQueuedReplay: Boolean = false
+    ): ContinuityGovernanceDecision {
+        val axis = CanonicalSessionAxis.buildRuntimeGovernanceSnapshot(
+            runtimeSessionId = runtimeSessionId,
+            activeSessionId = activeSession?.sessionId,
+            durableSessionId = durableSession?.durableSessionId,
+            continuityEpoch = durableSession?.sessionContinuityEpoch
+        )
+        val priorPhase = priorFlowRecord?.executionPhase?.let(AndroidFlowExecutionPhase::fromWireValue)
+        return when {
+            duplicateDetected ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.DUPLICATE,
+                    action = ContinuityGovernanceAction.DROP_DUPLICATE,
+                    axis = axis,
+                    reason = "duplicate_runtime_delivery"
+                )
+            queuedSessionTag != null && durableSession == null ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                    action = ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                    axis = axis,
+                    reason = "queued_result_without_durable_authority"
+                )
+            queuedSessionTag != null && queuedSessionTag != durableSession.durableSessionId ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.STALE_RESULT,
+                    action = ContinuityGovernanceAction.REJECT_STALE,
+                    axis = axis,
+                    reason = "stale_durable_session_tag"
+                )
+            priorPhase?.isTerminal == true ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.RESUMED_CLOSURE,
+                    action = ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                    axis = axis,
+                    reason = "terminal_context_requires_v2_closure_decision"
+                )
+            hasQueuedReplay && durableSession != null ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.REPLAY,
+                    action = ContinuityGovernanceAction.ALLOW_REPLAY,
+                    axis = axis,
+                    reason = "offline_queue_matches_current_durable_session"
+                )
+            priorFlowRecord != null ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.RESUME,
+                    action = ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                    axis = axis,
+                    reason = "prior_flow_context_present"
+                )
+            activeSession?.isAttached == true ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                    action = ContinuityGovernanceAction.ALLOW_RESUME,
+                    axis = axis,
+                    reason = "active_attachment_rebind_only"
+                )
+            else ->
+                ContinuityGovernanceDecision(
+                    disposition = ContinuityDisposition.RESTART,
+                    action = ContinuityGovernanceAction.START_FRESH,
+                    axis = axis,
+                    reason = "no_prior_continuity_context"
+                )
+        }
     }
 
     /**

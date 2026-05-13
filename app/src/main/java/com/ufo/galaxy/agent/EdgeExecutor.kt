@@ -137,6 +137,18 @@ class EdgeExecutor(
             )
         val (initialFullBytes, initW, initH) = initialCapture
         val initialBase64 = Base64.getEncoder().encodeToString(initialFullBytes)
+
+        val plannerAuthority = LocalPlannerService.classifyAuthority(taskAssign.constraints)
+        if (!plannerAuthority.boundary.allowsAutonomousExecution) {
+            return buildResult(
+                taskId = taskAssign.task_id,
+                status = STATUS_ERROR,
+                error = "Planning blocked: ${plannerAuthority.reason}",
+                steps = accumulatedSteps,
+                snapshot = makeSnapshot(initialBase64, initW, initH)
+            )
+        }
+
         emitPerception(
             DevicePerceptionEmissionPayload(
                 flow_id = taskAssign.task_id,

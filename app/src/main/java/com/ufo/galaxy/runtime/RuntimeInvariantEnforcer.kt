@@ -239,6 +239,9 @@ object RuntimeInvariantEnforcer {
         /** Reconnect recovery state must be consistent with runtime state. */
         RECOVERY_STATE_CONSISTENT_WITH_RUNTIME("recovery_state_consistent_with_runtime"),
 
+        /** Recovery states require a durable session continuity record. */
+        RECOVERY_STATE_REQUIRES_DURABLE_SESSION("recovery_state_requires_durable_session"),
+
         /** Kill-switch state must preclude an Active runtime with an ATTACHED session. */
         KILL_SWITCH_CLEARS_CROSS_DEVICE("kill_switch_clears_cross_device");
 
@@ -430,6 +433,19 @@ object RuntimeInvariantEnforcer {
                 "RuntimeController.stop() which always resets recovery state to IDLE."
         ),
 
+        RuntimeInvariant(
+            id = InvariantId.RECOVERY_STATE_REQUIRES_DURABLE_SESSION,
+            scope = InvariantScope.SESSION,
+            severity = InvariantSeverity.CRITICAL,
+            description = "ReconnectRecoveryState.RECOVERING, FAILED, or RECOVERED requires a " +
+                "DurableSessionContinuityRecord. Recovery without a durable era would blur replay, " +
+                "resume, and restart semantics.",
+            canonicalSurface = "RuntimeController.reconnectRecoveryState + RuntimeController.durableSessionContinuityRecord",
+            driftRisk = AndroidContractFinalizer.DriftRisk.HIGH,
+            enforcementNote = "Checked in RuntimeInvariantEnforcer.checkAll(); recovery-state transitions " +
+                "must retain the durable continuity anchor until V2-side recovery closes."
+        ),
+
         // ── Kill-switch invariant ─────────────────────────────────────────────
 
         RuntimeInvariant(
@@ -526,6 +542,7 @@ object RuntimeInvariantEnforcer {
         checkDispatchEligibilityConsistentWithReadiness(runtimeState, attachedSession, rollout),
         checkDurableSessionPresentWhenActive(runtimeState, durableRecord),
         checkRecoveryStateConsistentWithRuntime(runtimeState, recoveryState),
+        checkRecoveryStateRequiresDurableSession(durableRecord, recoveryState),
         checkKillSwitchClearsCrossDevice(runtimeState, attachedSession, rollout)
     )
 
@@ -805,6 +822,33 @@ object RuntimeInvariantEnforcer {
     }
 
     /**
+     * Checks [InvariantId.RECOVERY_STATE_REQUIRES_DURABLE_SESSION].
+     *
+     * Violation: recovery state is RECOVERING/FAILED/RECOVERED but durable session is absent.
+     */
+    fun checkRecoveryStateRequiresDurableSession(
+        durableRecord: DurableSessionContinuityRecord?,
+        recoveryState: ReconnectRecoveryState
+    ): InvariantCheckResult {
+        val id = InvariantId.RECOVERY_STATE_REQUIRES_DURABLE_SESSION
+        val recoveryRelevant = recoveryState == ReconnectRecoveryState.RECOVERING ||
+            recoveryState == ReconnectRecoveryState.FAILED ||
+            recoveryState == ReconnectRecoveryState.RECOVERED
+        if (!recoveryRelevant) {
+            return InvariantCheckResult(id, InvariantOutcome.SATISFIED)
+        }
+        return if (durableRecord != null) {
+            InvariantCheckResult(id, InvariantOutcome.SATISFIED)
+        } else {
+            InvariantCheckResult(
+                id,
+                InvariantOutcome.VIOLATED,
+                "RecoveryState=$recoveryState but durableSessionContinuityRecord is null"
+            )
+        }
+    }
+
+    /**
      * Checks [InvariantId.KILL_SWITCH_CLEARS_CROSS_DEVICE].
      *
      * Violation: rollout reflects kill-switch (crossDeviceAllowed=false AND
@@ -846,7 +890,7 @@ object RuntimeInvariantEnforcer {
      * Short description of what this invariant enforcer declares.
      */
     const val DESCRIPTION: String =
-        "PR-42 runtime invariant enforcer: defines nine high-value Android runtime " +
+        "PR-42 runtime invariant enforcer: defines ten high-value Android runtime " +
             "participation invariants across SESSION, TRANSPORT, READINESS, DISPATCH, and " +
             "SNAPSHOT scopes.  Provides pure-function check utilities for use at dispatch " +
             "boundaries, diagnostics checkpoints, and acceptance tests."

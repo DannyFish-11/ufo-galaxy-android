@@ -33,6 +33,40 @@ import com.ufo.galaxy.data.AppSettings
  */
 class TakeoverEligibilityAssessor(private val settings: AppSettings) {
 
+    enum class OwnershipTransferProofClass(val wireValue: String) {
+        CONFIRMED_STRONG("confirmed_strong"),
+        DEGRADED_PARTIAL("degraded_partial"),
+        DEGRADED_STALE("degraded_stale"),
+        DEGRADED_CONFLICTING("degraded_conflicting"),
+        DEGRADED_UNRESOLVED("degraded_unresolved"),
+        INCOMPLETE("incomplete");
+
+        companion object {
+            fun fromWireValue(value: String?): OwnershipTransferProofClass? =
+                entries.firstOrNull { it.wireValue == value }
+        }
+    }
+
+    enum class RecoveryGovernanceAction(val wireValue: String) {
+        ACCEPT_RECOVERY("accept_recovery"),
+        REVALIDATE_WITH_V2("revalidate_with_v2"),
+        REJECT_STALE_EVIDENCE("reject_stale_evidence"),
+        ESCALATE_TO_OPERATOR("escalate_to_operator"),
+        FORCED_SUSPEND("forced_suspend");
+
+        companion object {
+            fun fromWireValue(value: String?): RecoveryGovernanceAction? =
+                entries.firstOrNull { it.wireValue == value }
+        }
+    }
+
+    data class RecoveryGovernanceAssessment(
+        val action: RecoveryGovernanceAction,
+        val proofClass: OwnershipTransferProofClass?,
+        val reason: String,
+        val isRecoveryDispatch: Boolean
+    )
+
     /**
      * Structured outcome code for a takeover eligibility assessment.
      *
@@ -76,7 +110,19 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
          * supported; the main runtime must wait for the active takeover to complete before
          * issuing a new one.
          */
-        BLOCKED_CONCURRENT_TAKEOVER("concurrent_takeover_active")
+        BLOCKED_CONCURRENT_TAKEOVER("concurrent_takeover_active"),
+
+        /** Recovery dispatch carries degraded but non-stale proof and must be revalidated by V2. */
+        BLOCKED_RECOVERY_REQUIRES_REVALIDATION("recovery_requires_revalidation"),
+
+        /** Recovery dispatch carries stale ownership evidence and must be rejected. */
+        BLOCKED_RECOVERY_STALE_EVIDENCE("recovery_stale_evidence"),
+
+        /** Recovery dispatch is explicitly forced into suspend mode pending operator action. */
+        BLOCKED_RECOVERY_FORCED_SUSPEND("recovery_forced_suspend"),
+
+        /** Recovery dispatch evidence is conflicting or explicitly escalated to an operator. */
+        BLOCKED_RECOVERY_OPERATOR_ESCALATION("recovery_operator_escalation_required")
     }
 
     /**
@@ -130,6 +176,30 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
         if (!settings.overlayReady) {
             return blocked(EligibilityOutcome.BLOCKED_OVERLAY_NOT_READY)
         }
+        val recoveryGovernance = assessRecoveryGovernance(envelope)
+        when (recoveryGovernance.action) {
+            RecoveryGovernanceAction.ACCEPT_RECOVERY -> Unit
+            RecoveryGovernanceAction.REVALIDATE_WITH_V2 ->
+                return blocked(
+                    EligibilityOutcome.BLOCKED_RECOVERY_REQUIRES_REVALIDATION,
+                    recoveryGovernance.reason
+                )
+            RecoveryGovernanceAction.REJECT_STALE_EVIDENCE ->
+                return blocked(
+                    EligibilityOutcome.BLOCKED_RECOVERY_STALE_EVIDENCE,
+                    recoveryGovernance.reason
+                )
+            RecoveryGovernanceAction.FORCED_SUSPEND ->
+                return blocked(
+                    EligibilityOutcome.BLOCKED_RECOVERY_FORCED_SUSPEND,
+                    recoveryGovernance.reason
+                )
+            RecoveryGovernanceAction.ESCALATE_TO_OPERATOR ->
+                return blocked(
+                    EligibilityOutcome.BLOCKED_RECOVERY_OPERATOR_ESCALATION,
+                    recoveryGovernance.reason
+                )
+        }
         if (activeTakeoverId != null) {
             return EligibilityResult(
                 eligible = false,
@@ -147,9 +217,83 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun blocked(outcome: EligibilityOutcome) = EligibilityResult(
+    fun assessRecoveryGovernance(envelope: TakeoverRequestEnvelope): RecoveryGovernanceAssessment {
+        val isRecoveryDispatch = envelope.is_resumable == true ||
+            !envelope.interruption_reason.isNullOrBlank() ||
+            envelope.recovery_context.isNotEmpty()
+        if (!isRecoveryDispatch) {
+            return RecoveryGovernanceAssessment(
+                action = RecoveryGovernanceAction.ACCEPT_RECOVERY,
+                proofClass = null,
+                reason = EligibilityOutcome.ELIGIBLE.reason,
+                isRecoveryDispatch = false
+            )
+        }
+
+        val proofClass = OwnershipTransferProofClass.fromWireValue(
+            envelope.recovery_context[KEY_OWNERSHIP_TRANSFER_PROOF_CLASS]
+        )
+        val governanceAction = RecoveryGovernanceAction.fromWireValue(
+            envelope.recovery_context[KEY_TAKEOVER_GOVERNANCE_ACTION]
+        )
+        val operatorResponse = envelope.recovery_context[KEY_OPERATOR_RESPONSE]?.trim()?.lowercase()
+
+        return when {
+            governanceAction == RecoveryGovernanceAction.FORCED_SUSPEND ->
+                RecoveryGovernanceAssessment(
+                    action = RecoveryGovernanceAction.FORCED_SUSPEND,
+                    proofClass = proofClass,
+                    reason = "recovery_forced_suspend:${proofClass?.wireValue ?: "unspecified"}",
+                    isRecoveryDispatch = true
+                )
+            operatorResponse == OPERATOR_RESPONSE_ESCALATE ||
+                governanceAction == RecoveryGovernanceAction.ESCALATE_TO_OPERATOR ||
+                proofClass == OwnershipTransferProofClass.DEGRADED_CONFLICTING ->
+                RecoveryGovernanceAssessment(
+                    action = RecoveryGovernanceAction.ESCALATE_TO_OPERATOR,
+                    proofClass = proofClass,
+                    reason = "recovery_operator_escalation:${proofClass?.wireValue ?: "conflicting_or_requested"}",
+                    isRecoveryDispatch = true
+                )
+            proofClass == OwnershipTransferProofClass.DEGRADED_STALE ->
+                RecoveryGovernanceAssessment(
+                    action = RecoveryGovernanceAction.REJECT_STALE_EVIDENCE,
+                    proofClass = proofClass,
+                    reason = "recovery_stale_evidence:${proofClass.wireValue}",
+                    isRecoveryDispatch = true
+                )
+            governanceAction == RecoveryGovernanceAction.REVALIDATE_WITH_V2 ||
+                proofClass == null ||
+                proofClass == OwnershipTransferProofClass.DEGRADED_PARTIAL ||
+                proofClass == OwnershipTransferProofClass.DEGRADED_UNRESOLVED ||
+                proofClass == OwnershipTransferProofClass.INCOMPLETE ->
+                RecoveryGovernanceAssessment(
+                    action = RecoveryGovernanceAction.REVALIDATE_WITH_V2,
+                    proofClass = proofClass,
+                    reason = "recovery_requires_revalidation:${proofClass?.wireValue ?: "missing_proof"}",
+                    isRecoveryDispatch = true
+                )
+            else ->
+                RecoveryGovernanceAssessment(
+                    action = RecoveryGovernanceAction.ACCEPT_RECOVERY,
+                    proofClass = proofClass,
+                    reason = EligibilityOutcome.ELIGIBLE.reason,
+                    isRecoveryDispatch = true
+                )
+        }
+    }
+
+    private fun blocked(outcome: EligibilityOutcome, reason: String = outcome.reason) = EligibilityResult(
         eligible = false,
         outcome = outcome,
-        reason = outcome.reason
+        reason = reason
     )
+
+    companion object {
+        const val KEY_OWNERSHIP_TRANSFER_PROOF_CLASS = "ownership_transfer_proof_class"
+        const val KEY_TAKEOVER_GOVERNANCE_ACTION = "takeover_governance_action"
+        const val KEY_OPERATOR_RESPONSE = "operator_response"
+
+        private const val OPERATOR_RESPONSE_ESCALATE = "escalate"
+    }
 }
