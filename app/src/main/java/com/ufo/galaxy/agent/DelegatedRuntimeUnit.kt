@@ -324,6 +324,10 @@ data class DelegatedRuntimeUnit(
         const val EXECUTION_RUNTIME_KIND_TAKEOVER_INTERACTIVE = "takeover_interactive"
         const val EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE = "local_assistive"
         const val EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK = "degraded_fallback"
+        private const val DISPATCH_STRATEGY_FALLBACK_LOCAL = "fallback_local"
+        private const val INTENT_KEYWORD_FALLBACK = "fallback"
+        private const val INTENT_KEYWORD_DEGRADED = "degraded"
+        private const val INTENT_KEYWORD_ASSIST = "assist"
 
         /**
          * Creates a [DelegatedRuntimeUnit] from a [TakeoverRequestEnvelope] and an
@@ -401,10 +405,14 @@ data class DelegatedRuntimeUnit(
             val intent = dispatchIntent?.trim()?.lowercase().orEmpty()
             val strategy = sourceDispatchStrategy?.trim()?.lowercase().orEmpty()
             return when {
-                strategy == "fallback_local" || intent.contains("fallback") || intent.contains("degraded") ->
+                strategy == DISPATCH_STRATEGY_FALLBACK_LOCAL ||
+                    intent.contains(INTENT_KEYWORD_FALLBACK) ||
+                    intent.contains(INTENT_KEYWORD_DEGRADED) ->
                     EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK
-                intent.contains("assist") ->
+                intent.contains(INTENT_KEYWORD_ASSIST) ->
                     EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE
+                // Resumable or recovery-aware dispatches are takeover-interactive by contract:
+                // they continue an in-flight execution with session/recovery continuity signals.
                 isResumable == true || !interruptionReason.isNullOrBlank() || recoveryContext.isNotEmpty() ->
                     EXECUTION_RUNTIME_KIND_TAKEOVER_INTERACTIVE
                 else ->
