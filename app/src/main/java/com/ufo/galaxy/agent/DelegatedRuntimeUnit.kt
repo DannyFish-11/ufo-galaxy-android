@@ -325,9 +325,9 @@ data class DelegatedRuntimeUnit(
         const val EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE = "local_assistive"
         const val EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK = "degraded_fallback"
         private const val DISPATCH_STRATEGY_FALLBACK_LOCAL = "fallback_local"
-        private const val INTENT_KEYWORD_FALLBACK = "fallback"
-        private const val INTENT_KEYWORD_DEGRADED = "degraded"
-        private const val INTENT_KEYWORD_ASSIST = "assist"
+        private const val INTENT_KEYWORD_FALLBACK_LOWERCASE = "fallback"
+        private const val INTENT_KEYWORD_DEGRADED_LOWERCASE = "degraded"
+        private const val INTENT_KEYWORD_ASSIST_LOWERCASE = "assist"
 
         /**
          * Creates a [DelegatedRuntimeUnit] from a [TakeoverRequestEnvelope] and an
@@ -402,14 +402,22 @@ data class DelegatedRuntimeUnit(
             interruptionReason: String?,
             recoveryContext: Map<String, String>
         ): String {
-            val intent = dispatchIntent?.trim()?.lowercase().orEmpty()
-            val strategy = sourceDispatchStrategy?.trim()?.lowercase().orEmpty()
+            val strategy = sourceDispatchStrategy?.trim()?.takeIf { it.isNotEmpty() }?.lowercase().orEmpty()
+            // Dispatch-intent matching uses exact token matching on normalized lowercase tokens
+            // to avoid accidental substring matches such as "non_fallback_mode".
+            val intentTokens = dispatchIntent
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.lowercase()
+                ?.split(Regex("[^a-z0-9]+"))
+                ?.filter(String::isNotBlank)
+                .orEmpty()
             return when {
                 strategy == DISPATCH_STRATEGY_FALLBACK_LOCAL ||
-                    intent.contains(INTENT_KEYWORD_FALLBACK) ||
-                    intent.contains(INTENT_KEYWORD_DEGRADED) ->
+                    intentTokens.contains(INTENT_KEYWORD_FALLBACK_LOWERCASE) ||
+                    intentTokens.contains(INTENT_KEYWORD_DEGRADED_LOWERCASE) ->
                     EXECUTION_RUNTIME_KIND_DEGRADED_FALLBACK
-                intent.contains(INTENT_KEYWORD_ASSIST) ->
+                intentTokens.contains(INTENT_KEYWORD_ASSIST_LOWERCASE) ->
                     EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE
                 // Resumable or recovery-aware dispatches are takeover-interactive by contract:
                 // they continue an in-flight execution with session/recovery continuity signals.
