@@ -68,6 +68,31 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
     }
 
     @Test
+    fun `tracker records ordered transition history with trigger`() {
+        val tracker = AndroidAuthoritativeParticipationTruth.Tracker(historyLimit = 8)
+        tracker.evaluate(baseInput(crossDeviceEnabled = false), timestampMs = 10L)
+        val snapshot = tracker.evaluate(
+            baseInput(
+                crossDeviceEnabled = true,
+                wsConnected = true,
+                capabilityVisible = true,
+                runtimeSessionAvailable = true,
+                fullyAttached = true,
+                readinessSatisfied = true,
+                dispatchEligible = true,
+                distributedRuntimeActivity = true
+            ),
+            timestampMs = 20L
+        )
+
+        assertEquals(AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT, snapshot.state)
+        assertEquals("cross_device_enabled", snapshot.lastTransitionTrigger)
+        assertEquals(1L, snapshot.transitionSequence)
+        assertTrue(snapshot.transitionHistory.isNotEmpty())
+        assertTrue(snapshot.transitionHistoryWire.first().contains("local_only->distributed_participant"))
+    }
+
+    @Test
     fun `runtime truth map includes authoritative participation state`() {
         val descriptor = RuntimeHostDescriptor(
             hostId = "host-1",
@@ -78,12 +103,24 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
         )
         val truth = AndroidParticipantRuntimeTruth.from(
             descriptor = descriptor,
-            authoritativeParticipationState = AndroidAuthoritativeParticipationTruth.State.DISPATCH_ELIGIBLE.wireValue
+            authoritativeParticipationState = AndroidAuthoritativeParticipationTruth.State.DISPATCH_ELIGIBLE.wireValue,
+            authoritativeParticipationTransitionSequence = 7L,
+            authoritativeParticipationTransitionTrigger = "readiness_satisfied",
+            authoritativeParticipationTransitionHistory =
+                listOf("7|fully_attached->dispatch_eligible|readiness_satisfied|171111111")
         )
         val map = truth.toMap()
         assertEquals(
             AndroidAuthoritativeParticipationTruth.State.DISPATCH_ELIGIBLE.wireValue,
             map[AndroidParticipantRuntimeTruth.KEY_AUTHORITATIVE_PARTICIPATION_STATE]
+        )
+        assertEquals(
+            7L,
+            map[AndroidParticipantRuntimeTruth.KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_SEQUENCE]
+        )
+        assertEquals(
+            "readiness_satisfied",
+            map[AndroidParticipantRuntimeTruth.KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_TRIGGER]
         )
     }
 
@@ -108,10 +145,13 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
             warmup_result = "ok",
             offline_queue_depth = 0,
             current_fallback_tier = "none",
-            authoritative_participation_state = AndroidAuthoritativeParticipationTruth.State.FULLY_ATTACHED.wireValue
+            authoritative_participation_state = AndroidAuthoritativeParticipationTruth.State.FULLY_ATTACHED.wireValue,
+            authoritative_participation_transition_sequence = 5L,
+            authoritative_participation_transition_trigger = "session_established"
         )
         val json = gson.toJson(payload)
         assertTrue(json.contains("\"authoritative_participation_state\":\"fully_attached\""))
+        assertTrue(json.contains("\"authoritative_participation_transition_sequence\":5"))
     }
 
     @Test
@@ -120,10 +160,13 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
             flow_id = "f1",
             task_id = "t1",
             phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
-            authoritative_participation_state = AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT.wireValue
+            authoritative_participation_state =
+                AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT.wireValue,
+            authoritative_participation_transition_trigger = "distributed_activity_started"
         )
         val json = gson.toJson(payload)
         assertTrue(json.contains("\"authoritative_participation_state\":\"distributed_participant\""))
+        assertTrue(json.contains("\"authoritative_participation_transition_trigger\":\"distributed_activity_started\""))
     }
 
     private fun baseInput(

@@ -29,7 +29,6 @@ import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
-import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
@@ -432,22 +431,12 @@ class GalaxyConnectionService : Service() {
             val dispatchReadiness = runtimeController.currentDispatchReadiness()
             val distributedRuntimeActivity =
                 isDistributedParticipationActivePhase(payload.phase)
-            val participationState = AndroidAuthoritativeParticipationTruth.derive(
-                AndroidAuthoritativeParticipationTruth.DerivationInput(
-                    crossDeviceEnabled = settings.crossDeviceEnabled,
-                    wsConnected = webSocketClient.isConnected(),
-                    registrationInFlight = runtimeController.state.value is com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Starting,
-                    capabilityVisible = hasVisibleCrossDeviceCapability(
-                        crossDeviceEligibility = modeState.crossDeviceEligibility,
-                        sessionIsAttached = dispatchReadiness.sessionIsAttached
-                    ),
-                    readinessSatisfied = modeState.crossDeviceEligibility,
-                    runtimeSessionAvailable = !UFOGalaxyApplication.runtimeSessionId.isNullOrBlank(),
-                    fullyAttached = dispatchReadiness.sessionIsAttached,
-                    dispatchEligible = dispatchReadiness.isEligible,
-                    continuityIntact = runtimeController.reconnectRecoveryState.value != ReconnectRecoveryState.FAILED,
-                    operatorSuspendedOrIsolated = false,
-                    distributedRuntimeActivity = distributedRuntimeActivity
+            val participationSnapshot = runtimeController.evaluateAuthoritativeParticipationSnapshot(
+                readinessSatisfied = modeState.crossDeviceEligibility,
+                distributedRuntimeActivity = distributedRuntimeActivity,
+                capabilityVisible = hasVisibleCrossDeviceCapability(
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    sessionIsAttached = dispatchReadiness.sessionIsAttached
                 )
             )
             val eventStamp = runtimeStateTruthSequencer.nextEventStamp(
@@ -471,7 +460,13 @@ class GalaxyConnectionService : Service() {
                 cross_device_eligibility = modeState.crossDeviceEligibility,
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
-                authoritative_participation_state = participationState.wireValue,
+                authoritative_participation_state = participationSnapshot.state.wireValue,
+                authoritative_participation_transition_sequence =
+                    participationSnapshot.transitionSequence,
+                authoritative_participation_transition_trigger =
+                    participationSnapshot.lastTransitionTrigger,
+                authoritative_participation_transition_history =
+                    participationSnapshot.transitionHistoryWire,
                 execution_mode_state = modeState.executionModeState
             )
             val closedLoopPayload =
@@ -3311,24 +3306,15 @@ class GalaxyConnectionService : Service() {
             val readinessSurfaceSnapshot = delegatedRuntimeReadinessEvaluator.buildSnapshot(deviceId)
             val acceptanceSurfaceSnapshot = delegatedRuntimeAcceptanceEvaluator.buildSnapshot(deviceId)
             val dispatchReadiness = runtimeController.currentDispatchReadiness()
-            val authoritativeParticipationState = AndroidAuthoritativeParticipationTruth.derive(
-                AndroidAuthoritativeParticipationTruth.DerivationInput(
-                    crossDeviceEnabled = settings.crossDeviceEnabled,
-                    wsConnected = webSocketClient.isConnected(),
-                    registrationInFlight = runtimeController.state.value is com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Starting,
+            val authoritativeParticipationSnapshot =
+                runtimeController.evaluateAuthoritativeParticipationSnapshot(
+                    readinessSatisfied = modeState.crossDeviceEligibility,
+                    distributedRuntimeActivity = snapshotStamp.executionBusy,
                     capabilityVisible = hasVisibleCrossDeviceCapability(
                         crossDeviceEligibility = modeState.crossDeviceEligibility,
                         sessionIsAttached = dispatchReadiness.sessionIsAttached
-                    ),
-                    readinessSatisfied = modeState.crossDeviceEligibility,
-                    runtimeSessionAvailable = !UFOGalaxyApplication.runtimeSessionId.isNullOrBlank(),
-                    fullyAttached = dispatchReadiness.sessionIsAttached,
-                    dispatchEligible = dispatchReadiness.isEligible,
-                    continuityIntact = reconnectRecoveryState != ReconnectRecoveryState.FAILED.wireValue,
-                    operatorSuspendedOrIsolated = false,
-                    distributedRuntimeActivity = snapshotStamp.executionBusy
+                    )
                 )
-            )
             val operationalSurface = AndroidOperationalStateSurfaceContract.derive(
                 AndroidOperationalStateSurfaceContract.DerivationInput(
                     deviceId = deviceId,
@@ -3404,7 +3390,14 @@ class GalaxyConnectionService : Service() {
                 cross_device_eligibility = modeState.crossDeviceEligibility,
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
-                authoritative_participation_state = authoritativeParticipationState.wireValue,
+                authoritative_participation_state =
+                    authoritativeParticipationSnapshot.state.wireValue,
+                authoritative_participation_transition_sequence =
+                    authoritativeParticipationSnapshot.transitionSequence,
+                authoritative_participation_transition_trigger =
+                    authoritativeParticipationSnapshot.lastTransitionTrigger,
+                authoritative_participation_transition_history =
+                    authoritativeParticipationSnapshot.transitionHistoryWire,
                 // PR-10: cross-cutting carrier state backed by real RuntimeController state.
                 carrier_runtime_state = carrierRuntimeState,
                 reconnect_recovery_state = reconnectRecoveryState,
@@ -4859,6 +4852,16 @@ class GalaxyConnectionService : Service() {
             wsConnected = webSocketClient.isConnected(),
             capabilityDegraded = managerStateDegraded()
         )
+        val dispatchReadiness = UFOGalaxyApplication.runtimeController.currentDispatchReadiness()
+        val participationSnapshot =
+            UFOGalaxyApplication.runtimeController.evaluateAuthoritativeParticipationSnapshot(
+                readinessSatisfied = modeState.crossDeviceEligibility,
+                distributedRuntimeActivity = UFOGalaxyApplication.runtimeController.activeTaskId != null,
+                capabilityVisible = hasVisibleCrossDeviceCapability(
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    sessionIsAttached = dispatchReadiness.sessionIsAttached
+                )
+            )
         webSocketClient.setDeviceMetadata(
             settings.toMetadataMap() + mapOf(
                 "inference_runtime_state" to inferenceRuntimeState,
@@ -4868,6 +4871,19 @@ class GalaxyConnectionService : Service() {
                 // local_inference_available is a broader availability gate input:
                 // true for Success/Degraded, false for Failure.
                 "local_inference_available" to startResult.isUsable,
+                "authoritative_participation_state" to participationSnapshot.state.wireValue,
+                "authoritative_participation_transition_sequence" to
+                    participationSnapshot.transitionSequence,
+                "authoritative_participation_transition_trigger" to
+                    participationSnapshot.lastTransitionTrigger,
+                "authoritative_participation_transition_history" to
+                    participationSnapshot.transitionHistoryWire,
+                "authoritative_participation_connected" to participationSnapshot.connected,
+                "authoritative_participation_attached" to participationSnapshot.attached,
+                "authoritative_participation_dispatch_eligible" to
+                    participationSnapshot.canDispatch,
+                "authoritative_participation_distributed_participant" to
+                    participationSnapshot.distributedParticipant,
                 // Keep mode-gate projections explicit in capability metadata.
             ) + modeState.toMetadataMap()
         )

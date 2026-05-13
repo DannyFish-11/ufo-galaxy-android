@@ -104,6 +104,9 @@ data class AndroidParticipantRuntimeTruth(
         activeTaskStatus = activeTaskStatus
     ),
     val runtimeNodeIdentity: AndroidRuntimeNodeIdentity? = null,
+    val authoritativeParticipationTransitionSequence: Long? = null,
+    val authoritativeParticipationTransitionTrigger: String? = null,
+    val authoritativeParticipationTransitionHistory: List<String> = emptyList(),
     val reportedAtMs: Long,
     val reconciliationEpoch: Int
 ) {
@@ -172,6 +175,18 @@ data class AndroidParticipantRuntimeTruth(
         activeTaskId?.let { put(KEY_ACTIVE_TASK_ID, it) }
         activeTaskStatus?.let { put(KEY_ACTIVE_TASK_STATUS, it.wireValue) }
         put(KEY_AUTHORITATIVE_PARTICIPATION_STATE, authoritativeParticipationState)
+        authoritativeParticipationTransitionSequence?.let {
+            put(KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_SEQUENCE, it)
+        }
+        authoritativeParticipationTransitionTrigger?.let {
+            put(KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_TRIGGER, it)
+        }
+        if (authoritativeParticipationTransitionHistory.isNotEmpty()) {
+            put(
+                KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_HISTORY,
+                authoritativeParticipationTransitionHistory
+            )
+        }
         runtimeNodeIdentity?.let { put(KEY_RUNTIME_NODE_IDENTITY, it.toMap()) }
         put(KEY_REPORTED_AT_MS, reportedAtMs)
         put(KEY_RECONCILIATION_EPOCH, reconciliationEpoch)
@@ -229,6 +244,18 @@ data class AndroidParticipantRuntimeTruth(
         /** Wire key for [authoritativeParticipationState]. */
         const val KEY_AUTHORITATIVE_PARTICIPATION_STATE = "authoritative_participation_state"
 
+        /** Wire key for [authoritativeParticipationTransitionSequence]. */
+        const val KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_SEQUENCE =
+            "authoritative_participation_transition_sequence"
+
+        /** Wire key for [authoritativeParticipationTransitionTrigger]. */
+        const val KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_TRIGGER =
+            "authoritative_participation_transition_trigger"
+
+        /** Wire key for [authoritativeParticipationTransitionHistory]. */
+        const val KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_HISTORY =
+            "authoritative_participation_transition_history"
+
         /** Wire key for consolidated [runtimeNodeIdentity] map; absent when null. */
         const val KEY_RUNTIME_NODE_IDENTITY = "runtime_node_identity"
 
@@ -269,6 +296,9 @@ data class AndroidParticipantRuntimeTruth(
             activeTaskStatus: ActiveTaskStatus? = null,
             carrierForegroundVisible: Boolean? = null,
             authoritativeParticipationState: String? = null,
+            authoritativeParticipationTransitionSequence: Long? = null,
+            authoritativeParticipationTransitionTrigger: String? = null,
+            authoritativeParticipationTransitionHistory: List<String> = emptyList(),
             reconciliationEpoch: Int = 0,
             reportedAtMs: Long = System.currentTimeMillis()
         ): AndroidParticipantRuntimeTruth {
@@ -322,6 +352,12 @@ data class AndroidParticipantRuntimeTruth(
                     readinessState = readinessState,
                     carrierForegroundVisible = carrierForegroundVisible
                 ),
+                authoritativeParticipationTransitionSequence =
+                    authoritativeParticipationTransitionSequence,
+                authoritativeParticipationTransitionTrigger =
+                    authoritativeParticipationTransitionTrigger,
+                authoritativeParticipationTransitionHistory =
+                    authoritativeParticipationTransitionHistory,
                 reportedAtMs = reportedAtMs,
                 reconciliationEpoch = reconciliationEpoch
             )
