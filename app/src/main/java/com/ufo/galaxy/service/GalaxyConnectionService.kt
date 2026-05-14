@@ -2458,8 +2458,11 @@ class GalaxyConnectionService : Service() {
         val resolvedCrossDeviceElig = result.cross_device_eligibility ?: modeState?.crossDeviceEligibility ?: false
         val resolvedIsHoldState = result.local_mode_gate_deferred ?: modeState?.isHoldState ?: false
         // Derive unified constraint semantics for coherent boolean fields.
+        // isConstrained: manager degraded state signals runtime resource/health constraints.
+        // isDeferred: hold state from the mode gate signals temporary unavailability.
+        val resultManagerDegraded = managerStateDegraded()
         val constraintSem = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
-            isConstrained = false,
+            isConstrained = resultManagerDegraded,
             isDeferred = false,
             isLocalModeGateHold = resolvedIsHoldState,
             isExecutionBusy = UFOGalaxyApplication.runtimeController.activeTaskId != null,
@@ -3490,6 +3493,26 @@ class GalaxyConnectionService : Service() {
                     activeExecutionCount = snapshotStamp.activeExecutionCount
                 )
             )
+            // ── 统一真相上行合约：预先计算快照级约束语义（消除重复 derive() 调用）──────────────
+            // 单次 derive() 调用同时提供 wireValue/isConstraint/isDeferred，
+            // 替代之前三个独立的 run { derive(...).isConstraint/isDeferred/wireValue } 块。
+            val snapshotConstraintSem = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
+                isConstrained = degradedConditionClass ==
+                    AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
+                isDeferred = degradedConditionClass ==
+                    AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.DELAYED,
+                isLocalModeGateHold = modeState.isHoldState,
+                isExecutionBusy = snapshotStamp.executionBusy == true,
+                isHold = false
+            )
+            // ── 统一真相上行合约：预先计算本地能力状态（消除重复 LocalCapabilityState.derive() 调用）──
+            val snapshotLocalLlmReady = (modelReady == true && (llamaCppAvailable || ncnnAvailable))
+            val snapshotLocalCapState = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
+                localLlmReady = snapshotLocalLlmReady,
+                localInferenceAvailable = localInferenceAvailable(),
+                accessibilityReady = accessibilityReady,
+                isDegraded = managerStateDegraded()
+            )
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -3643,53 +3666,12 @@ class GalaxyConnectionService : Service() {
                     AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH),
                 local_mode_active = (modeState.executionModeState ==
                     LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
-                runtime_constrained = run {
-                    val cs = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
-                        isConstrained = degradedConditionClass ==
-                            AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
-                        isDeferred = false,
-                        isLocalModeGateHold = modeState.isHoldState,
-                        isExecutionBusy = snapshotStamp.executionBusy == true,
-                        isHold = false
-                    )
-                    cs.isConstraint
-                },
-                runtime_deferred = run {
-                    val cs = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
-                        isConstrained = false,
-                        isDeferred = degradedConditionClass ==
-                            AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.DELAYED,
-                        isLocalModeGateHold = modeState.isHoldState,
-                        isExecutionBusy = snapshotStamp.executionBusy == true,
-                        isHold = false
-                    )
-                    cs.isDeferred
-                },
-                constraint_semantics = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
-                    isConstrained = degradedConditionClass ==
-                        AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
-                    isDeferred = degradedConditionClass ==
-                        AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.DELAYED,
-                    isLocalModeGateHold = modeState.isHoldState,
-                    isExecutionBusy = snapshotStamp.executionBusy == true,
-                    isHold = false
-                ).wireValue,
-                local_llm_ready = (modelReady == true && (llamaCppAvailable || ncnnAvailable)),
-                local_mode_capable = run {
-                    val lcs = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
-                        localLlmReady = (modelReady == true && (llamaCppAvailable || ncnnAvailable)),
-                        localInferenceAvailable = localInferenceAvailable(),
-                        accessibilityReady = accessibilityReady,
-                        isDegraded = managerStateDegraded()
-                    )
-                    lcs.isLocalModeCapable
-                },
-                local_capability_state = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
-                    localLlmReady = (modelReady == true && (llamaCppAvailable || ncnnAvailable)),
-                    localInferenceAvailable = localInferenceAvailable(),
-                    accessibilityReady = accessibilityReady,
-                    isDegraded = managerStateDegraded()
-                ).wireValue
+                runtime_constrained = snapshotConstraintSem.isConstraint,
+                runtime_deferred = snapshotConstraintSem.isDeferred,
+                constraint_semantics = snapshotConstraintSem.wireValue,
+                local_llm_ready = snapshotLocalLlmReady,
+                local_mode_capable = snapshotLocalCapState.isLocalModeCapable,
+                local_capability_state = snapshotLocalCapState.wireValue
             )
 
             val envelope = AipMessage(

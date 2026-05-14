@@ -824,7 +824,7 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     @Test
-    fun `build local_mode_gate_deferred true when isHoldState`() {
+    fun `build local_mode_gate_deferred true when isHoldState without hold flag`() {
         val snapshot = AndroidUnifiedTruthUplinkContract.build(
             authoritativeParticipationStateWire = "fully_attached",
             participationTierWire = "fully_attached",

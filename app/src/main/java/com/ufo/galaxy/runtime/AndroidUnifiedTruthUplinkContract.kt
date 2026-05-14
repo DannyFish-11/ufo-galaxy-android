@@ -670,6 +670,10 @@ object AndroidUnifiedTruthUplinkContract {
         isExecutionBusy: Boolean = false,
         isHold: Boolean = false,
         taskId: String? = null,
+        // deviceId defaults to empty string for test-only callers that do not yet have a
+        // device identifier available (e.g. unit tests exercising semantic logic in isolation).
+        // Production callers in GalaxyConnectionService MUST pass a non-empty deviceId from
+        // localDeviceId / UFOGalaxyApplication.appSettings.deviceId.
         deviceId: String = "",
         runtimeSessionId: String? = null,
         executionPhase: String? = null,
