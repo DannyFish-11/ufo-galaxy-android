@@ -2084,6 +2084,33 @@ object StabilizationBaseline {
                 "Test: AndroidUnifiedTruthUplinkContractTest.",
             introducedPr = 90
         )
+    ) + listOf(
+
+        // ── PR-9: Android 最小可用路径与可操作性合约 ─────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-minimal-operability-contract",
+            displayName = "AndroidMinimalOperabilityContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidMinimalOperabilityContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-9 Android 侧最小可用路径与可操作性合约。将 Android APK 构建、安装、V2 连接、" +
+                "跨设备参与、委托执行、本地模式就绪、结果上行与失败诊断从「作者记忆工作流」提升为" +
+                "明确、可机器验证、可诊断的形式化可操作性合约。" +
+                "引入 OperabilityPathStep（10 步最小可用路径枚举）、" +
+                "PathBlockCondition（5 个路径阻断前提，含受影响步骤与是否可自愈标记）、" +
+                "CapabilityDegradationKind（5 种仅降级能力的条件，含 isRecoverable 标记）、" +
+                "LocalModeReadinessGate（本地模式就绪门，4 维度含硬/软前提区分，assess() 返回 " +
+                "LocalModeReadinessSnapshot 含 overall_ready/failing_hard_gates）、" +
+                "DelegatedExecutionBlockKind（5 种委托执行阻断分类，含 blocksTaskTypes 列表）、" +
+                "FailureDiagnosticKind（9 种失败诊断分类，每类含 actionableHint 机器可读建议）、" +
+                "以及 OPERABILITY_INVARIANTS（12 条形式化不变量）。" +
+                "与 AndroidLocalDiagnosticReasonContract（运行时层诊断）互补，" +
+                "共同实现从操作路径层到运行时层的完整诊断覆盖。" +
+                "toContractMetaWireMap() 提供合约元数据 wire 序列化，可嵌入诊断载体或设备状态快照。" +
+                "Test: Pr9AndroidMinimalOperabilityContractTest.",
+            introducedPr = 9
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────
