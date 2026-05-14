@@ -724,7 +724,26 @@ class GalaxyWebSocketClient(
         }
         // authoritative_participation_state may come from external metadata; non-string values
         // are treated as absent and safely downgraded to PRE_ATTACH by tier derivation.
-        val participationStateWireValue = merged["authoritative_participation_state"] as? String
+        val rawParticipationState = merged["authoritative_participation_state"]
+        if (rawParticipationState != null && rawParticipationState !is String) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] authoritative_participation_state type invalid: " +
+                    "${rawParticipationState::class.java.simpleName}; defaulting participation_tier=pre_attach"
+            )
+        }
+        val participationStateWireValue = rawParticipationState as? String
+        if (participationStateWireValue != null &&
+            AndroidAuthoritativeParticipationTruth.State.entries.none {
+                it.wireValue == participationStateWireValue
+            }
+        ) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] authoritative_participation_state unknown: " +
+                    "$participationStateWireValue; defaulting participation_tier=pre_attach"
+            )
+        }
         merged["participation_tier"] = AndroidAuthoritativeParticipationTruth
             .participationTierWireValueFor(participationStateWireValue)
         merged["runtime_constrained"] = !modeSemantics.acceptsCrossDeviceTasks || degradedMode

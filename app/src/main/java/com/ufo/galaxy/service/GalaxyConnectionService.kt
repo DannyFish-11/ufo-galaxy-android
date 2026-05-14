@@ -2412,12 +2412,22 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendGoalResult(result: GoalResultPayload, traceId: String?, routeMode: String?) {
         val runtimeSession = UFOGalaxyApplication.runtimeSessionId
-        val modeState = UFOGalaxyApplication.appSettings.authoritativeModeState(
-            wsConnected = webSocketClient.isConnected(),
-            capabilityDegraded = managerStateDegraded()
-        )
-        val dispatchReadiness = UFOGalaxyApplication.runtimeController.currentDispatchReadiness()
-        val participationSnapshot =
+        val needsRuntimeContext =
+            result.participation_tier == null ||
+                result.execution_mode_state == null ||
+                result.cross_device_eligibility == null ||
+                result.local_mode_gate_deferred == null ||
+                result.local_inference_available == null
+        val modeState = if (needsRuntimeContext) {
+            UFOGalaxyApplication.appSettings.authoritativeModeState(
+                wsConnected = webSocketClient.isConnected(),
+                capabilityDegraded = managerStateDegraded()
+            )
+        } else {
+            null
+        }
+        val participationSnapshot = if (needsRuntimeContext && modeState != null) {
+            val dispatchReadiness = UFOGalaxyApplication.runtimeController.currentDispatchReadiness()
             UFOGalaxyApplication.runtimeController.evaluateAuthoritativeParticipationSnapshot(
                 readinessSatisfied = modeState.crossDeviceEligibility,
                 distributedRuntimeActivity = UFOGalaxyApplication.runtimeController.activeTaskId != null,
@@ -2426,6 +2436,14 @@ class GalaxyConnectionService : Service() {
                     sessionIsAttached = dispatchReadiness.sessionIsAttached
                 )
             )
+        } else {
+            null
+        }
+        val localInferenceAvailable = if (needsRuntimeContext) {
+            localInferenceAvailable()
+        } else {
+            null
+        }
         // ── Enrich payload with unified-contract fields (always set at the single emission layer) ──
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
@@ -2434,11 +2452,13 @@ class GalaxyConnectionService : Service() {
             // carry a consistent human-readable summary field regardless of the caller path.
             result_summary = result.result_summary ?: result.result,
             participation_tier = result.participation_tier
-                ?: AndroidAuthoritativeParticipationTruth.participationTierFor(participationSnapshot.state).wireValue,
-            execution_mode_state = result.execution_mode_state ?: modeState.executionModeState,
-            cross_device_eligibility = result.cross_device_eligibility ?: modeState.crossDeviceEligibility,
-            local_mode_gate_deferred = result.local_mode_gate_deferred ?: modeState.isHoldState,
-            local_inference_available = result.local_inference_available ?: localInferenceAvailable()
+                ?: participationSnapshot?.let {
+                    AndroidAuthoritativeParticipationTruth.participationTierFor(it.state).wireValue
+                },
+            execution_mode_state = result.execution_mode_state ?: modeState?.executionModeState,
+            cross_device_eligibility = result.cross_device_eligibility ?: modeState?.crossDeviceEligibility,
+            local_mode_gate_deferred = result.local_mode_gate_deferred ?: modeState?.isHoldState,
+            local_inference_available = result.local_inference_available ?: localInferenceAvailable
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
