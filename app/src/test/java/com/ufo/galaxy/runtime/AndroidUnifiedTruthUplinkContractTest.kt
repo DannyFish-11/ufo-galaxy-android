@@ -377,7 +377,7 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     @Test
-    fun `deriveGovernanceTruth returns delegated execution and active takeover during active delegated execution`() {
+    fun `deriveGovernanceTruth returns delegated execution state with active takeover during execution`() {
         val truth = AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
             crossDeviceEnabled = true,
             sessionAttached = true,
