@@ -344,7 +344,7 @@ object AndroidUnifiedTruthUplinkContract {
         val governanceState = when {
             operatorSuspendedOrIsolated -> GovernanceState.GOVERNANCE_BLOCKED
             delegatedExecutionActive -> GovernanceState.DELEGATED_EXECUTION
-            sessionAttached -> GovernanceState.V2_GOVERNED // Attached runtime session is already center-governed.
+            sessionAttached -> GovernanceState.V2_GOVERNED // An attached runtime session is already center-governed.
             // Explicit cross-device opt-in or an in-flight takeover both mean governance
             // authority has already moved to the center even before a task becomes active.
             crossDeviceEnabled || !activeTakeoverId.isNullOrBlank() ->

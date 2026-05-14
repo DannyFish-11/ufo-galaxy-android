@@ -709,7 +709,7 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     @Test
-    fun `build governance truth separates governance from mode state INV-UTU-15`() {
+    fun `build governance truth separates governance from mode state`() {
         val snapshot = AndroidUnifiedTruthUplinkContract.build(
             authoritativeParticipationStateWire = "fully_attached",
             participationTierWire = "fully_attached",
