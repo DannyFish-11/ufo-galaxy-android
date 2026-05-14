@@ -1134,6 +1134,24 @@ data class GoalResultPayload(
     val runtime_constrained: Boolean? = null,
     val runtime_deferred: Boolean? = null,
 
+    // ── 统一真相上行合约：治理真相字段（AndroidUnifiedTruthUplinkContract）────────────────────
+    //
+    // governance_state: Android 当前治理状态。
+    //   值来自 AndroidUnifiedTruthUplinkContract.GovernanceState：
+    //   "local_autonomous" | "v2_governed" | "delegated_execution" | "governance_blocked"。
+    //
+    // governance_blocked: Android 当前是否被治理层阻塞（如 operator isolate / suspend）。
+    //
+    // delegated_execution_active: Android 在结果上报时是否仍处于活跃委托执行中。
+    //
+    // takeover_state: Android 当前接管生命周期状态。
+    //   值来自 AndroidUnifiedTruthUplinkContract.TakeoverState：
+    //   "inactive" | "pending" | "active"。
+    val governance_state: String? = null,
+    val governance_blocked: Boolean? = null,
+    val delegated_execution_active: Boolean? = null,
+    val takeover_state: String? = null,
+
     // ── 统一真相上行合约：本地能力真相字段（AndroidUnifiedTruthUplinkContract）──────────────────
     //
     // local_llm_ready: Android 本地 LLM 在结果上报时是否就绪（模型已加载、权重已验证）。
@@ -2568,6 +2586,18 @@ data class DeviceStateSnapshotPayload(
     //   V2 MUST 读取此字段而非通过字段组合推断约束状态。
     //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
     //
+    // governance_state: Android 当前治理状态。
+    //   值来自 AndroidUnifiedTruthUplinkContract.GovernanceState：
+    //   "local_autonomous" | "v2_governed" | "delegated_execution" | "governance_blocked"。
+    //
+    // governance_blocked: Android 当前是否被治理层显式阻塞（如 operator isolate / suspend）。
+    //
+    // delegated_execution_active: Android 在快照时是否存在活跃委托执行。
+    //
+    // takeover_state: Android 当前接管生命周期状态。
+    //   值来自 AndroidUnifiedTruthUplinkContract.TakeoverState：
+    //   "inactive" | "pending" | "active"。
+    //
     // local_llm_ready: Android 本地 LLM 在快照时是否就绪（模型已加载、权重已验证）。
     //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
     //
@@ -2587,6 +2617,10 @@ data class DeviceStateSnapshotPayload(
     val runtime_constrained: Boolean? = null,
     val runtime_deferred: Boolean? = null,
     val constraint_semantics: String? = null,
+    val governance_state: String? = null,
+    val governance_blocked: Boolean? = null,
+    val delegated_execution_active: Boolean? = null,
+    val takeover_state: String? = null,
     val local_llm_ready: Boolean? = null,
     val local_mode_capable: Boolean? = null,
     val local_capability_state: String? = null
@@ -2735,6 +2769,17 @@ data class DeviceExecutionEventPayload(
     // Emitted alongside each execution event so V2 can correlate the event with the
     // precise execution mode at the time of emission.  Null only as defensive default.
     val execution_mode_state: String? = null,
+
+    // Governance truth fields from AndroidUnifiedTruthUplinkContract.
+    // governance_state: "local_autonomous" | "v2_governed" |
+    //   "delegated_execution" | "governance_blocked".
+    // governance_blocked: explicit governance-layer block flag.
+    // delegated_execution_active: true when a delegated unit is actively executing.
+    // takeover_state: "inactive" | "pending" | "active".
+    val governance_state: String? = null,
+    val governance_blocked: Boolean? = null,
+    val delegated_execution_active: Boolean? = null,
+    val takeover_state: String? = null,
 
     // PR-08Android: Canonical runtime truth unification fields for execution events.
     //

@@ -25,12 +25,13 @@ package com.ufo.galaxy.runtime
  *  4. 受限/延迟/持有/本地模式门/执行压力等语义**未统一为正式合约**。
  *  5. Android 侧运行时真相仍存在**路由专用行为**而非单一长期合约。
  *
- * ## 六类真相分类
+ * ## 七类真相分类
  *
  * | [TruthCategory]                    | 描述                                    |
  * |------------------------------------|-----------------------------------------|
  * | [TruthCategory.PARTICIPATION]      | 参与状态：tier、eligible、distributed   |
  * | [TruthCategory.MODE]               | 执行模式：local/cross-device/constrained|
+ * | [TruthCategory.GOVERNANCE]         | 治理状态：delegated/takeover/blocked    |
  * | [TruthCategory.EXECUTION]          | 执行标识：task/device/session/phase     |
  * | [TruthCategory.CLOSURE_UPSTREAM]   | 接受/闭合相关上行真相                   |
  * | [TruthCategory.CONTINUITY]         | 持久身份与会话连续性                    |
@@ -62,7 +63,7 @@ object AndroidUnifiedTruthUplinkContract {
     // ── 真相分类枚举 ─────────────────────────────────────────────────────────────
 
     /**
-     * Android 上行真相的六大分类。
+     * Android 上行真相的七大分类。
      *
      * 每个分类对应 V2 中独立的消费语境（路由/调度/闭合/治理/连续性/能力评分）。
      *
@@ -91,6 +92,17 @@ object AndroidUnifiedTruthUplinkContract {
         MODE(
             wireValue = "mode",
             description = "Android 执行模式：local/cross-device/constrained/deferred/gate"
+        ),
+
+        /**
+         * 治理真相（Governance Truth）。
+         *
+         * 涵盖 Android 当前由谁治理、是否正处于委托执行中、接管是否待处理/活跃、
+         * 以及是否被治理层阻塞。
+         */
+        GOVERNANCE(
+            wireValue = "governance",
+            description = "Android 治理状态：authority/delegated/takeover/blocked"
         ),
 
         /**
@@ -251,6 +263,99 @@ object AndroidUnifiedTruthUplinkContract {
         }
     }
 
+    // ── 治理状态枚举 ──────────────────────────────────────────────────────────────
+
+    /**
+     * Android 当前治理状态的正式枚举。
+     *
+     * 与 [TruthCategory.MODE] 分离：mode 描述“运行在哪里/是否受限”，
+     * governance 描述“当前由谁治理以及是否被治理层阻塞”。
+     */
+    enum class GovernanceState(
+        val wireValue: String,
+        val v2Governed: Boolean,
+        val blocked: Boolean
+    ) {
+
+        /** Android 当前处于本地自主治理状态。 */
+        LOCAL_AUTONOMOUS("local_autonomous", v2Governed = false, blocked = false),
+
+        /** Android 已接入中心治理，但当前没有活跃委托执行。 */
+        V2_GOVERNED("v2_governed", v2Governed = true, blocked = false),
+
+        /** Android 当前正在执行中心委托的执行单元。 */
+        DELEGATED_EXECUTION("delegated_execution", v2Governed = true, blocked = false),
+
+        /** Android 已接入治理面，但因治理隔离/挂起而被阻塞。 */
+        GOVERNANCE_BLOCKED("governance_blocked", v2Governed = true, blocked = true);
+
+        companion object {
+            private val BY_WIRE = values().associateBy { it.wireValue }
+
+            fun fromWireValue(wireValue: String): GovernanceState? = BY_WIRE[wireValue]
+
+            val ALL_WIRE_VALUES: List<String> = values().map { it.wireValue }
+        }
+    }
+
+    /**
+     * Android 当前接管生命周期状态。
+     */
+    enum class TakeoverState(val wireValue: String) {
+        INACTIVE("inactive"),
+        PENDING("pending"),
+        ACTIVE("active");
+
+        companion object {
+            private val BY_WIRE = values().associateBy { it.wireValue }
+
+            fun fromWireValue(wireValue: String): TakeoverState? = BY_WIRE[wireValue]
+
+            val ALL_WIRE_VALUES: List<String> = values().map { it.wireValue }
+        }
+    }
+
+    /**
+     * 治理真相的聚合推导结果。
+     */
+    data class GovernanceTruth(
+        val governance_state: String,
+        val governance_blocked: Boolean,
+        val delegated_execution_active: Boolean,
+        val takeover_state: String
+    )
+
+    /**
+     * 从 Android 运行时的原始治理信号推导稳定治理真相。
+     */
+    fun deriveGovernanceTruth(
+        crossDeviceEnabled: Boolean,
+        sessionAttached: Boolean,
+        activeTaskId: String?,
+        activeTakeoverId: String?,
+        operatorSuspendedOrIsolated: Boolean
+    ): GovernanceTruth {
+        val delegatedExecutionActive = !activeTaskId.isNullOrBlank()
+        val takeoverState = when {
+            activeTakeoverId.isNullOrBlank() -> TakeoverState.INACTIVE
+            delegatedExecutionActive -> TakeoverState.ACTIVE
+            else -> TakeoverState.PENDING
+        }
+        val governanceState = when {
+            operatorSuspendedOrIsolated -> GovernanceState.GOVERNANCE_BLOCKED
+            delegatedExecutionActive -> GovernanceState.DELEGATED_EXECUTION
+            sessionAttached || crossDeviceEnabled || !activeTakeoverId.isNullOrBlank() ->
+                GovernanceState.V2_GOVERNED
+            else -> GovernanceState.LOCAL_AUTONOMOUS
+        }
+        return GovernanceTruth(
+            governance_state = governanceState.wireValue,
+            governance_blocked = governanceState.blocked,
+            delegated_execution_active = delegatedExecutionActive,
+            takeover_state = takeoverState.wireValue
+        )
+    }
+
     // ── 本地能力状态枚举 ──────────────────────────────────────────────────────────
 
     /**
@@ -322,7 +427,7 @@ object AndroidUnifiedTruthUplinkContract {
     /**
      * Android 侧统一真相快照。
      *
-     * 将六大真相分类的关键字段聚合为一个稳定的、版本化的快照类型，
+     * 将七大真相分类的关键字段聚合为一个稳定的、版本化的快照类型，
      * 使 V2 可从单一结构消费所有重要的 Android 运行时真相，
      * 而无需在多个载体类型间重新组装。
      *
@@ -424,6 +529,30 @@ object AndroidUnifiedTruthUplinkContract {
          * **本字段永不为 null**：当无法推断时默认为 `none`。
          */
         val constraint_semantics: String,
+
+        // ── 治理真相（GOVERNANCE） ───────────────────────────────────────────────
+
+        /**
+         * Android 当前治理状态 wire 值。
+         * 取自 [GovernanceState.wireValue]。
+         */
+        val governance_state: String,
+
+        /**
+         * Android 当前是否因治理隔离/挂起而被阻塞。
+         */
+        val governance_blocked: Boolean,
+
+        /**
+         * Android 当前是否存在活跃委托执行。
+         */
+        val delegated_execution_active: Boolean,
+
+        /**
+         * Android 当前接管生命周期状态 wire 值。
+         * 取自 [TakeoverState.wireValue]。
+         */
+        val takeover_state: String,
 
         // ── 执行真相（EXECUTION） ────────────────────────────────────────────────
 
@@ -539,6 +668,10 @@ object AndroidUnifiedTruthUplinkContract {
             put(KEY_RUNTIME_CONSTRAINED, runtime_constrained)
             put(KEY_RUNTIME_DEFERRED, runtime_deferred)
             put(KEY_CONSTRAINT_SEMANTICS, constraint_semantics)
+            put(KEY_GOVERNANCE_STATE, governance_state)
+            put(KEY_GOVERNANCE_BLOCKED, governance_blocked)
+            put(KEY_DELEGATED_EXECUTION_ACTIVE, delegated_execution_active)
+            put(KEY_TAKEOVER_STATE, takeover_state)
             task_id?.let { put(KEY_TASK_ID, it) }
             put(KEY_DEVICE_ID, device_id)
             runtime_session_id?.let { put(KEY_RUNTIME_SESSION_ID, it) }
@@ -576,6 +709,10 @@ object AndroidUnifiedTruthUplinkContract {
     const val KEY_RUNTIME_CONSTRAINED = "runtime_constrained"
     const val KEY_RUNTIME_DEFERRED = "runtime_deferred"
     const val KEY_CONSTRAINT_SEMANTICS = "constraint_semantics"
+    const val KEY_GOVERNANCE_STATE = "governance_state"
+    const val KEY_GOVERNANCE_BLOCKED = "governance_blocked"
+    const val KEY_DELEGATED_EXECUTION_ACTIVE = "delegated_execution_active"
+    const val KEY_TAKEOVER_STATE = "takeover_state"
     const val KEY_TASK_ID = "task_id"
     const val KEY_DEVICE_ID = "device_id"
     const val KEY_RUNTIME_SESSION_ID = "runtime_session_id"
@@ -617,7 +754,10 @@ object AndroidUnifiedTruthUplinkContract {
         "INV-UTU-12: local_mode_capable 当且仅当 local_capability_state 为 full 或 partial 时为 true",
         "INV-UTU-13: toWireMap() 中所有非 null 字段使用合约声明的 KEY_ 常量作为键",
         "INV-UTU-14: ConstraintSemantics.derive() 结果与 runtime_constrained/runtime_deferred 布尔值一致",
-        "INV-UTU-15: 所有六大 TruthCategory 在 TruthCategory.ALL_WIRE_VALUES 中各有唯一 wire 值"
+        "INV-UTU-15: governance_state/runtime governance 字段与 delegated_execution_active/takeover_state 一致",
+        "INV-UTU-16: takeover_state 当且仅当 active_takeover_id 存在时为 pending 或 active",
+        "INV-UTU-17: governance_blocked 当且仅当 governance_state 为 governance_blocked 时为 true",
+        "INV-UTU-18: 所有七大 TruthCategory 在 TruthCategory.ALL_WIRE_VALUES 中各有唯一 wire 值"
     )
 
     // ── 工厂方法：从离散信号构建统一快照 ─────────────────────────────────────────
@@ -669,6 +809,10 @@ object AndroidUnifiedTruthUplinkContract {
         isDeferred: Boolean = false,
         isExecutionBusy: Boolean = false,
         isHold: Boolean = false,
+        crossDeviceEnabled: Boolean = false,
+        activeTaskId: String? = null,
+        activeTakeoverId: String? = null,
+        operatorSuspendedOrIsolated: Boolean = false,
         taskId: String? = null,
         // deviceId defaults to empty string for test-only callers that do not yet have a
         // device identifier available (e.g. unit tests exercising semantic logic in isolation).
@@ -720,6 +864,15 @@ object AndroidUnifiedTruthUplinkContract {
         val runtimeConstrained = constraintSem.isConstraint
         val runtimeDeferred = constraintSem.isDeferred
 
+        // ── 治理真相推断 ──
+        val governanceTruth = deriveGovernanceTruth(
+            crossDeviceEnabled = crossDeviceEnabled,
+            sessionAttached = sessionAttached,
+            activeTaskId = activeTaskId,
+            activeTakeoverId = activeTakeoverId,
+            operatorSuspendedOrIsolated = operatorSuspendedOrIsolated
+        )
+
         // ── 本地能力推断 ──
         val localCapState = LocalCapabilityState.derive(
             localLlmReady = localLlmReady,
@@ -743,6 +896,10 @@ object AndroidUnifiedTruthUplinkContract {
             runtime_constrained = runtimeConstrained,
             runtime_deferred = runtimeDeferred,
             constraint_semantics = constraintSem.wireValue,
+            governance_state = governanceTruth.governance_state,
+            governance_blocked = governanceTruth.governance_blocked,
+            delegated_execution_active = governanceTruth.delegated_execution_active,
+            takeover_state = governanceTruth.takeover_state,
             task_id = taskId,
             device_id = deviceId,
             runtime_session_id = runtimeSessionId,
