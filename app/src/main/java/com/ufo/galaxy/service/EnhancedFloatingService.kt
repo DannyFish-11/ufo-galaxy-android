@@ -34,6 +34,7 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.CrossDeviceSetupError
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.ui.MainActivity
@@ -634,7 +635,16 @@ class EnhancedFloatingService : Service() {
             STATUS_ERROR   -> "错误"
             else           -> if (webSocketClient.isConnected()) "已连接" else "未连接"
         }
-        return "$mode | $idPart | $statusLabel"
+        val sourceProjection = AndroidDeviceSurfaceSourceContract.deriveFloatingSurfaceProjection(
+            crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+            wsConnected = webSocketClient.isConnected(),
+            attachedToV2Session = UFOGalaxyApplication.runtimeController.attachedSession.value?.isAttached == true,
+            hasPendingOfflineSignals = webSocketClient.queueSize.value > 0,
+            runtimeDegraded = UFOGalaxyApplication.runtimeController.state.value is
+                com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Failed,
+            taskInFlight = taskStatus == STATUS_RUNNING
+        )
+        return "$mode | $idPart | $statusLabel | ${sourceProjection.sourceType.badgeZh}"
     }
 
     /**
