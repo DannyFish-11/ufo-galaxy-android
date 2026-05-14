@@ -8,6 +8,21 @@ package com.ufo.galaxy.runtime
  */
 object AndroidAuthoritativeParticipationTruth {
 
+    /**
+     * Stable participation tier projection for V2-side routing/governance consumers.
+     *
+     * This tier is intentionally coarser than [State]:
+     * - [PRE_ATTACH] covers all non-attached / non-dispatchable states.
+     * - [FULLY_ATTACHED], [DISPATCH_ELIGIBLE], and [DISTRIBUTED_PARTICIPANT] preserve
+     *   the canonical high-confidence participation milestones used by dispatch logic.
+     */
+    enum class ParticipationTier(val wireValue: String) {
+        PRE_ATTACH("pre_attach"),
+        FULLY_ATTACHED("fully_attached"),
+        DISPATCH_ELIGIBLE("dispatch_eligible"),
+        DISTRIBUTED_PARTICIPANT("distributed_participant")
+    }
+
     enum class State(val wireValue: String) {
         LOCAL_ONLY("local_only"),
         CONTROL_ONLY("control_only"),
@@ -195,5 +210,24 @@ object AndroidAuthoritativeParticipationTruth {
         if (!input.readinessSatisfied || !input.dispatchEligible) return State.FULLY_ATTACHED
         if (input.distributedRuntimeActivity) return State.DISTRIBUTED_PARTICIPANT
         return State.DISPATCH_ELIGIBLE
+    }
+
+    /**
+     * Maps authoritative [state] to a stable participation tier label for upstream reporting.
+     */
+    fun participationTierFor(state: State): ParticipationTier =
+        when (state) {
+            State.FULLY_ATTACHED -> ParticipationTier.FULLY_ATTACHED
+            State.DISPATCH_ELIGIBLE -> ParticipationTier.DISPATCH_ELIGIBLE
+            State.DISTRIBUTED_PARTICIPANT -> ParticipationTier.DISTRIBUTED_PARTICIPANT
+            else -> ParticipationTier.PRE_ATTACH
+        }
+
+    /**
+     * Wire-value variant of [participationTierFor] for payload/reporting paths.
+     */
+    fun participationTierWireValue(stateWireValue: String?): String {
+        val state = State.entries.firstOrNull { it.wireValue == stateWireValue }
+        return participationTierFor(state ?: State.LOCAL_ONLY).wireValue
     }
 }

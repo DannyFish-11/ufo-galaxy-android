@@ -629,7 +629,11 @@ class GalaxyWebSocketClient(
             "authoritative_participation_connected" to false,
             "authoritative_participation_attached" to false,
             "authoritative_participation_dispatch_eligible" to false,
-            "authoritative_participation_distributed_participant" to false
+            "authoritative_participation_distributed_participant" to false,
+            "participation_tier" to AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue,
+            "runtime_constrained" to true,
+            "runtime_deferred" to false,
+            "local_mode_active" to true
         )
         merged.putAll(metadata)
 
@@ -718,6 +722,13 @@ class GalaxyWebSocketClient(
                     AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_ENABLED.wireValue
             }
         }
+        merged["participation_tier"] = AndroidAuthoritativeParticipationTruth.participationTierWireValue(
+            merged["authoritative_participation_state"] as? String
+        )
+        merged["runtime_constrained"] = !modeSemantics.acceptsCrossDeviceTasks || degradedMode
+        merged["runtime_deferred"] = modeDecision.isHoldState
+        merged["local_mode_active"] =
+            modeDecision.state == LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY
         merged[AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION_KEY] =
             AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION
 

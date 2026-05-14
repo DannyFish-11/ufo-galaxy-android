@@ -27,6 +27,7 @@ import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
+import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
 import com.ufo.galaxy.runtime.AndroidOperatorActionGovernanceContract
@@ -468,6 +469,9 @@ class GalaxyConnectionService : Service() {
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 authoritative_participation_state = participationSnapshot.state.wireValue,
+                participation_tier = AndroidAuthoritativeParticipationTruth
+                    .participationTierFor(participationSnapshot.state)
+                    .wireValue,
                 authoritative_participation_transition_sequence =
                     participationSnapshot.transitionSequence,
                 authoritative_participation_transition_trigger =
@@ -2391,6 +2395,11 @@ class GalaxyConnectionService : Service() {
      *   populated from [GoalResultPayload.result] when not already set by the caller.
      *   This mirrors the same field in [HandoffEnvelopeV2ResultPayload]
      *   so all uplink result payloads carry a consistent named summary field.
+     * - Android-side runtime context fields:
+     *   [GoalResultPayload.participation_tier], [GoalResultPayload.execution_mode_state],
+     *   [GoalResultPayload.cross_device_eligibility], [GoalResultPayload.local_mode_gate_deferred],
+     *   and [GoalResultPayload.local_inference_available], allowing V2 closure/governance paths
+     *   to consume Android-side mode/participation truth from result uplinks directly.
      *
      * The AIP v3 envelope also propagates [GoalResultPayload.dispatch_trace_id] and
      * [GoalResultPayload.source_runtime_posture] so that V2 observability and posture
@@ -2403,13 +2412,33 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendGoalResult(result: GoalResultPayload, traceId: String?, routeMode: String?) {
         val runtimeSession = UFOGalaxyApplication.runtimeSessionId
+        val modeState = UFOGalaxyApplication.appSettings.authoritativeModeState(
+            wsConnected = webSocketClient.isConnected(),
+            capabilityDegraded = managerStateDegraded()
+        )
+        val dispatchReadiness = UFOGalaxyApplication.runtimeController.currentDispatchReadiness()
+        val participationSnapshot =
+            UFOGalaxyApplication.runtimeController.evaluateAuthoritativeParticipationSnapshot(
+                readinessSatisfied = modeState.crossDeviceEligibility,
+                distributedRuntimeActivity = UFOGalaxyApplication.runtimeController.activeTaskId != null,
+                capabilityVisible = hasVisibleCrossDeviceCapability(
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    sessionIsAttached = dispatchReadiness.sessionIsAttached
+                )
+            )
         // ── Enrich payload with unified-contract fields (always set at the single emission layer) ──
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
             // Populate result_summary from result when not already set, so all result payloads
             // carry a consistent human-readable summary field regardless of the caller path.
-            result_summary = result.result_summary ?: result.result
+            result_summary = result.result_summary ?: result.result,
+            participation_tier = result.participation_tier
+                ?: AndroidAuthoritativeParticipationTruth.participationTierFor(participationSnapshot.state).wireValue,
+            execution_mode_state = result.execution_mode_state ?: modeState.executionModeState,
+            cross_device_eligibility = result.cross_device_eligibility ?: modeState.crossDeviceEligibility,
+            local_mode_gate_deferred = result.local_mode_gate_deferred ?: modeState.isHoldState,
+            local_inference_available = result.local_inference_available ?: localInferenceAvailable()
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -3442,6 +3471,9 @@ class GalaxyConnectionService : Service() {
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 authoritative_participation_state =
                     authoritativeParticipationSnapshot.state.wireValue,
+                participation_tier = AndroidAuthoritativeParticipationTruth
+                    .participationTierFor(authoritativeParticipationSnapshot.state)
+                    .wireValue,
                 authoritative_participation_transition_sequence =
                     authoritativeParticipationSnapshot.transitionSequence,
                 authoritative_participation_transition_trigger =
@@ -5345,6 +5377,14 @@ class GalaxyConnectionService : Service() {
             is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded,
             is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.FailedStartup,
             is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed -> true
+            else -> false
+        }
+    }
+
+    private fun localInferenceAvailable(): Boolean {
+        return when (UFOGalaxyApplication.localInferenceRuntimeManager.state.value) {
+            is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running,
+            is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded -> true
             else -> false
         }
     }
