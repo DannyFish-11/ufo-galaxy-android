@@ -226,7 +226,7 @@ object AndroidAuthoritativeParticipationTruth {
     /**
      * Wire-value variant of [participationTierFor] for payload/reporting paths.
      */
-    fun participationTierWireValue(stateWireValue: String?): String {
+    fun participationTierWireValueForState(stateWireValue: String?): String {
         val state = State.entries.firstOrNull { it.wireValue == stateWireValue }
         return participationTierFor(state ?: State.LOCAL_ONLY).wireValue
     }

@@ -722,7 +722,9 @@ class GalaxyWebSocketClient(
                     AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_ENABLED.wireValue
             }
         }
-        merged["participation_tier"] = AndroidAuthoritativeParticipationTruth.participationTierWireValue(
+        // authoritative_participation_state may come from external metadata; non-string values
+        // are treated as absent and safely downgraded to PRE_ATTACH by tier derivation.
+        merged["participation_tier"] = AndroidAuthoritativeParticipationTruth.participationTierWireValueForState(
             merged["authoritative_participation_state"] as? String
         )
         merged["runtime_constrained"] = !modeSemantics.acceptsCrossDeviceTasks || degradedMode
