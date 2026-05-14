@@ -629,7 +629,11 @@ class GalaxyWebSocketClient(
             "authoritative_participation_connected" to false,
             "authoritative_participation_attached" to false,
             "authoritative_participation_dispatch_eligible" to false,
-            "authoritative_participation_distributed_participant" to false
+            "authoritative_participation_distributed_participant" to false,
+            "participation_tier" to AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue,
+            "runtime_constrained" to true,
+            "runtime_deferred" to false,
+            "local_mode_active" to true
         )
         merged.putAll(metadata)
 
@@ -718,6 +722,34 @@ class GalaxyWebSocketClient(
                     AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_ENABLED.wireValue
             }
         }
+        // authoritative_participation_state may come from external metadata; non-string values
+        // are treated as absent and safely downgraded to PRE_ATTACH by tier derivation.
+        val rawParticipationState = merged["authoritative_participation_state"]
+        if (rawParticipationState != null && rawParticipationState !is String) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] authoritative_participation_state type invalid: " +
+                    "${rawParticipationState::class.java.simpleName}; defaulting participation_tier=pre_attach"
+            )
+        }
+        val participationStateWireValue = rawParticipationState as? String
+        if (participationStateWireValue != null &&
+            AndroidAuthoritativeParticipationTruth.State.entries.none {
+                it.wireValue == participationStateWireValue
+            }
+        ) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] authoritative_participation_state unknown: " +
+                    "$participationStateWireValue; defaulting participation_tier=pre_attach"
+            )
+        }
+        merged["participation_tier"] = AndroidAuthoritativeParticipationTruth
+            .participationTierWireValueFor(participationStateWireValue)
+        merged["runtime_constrained"] = !modeSemantics.acceptsCrossDeviceTasks || degradedMode
+        merged["runtime_deferred"] = modeDecision.isHoldState
+        merged["local_mode_active"] =
+            modeDecision.state == LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY
         merged[AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION_KEY] =
             AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION
 

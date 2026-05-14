@@ -1066,6 +1066,16 @@ data class GoalResultPayload(
     val policy_rejection_detail: String? = null,
     val hold_reason: String? = null,
     val is_continuation: Boolean? = null,
+    // Android-side participation tier projection for V2 routing / closure consumption.
+    // Values: "pre_attach" | "fully_attached" | "dispatch_eligible" | "distributed_participant".
+    val participation_tier: String? = null,
+    // Canonical LocalExecutionModeGate wire state echoed in result uplink for mode-context parity.
+    val execution_mode_state: String? = null,
+    // Echoed mode gate booleans so V2 can consume result-level local/cross-device eligibility.
+    val cross_device_eligibility: Boolean? = null,
+    val local_mode_gate_deferred: Boolean? = null,
+    // Result-time local inference availability hint from Android's runtime/capability truth.
+    val local_inference_available: Boolean? = null,
     // ── Unified result contract: canonical kind + replay identity ──────────────────────────────
     // Both fields are set by GalaxyConnectionService.sendGoalResult at emission time and are
     // null only for pre-emission / locally-constructed payloads.
@@ -2234,6 +2244,7 @@ data class DeviceStateSnapshotPayload(
     //  "local_only" | "control_only" | "cross_device_capable" | "cross_device_enabled" |
     //  "fully_attached" | "dispatch_eligible" | "distributed_participant".
     val authoritative_participation_state: String? = null,
+    val participation_tier: String? = null,
     val authoritative_participation_transition_sequence: Long? = null,
     val authoritative_participation_transition_trigger: String? = null,
     val authoritative_participation_transition_history: List<String>? = null,
@@ -2593,6 +2604,7 @@ data class DeviceExecutionEventPayload(
     //  "local_only" | "control_only" | "cross_device_capable" | "cross_device_enabled" |
     //  "fully_attached" | "dispatch_eligible" | "distributed_participant".
     val authoritative_participation_state: String? = null,
+    val participation_tier: String? = null,
     val authoritative_participation_transition_sequence: Long? = null,
     val authoritative_participation_transition_trigger: String? = null,
     val authoritative_participation_transition_history: List<String>? = null,

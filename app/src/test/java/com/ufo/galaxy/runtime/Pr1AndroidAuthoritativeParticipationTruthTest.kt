@@ -3,6 +3,7 @@ package com.ufo.galaxy.runtime
 import com.google.gson.Gson
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
+import com.ufo.galaxy.protocol.GoalResultPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,6 +66,25 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
             baseInput(distributedRuntimeActivity = true)
         )
         assertEquals(AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT, state)
+    }
+
+    @Test
+    fun `participationTierFor maps canonical high-confidence states`() {
+        assertEquals(
+            AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH,
+            AndroidAuthoritativeParticipationTruth
+                .participationTierFor(AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_ENABLED)
+        )
+        assertEquals(
+            AndroidAuthoritativeParticipationTruth.ParticipationTier.FULLY_ATTACHED,
+            AndroidAuthoritativeParticipationTruth
+                .participationTierFor(AndroidAuthoritativeParticipationTruth.State.FULLY_ATTACHED)
+        )
+        assertEquals(
+            AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT,
+            AndroidAuthoritativeParticipationTruth
+                .participationTierFor(AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT)
+        )
     }
 
     @Test
@@ -146,11 +166,15 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
             offline_queue_depth = 0,
             current_fallback_tier = "none",
             authoritative_participation_state = AndroidAuthoritativeParticipationTruth.State.FULLY_ATTACHED.wireValue,
+            participation_tier = AndroidAuthoritativeParticipationTruth
+                .ParticipationTier.FULLY_ATTACHED
+                .wireValue,
             authoritative_participation_transition_sequence = 5L,
             authoritative_participation_transition_trigger = "session_established"
         )
         val json = gson.toJson(payload)
         assertTrue(json.contains("\"authoritative_participation_state\":\"fully_attached\""))
+        assertTrue(json.contains("\"participation_tier\":\"fully_attached\""))
         assertTrue(json.contains("\"authoritative_participation_transition_sequence\":5"))
     }
 
@@ -162,11 +186,35 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
             phase = DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED,
             authoritative_participation_state =
                 AndroidAuthoritativeParticipationTruth.State.DISTRIBUTED_PARTICIPANT.wireValue,
+            participation_tier = AndroidAuthoritativeParticipationTruth
+                .ParticipationTier.DISTRIBUTED_PARTICIPANT
+                .wireValue,
             authoritative_participation_transition_trigger = "distributed_activity_started"
         )
         val json = gson.toJson(payload)
         assertTrue(json.contains("\"authoritative_participation_state\":\"distributed_participant\""))
+        assertTrue(json.contains("\"participation_tier\":\"distributed_participant\""))
         assertTrue(json.contains("\"authoritative_participation_transition_trigger\":\"distributed_activity_started\""))
+    }
+
+    @Test
+    fun `goal result payload serializes participation tier and mode semantics fields`() {
+        val payload = GoalResultPayload(
+            task_id = "t-result-1",
+            status = "success",
+            participation_tier = AndroidAuthoritativeParticipationTruth
+                .ParticipationTier.DISPATCH_ELIGIBLE
+                .wireValue,
+            execution_mode_state = "cross_device_active",
+            cross_device_eligibility = true,
+            local_mode_gate_deferred = false,
+            local_inference_available = true
+        )
+        val json = gson.toJson(payload)
+        assertTrue(json.contains("\"participation_tier\":\"dispatch_eligible\""))
+        assertTrue(json.contains("\"execution_mode_state\":\"cross_device_active\""))
+        assertTrue(json.contains("\"cross_device_eligibility\":true"))
+        assertTrue(json.contains("\"local_inference_available\":true"))
     }
 
     private fun baseInput(
