@@ -2098,7 +2098,7 @@ object StabilizationBaseline {
                 "跨设备参与、委托执行、本地模式就绪、结果上行与失败诊断从「作者记忆工作流」提升为" +
                 "明确、可机器验证、可诊断的形式化可操作性合约。" +
                 "引入 OperabilityPathStep（10 步最小可用路径枚举）、" +
-                "PathBlockCondition（5 个路径阻断前提，含受影响步骤与是否可自愈标记）、" +
+                "PathBlockCondition（6 个路径阻断前提，含受影响步骤与是否可自愈标记）、" +
                 "CapabilityDegradationKind（5 种仅降级能力的条件，含 isRecoverable 标记）、" +
                 "LocalModeReadinessGate（本地模式就绪门，4 维度含硬/软前提区分，assess() 返回 " +
                 "LocalModeReadinessSnapshot 含 overall_ready/failing_hard_gates）、" +
