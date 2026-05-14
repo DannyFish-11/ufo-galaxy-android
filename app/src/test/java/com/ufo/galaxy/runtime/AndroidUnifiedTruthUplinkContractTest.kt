@@ -8,29 +8,31 @@ import org.junit.Test
  *
  * 验证以下接受准则：
  *
- *  1. **TruthCategory** — 六个分类定义；wire value 稳定；fromWireValue 正确。
+ *  1. **TruthCategory** — 七个分类定义；wire value 稳定；fromWireValue 正确。
  *  2. **ConstraintSemantics** — 六个枚举值；isConstraint/isDeferred 语义正确；derive() 优先级正确。
- *  3. **LocalCapabilityState** — 五个枚举值；isLocalModeCapable 正确；derive() 逻辑正确。
- *  4. **UPLINK_INVARIANTS** — 共 15 条；全部非空。
- *  5. **build()** — 核心工厂方法；所有不变量在运行时被执行。
- *  6. **UnifiedTruthSnapshot.toWireMap()** — 所有非 null 字段出现在 map 中；null 字段被省略。
- *  7. **StabilizationBaseline** — "android-unified-truth-uplink-contract" 已注册为 CANONICAL_STABLE。
- *  8. **SCHEMA_VERSION** — 为 "1"。
- *  9. **KEY_ 常量** — 所有 KEY_ 常量非空。
- * 10. **participation_tier 保底** — null 时默认 pre_attach（INV-UTU-01）。
+ *  3. **GovernanceState / TakeoverState** — 治理态与接管态枚举稳定，deriveGovernanceTruth() 逻辑正确。
+ *  4. **LocalCapabilityState** — 五个枚举值；isLocalModeCapable 正确；derive() 逻辑正确。
+ *  5. **UPLINK_INVARIANTS** — 共 18 条；全部非空。
+ *  6. **build()** — 核心工厂方法；所有不变量在运行时被执行。
+ *  7. **UnifiedTruthSnapshot.toWireMap()** — 所有非 null 字段出现在 map 中；null 字段被省略。
+ *  8. **StabilizationBaseline** — "android-unified-truth-uplink-contract" 已注册为 CANONICAL_STABLE。
+ *  9. **SCHEMA_VERSION** — 为 "1"。
+ * 10. **KEY_ 常量** — 所有 KEY_ 常量非空。
+ * 11. **participation_tier 保底** — null 时默认 pre_attach（INV-UTU-01）。
  *
  * ## 测试矩阵
  *
  * ### TruthCategory
  *  - PARTICIPATION wireValue 为 participation
  *  - MODE wireValue 为 mode
+ *  - GOVERNANCE wireValue 为 governance
  *  - EXECUTION wireValue 为 execution
  *  - CLOSURE_UPSTREAM wireValue 为 closure_upstream
  *  - CONTINUITY wireValue 为 continuity
  *  - LOCAL_CAPABILITY wireValue 为 local_capability
  *  - fromWireValue 对每个值返回正确分类
  *  - fromWireValue 对未知值返回 null
- *  - ALL_WIRE_VALUES 恰好包含六条
+ *  - ALL_WIRE_VALUES 恰好包含七条
  *
  * ### ConstraintSemantics
  *  - NONE wireValue 为 none；isConstraint=false；isDeferred=false
@@ -107,6 +109,14 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     @Test
+    fun `GOVERNANCE wireValue is governance`() {
+        assertEquals(
+            "governance",
+            AndroidUnifiedTruthUplinkContract.TruthCategory.GOVERNANCE.wireValue
+        )
+    }
+
+    @Test
     fun `EXECUTION wireValue is execution`() {
         assertEquals(
             "execution",
@@ -143,6 +153,7 @@ class AndroidUnifiedTruthUplinkContractTest {
         val C = AndroidUnifiedTruthUplinkContract.TruthCategory
         assertEquals(C.PARTICIPATION, C.fromWireValue("participation"))
         assertEquals(C.MODE, C.fromWireValue("mode"))
+        assertEquals(C.GOVERNANCE, C.fromWireValue("governance"))
         assertEquals(C.EXECUTION, C.fromWireValue("execution"))
         assertEquals(C.CLOSURE_UPSTREAM, C.fromWireValue("closure_upstream"))
         assertEquals(C.CONTINUITY, C.fromWireValue("continuity"))
@@ -155,8 +166,8 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     @Test
-    fun `TruthCategory ALL_WIRE_VALUES contains exactly six entries`() {
-        assertEquals(6, AndroidUnifiedTruthUplinkContract.TruthCategory.ALL_WIRE_VALUES.size)
+    fun `TruthCategory ALL_WIRE_VALUES contains exactly seven entries`() {
+        assertEquals(7, AndroidUnifiedTruthUplinkContract.TruthCategory.ALL_WIRE_VALUES.size)
     }
 
     @Test
@@ -313,6 +324,89 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    // GovernanceState / TakeoverState
+    // ════════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `GovernanceState wire values are stable`() {
+        val state = AndroidUnifiedTruthUplinkContract.GovernanceState
+        assertEquals("local_autonomous", state.LOCAL_AUTONOMOUS.wireValue)
+        assertEquals("v2_governed", state.V2_GOVERNED.wireValue)
+        assertEquals("delegated_execution", state.DELEGATED_EXECUTION.wireValue)
+        assertEquals("governance_blocked", state.GOVERNANCE_BLOCKED.wireValue)
+        assertEquals(4, state.ALL_WIRE_VALUES.size)
+    }
+
+    @Test
+    fun `TakeoverState wire values are stable`() {
+        val state = AndroidUnifiedTruthUplinkContract.TakeoverState
+        assertEquals("inactive", state.INACTIVE.wireValue)
+        assertEquals("pending", state.PENDING.wireValue)
+        assertEquals("active", state.ACTIVE.wireValue)
+        assertEquals(3, state.ALL_WIRE_VALUES.size)
+    }
+
+    @Test
+    fun `deriveGovernanceTruth returns local autonomous when not governed by V2`() {
+        val truth = AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
+            crossDeviceEnabled = false,
+            sessionAttached = false,
+            activeTaskId = null,
+            activeTakeoverId = null,
+            operatorSuspendedOrIsolated = false
+        )
+        assertEquals("local_autonomous", truth.governance_state)
+        assertFalse(truth.governance_blocked)
+        assertFalse(truth.delegated_execution_active)
+        assertEquals("inactive", truth.takeover_state)
+    }
+
+    @Test
+    fun `deriveGovernanceTruth returns v2 governed when session attached without active task`() {
+        val truth = AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
+            crossDeviceEnabled = true,
+            sessionAttached = true,
+            activeTaskId = null,
+            activeTakeoverId = null,
+            operatorSuspendedOrIsolated = false
+        )
+        assertEquals("v2_governed", truth.governance_state)
+        assertFalse(truth.governance_blocked)
+        assertFalse(truth.delegated_execution_active)
+        assertEquals("inactive", truth.takeover_state)
+    }
+
+    @Test
+    fun `deriveGovernanceTruth returns delegated execution state with active takeover during execution`() {
+        val truth = AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
+            crossDeviceEnabled = true,
+            sessionAttached = true,
+            activeTaskId = "task-1",
+            activeTakeoverId = "takeover-1",
+            operatorSuspendedOrIsolated = false
+        )
+        assertEquals("delegated_execution", truth.governance_state)
+        assertFalse(truth.governance_blocked)
+        assertTrue(truth.delegated_execution_active)
+        assertEquals("active", truth.takeover_state)
+    }
+
+    @Test
+    fun `deriveGovernanceTruth returns blocked when operator isolation is active`() {
+        val truth = AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
+            crossDeviceEnabled = true,
+            sessionAttached = true,
+            activeTaskId = null,
+            activeTakeoverId = "takeover-1",
+            operatorSuspendedOrIsolated = true
+        )
+        assertEquals("governance_blocked", truth.governance_state)
+        assertTrue(truth.governance_blocked)
+        assertFalse(truth.delegated_execution_active)
+        assertEquals("pending", truth.takeover_state)
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     // LocalCapabilityState
     // ════════════════════════════════════════════════════════════════════════
 
@@ -440,8 +534,8 @@ class AndroidUnifiedTruthUplinkContractTest {
     // ════════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `UPLINK_INVARIANTS contains exactly 15 invariants`() {
-        assertEquals(15, AndroidUnifiedTruthUplinkContract.UPLINK_INVARIANTS.size)
+    fun `UPLINK_INVARIANTS contains exactly 18 invariants`() {
+        assertEquals(18, AndroidUnifiedTruthUplinkContract.UPLINK_INVARIANTS.size)
     }
 
     @Test
@@ -614,6 +708,39 @@ class AndroidUnifiedTruthUplinkContractTest {
         assertEquals("unavailable", snapshot.local_capability_state)
     }
 
+    @Test
+    fun `build governance truth separates governance from mode state`() {
+        val snapshot = AndroidUnifiedTruthUplinkContract.build(
+            authoritativeParticipationStateWire = "fully_attached",
+            participationTierWire = "fully_attached",
+            executionModeStateWire = "cross_device_active",
+            crossDeviceEligibility = true,
+            crossDeviceEnabled = true,
+            activeTaskId = "task-1",
+            activeTakeoverId = "takeover-1"
+        )
+        assertEquals("delegated_execution", snapshot.governance_state)
+        assertFalse(snapshot.governance_blocked)
+        assertTrue(snapshot.delegated_execution_active)
+        assertEquals("active", snapshot.takeover_state)
+    }
+
+    @Test
+    fun `build governance blocked is only true for blocked governance state INV-UTU-17`() {
+        val snapshot = AndroidUnifiedTruthUplinkContract.build(
+            authoritativeParticipationStateWire = "fully_attached",
+            participationTierWire = "fully_attached",
+            executionModeStateWire = "cross_device_active",
+            crossDeviceEligibility = true,
+            crossDeviceEnabled = true,
+            activeTakeoverId = "takeover-1",
+            operatorSuspendedOrIsolated = true
+        )
+        assertEquals("governance_blocked", snapshot.governance_state)
+        assertTrue(snapshot.governance_blocked)
+        assertEquals("pending", snapshot.takeover_state)
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     // UnifiedTruthSnapshot.toWireMap()
     // ════════════════════════════════════════════════════════════════════════
@@ -638,6 +765,10 @@ class AndroidUnifiedTruthUplinkContractTest {
         assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_RUNTIME_CONSTRAINED))
         assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_RUNTIME_DEFERRED))
         assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_CONSTRAINT_SEMANTICS))
+        assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_GOVERNANCE_STATE))
+        assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_GOVERNANCE_BLOCKED))
+        assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_DELEGATED_EXECUTION_ACTIVE))
+        assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_TAKEOVER_STATE))
         assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_LOCAL_MODE_CAPABLE))
         assertTrue(map.containsKey(AndroidUnifiedTruthUplinkContract.KEY_LOCAL_CAPABILITY_STATE))
     }
@@ -726,6 +857,10 @@ class AndroidUnifiedTruthUplinkContractTest {
             AndroidUnifiedTruthUplinkContract.KEY_RUNTIME_CONSTRAINED,
             AndroidUnifiedTruthUplinkContract.KEY_RUNTIME_DEFERRED,
             AndroidUnifiedTruthUplinkContract.KEY_CONSTRAINT_SEMANTICS,
+            AndroidUnifiedTruthUplinkContract.KEY_GOVERNANCE_STATE,
+            AndroidUnifiedTruthUplinkContract.KEY_GOVERNANCE_BLOCKED,
+            AndroidUnifiedTruthUplinkContract.KEY_DELEGATED_EXECUTION_ACTIVE,
+            AndroidUnifiedTruthUplinkContract.KEY_TAKEOVER_STATE,
             AndroidUnifiedTruthUplinkContract.KEY_TASK_ID,
             AndroidUnifiedTruthUplinkContract.KEY_DEVICE_ID,
             AndroidUnifiedTruthUplinkContract.KEY_RUNTIME_SESSION_ID,

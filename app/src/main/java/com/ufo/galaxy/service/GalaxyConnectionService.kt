@@ -273,6 +273,21 @@ class GalaxyConnectionService : Service() {
         }
     }
 
+    private fun currentGovernanceTruth(
+        activeTaskId: String? = UFOGalaxyApplication.runtimeController.activeTaskId,
+        activeTakeoverId: String? = currentActiveTakeoverId()
+    ): AndroidUnifiedTruthUplinkContract.GovernanceTruth {
+        val runtimeController = UFOGalaxyApplication.runtimeController
+        val eligibilityContext = runtimeController.buildOperatorActionEligibilityContext(activeTakeoverId)
+        return AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
+            crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+            sessionAttached = runtimeController.attachedSession.value?.isAttached == true,
+            activeTaskId = activeTaskId,
+            activeTakeoverId = activeTakeoverId,
+            operatorSuspendedOrIsolated = eligibilityContext.operatorSuspendedOrIsolated
+        )
+    }
+
     private fun clearActiveTakeoverIdIfMatches(expectedTakeoverId: String) {
         synchronized(activeTakeoverLock) {
             if (activeTakeoverId == expectedTakeoverId) {
@@ -441,6 +456,7 @@ class GalaxyConnectionService : Service() {
             val dispatchReadiness = runtimeController.currentDispatchReadiness()
             val distributedRuntimeActivity =
                 isDistributedParticipationActivePhase(payload.phase)
+            val governanceTruth = currentGovernanceTruth()
             val participationSnapshot = runtimeController.evaluateAuthoritativeParticipationSnapshot(
                 readinessSatisfied = modeState.crossDeviceEligibility,
                 distributedRuntimeActivity = distributedRuntimeActivity,
@@ -481,6 +497,10 @@ class GalaxyConnectionService : Service() {
                 authoritative_participation_transition_history =
                     participationSnapshot.transitionHistoryWire,
                 execution_mode_state = modeState.executionModeState,
+                governance_state = governanceTruth.governance_state,
+                governance_blocked = governanceTruth.governance_blocked,
+                delegated_execution_active = governanceTruth.delegated_execution_active,
+                takeover_state = governanceTruth.takeover_state,
                 // PR-5 (Android): observability audit fields enriched at the canonical sink
                 // so every execution event carries coherent path tagging, audit class, and
                 // fidelity classification regardless of which execution entry point produced it.
@@ -2446,6 +2466,7 @@ class GalaxyConnectionService : Service() {
         } else {
             null
         }
+        val governanceTruth = currentGovernanceTruth()
         // ── Enrich payload with unified-contract fields (always set at the single emission layer) ──
         // Resolve participation tier with guaranteed non-null fallback (INV-UTU-01).
         val resolvedParticipationTier = result.participation_tier
@@ -2508,6 +2529,11 @@ class GalaxyConnectionService : Service() {
                     LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
             runtime_constrained = result.runtime_constrained ?: constraintSem.isConstraint,
             runtime_deferred = result.runtime_deferred ?: constraintSem.isDeferred,
+            governance_state = result.governance_state ?: governanceTruth.governance_state,
+            governance_blocked = result.governance_blocked ?: governanceTruth.governance_blocked,
+            delegated_execution_active = result.delegated_execution_active
+                ?: governanceTruth.delegated_execution_active,
+            takeover_state = result.takeover_state ?: governanceTruth.takeover_state,
             local_llm_ready = localLlmReady,
             accessibility_ready = accessibilityReady,
             local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable
@@ -3514,6 +3540,8 @@ class GalaxyConnectionService : Service() {
             val snapshotParticipationTier = AndroidAuthoritativeParticipationTruth
                 .participationTierFor(authoritativeParticipationSnapshot.state)
 
+            val governanceTruth = currentGovernanceTruth()
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -3665,6 +3693,10 @@ class GalaxyConnectionService : Service() {
                 runtime_constrained = snapshotConstraintSem.isConstraint,
                 runtime_deferred = snapshotConstraintSem.isDeferred,
                 constraint_semantics = snapshotConstraintSem.wireValue,
+                governance_state = governanceTruth.governance_state,
+                governance_blocked = governanceTruth.governance_blocked,
+                delegated_execution_active = governanceTruth.delegated_execution_active,
+                takeover_state = governanceTruth.takeover_state,
                 local_llm_ready = snapshotLocalLlmReady,
                 local_mode_capable = snapshotLocalCapState.isLocalModeCapable,
                 local_capability_state = snapshotLocalCapState.wireValue
