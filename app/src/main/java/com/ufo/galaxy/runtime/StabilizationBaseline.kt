@@ -2047,6 +2047,43 @@ object StabilizationBaseline {
                 "Test: Pr89AndroidRuntimeObservabilityAuditTest.",
             introducedPr = 89
         )
+    ) + listOf(
+
+        // ── 统一真相上行合约（Android Unified Truth Uplink Contract）───────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-unified-truth-uplink-contract",
+            displayName = "AndroidUnifiedTruthUplinkContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Android 侧向 V2 中心上报运行时真相的统一、稳定、机器可消费合约。" +
+                "建立了六大真相分类（TruthCategory：PARTICIPATION/MODE/EXECUTION/CLOSURE_UPSTREAM/" +
+                "CONTINUITY/LOCAL_CAPABILITY），统一了此前分散在多个载体中的真相字段。" +
+                "引入 ConstraintSemantics（6 值：NONE/RUNTIME_CONSTRAINED/RUNTIME_DEFERRED/" +
+                "LOCAL_MODE_GATE_DEFERRED/EXECUTION_PRESSURE/HOLD）消除约束/延迟/持有语义的" +
+                "字段组合推断；引入 LocalCapabilityState（5 值：FULL/PARTIAL/DEGRADED/" +
+                "UNAVAILABLE/UNKNOWN）统一本地能力真相。" +
+                "UnifiedTruthSnapshot 保证 participation_tier/execution_mode_state/" +
+                "constraint_semantics/local_capability_state 在所有快照中永不为 null。" +
+                "GoalResultPayload 新增 dispatch_eligible/distributed_participant/session_attached/" +
+                "local_mode_active/runtime_constrained/runtime_deferred/local_llm_ready/" +
+                "accessibility_ready/local_mode_capable 字段，确保 participation_tier 在所有" +
+                "委托结果路径中有保底默认值（pre_attach）。" +
+                "DeviceStateSnapshotPayload 新增 unified_truth_schema_version/" +
+                "dispatch_eligible/distributed_participant/session_attached/local_mode_active/" +
+                "runtime_constrained/runtime_deferred/constraint_semantics/local_llm_ready/" +
+                "local_mode_capable/local_capability_state 字段。" +
+                "GalaxyConnectionService.sendGoalResult 和 sendDeviceStateSnapshot 在单一发送层" +
+                "强制填充所有新字段，确保 V2 无需字段组合推断即可消费 Android 运行时真相。" +
+                "UPLINK_INVARIANTS 声明 15 条不变量涵盖参与/模式/约束/能力/wire map 一致性。" +
+                "V2 集成点：core/android_device_state_store.py（dispatch_eligible/local_mode_capable），" +
+                "core/unified_result_ingress.py（participation_tier 保底），" +
+                "core/android_runtime_transition_reducer.py（constraint_semantics），" +
+                "metrics/android_capability_metrics.py（local_capability_state）。" +
+                "Test: AndroidUnifiedTruthUplinkContractTest.",
+            introducedPr = 90
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

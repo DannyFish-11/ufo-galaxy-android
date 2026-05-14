@@ -1095,7 +1095,63 @@ data class GoalResultPayload(
     // execution_spine_participation_kind: The spine participation mode Android used.
     // Wire value of AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.
     // Echoed in results for V2 task_result_canonical_truth_chain correlation. Null for legacy.
-    val execution_spine_participation_kind: String? = null
+    val execution_spine_participation_kind: String? = null,
+
+    // ── 统一真相上行合约：参与真相布尔字段（AndroidUnifiedTruthUplinkContract）──────────────────
+    //
+    // dispatch_eligible: Android 在结果上报时是否处于 dispatch_eligible 或 distributed_participant
+    //   参与层级。允许 V2 接受/闭合路径无需解析 participation_tier 字符串。
+    //   当 participation_tier 为 "dispatch_eligible" 或 "distributed_participant" 时为 true。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // distributed_participant: Android 在结果上报时是否处于分布式参与者层级。
+    //   当 participation_tier 为 "distributed_participant" 时为 true。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // session_attached: Android 在结果上报时是否已附加运行时会话。
+    //   当 participation_tier 不为 "pre_attach" 时为 true。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    val dispatch_eligible: Boolean? = null,
+    val distributed_participant: Boolean? = null,
+    val session_attached: Boolean? = null,
+
+    // ── 统一真相上行合约：模式真相布尔字段（AndroidUnifiedTruthUplinkContract）──────────────────
+    //
+    // local_mode_active: Android 在结果上报时是否处于本地模式（execution_mode_state = "local_only"）。
+    //   true 时 V2 应知晓此结果来自本地执行而非跨设备委托路径。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // runtime_constrained: Android 在结果上报时是否处于运行时受限状态。
+    //   对应 AndroidUnifiedTruthUplinkContract.ConstraintSemantics 中的 isConstraint=true 状态。
+    //   V2 应将此字段用于接受置信度调整：受限状态下的结果可信度较低。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // runtime_deferred: Android 在结果上报时是否处于运行时延迟状态。
+    //   对应 AndroidUnifiedTruthUplinkContract.ConstraintSemantics 中的 isDeferred=true 状态。
+    //   V2 应将此字段用于重试策略决策：延迟状态下可等待后续结果。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    val local_mode_active: Boolean? = null,
+    val runtime_constrained: Boolean? = null,
+    val runtime_deferred: Boolean? = null,
+
+    // ── 统一真相上行合约：本地能力真相字段（AndroidUnifiedTruthUplinkContract）──────────────────
+    //
+    // local_llm_ready: Android 本地 LLM 在结果上报时是否就绪（模型已加载、权重已验证）。
+    //   true 意味着 Android 已在本地语言模型支持下执行此任务，无需网络依赖。
+    //   与 local_inference_available 不同：local_llm_ready 专指 LLM 组件就绪状态。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // accessibility_ready: Android 可访问性服务在结果上报时是否就绪。
+    //   true 意味着此结果的执行路径具备完整 UI 自动化能力。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // local_mode_capable: Android 在结果上报时是否具备完整本地模式运行能力。
+    //   对应 AndroidUnifiedTruthUplinkContract.LocalCapabilityState.isLocalModeCapable。
+    //   true 意味着 local_inference_available 且无关键降级，此结果可信度较高。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    val local_llm_ready: Boolean? = null,
+    val accessibility_ready: Boolean? = null,
+    val local_mode_capable: Boolean? = null
 )
 
 /**
@@ -2476,7 +2532,64 @@ data class DeviceStateSnapshotPayload(
     val observability_audit_schema_version: String? = null,
     val execution_path_tag: String? = null,
     val audit_contribution_class: String? = null,
-    val observability_reliability_class: String? = null
+    val observability_reliability_class: String? = null,
+
+    // ── 统一真相上行合约：快照级统一真相字段（AndroidUnifiedTruthUplinkContract）──────────────
+    //
+    // unified_truth_schema_version: 本合约字段组的 schema 版本。
+    //   取自 AndroidUnifiedTruthUplinkContract.SCHEMA_VERSION。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // dispatch_eligible: Android 在快照时是否处于 dispatch_eligible 或 distributed_participant
+    //   参与层级。V2 可通过此单一布尔字段替代解析 participation_tier 字符串。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // distributed_participant: Android 在快照时是否处于分布式参与者层级。
+    //   当 participation_tier 为 "distributed_participant" 时为 true。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // session_attached: Android 在快照时是否已附加运行时会话。
+    //   当 participation_tier 不为 "pre_attach" 时为 true。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // local_mode_active: Android 在快照时是否处于本地模式（execution_mode_state = "local_only"）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // runtime_constrained: Android 在快照时是否处于运行时受限状态。
+    //   对应 AndroidUnifiedTruthUplinkContract.ConstraintSemantics 中的 isConstraint=true 状态。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // runtime_deferred: Android 在快照时是否处于运行时延迟状态。
+    //   对应 AndroidUnifiedTruthUplinkContract.ConstraintSemantics 中的 isDeferred=true 状态。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // constraint_semantics: 统一约束语义 wire 值，取自
+    //   AndroidUnifiedTruthUplinkContract.ConstraintSemantics.wireValue。
+    //   V2 MUST 读取此字段而非通过字段组合推断约束状态。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // local_llm_ready: Android 本地 LLM 在快照时是否就绪（模型已加载、权重已验证）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // local_mode_capable: Android 在快照时是否具备完整本地模式运行能力。
+    //   对应 AndroidUnifiedTruthUplinkContract.LocalCapabilityState.isLocalModeCapable。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // local_capability_state: 统一本地能力状态 wire 值，取自
+    //   AndroidUnifiedTruthUplinkContract.LocalCapabilityState.wireValue。
+    //   V2 MUST 读取此字段而非通过 local_intelligence_status / model_ready 等组合推断。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    val unified_truth_schema_version: String? = null,
+    val dispatch_eligible: Boolean? = null,
+    val distributed_participant: Boolean? = null,
+    val session_attached: Boolean? = null,
+    val local_mode_active: Boolean? = null,
+    val runtime_constrained: Boolean? = null,
+    val runtime_deferred: Boolean? = null,
+    val constraint_semantics: String? = null,
+    val local_llm_ready: Boolean? = null,
+    val local_mode_capable: Boolean? = null,
+    val local_capability_state: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────

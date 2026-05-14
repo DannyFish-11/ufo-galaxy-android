@@ -35,6 +35,8 @@ import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
 import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
+import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
@@ -2445,20 +2447,70 @@ class GalaxyConnectionService : Service() {
             null
         }
         // ── Enrich payload with unified-contract fields (always set at the single emission layer) ──
+        // Resolve participation tier with guaranteed non-null fallback (INV-UTU-01).
+        val resolvedParticipationTier = result.participation_tier
+            ?: participationSnapshot?.let {
+                AndroidAuthoritativeParticipationTruth.participationTierFor(it.state).wireValue
+            }
+            ?: AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue
+        val resolvedModeState = result.execution_mode_state ?: modeState?.executionModeState
+            ?: LocalExecutionModeGate.ExecutionModeState.INACTIVE.wireValue
+        val resolvedCrossDeviceElig = result.cross_device_eligibility ?: modeState?.crossDeviceEligibility ?: false
+        val resolvedIsHoldState = result.local_mode_gate_deferred ?: modeState?.isHoldState ?: false
+        // Derive unified constraint semantics for coherent boolean fields.
+        val constraintSem = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
+            isConstrained = false,
+            isDeferred = false,
+            isLocalModeGateHold = resolvedIsHoldState,
+            isExecutionBusy = UFOGalaxyApplication.runtimeController.activeTaskId != null,
+            isHold = false
+        )
+        // Derive unified local capability state.
+        val resolvedLocalInference = result.local_inference_available ?: localInferenceAvailable
+        val localLlmReady = result.local_llm_ready
+            ?: (UFOGalaxyApplication.appSettings.modelReady == true &&
+                (NativeInferenceLoader.isLlamaCppAvailable() ||
+                    NativeInferenceLoader.isNcnnAvailable()))
+        val accessibilityReady = result.accessibility_ready
+            ?: UFOGalaxyApplication.appSettings.accessibilityReady
+        val localCapState = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
+            localLlmReady = localLlmReady,
+            localInferenceAvailable = resolvedLocalInference,
+            accessibilityReady = accessibilityReady,
+            isDegraded = managerStateDegraded()
+        )
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
             // Populate result_summary from result when not already set, so all result payloads
             // carry a consistent human-readable summary field regardless of the caller path.
             result_summary = result.result_summary ?: result.result,
-            participation_tier = result.participation_tier
-                ?: participationSnapshot?.let {
-                    AndroidAuthoritativeParticipationTruth.participationTierFor(it.state).wireValue
-                },
-            execution_mode_state = result.execution_mode_state ?: modeState?.executionModeState,
-            cross_device_eligibility = result.cross_device_eligibility ?: modeState?.crossDeviceEligibility,
-            local_mode_gate_deferred = result.local_mode_gate_deferred ?: modeState?.isHoldState,
-            local_inference_available = result.local_inference_available ?: localInferenceAvailable
+            // participation_tier is guaranteed non-null (INV-UTU-01): defaults to pre_attach.
+            participation_tier = resolvedParticipationTier,
+            execution_mode_state = resolvedModeState,
+            cross_device_eligibility = resolvedCrossDeviceElig,
+            local_mode_gate_deferred = resolvedIsHoldState,
+            local_inference_available = resolvedLocalInference,
+            // ── 统一真相上行合约布尔字段（在单一发送层强制填充）──
+            dispatch_eligible = result.dispatch_eligible
+                ?: (resolvedParticipationTier ==
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISPATCH_ELIGIBLE.wireValue ||
+                    resolvedParticipationTier ==
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT.wireValue),
+            distributed_participant = result.distributed_participant
+                ?: (resolvedParticipationTier ==
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT.wireValue),
+            session_attached = result.session_attached
+                ?: (resolvedParticipationTier !=
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue),
+            local_mode_active = result.local_mode_active
+                ?: (resolvedModeState ==
+                    LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
+            runtime_constrained = result.runtime_constrained ?: constraintSem.isConstraint,
+            runtime_deferred = result.runtime_deferred ?: constraintSem.isDeferred,
+            local_llm_ready = localLlmReady,
+            accessibility_ready = accessibilityReady,
+            local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -3573,6 +3625,70 @@ class GalaxyConnectionService : Service() {
                     degradedConditionClass = degradedConditionClass.wireValue,
                     reconnectRecoveryState = reconnectRecoveryState,
                     localObservationBasis = AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
+                ).wireValue,
+                // ── 统一真相上行合约字段（AndroidUnifiedTruthUplinkContract）────────────────────────
+                // 在快照发送层唯一填充，确保 V2 快照消费无需字段组合推断。
+                unified_truth_schema_version = AndroidUnifiedTruthUplinkContract.SCHEMA_VERSION,
+                dispatch_eligible = (AndroidAuthoritativeParticipationTruth
+                    .participationTierFor(authoritativeParticipationSnapshot.state) ==
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISPATCH_ELIGIBLE ||
+                    AndroidAuthoritativeParticipationTruth
+                    .participationTierFor(authoritativeParticipationSnapshot.state) ==
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT),
+                distributed_participant = (AndroidAuthoritativeParticipationTruth
+                    .participationTierFor(authoritativeParticipationSnapshot.state) ==
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT),
+                session_attached = (AndroidAuthoritativeParticipationTruth
+                    .participationTierFor(authoritativeParticipationSnapshot.state) !=
+                    AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH),
+                local_mode_active = (modeState.executionModeState ==
+                    LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
+                runtime_constrained = run {
+                    val cs = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
+                        isConstrained = degradedConditionClass ==
+                            AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
+                        isDeferred = false,
+                        isLocalModeGateHold = modeState.isHoldState,
+                        isExecutionBusy = snapshotStamp.executionBusy == true,
+                        isHold = false
+                    )
+                    cs.isConstraint
+                },
+                runtime_deferred = run {
+                    val cs = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
+                        isConstrained = false,
+                        isDeferred = degradedConditionClass ==
+                            AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.DELAYED,
+                        isLocalModeGateHold = modeState.isHoldState,
+                        isExecutionBusy = snapshotStamp.executionBusy == true,
+                        isHold = false
+                    )
+                    cs.isDeferred
+                },
+                constraint_semantics = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
+                    isConstrained = degradedConditionClass ==
+                        AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
+                    isDeferred = degradedConditionClass ==
+                        AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.DELAYED,
+                    isLocalModeGateHold = modeState.isHoldState,
+                    isExecutionBusy = snapshotStamp.executionBusy == true,
+                    isHold = false
+                ).wireValue,
+                local_llm_ready = (modelReady == true && (llamaCppAvailable || ncnnAvailable)),
+                local_mode_capable = run {
+                    val lcs = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
+                        localLlmReady = (modelReady == true && (llamaCppAvailable || ncnnAvailable)),
+                        localInferenceAvailable = localInferenceAvailable(),
+                        accessibilityReady = accessibilityReady,
+                        isDegraded = managerStateDegraded()
+                    )
+                    lcs.isLocalModeCapable
+                },
+                local_capability_state = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
+                    localLlmReady = (modelReady == true && (llamaCppAvailable || ncnnAvailable)),
+                    localInferenceAvailable = localInferenceAvailable(),
+                    accessibilityReady = accessibilityReady,
+                    isDegraded = managerStateDegraded()
                 ).wireValue
             )
 
