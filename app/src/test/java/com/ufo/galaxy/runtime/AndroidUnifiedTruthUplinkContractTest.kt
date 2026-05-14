@@ -347,7 +347,7 @@ class AndroidUnifiedTruthUplinkContractTest {
     }
 
     @Test
-    fun `deriveGovernanceTruth returns local autonomous when cross-device is absent`() {
+    fun `deriveGovernanceTruth returns local autonomous when not governed by V2`() {
         val truth = AndroidUnifiedTruthUplinkContract.deriveGovernanceTruth(
             crossDeviceEnabled = false,
             sessionAttached = false,
