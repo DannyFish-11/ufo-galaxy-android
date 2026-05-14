@@ -35,6 +35,7 @@ import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
 import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
+import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
@@ -3334,8 +3335,9 @@ class GalaxyConnectionService : Service() {
                 is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Failed -> true
                 else -> false
             }
+            val wsConnected = webSocketClient.isConnected()
             val modeState = settings.authoritativeModeState(
-                wsConnected = webSocketClient.isConnected(),
+                wsConnected = wsConnected,
                 capabilityDegraded = capabilityDegradedForMode,
                 degradationReasons = degradedReasons
             )
@@ -3394,6 +3396,14 @@ class GalaxyConnectionService : Service() {
                 plannerFallbackTier = plannerFallbackTier,
                 groundingFallbackTier = groundingFallbackTier
             )
+            val localObservationBasis =
+                AndroidDeviceSurfaceSourceContract.deriveSnapshotObservationBasis(
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = wsConnected,
+                    reconnectRecoveryState = reconnectRecoveryState,
+                    offlineQueueDepth = offlineQueueDepth,
+                    reportedStateSemanticClass = reportedStateSemanticClass
+                )
             val degradedConditionClass = AndroidCanonicalRuntimeTruthContract.classifyDegradedCondition(
                 reconnectRecoveryState = reconnectRecoveryState,
                 degradedReasons = degradedReasons,
@@ -3631,8 +3641,7 @@ class GalaxyConnectionService : Service() {
                 participant_identity_freshness = snapshotParticipantFreshness,
                 reported_state_semantic_class = reportedStateSemanticClass.wireValue,
                 degraded_condition_class = degradedConditionClass.wireValue,
-                local_observation_basis =
-                    AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue,
+                local_observation_basis = localObservationBasis.wireValue,
                 // PR-7B: explicit evidence presence kind so V2 applies the correct governance
                 // policy without relying on optimistic defaults for missing or failed evidence.
                 evidence_presence_kind = evidencePresenceKind.wireValue,
@@ -3675,7 +3684,7 @@ class GalaxyConnectionService : Service() {
                     evidencePresenceKind = evidencePresenceKind.wireValue,
                     degradedConditionClass = degradedConditionClass.wireValue,
                     reconnectRecoveryState = reconnectRecoveryState,
-                    localObservationBasis = AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
+                    localObservationBasis = localObservationBasis.wireValue
                 ).wireValue,
                 // ── 统一真相上行合约字段（AndroidUnifiedTruthUplinkContract）────────────────────────
                 // 在快照发送层唯一填充，确保 V2 快照消费无需字段组合推断。
