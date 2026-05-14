@@ -2470,10 +2470,7 @@ class GalaxyConnectionService : Service() {
         )
         // Derive unified local capability state.
         val resolvedLocalInference = result.local_inference_available ?: localInferenceAvailable
-        val localLlmReady = result.local_llm_ready
-            ?: (UFOGalaxyApplication.appSettings.modelReady == true &&
-                (NativeInferenceLoader.isLlamaCppAvailable() ||
-                    NativeInferenceLoader.isNcnnAvailable()))
+        val localLlmReady = result.local_llm_ready ?: localLlmReady()
         val accessibilityReady = result.accessibility_ready
             ?: UFOGalaxyApplication.appSettings.accessibilityReady
         val localCapState = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
@@ -3506,13 +3503,16 @@ class GalaxyConnectionService : Service() {
                 isHold = false
             )
             // ── 统一真相上行合约：预先计算本地能力状态（消除重复 LocalCapabilityState.derive() 调用）──
-            val snapshotLocalLlmReady = (modelReady == true && (llamaCppAvailable || ncnnAvailable))
+            val snapshotLocalLlmReady = localLlmReady()
             val snapshotLocalCapState = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
                 localLlmReady = snapshotLocalLlmReady,
                 localInferenceAvailable = localInferenceAvailable(),
                 accessibilityReady = accessibilityReady,
                 isDegraded = managerStateDegraded()
             )
+            // ── 统一真相上行合约：预先计算参与层级（消除 4 次重复的 participationTierFor 调用）──
+            val snapshotParticipationTier = AndroidAuthoritativeParticipationTruth
+                .participationTierFor(authoritativeParticipationSnapshot.state)
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -3652,17 +3652,13 @@ class GalaxyConnectionService : Service() {
                 // ── 统一真相上行合约字段（AndroidUnifiedTruthUplinkContract）────────────────────────
                 // 在快照发送层唯一填充，确保 V2 快照消费无需字段组合推断。
                 unified_truth_schema_version = AndroidUnifiedTruthUplinkContract.SCHEMA_VERSION,
-                dispatch_eligible = (AndroidAuthoritativeParticipationTruth
-                    .participationTierFor(authoritativeParticipationSnapshot.state) ==
+                dispatch_eligible = (snapshotParticipationTier ==
                     AndroidAuthoritativeParticipationTruth.ParticipationTier.DISPATCH_ELIGIBLE ||
-                    AndroidAuthoritativeParticipationTruth
-                    .participationTierFor(authoritativeParticipationSnapshot.state) ==
+                    snapshotParticipationTier ==
                     AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT),
-                distributed_participant = (AndroidAuthoritativeParticipationTruth
-                    .participationTierFor(authoritativeParticipationSnapshot.state) ==
+                distributed_participant = (snapshotParticipationTier ==
                     AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT),
-                session_attached = (AndroidAuthoritativeParticipationTruth
-                    .participationTierFor(authoritativeParticipationSnapshot.state) !=
+                session_attached = (snapshotParticipationTier !=
                     AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH),
                 local_mode_active = (modeState.executionModeState ==
                     LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
@@ -5506,6 +5502,16 @@ class GalaxyConnectionService : Service() {
             else -> false
         }
     }
+
+    /**
+     * Returns true when the local LLM is ready: model weights are loaded and at least one of
+     * llama.cpp or NCNN native runtime is available.  Used by both [sendGoalResult] and
+     * [sendDeviceStateSnapshot] to populate the [GoalResultPayload.local_llm_ready] and
+     * [DeviceStateSnapshotPayload.local_llm_ready] fields from a single authoritative source.
+     */
+    private fun localLlmReady(): Boolean =
+        UFOGalaxyApplication.appSettings.modelReady == true &&
+            (NativeInferenceLoader.isLlamaCppAvailable() || NativeInferenceLoader.isNcnnAvailable())
 
     private fun isDistributedParticipationActivePhase(phase: String): Boolean =
         phase !in setOf(
