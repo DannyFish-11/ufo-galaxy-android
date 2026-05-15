@@ -4668,9 +4668,20 @@ class GalaxyConnectionService : Service() {
         // Mark this request as in-flight so any concurrent inbound request is blocked.
         updateActiveTakeoverId(envelope.takeover_id)
         try {
+            val runtimeModeState = UFOGalaxyApplication.appSettings.authoritativeModeState(
+                wsConnected = webSocketClient.isConnected(),
+                runtimeActive = UFOGalaxyApplication.runtimeController.state.value !is
+                    com.ufo.galaxy.runtime.RuntimeController.RuntimeState.Idle,
+                capabilityDegraded = managerStateDegraded()
+            )
             val eligibility = takeoverEligibilityAssessor.assess(
                 envelope = envelope,
-                activeTakeoverId = existingActiveTakeoverId
+                activeTakeoverId = existingActiveTakeoverId,
+                modeContext = TakeoverEligibilityAssessor.RuntimeModeContext(
+                    executionModeState = runtimeModeState.executionModeState,
+                    acceptsCrossDeviceTasks = runtimeModeState.acceptsCrossDeviceTasks,
+                    isHoldState = runtimeModeState.isHoldState
+                )
             )
 
             Log.i(
@@ -4678,6 +4689,9 @@ class GalaxyConnectionService : Service() {
                 "[PR3:TAKEOVER] takeover_request received takeover_id=${envelope.takeover_id} " +
                     "task_id=${envelope.task_id} trace_id=${envelope.trace_id} " +
                     "source_device=${envelope.source_device_id} posture=$resolvedPosture " +
+                    "mode_state=${runtimeModeState.executionModeState} " +
+                    "mode_accepts_cross_device=${runtimeModeState.acceptsCrossDeviceTasks} " +
+                    "mode_hold=${runtimeModeState.isHoldState} " +
                     "eligible=${eligibility.eligible} reason=${eligibility.reason}"
             )
             GalaxyLogger.log(

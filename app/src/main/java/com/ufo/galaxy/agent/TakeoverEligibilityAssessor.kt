@@ -13,9 +13,10 @@ import com.ufo.galaxy.data.AppSettings
  * ## Assessment order (first failing check wins)
  * 1. [AppSettings.crossDeviceEnabled] must be `true`.
  * 2. [AppSettings.goalExecutionEnabled] must be `true`.
- * 3. [AppSettings.accessibilityReady] must be `true`.
- * 4. [AppSettings.overlayReady] must be `true`.
- * 5. No other takeover may currently be active on this device.
+ * 3. Delegated dispatch must not be in mode hold and must remain cross-device eligible.
+ * 4. [AppSettings.accessibilityReady] must be `true`.
+ * 5. [AppSettings.overlayReady] must be `true`.
+ * 6. No other takeover may currently be active on this device.
  *
  * Source posture ([TakeoverRequestEnvelope.source_runtime_posture]) is **not** a blocking
  * condition — Android can accept a takeover regardless of whether the originating device is
@@ -32,6 +33,11 @@ import com.ufo.galaxy.data.AppSettings
  *                 assessment time.
  */
 class TakeoverEligibilityAssessor(private val settings: AppSettings) {
+    data class RuntimeModeContext(
+        val executionModeState: String,
+        val acceptsCrossDeviceTasks: Boolean,
+        val isHoldState: Boolean
+    )
 
     enum class OwnershipTransferProofClass(val wireValue: String) {
         CONFIRMED_STRONG("confirmed_strong"),
@@ -92,6 +98,12 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
          * disabled.  Cross-device connectivity (WS session) remains active.
          */
         BLOCKED_DELEGATED_EXECUTION_DISABLED("delegated_execution_disabled"),
+
+        /** Runtime mode is in transition; cross-device dispatch is explicitly on hold. */
+        BLOCKED_MODE_DISPATCH_HOLD("mode_dispatch_hold"),
+
+        /** Runtime mode is not currently cross-device executable (e.g. local_only/inactive). */
+        BLOCKED_MODE_LOCAL_ONLY("mode_local_only"),
 
         /**
          * [AppSettings.accessibilityReady] is `false`; the accessibility service is not
@@ -157,7 +169,11 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
      *                          or `null` when no takeover is active.
      * @return [EligibilityResult] describing the decision.
      */
-    fun assess(envelope: TakeoverRequestEnvelope, activeTakeoverId: String? = null): EligibilityResult {
+    fun assess(
+        envelope: TakeoverRequestEnvelope,
+        activeTakeoverId: String? = null,
+        modeContext: RuntimeModeContext? = null
+    ): EligibilityResult {
         if (!settings.crossDeviceEnabled) {
             return blocked(EligibilityOutcome.BLOCKED_CROSS_DEVICE_DISABLED)
         }
@@ -169,6 +185,21 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
         // connectivity or requiring a full reconnect cycle.
         if (!settings.delegatedExecutionAllowed) {
             return blocked(EligibilityOutcome.BLOCKED_DELEGATED_EXECUTION_DISABLED)
+        }
+        if (modeContext != null && modeContext.isHoldState) {
+            // TRANSITIONING/hold 明确优先：当中心侧仍在切换窗口时，不应被解释为一般 local-only。
+            return blocked(
+                EligibilityOutcome.BLOCKED_MODE_DISPATCH_HOLD,
+                "${EligibilityOutcome.BLOCKED_MODE_DISPATCH_HOLD.reason}:" +
+                    modeContext.executionModeState
+            )
+        }
+        if (modeContext != null && !modeContext.acceptsCrossDeviceTasks) {
+            return blocked(
+                EligibilityOutcome.BLOCKED_MODE_LOCAL_ONLY,
+                "${EligibilityOutcome.BLOCKED_MODE_LOCAL_ONLY.reason}:" +
+                    modeContext.executionModeState
+            )
         }
         if (!settings.accessibilityReady) {
             return blocked(EligibilityOutcome.BLOCKED_ACCESSIBILITY_NOT_READY)

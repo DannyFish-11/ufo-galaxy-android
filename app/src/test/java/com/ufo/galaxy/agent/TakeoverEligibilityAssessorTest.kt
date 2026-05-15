@@ -17,6 +17,8 @@ import org.junit.Test
  * ### Individual blocking conditions
  *  - BLOCKED_CROSS_DEVICE_DISABLED when crossDeviceEnabled=false.
  *  - BLOCKED_GOAL_EXECUTION_DISABLED when goalExecutionEnabled=false.
+ *  - BLOCKED_MODE_DISPATCH_HOLD when runtime mode is transitioning/hold.
+ *  - BLOCKED_MODE_LOCAL_ONLY when runtime mode does not accept cross-device tasks.
  *  - BLOCKED_ACCESSIBILITY_NOT_READY when accessibilityReady=false.
  *  - BLOCKED_OVERLAY_NOT_READY when overlayReady=false.
  *
@@ -207,6 +209,44 @@ class TakeoverEligibilityAssessorTest {
         assertEquals(TakeoverEligibilityAssessor.EligibilityOutcome.ELIGIBLE, result.outcome)
     }
 
+    @Test
+    fun `mode hold state blocks takeover with BLOCKED_MODE_DISPATCH_HOLD`() {
+        val assessor = TakeoverEligibilityAssessor(fullyReadySettings())
+        val result = assessor.assess(
+            envelope = minimalEnvelope(),
+            modeContext = TakeoverEligibilityAssessor.RuntimeModeContext(
+                executionModeState = "transitioning",
+                acceptsCrossDeviceTasks = false,
+                isHoldState = true
+            )
+        )
+        assertFalse(result.eligible)
+        assertEquals(
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_MODE_DISPATCH_HOLD,
+            result.outcome
+        )
+        assertTrue(result.reason.startsWith("mode_dispatch_hold:"))
+    }
+
+    @Test
+    fun `non cross-device mode blocks takeover with BLOCKED_MODE_LOCAL_ONLY`() {
+        val assessor = TakeoverEligibilityAssessor(fullyReadySettings())
+        val result = assessor.assess(
+            envelope = minimalEnvelope(),
+            modeContext = TakeoverEligibilityAssessor.RuntimeModeContext(
+                executionModeState = "local_only",
+                acceptsCrossDeviceTasks = false,
+                isHoldState = false
+            )
+        )
+        assertFalse(result.eligible)
+        assertEquals(
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_MODE_LOCAL_ONLY,
+            result.outcome
+        )
+        assertTrue(result.reason.startsWith("mode_local_only:"))
+    }
+
     // ── Check ordering ────────────────────────────────────────────────────────
 
     @Test
@@ -366,6 +406,14 @@ class TakeoverEligibilityAssessorTest {
         assertEquals(
             "recovery_forced_suspend",
             TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_RECOVERY_FORCED_SUSPEND.reason
+        )
+        assertEquals(
+            "mode_dispatch_hold",
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_MODE_DISPATCH_HOLD.reason
+        )
+        assertEquals(
+            "mode_local_only",
+            TakeoverEligibilityAssessor.EligibilityOutcome.BLOCKED_MODE_LOCAL_ONLY.reason
         )
     }
 
