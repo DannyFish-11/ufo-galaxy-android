@@ -617,6 +617,13 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
             val payload = buildMap<String, Any?> {
+                putAll(
+                    closureSemanticsPayload(
+                        resultReturned = false,
+                        completionSignaled = false,
+                        closureReadyForAcceptance = false
+                    )
+                )
                 put("health_state", healthState.wireValue)
                 put("readiness_state", readinessState.wireValue)
                 posture?.let { put("source_runtime_posture", it) }
@@ -656,6 +663,11 @@ data class ReconciliationSignal(
             taskId = truth.activeTaskId,
             correlationId = null,
             status = STATUS_SNAPSHOT,
+            payload = closureSemanticsPayload(
+                resultReturned = false,
+                completionSignaled = false,
+                closureReadyForAcceptance = false
+            ),
             runtimeTruth = truth,
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),

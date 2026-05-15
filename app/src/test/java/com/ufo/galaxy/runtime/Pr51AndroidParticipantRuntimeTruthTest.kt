@@ -892,6 +892,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     fun `runtimeTruthSnapshot status is STATUS_SNAPSHOT`() {
         val signal = ReconciliationSignal.runtimeTruthSnapshot(fullyReconcilableTruth())
         assertEquals(ReconciliationSignal.STATUS_SNAPSHOT, signal.status)
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test
