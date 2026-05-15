@@ -2854,6 +2854,16 @@ data class DeviceExecutionEventPayload(
     val lifecycle_result_uplink_required: Boolean? = null,
     val lifecycle_state_uplink_required: Boolean? = null,
     val lifecycle_terminal_phase: Boolean? = null,
+    // PR-3Android counterpart: explicit completion/closure visibility semantics for
+    // execution-event consumption in the shared source-of-truth pipeline.
+    // These three booleans mirror ReconciliationSignal payload semantics:
+    //   - result_returned: Android has reached a terminal result phase for this task.
+    //   - completion_signaled: Android has emitted a completion-side execution signal.
+    //   - closure_ready_for_acceptance: this event is terminal and can enter acceptance closure.
+    // Null only as a defensive default; GalaxyConnectionService fills these at event emission.
+    val result_returned: Boolean? = null,
+    val completion_signaled: Boolean? = null,
+    val closure_ready_for_acceptance: Boolean? = null,
 
     // PR-7B: Evidence presence kind — explicit label for the quality and completeness of
     //   the evidence backing this execution event publication.
@@ -2869,6 +2879,10 @@ data class DeviceExecutionEventPayload(
     //     - "failed_observation": runtime or stagnation failure observed; apply recovery policy.
     //   Null only as a defensive default; populated at event-emission call sites.
     val evidence_presence_kind: String? = null,
+    // Wire value of AndroidCanonicalRuntimeTruthContract.LocalObservationBasis for this event.
+    // Values: "live_runtime" | "cached_state" | "derived_projection" | "none".
+    // Makes event-side projection/freshness basis explicit for V2 reliability reducers.
+    val local_observation_basis: String? = null,
 
     // PR-5 (Android): Runtime observability and problem-solving audit fields for execution
     // events. Same semantics as the corresponding DeviceStateSnapshotPayload fields; see

@@ -18,6 +18,12 @@ object AndroidMissionCompletionSemanticsContract {
     private const val KEYWORD_FALLBACK = "fallback"
     private const val KEYWORD_PARTIAL = "partial"
     private const val KEYWORD_RECOVER = "recover"
+    private val TERMINAL_EXECUTION_PHASES: Set<String> = setOf(
+        DeviceExecutionEventPayload.PHASE_COMPLETED,
+        DeviceExecutionEventPayload.PHASE_FAILED,
+        DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
+        DeviceExecutionEventPayload.PHASE_CANCELLED
+    )
 
     enum class TerminalOutcomeKind(val wireValue: String, val isTerminal: Boolean) {
         COMPLETION("completion", true),
@@ -30,6 +36,12 @@ object AndroidMissionCompletionSemanticsContract {
         RECOVERY("recovery", true),
         NON_TERMINAL("non_terminal", false)
     }
+
+    data class CompletionVisibility(
+        val resultReturned: Boolean,
+        val completionSignaled: Boolean,
+        val closureReadyForAcceptance: Boolean
+    )
 
     /**
      * Classifies the local terminal observation from execution-event/result facts.
@@ -119,4 +131,17 @@ object AndroidMissionCompletionSemanticsContract {
             TerminalOutcomeKind.FALLBACK ->
                 AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL
         }
+
+    fun deriveExecutionCompletionVisibility(
+        phase: String,
+        lifecycleTerminalPhase: Boolean?
+    ): CompletionVisibility {
+        val terminalByPhase = TERMINAL_EXECUTION_PHASES.contains(phase)
+        val isTerminal = lifecycleTerminalPhase == true || terminalByPhase
+        return CompletionVisibility(
+            resultReturned = isTerminal,
+            completionSignaled = isTerminal,
+            closureReadyForAcceptance = isTerminal
+        )
+    }
 }
