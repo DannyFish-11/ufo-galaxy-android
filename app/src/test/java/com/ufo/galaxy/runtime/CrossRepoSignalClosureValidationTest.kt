@@ -96,6 +96,9 @@ class CrossRepoSignalClosureValidationTest {
         )
         assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal.kind)
         assertTrue(signal.isTerminal)
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
         assertFalse(signal.signalId.isBlank())
     }
 
