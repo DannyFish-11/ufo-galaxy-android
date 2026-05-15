@@ -88,6 +88,7 @@ import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
 import com.ufo.galaxy.protocol.OperatorActionRequestPayload
 import com.ufo.galaxy.protocol.OperatorActionResultPayload
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment
 import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
 import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
 import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
@@ -2938,6 +2939,16 @@ class GalaxyConnectionService : Service() {
         )
     }
 
+    private fun shouldEmitTakeoverFailureDiagnostics(
+        returnedGoalResult: GoalResultPayload?,
+        normalizedReturnedStatus: String?
+    ): Boolean =
+        returnedGoalResult == null ||
+            (normalizedReturnedStatus != EdgeExecutor.STATUS_CANCELLED &&
+                normalizedReturnedStatus != EdgeExecutor.STATUS_TIMEOUT &&
+                normalizedReturnedStatus != AutonomousExecutionPipeline.STATUS_DISABLED &&
+                !PolicyRoutingContext.isHoldStatus(normalizedReturnedStatus))
+
     /**
      * Transmits a [ReconciliationSignal] as a [MsgType.RECONCILIATION_SIGNAL] AIP v3
      * uplink message (PR-06).
@@ -4912,14 +4923,12 @@ class GalaxyConnectionService : Service() {
                                 )
                             }
                             val normalizedReturnedStatus = returnedGoalResult?.let {
-                                com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment
-                                    .normalizeLifecycleStatus(it.status)
+                                UgcpSharedSchemaAlignment.normalizeLifecycleStatus(it.status)
                             }
-                            if (returnedGoalResult == null ||
-                                (normalizedReturnedStatus != EdgeExecutor.STATUS_CANCELLED &&
-                                    normalizedReturnedStatus != EdgeExecutor.STATUS_TIMEOUT &&
-                                    normalizedReturnedStatus != AutonomousExecutionPipeline.STATUS_DISABLED &&
-                                    !PolicyRoutingContext.isHoldStatus(normalizedReturnedStatus))
+                            if (shouldEmitTakeoverFailureDiagnostics(
+                                    returnedGoalResult = returnedGoalResult,
+                                    normalizedReturnedStatus = normalizedReturnedStatus
+                                )
                             ) {
                                 emitRuntimeDiagnostics(
                                     taskId = envelope.task_id,
