@@ -552,7 +552,7 @@ class GalaxyConnectionService : Service() {
                             .takeIf { it.isNotBlank() }
                     } catch (e: Exception) { null }
                     val eventInteractionSurface = UFOGalaxyApplication.appSettings.let {
-                        it.accessibilityReady == true && it.overlayReady == true
+                        it.accessibilityReady && it.overlayReady
                     }
                     val eventReconnectState = UFOGalaxyApplication.runtimeController
                         .reconnectRecoveryState.value.wireValue
