@@ -34,7 +34,7 @@ import com.ufo.galaxy.data.AppSettings
  */
 class TakeoverEligibilityAssessor(private val settings: AppSettings) {
     data class RuntimeModeContext(
-        val executionModeState: String?,
+        val executionModeState: String,
         val acceptsCrossDeviceTasks: Boolean,
         val isHoldState: Boolean
     )
@@ -186,18 +186,19 @@ class TakeoverEligibilityAssessor(private val settings: AppSettings) {
         if (!settings.delegatedExecutionAllowed) {
             return blocked(EligibilityOutcome.BLOCKED_DELEGATED_EXECUTION_DISABLED)
         }
-        if (modeContext?.isHoldState == true) {
+        if (modeContext != null && modeContext.isHoldState) {
+            // TRANSITIONING/hold 明确优先：当中心侧仍在切换窗口时，不应被解释为一般 local-only。
             return blocked(
                 EligibilityOutcome.BLOCKED_MODE_DISPATCH_HOLD,
                 "${EligibilityOutcome.BLOCKED_MODE_DISPATCH_HOLD.reason}:" +
-                    (modeContext.executionModeState ?: "transitioning")
+                    modeContext.executionModeState
             )
         }
         if (modeContext != null && !modeContext.acceptsCrossDeviceTasks) {
             return blocked(
                 EligibilityOutcome.BLOCKED_MODE_LOCAL_ONLY,
                 "${EligibilityOutcome.BLOCKED_MODE_LOCAL_ONLY.reason}:" +
-                    (modeContext.executionModeState ?: "local_only")
+                    modeContext.executionModeState
             )
         }
         if (!settings.accessibilityReady) {
