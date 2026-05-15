@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
@@ -1457,13 +1458,33 @@ class RuntimeController(
      * coroutine.  Logs a warning when the buffer is full and the signal is dropped.
      */
     private fun emitReconciliationSignal(signal: ReconciliationSignal) {
-        val emitted = _reconciliationSignals.tryEmit(signal)
-        if (!emitted) {
+        val emittedImmediately = _reconciliationSignals.tryEmit(signal)
+        val retryScheduled = !emittedImmediately && signal.isTerminal
+        if (!emittedImmediately) {
             Log.w(
                 TAG,
-                "[RUNTIME] reconciliationSignals buffer full — signal dropped: " +
+                "[RUNTIME] reconciliationSignals buffer full — immediate emit failed: " +
                     "kind=${signal.kind.wireValue} participant=${signal.participantId} task=${signal.taskId}"
             )
+            if (retryScheduled) {
+                controllerScope.launch {
+                    val emittedOnRetry = withTimeoutOrNull(RECONCILIATION_SIGNAL_RETRY_TIMEOUT_MS) {
+                        _reconciliationSignals.emit(signal)
+                        true
+                    } ?: false
+                    GalaxyLogger.log(
+                        TAG,
+                        mapOf(
+                            "event" to "reconciliation_signal_emit_retry",
+                            "kind" to signal.kind.wireValue,
+                            "participant_id" to signal.participantId,
+                            "task_id" to (signal.taskId ?: ""),
+                            "signal_id" to signal.signalId,
+                            "emitted" to emittedOnRetry
+                        )
+                    )
+                }
+            }
         }
         GalaxyLogger.log(
             TAG,
@@ -1475,7 +1496,9 @@ class RuntimeController(
                 "signal_id" to signal.signalId,
                 "reconciliation_epoch" to signal.reconciliationEpoch,
                 "durable_session_id" to (signal.durableSessionId ?: ""),
-                "session_continuity_epoch" to (signal.sessionContinuityEpoch ?: -1)
+                "session_continuity_epoch" to (signal.sessionContinuityEpoch ?: -1),
+                "emitted_immediately" to emittedImmediately,
+                "retry_scheduled" to retryScheduled
             )
         )
     }
@@ -3161,5 +3184,6 @@ class RuntimeController(
          * dropping events when the V2 consumer is briefly slow to drain.
          */
         private const val RECONCILIATION_SIGNAL_BUFFER_CAPACITY = 32
+        private const val RECONCILIATION_SIGNAL_RETRY_TIMEOUT_MS = 2_000L
     }
 }

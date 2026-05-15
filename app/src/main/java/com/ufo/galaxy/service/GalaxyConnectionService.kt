@@ -30,6 +30,7 @@ import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
+import com.ufo.galaxy.runtime.AndroidNlDrivenExecutionSpineContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
 import com.ufo.galaxy.runtime.AndroidOperatorActionGovernanceContract
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
@@ -1623,9 +1624,14 @@ class GalaxyConnectionService : Service() {
                 // Enrich result with posture and send with full trace context.
                 val enriched = result.takeIf { it.source_runtime_posture != null }
                     ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
-                sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
+                val disposition = sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
                 finalResult = enriched
-                Log.i(TAG, "goal_result 已回传 task_id=$taskId status=${enriched.status} latency=${enriched.latency_ms}ms trace_id=$traceId")
+                Log.i(
+                    TAG,
+                    "goal_result 已产出 task_id=$taskId status=${enriched.status} " +
+                        "latency=${enriched.latency_ms}ms trace_id=$traceId " +
+                        "delivery=${disposition.name.lowercase()}"
+                )
                 // ── PR-2: emit terminal execution event from goal_execution result ─────
                 deviceExecutionEventSink.onEvent(
                     buildTerminalExecutionEvent(
@@ -1837,13 +1843,14 @@ class GalaxyConnectionService : Service() {
                 // Enrich result with posture and send with full trace context.
                 val enriched = result.takeIf { it.source_runtime_posture != null }
                     ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
-                sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
+                val disposition = sendGoalResult(enriched, traceId, ROUTE_MODE_CROSS_DEVICE)
                 finalResult = enriched
                 Log.i(
                     TAG,
-                    "goal_result (parallel) 已回传 task_id=$taskId status=${enriched.status} " +
+                    "goal_result (parallel) 已产出 task_id=$taskId status=${enriched.status} " +
                         "group_id=${enriched.group_id} subtask_index=${enriched.subtask_index} " +
-                        "latency=${enriched.latency_ms}ms trace_id=$traceId"
+                        "latency=${enriched.latency_ms}ms trace_id=$traceId " +
+                        "delivery=${disposition.name.lowercase()}"
                 )
                 if (meshId != null && meshJoined) {
                     webSocketClient.sendMeshResult(
@@ -2476,7 +2483,17 @@ class GalaxyConnectionService : Service() {
      * from the outbound envelope rather than defaulting to an empty string.
      * The V2 gateway handler (_handle_goal_execution_result) accepts missing trace context.
      */
-    private fun sendGoalResult(result: GoalResultPayload, traceId: String?, routeMode: String?) {
+    private enum class ResultDeliveryDisposition {
+        DIRECT_SENT,
+        OFFLINE_QUEUED,
+        SEND_FAILED
+    }
+
+    private fun sendGoalResult(
+        result: GoalResultPayload,
+        traceId: String?,
+        routeMode: String?
+    ): ResultDeliveryDisposition {
         val runtimeSession = UFOGalaxyApplication.runtimeSessionId
         val needsRuntimeContext =
             result.participation_tier == null ||
@@ -2544,6 +2561,21 @@ class GalaxyConnectionService : Service() {
             accessibilityReady = accessibilityReady,
             isDegraded = managerStateDegraded()
         )
+        val normalizedLifecycleStatus =
+            UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)
+        val resolvedSpineParticipation = result.execution_spine_participation_kind
+            ?: AndroidNlDrivenExecutionSpineContract.classifyParticipationKind(
+                executionRuntimeKind = result.execution_runtime_kind
+            ).wireValue
+        val participationKind = AndroidNlDrivenExecutionSpineContract
+            .ExecutionSpineParticipationKind
+            .fromWireValue(resolvedSpineParticipation)
+            ?: AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DELEGATED_EXECUTION
+        val resolvedProblemClosureClass = result.problem_solving_closure_class
+            ?: AndroidNlDrivenExecutionSpineContract.classifyClosureClass(
+                participationKind = participationKind,
+                taskSucceeded = normalizedLifecycleStatus == EdgeExecutor.STATUS_SUCCESS
+            ).wireValue
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
@@ -2580,7 +2612,9 @@ class GalaxyConnectionService : Service() {
             takeover_state = result.takeover_state ?: governanceTruth.takeover_state,
             local_llm_ready = localLlmReady,
             accessibility_ready = accessibilityReady,
-            local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable
+            local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable,
+            execution_spine_participation_kind = resolvedSpineParticipation,
+            problem_solving_closure_class = resolvedProblemClosureClass
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -2596,15 +2630,56 @@ class GalaxyConnectionService : Service() {
             dispatch_trace_id = enriched.dispatch_trace_id,
             source_runtime_posture = enriched.source_runtime_posture
         )
-        val sent = webSocketClient.sendJson(gson.toJson(envelope))
+        val envelopeJson = gson.toJson(envelope)
+        val connectedAtSendAttempt = webSocketClient.isConnected()
+        val sent = webSocketClient.sendJson(envelopeJson)
+        val deliveryDisposition = when {
+            sent -> ResultDeliveryDisposition.DIRECT_SENT
+            else -> {
+                val durableSessionTag = UFOGalaxyApplication.runtimeController
+                    .durableSessionContinuityRecord.value
+                    ?.durableSessionId
+                val queueSucceeded = runCatching {
+                    webSocketClient.offlineQueue.enqueue(
+                        type = MsgType.GOAL_EXECUTION_RESULT.value,
+                        json = envelopeJson,
+                        sessionTag = durableSessionTag
+                    )
+                }.isSuccess
+                if (queueSucceeded) {
+                    ResultDeliveryDisposition.OFFLINE_QUEUED
+                } else {
+                    ResultDeliveryDisposition.SEND_FAILED
+                }
+            }
+        }
         crossRepoRegressionHooks.recordGoalResultFeedback(
             taskId = enriched.task_id,
             traceId = traceId,
             runtimeSessionId = runtimeSession,
-            status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
-            reason = if (sent) null else "goal_execution_result_send_failed"
+            status = if (deliveryDisposition == ResultDeliveryDisposition.SEND_FAILED) {
+                ScenarioOutcomeStatus.FAILED
+            } else {
+                ScenarioOutcomeStatus.PASSED
+            },
+            reason = when (deliveryDisposition) {
+                ResultDeliveryDisposition.DIRECT_SENT -> null
+                ResultDeliveryDisposition.OFFLINE_QUEUED -> "goal_execution_result_offline_queued"
+                ResultDeliveryDisposition.SEND_FAILED -> "goal_execution_result_send_failed"
+            }
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "goal_result_delivery_disposition",
+                "task_id" to enriched.task_id,
+                "trace_id" to (traceId ?: ""),
+                "delivery_disposition" to deliveryDisposition.name.lowercase(),
+                "connected_at_send_attempt" to connectedAtSendAttempt
+            )
         )
         emitCrossRepoRegressionSnapshot("cross_repo_goal_result_return")
+        return deliveryDisposition
     }
 
     /**
@@ -4888,14 +4963,16 @@ class GalaxyConnectionService : Service() {
                             val enriched = outcome.goalResult.copy(
                                 source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
                             )
-                            sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
+                            val disposition =
+                                sendGoalResult(enriched, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
                             Log.i(
                                 TAG,
-                                "[PR13:TAKEOVER] goal_result sent takeover_id=${envelope.takeover_id} " +
+                                "[PR13:TAKEOVER] goal_result produced takeover_id=${envelope.takeover_id} " +
                                     "task_id=${envelope.task_id} status=${enriched.status} " +
                                     "trace_id=${envelope.trace_id} " +
                                     "attached_session_id=${delegatedUnit.attachedSessionId} " +
-                                    "steps=${outcome.tracker.stepCount}"
+                                    "steps=${outcome.tracker.stepCount} " +
+                                    "delivery=${disposition.name.lowercase()}"
                             )
                             // ── PR-2: emit terminal takeover execution event on completion ─
                             deviceExecutionEventSink.onEvent(

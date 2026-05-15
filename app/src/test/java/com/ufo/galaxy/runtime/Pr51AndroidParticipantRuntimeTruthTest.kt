@@ -819,6 +819,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     fun `taskAccepted status is STATUS_RUNNING`() {
         val signal = ReconciliationSignal.taskAccepted("pid", "tid")
         assertEquals(ReconciliationSignal.STATUS_RUNNING, signal.status)
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test
@@ -838,6 +841,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     fun `taskCancelled status is STATUS_CANCELLED`() {
         val signal = ReconciliationSignal.taskCancelled("pid", "tid")
         assertEquals(ReconciliationSignal.STATUS_CANCELLED, signal.status)
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test
@@ -850,6 +856,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     fun `taskFailed status is STATUS_FAILED`() {
         val signal = ReconciliationSignal.taskFailed("pid", "tid")
         assertEquals(ReconciliationSignal.STATUS_FAILED, signal.status)
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test
@@ -868,6 +877,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     fun `taskResult status is STATUS_SUCCESS`() {
         val signal = ReconciliationSignal.taskResult("pid", "tid")
         assertEquals(ReconciliationSignal.STATUS_SUCCESS, signal.status)
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test

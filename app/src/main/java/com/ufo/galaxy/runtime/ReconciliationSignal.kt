@@ -246,6 +246,29 @@ data class ReconciliationSignal(
         /** Wire key for [status]. */
         const val KEY_STATUS = "reconciliation_status"
 
+        /**
+         * Payload key: whether Android has produced a terminal result for this task.
+         *
+         * `true` for terminal task signals (`task_result` / `task_cancelled` / `task_failed`);
+         * `false` for non-terminal lifecycle signals.
+         */
+        const val KEY_RESULT_RETURNED = "result_returned"
+
+        /**
+         * Payload key: whether Android has emitted a completion-side reconciliation signal.
+         *
+         * `true` for terminal task signals; `false` for accepted/progress/state/snapshot signals.
+         */
+        const val KEY_COMPLETION_SIGNALED = "completion_signaled"
+
+        /**
+         * Payload key: whether this signal alone means closure is ready for central acceptance.
+         *
+         * Reconciliation terminal signals are pre-acceptance observations on Android and do not
+         * unilaterally close central truth, therefore this value is `false` for all task signals.
+         */
+        const val KEY_CLOSURE_READY_FOR_ACCEPTANCE = "closure_ready_for_acceptance"
+
         /** Wire key for [signalId]. */
         const val KEY_SIGNAL_ID = "reconciliation_signal_id"
 
@@ -345,6 +368,16 @@ data class ReconciliationSignal(
         /** Wire status for a full snapshot signal. */
         const val STATUS_SNAPSHOT = "snapshot"
 
+        private fun closureSemanticsPayload(
+            resultReturned: Boolean,
+            completionSignaled: Boolean,
+            closureReadyForAcceptance: Boolean
+        ): Map<String, Any?> = mapOf(
+            KEY_RESULT_RETURNED to resultReturned,
+            KEY_COMPLETION_SIGNALED to completionSignaled,
+            KEY_CLOSURE_READY_FOR_ACCEPTANCE to closureReadyForAcceptance
+        )
+
         // ── Factories ─────────────────────────────────────────────────────────
 
         /**
@@ -373,6 +406,11 @@ data class ReconciliationSignal(
             taskId = taskId,
             correlationId = correlationId,
             status = STATUS_RUNNING,
+            payload = closureSemanticsPayload(
+                resultReturned = false,
+                completionSignaled = false,
+                closureReadyForAcceptance = false
+            ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
             reconciliationEpoch = reconciliationEpoch,
@@ -406,6 +444,11 @@ data class ReconciliationSignal(
             taskId = taskId,
             correlationId = correlationId,
             status = STATUS_CANCELLED,
+            payload = closureSemanticsPayload(
+                resultReturned = true,
+                completionSignaled = true,
+                closureReadyForAcceptance = false
+            ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
             reconciliationEpoch = reconciliationEpoch,
@@ -436,7 +479,11 @@ data class ReconciliationSignal(
             durableSessionId: String? = null,
             sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
-            val payload = buildMap<String, Any?> {
+            val payload = closureSemanticsPayload(
+                resultReturned = true,
+                completionSignaled = true,
+                closureReadyForAcceptance = false
+            ).toMutableMap().apply {
                 errorDetail?.let { put("error_detail", it) }
             }
             return ReconciliationSignal(
@@ -480,6 +527,11 @@ data class ReconciliationSignal(
             taskId = taskId,
             correlationId = correlationId,
             status = STATUS_SUCCESS,
+            payload = closureSemanticsPayload(
+                resultReturned = true,
+                completionSignaled = true,
+                closureReadyForAcceptance = false
+            ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
             reconciliationEpoch = reconciliationEpoch,
@@ -514,6 +566,9 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
             val payload = buildMap<String, Any?> {
+                put(KEY_RESULT_RETURNED, false)
+                put(KEY_COMPLETION_SIGNALED, false)
+                put(KEY_CLOSURE_READY_FOR_ACCEPTANCE, false)
                 progressDetail?.let { put("progress_detail", it) }
             }
             return ReconciliationSignal(
