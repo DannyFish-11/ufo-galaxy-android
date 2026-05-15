@@ -304,6 +304,21 @@ class CanonicalResultWireTypeTest {
     }
 
     @Test
+    fun `GoalResultPayload completion visibility fields default to null before emission`() {
+        val result = buildNormalResult()
+        assertNull(result.result_returned)
+        assertNull(result.completion_signaled)
+        assertNull(result.closure_ready_for_acceptance)
+    }
+
+    @Test
+    fun `GoalResultPayload lifecycle phase fields default to null before emission`() {
+        val result = buildNormalResult()
+        assertNull(result.unified_lifecycle_phase)
+        assertNull(result.unified_lifecycle_schema_version)
+    }
+
+    @Test
     fun `normalized_status success maps to final_completion`() {
         val result = GoalResultPayload(
             task_id = "t1", status = "success", device_id = "dev",
@@ -463,6 +478,24 @@ class CanonicalResultWireTypeTest {
         val copied = result.copy(error = "updated error")
         assertEquals("failure", copied.normalized_status)
         assertEquals("session-2", copied.runtime_session_id)
+    }
+
+    @Test
+    fun `GoalResultPayload copy preserves completion visibility and lifecycle phase fields`() {
+        val result = GoalResultPayload(
+            task_id = "copy-closure", status = "success", device_id = "dev",
+            result_returned = true,
+            completion_signaled = true,
+            closure_ready_for_acceptance = true,
+            unified_lifecycle_phase = "participating",
+            unified_lifecycle_schema_version = "1"
+        )
+        val copied = result.copy(status = "error")
+        assertEquals(true, copied.result_returned)
+        assertEquals(true, copied.completion_signaled)
+        assertEquals(true, copied.closure_ready_for_acceptance)
+        assertEquals("participating", copied.unified_lifecycle_phase)
+        assertEquals("1", copied.unified_lifecycle_schema_version)
     }
 
     @Test

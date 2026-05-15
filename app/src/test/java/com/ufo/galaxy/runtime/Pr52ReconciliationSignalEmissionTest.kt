@@ -355,6 +355,9 @@ class Pr52ReconciliationSignalEmissionTest {
             readinessState = ParticipantReadinessState.READY_WITH_FALLBACK
         )
         assertEquals(ParticipantReadinessState.READY_WITH_FALLBACK.wireValue, signal.payload["readiness_state"])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test

@@ -148,6 +148,9 @@ class CrossRepoSignalClosureValidationTest {
         assertFalse(signal.isTerminal)
         assertTrue("payload must have health_state", signal.payload.containsKey("health_state"))
         assertTrue("payload must have readiness_state", signal.payload.containsKey("readiness_state"))
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test
@@ -176,6 +179,9 @@ class CrossRepoSignalClosureValidationTest {
         assertEquals(ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT, signal.kind)
         assertTrue(signal.hasRuntimeTruth)
         assertNotNull(signal.runtimeTruth)
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
     }
 
     @Test

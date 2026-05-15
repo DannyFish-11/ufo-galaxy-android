@@ -2490,6 +2490,12 @@ class GalaxyConnectionService : Service() {
      *   populated from [GoalResultPayload.result] when not already set by the caller.
      *   This mirrors the same field in [HandoffEnvelopeV2ResultPayload]
      *   so all uplink result payloads carry a consistent named summary field.
+     * - [GoalResultPayload.result_returned], [GoalResultPayload.completion_signaled],
+     *   [GoalResultPayload.closure_ready_for_acceptance]: explicit completion visibility
+     *   booleans aligned with execution-event and reconciliation-signal closure semantics.
+     * - [GoalResultPayload.unified_lifecycle_phase] /
+     *   [GoalResultPayload.unified_lifecycle_schema_version]: lifecycle phase at result
+     *   emission time, aligned with snapshot/event lifecycle phase surfaces.
      * - Android-side runtime context fields:
      *   [GoalResultPayload.participation_tier], [GoalResultPayload.execution_mode_state],
      *   [GoalResultPayload.cross_device_eligibility], [GoalResultPayload.local_mode_gate_deferred],
@@ -2522,7 +2528,9 @@ class GalaxyConnectionService : Service() {
                 result.execution_mode_state == null ||
                 result.cross_device_eligibility == null ||
                 result.local_mode_gate_deferred == null ||
-                result.local_inference_available == null
+                result.local_inference_available == null ||
+                result.unified_lifecycle_phase == null ||
+                result.unified_lifecycle_schema_version == null
         val modeState = if (needsRuntimeContext) {
             UFOGalaxyApplication.appSettings.authoritativeModeState(
                 wsConnected = webSocketClient.isConnected(),
@@ -2585,6 +2593,51 @@ class GalaxyConnectionService : Service() {
         )
         val normalizedLifecycleStatus =
             UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)
+        val isHoldStatus = PolicyRoutingContext.isHoldStatus(result.status)
+        val goalResultCompletionVisibility = if (isHoldStatus) {
+            AndroidMissionCompletionSemanticsContract.CompletionVisibility(
+                resultReturned = false,
+                completionSignaled = false,
+                closureReadyForAcceptance = false
+            )
+        } else {
+            AndroidMissionCompletionSemanticsContract.CompletionVisibility(
+                resultReturned = true,
+                completionSignaled = true,
+                closureReadyForAcceptance = true
+            )
+        }
+        val resultDispatchReadiness = UFOGalaxyApplication.runtimeController.currentDispatchReadiness()
+        val resultCapabilityVisible = hasVisibleCrossDeviceCapability(
+            crossDeviceEligibility = resolvedCrossDeviceElig,
+            sessionIsAttached = resultDispatchReadiness.sessionIsAttached
+        )
+        val resultDurableParticipantId = try {
+            UFOGalaxyApplication.appSettings.durableParticipantId.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+        val resultUnifiedLifecyclePhase = AndroidUnifiedParticipantLifecyclePhase.derive(
+            AndroidUnifiedParticipantLifecyclePhase.DerivationInput(
+                formalLifecycleState = FormalParticipantLifecycleState.fromManagerState(
+                    UFOGalaxyApplication.localInferenceRuntimeManager.state.value
+                ),
+                reconnectRecoveryStateWire = UFOGalaxyApplication.runtimeController
+                    .reconnectRecoveryState.value.wireValue,
+                crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+                wsConnected = webSocketClient.isConnected(),
+                hasDurableParticipantId = resultDurableParticipantId != null,
+                capabilityVisible = resultCapabilityVisible,
+                sessionAttached = resultDispatchReadiness.sessionIsAttached,
+                readinessSatisfied = resolvedCrossDeviceElig,
+                executionBusy = UFOGalaxyApplication.runtimeController.activeTaskId != null,
+                takeoverActive = currentActiveTakeoverId() != null,
+                interactionSurfaceReady = UFOGalaxyApplication.appSettings.let {
+                    it.accessibilityReady && it.overlayReady
+                },
+                governanceBlocked = governanceTruth.governance_blocked
+            )
+        ).wireValue
         val resolvedSpineParticipation = result.execution_spine_participation_kind
             ?: AndroidNlDrivenExecutionSpineContract.classifyParticipationKind(
                 executionRuntimeKind = result.execution_runtime_kind
@@ -2635,6 +2688,13 @@ class GalaxyConnectionService : Service() {
             local_llm_ready = localLlmReady,
             accessibility_ready = accessibilityReady,
             local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable,
+            result_returned = result.result_returned ?: goalResultCompletionVisibility.resultReturned,
+            completion_signaled = result.completion_signaled ?: goalResultCompletionVisibility.completionSignaled,
+            closure_ready_for_acceptance = result.closure_ready_for_acceptance
+                ?: goalResultCompletionVisibility.closureReadyForAcceptance,
+            unified_lifecycle_phase = result.unified_lifecycle_phase ?: resultUnifiedLifecyclePhase,
+            unified_lifecycle_schema_version = result.unified_lifecycle_schema_version
+                ?: AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
             execution_spine_participation_kind = resolvedSpineParticipation,
             problem_solving_closure_class = resolvedProblemClosureClass
         )

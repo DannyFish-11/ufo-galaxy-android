@@ -1086,6 +1086,21 @@ data class GoalResultPayload(
     // so that all uplink result payloads carry a consistent human-readable one-line outcome.
     // Populated by GalaxyConnectionService.sendGoalResult from the `result` field when absent.
     val result_summary: String? = null,
+    // ── PR-6: completion/closure visibility semantics for result uplink ───────────────────────
+    // Mirrors DeviceExecutionEventPayload completion semantics so V2 can consume execution-event
+    // and goal-result closure truth through the same boolean contract.
+    // - result_returned: Android has produced a terminal result for this task.
+    // - completion_signaled: Android has emitted a completion-side signal for this task.
+    // - closure_ready_for_acceptance: this result is terminal and may enter acceptance closure.
+    // Null only as defensive defaults; GalaxyConnectionService.sendGoalResult fills these.
+    val result_returned: Boolean? = null,
+    val completion_signaled: Boolean? = null,
+    val closure_ready_for_acceptance: Boolean? = null,
+    // ── PR-6: unified participant lifecycle phase on result uplink ─────────────────────────────
+    // Mirrors snapshot/event lifecycle fields so V2 can correlate results with Android lifecycle
+    // phase at emission time without inferring from mode/participation combinations.
+    val unified_lifecycle_phase: String? = null,
+    val unified_lifecycle_schema_version: String? = null,
     // ── PR-2: NL-driven execution spine closure reporting ──────────────────────────────────────
     // problem_solving_closure_class: Android's contribution to V2 canonical problem-solving
     // closure. Wire value of AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.
