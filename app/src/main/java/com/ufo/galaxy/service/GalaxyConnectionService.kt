@@ -13,6 +13,7 @@ import com.google.gson.Gson
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.agent.AgentRuntimeBridge
+import com.ufo.galaxy.agent.AutonomousExecutionPipeline
 import com.ufo.galaxy.agent.DelegatedRuntimeReceiver
 import com.ufo.galaxy.agent.DelegatedTakeoverExecutor
 import com.ufo.galaxy.agent.GoalExecutionPipeline
@@ -53,6 +54,7 @@ import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceSnapshot
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
 import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
+import com.ufo.galaxy.runtime.PolicyRoutingContext
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.runtime.toOutboundPayload
@@ -86,6 +88,7 @@ import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
 import com.ufo.galaxy.protocol.OperatorActionRequestPayload
 import com.ufo.galaxy.protocol.OperatorActionResultPayload
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment
 import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
 import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
 import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
@@ -2937,6 +2940,24 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
+     * Returns `true` when takeover failure should still emit runtime diagnostics.
+     *
+     * Structured non-success terminal results that already describe an expected closure shape
+     * (`cancelled`, `timeout`, `disabled`, `hold`) do not need an extra diagnostics emission.
+     * We still emit diagnostics when no structured result was returned, or when Android surfaced
+     * any other status that implies an unexpected execution failure and needs extra observability.
+     */
+    private fun shouldEmitTakeoverFailureDiagnostics(
+        returnedGoalResult: GoalResultPayload?,
+        normalizedReturnedStatus: String?
+    ): Boolean =
+        returnedGoalResult == null ||
+            (normalizedReturnedStatus != EdgeExecutor.STATUS_CANCELLED &&
+                normalizedReturnedStatus != EdgeExecutor.STATUS_TIMEOUT &&
+                normalizedReturnedStatus != AutonomousExecutionPipeline.STATUS_DISABLED &&
+                !PolicyRoutingContext.isHoldStatus(normalizedReturnedStatus))
+
+    /**
      * Transmits a [ReconciliationSignal] as a [MsgType.RECONCILIATION_SIGNAL] AIP v3
      * uplink message (PR-06).
      *
@@ -4888,70 +4909,61 @@ class GalaxyConnectionService : Service() {
                             )
                         }
                         is DelegatedTakeoverExecutor.ExecutionOutcome.Failed -> {
+                            val returnedGoalResult = outcome.goalResult?.copy(
+                                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
+                            )
+                            val failureReason = returnedGoalResult?.error
+                                ?: returnedGoalResult?.hold_reason
+                                ?: outcome.error
                             Log.w(
                                 TAG,
                                 "[PR13:TAKEOVER] delegated execution failed takeover_id=${envelope.takeover_id} " +
-                                    "task_id=${envelope.task_id} error=${outcome.error}"
+                                    "task_id=${envelope.task_id} error=$failureReason " +
+                                    "status=${returnedGoalResult?.status ?: "thrown_exception"}"
                             )
-                            sendGoalError(
-                                envelope.task_id, null, null,
-                                "takeover_error: ${outcome.error}", envelope.trace_id,
-                                ROUTE_MODE_CROSS_DEVICE
-                            )
-                            emitRuntimeDiagnostics(
-                                taskId = envelope.task_id,
-                                nodeName = "takeover_execution",
-                                errorType = "takeover_execution_failed",
-                                errorContext = outcome.error
-                            )
-                            // ── PR-2: emit failed event on takeover execution failure ────
-                            // PR-6: capture session identity at failure emission.
-                            val durTakeoverFail = UFOGalaxyApplication.runtimeController.durableSessionContinuityRecord.value
-                            val failurePhase = when (outcome.ledger.lastResult?.resultKind) {
-                                DelegatedExecutionSignal.ResultKind.CANCELLED ->
-                                    DeviceExecutionEventPayload.PHASE_CANCELLED
-                                else -> DeviceExecutionEventPayload.PHASE_FAILED
+                            if (returnedGoalResult != null) {
+                                sendGoalResult(returnedGoalResult, envelope.trace_id, ROUTE_MODE_CROSS_DEVICE)
+                            } else {
+                                sendGoalError(
+                                    envelope.task_id, null, null,
+                                    "takeover_error: ${outcome.error}", envelope.trace_id,
+                                    ROUTE_MODE_CROSS_DEVICE
+                                )
                             }
-                            val failureOutcome = AndroidMissionCompletionSemanticsContract.classifyLocalTerminalOutcome(
-                                phase = failurePhase,
+                            val normalizedReturnedStatus = returnedGoalResult?.let {
+                                UgcpSharedSchemaAlignment.normalizeLifecycleStatus(it.status)
+                            }
+                            if (shouldEmitTakeoverFailureDiagnostics(
+                                    returnedGoalResult = returnedGoalResult,
+                                    normalizedReturnedStatus = normalizedReturnedStatus
+                                )
+                            ) {
+                                emitRuntimeDiagnostics(
+                                    taskId = envelope.task_id,
+                                    nodeName = "takeover_execution",
+                                    errorType = "takeover_execution_failed",
+                                    errorContext = failureReason
+                                )
+                            }
+                            val terminalFailureResult = returnedGoalResult ?: GoalResultPayload(
+                                task_id = envelope.task_id,
+                                correlation_id = envelope.task_id,
                                 status = when (outcome.ledger.lastResult?.resultKind) {
                                     DelegatedExecutionSignal.ResultKind.TIMEOUT -> EdgeExecutor.STATUS_TIMEOUT
                                     DelegatedExecutionSignal.ResultKind.CANCELLED -> EdgeExecutor.STATUS_CANCELLED
                                     else -> EdgeExecutor.STATUS_ERROR
                                 },
-                                blockingReason = outcome.error
+                                error = failureReason,
+                                device_id = localDeviceId,
+                                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
                             )
                             deviceExecutionEventSink.onEvent(
-                                DeviceExecutionEventPayload(
-                                    flow_id = envelope.takeover_id,
-                                    task_id = envelope.task_id,
-                                    phase = failurePhase,
-                                    is_blocking = failurePhase == DeviceExecutionEventPayload.PHASE_FAILED,
-                                    blocking_reason = outcome.error,
-                                    device_id = localDeviceId,
-                                    source_component = "GalaxyConnectionService.handleTakeoverRequest",
-                                    durable_session_id = durTakeoverFail?.durableSessionId,
-                                    session_continuity_epoch = durTakeoverFail?.sessionContinuityEpoch,
-                                    runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                                    attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
-                                    // PR-8: carrier manifestation/presence hints at takeover failure.
-                                    carrier_foreground_visible = UFOGalaxyApplication.runtimeController.appForegroundVisible.value,
-                                    interaction_surface_ready = UFOGalaxyApplication.appSettings.accessibilityReady &&
-                                        UFOGalaxyApplication.appSettings.overlayReady,
-                                    // PR-10: carrier runtime state at takeover failure.
-                                    carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
-                                    reported_state_semantic_class =
-                                        AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING.wireValue,
-                                    result_uplink_semantic_class =
-                                        AndroidMissionCompletionSemanticsContract
-                                            .classifyReportedResultSemantic(failureOutcome)
-                                            .wireValue,
-                                    terminal_outcome_kind = failureOutcome.wireValue,
-                                    // PR-7B: explicit evidence presence kind for takeover failure phase.
-                                    evidence_presence_kind =
-                                        AndroidTruthPublicationSemanticsContract.classifyEventEvidencePresence(
-                                            failurePhase
-                                        ).wireValue
+                                buildTerminalExecutionEvent(
+                                    taskId = envelope.task_id,
+                                    result = terminalFailureResult,
+                                    stepIndex = maxOf(0, outcome.tracker.stepCount - 1),
+                                    source = "GalaxyConnectionService.handleTakeoverRequest",
+                                    flowId = envelope.takeover_id
                                 )
                             )
                             // PR-23: Notify RuntimeController — the canonical failure path —
@@ -4967,7 +4979,7 @@ class GalaxyConnectionService : Service() {
                                 takeoverId = envelope.takeover_id,
                                 taskId = envelope.task_id,
                                 traceId = envelope.trace_id,
-                                reason = outcome.error,
+                                reason = failureReason,
                                 cause = failureCause
                             )
                         }

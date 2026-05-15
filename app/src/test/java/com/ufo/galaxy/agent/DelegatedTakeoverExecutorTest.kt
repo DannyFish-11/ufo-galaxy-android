@@ -141,6 +141,20 @@ class DelegatedTakeoverExecutorTest {
         )
     }
 
+    private fun returnedResultPipeline(
+        status: String,
+        error: String? = null,
+        holdReason: String? = null
+    ): GoalExecutionPipeline = GoalExecutionPipeline { payload ->
+        GoalResultPayload(
+            task_id = payload.task_id,
+            correlation_id = payload.task_id,
+            status = status,
+            error = error,
+            hold_reason = holdReason
+        )
+    }
+
     private fun failingPipeline(
         message: String = "simulated failure"
     ): GoalExecutionPipeline = GoalExecutionPipeline { _ ->
@@ -461,6 +475,80 @@ class DelegatedTakeoverExecutorTest {
             DelegatedActivationRecord.ActivationStatus.FAILED,
             outcome.tracker.record.activationStatus
         )
+    }
+
+    @Test
+    fun `returned disabled result yields Failed outcome with preserved GoalResultPayload`() {
+        val outcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "disabled", error = "goal_execution_disabled")
+        ).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+
+        assertEquals("disabled", outcome.goalResult?.status)
+        assertEquals("goal_execution_disabled", outcome.goalResult?.error)
+        assertEquals("goal_execution_disabled", outcome.error)
+        assertEquals(
+            DelegatedActivationRecord.ActivationStatus.FAILED,
+            outcome.tracker.record.activationStatus
+        )
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `returned hold result yields Failed outcome with hold reason preserved`() {
+        val outcome = buildExecutor(
+            pipeline = returnedResultPipeline(
+                status = "hold",
+                holdReason = "policy_temporarily_unavailable"
+            )
+        ).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+
+        assertEquals("hold", outcome.goalResult?.status)
+        assertEquals("policy_temporarily_unavailable", outcome.goalResult?.hold_reason)
+        assertEquals("policy_temporarily_unavailable", outcome.error)
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `returned timeout status emits TIMEOUT result signal and Failed outcome`() {
+        val outcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "timeout", error = "soft_timeout")
+        ).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+
+        assertEquals("timeout", outcome.goalResult?.status)
+        assertEquals("soft_timeout", outcome.error)
+        assertEquals(DelegatedExecutionSignal.ResultKind.TIMEOUT, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `returned cancelled status emits CANCELLED result signal and Failed outcome`() {
+        val outcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "cancelled", error = "user_cancelled")
+        ).execute(makeUnit(), pendingRecord(), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+
+        assertEquals("cancelled", outcome.goalResult?.status)
+        assertEquals("user_cancelled", outcome.error)
+        assertEquals(DelegatedExecutionSignal.ResultKind.CANCELLED, outcome.ledger.lastResult?.resultKind)
+    }
+
+    @Test
+    fun `returned partial and error statuses emit FAILED signals with preserved results`() {
+        val partialOutcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "partial", error = "partial_progress")
+        ).execute(makeUnit(taskId = "task-partial"), pendingRecord(makeUnit(taskId = "task-partial")), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        val errorOutcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "error", error = "runtime_error")
+        ).execute(makeUnit(taskId = "task-error"), pendingRecord(makeUnit(taskId = "task-error")), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+
+        assertEquals("partial", partialOutcome.goalResult?.status)
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, partialOutcome.ledger.lastResult?.resultKind)
+        assertEquals("error", errorOutcome.goalResult?.status)
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, errorOutcome.ledger.lastResult?.resultKind)
     }
 
     // ── GoalExecutionPayload construction ─────────────────────────────────────

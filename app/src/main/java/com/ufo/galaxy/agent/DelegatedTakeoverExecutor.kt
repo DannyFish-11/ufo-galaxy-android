@@ -3,6 +3,7 @@ package com.ufo.galaxy.agent
 import android.util.Log
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
+import com.ufo.galaxy.protocol.UgcpSharedSchemaAlignment
 import com.ufo.galaxy.runtime.DelegatedActivationRecord
 import com.ufo.galaxy.runtime.DelegatedExecutionSignal
 import com.ufo.galaxy.runtime.DelegatedExecutionSignalSink
@@ -161,7 +162,7 @@ class DelegatedTakeoverExecutor(
         ) : ExecutionOutcome()
 
         /**
-         * The execution pipeline threw an exception during goal execution.
+         * The delegated execution did not reach a successful completed closure.
          *
          * [tracker] is in [DelegatedActivationRecord.ActivationStatus.FAILED] and a
          * [DelegatedExecutionSignal.Kind.RESULT] signal with
@@ -170,6 +171,10 @@ class DelegatedTakeoverExecutor(
          *
          * @property tracker  Final [DelegatedExecutionTracker] in FAILED state.
          * @property error    Human-readable error description; echoes [Throwable.message].
+         * @property goalResult Structured pipeline result when execution returned a non-success
+         *                     terminal status (`disabled`, `hold`, `timeout`, `cancelled`,
+         *                     `error`, `partial`) instead of throwing. `null` when the pipeline
+         *                     failed before producing a result payload.
          * @property ledger   The [EmittedSignalLedger] populated during this execution
          *                    (ACK + PROGRESS + RESULT recorded); use it to replay any
          *                    signal with stable identity.
@@ -177,6 +182,7 @@ class DelegatedTakeoverExecutor(
         data class Failed(
             val tracker: DelegatedExecutionTracker,
             val error: String,
+            val goalResult: GoalResultPayload? = null,
             override val ledger: EmittedSignalLedger
         ) : ExecutionOutcome()
     }
@@ -198,9 +204,14 @@ class DelegatedTakeoverExecutor(
      * 5. Advances tracker to ACTIVE — emits [DelegatedExecutionSignal.Kind.PROGRESS] to
      *    inform the host that the pipeline is about to be entered.
      * 6. Calls [GoalExecutionPipeline.executeGoal].
-     *    - **On success**: records a step, advances to COMPLETED, emits RESULT signal
-     *      with [DelegatedExecutionSignal.ResultKind.COMPLETED], returns
-     *      [ExecutionOutcome.Completed].
+      *    - **On returned `status=success`**: records a step, advances to COMPLETED, emits
+      *      RESULT signal with [DelegatedExecutionSignal.ResultKind.COMPLETED], returns
+      *      [ExecutionOutcome.Completed].
+      *    - **On returned non-success status** (`disabled`, `hold`, `error`, `timeout`,
+      *      `cancelled`, `partial`): records a step, advances to FAILED, emits the matching
+      *      RESULT signal kind, returns [ExecutionOutcome.Failed] with [ExecutionOutcome.Failed.goalResult]
+      *      preserved so callers can uplink the structured result rather than collapsing it
+      *      into a generic exception error.
      *    - **On [TimeoutCancellationException]**: advances to FAILED, emits RESULT signal
      *      with [DelegatedExecutionSignal.ResultKind.TIMEOUT], returns
      *      [ExecutionOutcome.Failed].
@@ -227,9 +238,9 @@ class DelegatedTakeoverExecutor(
      * @param nowMs         Epoch-ms reference time used for tracker timestamps; defaults
      *                      to the current wall clock.  Pass an explicit value in tests to
      *                      produce deterministic timestamps.
-     * @return [ExecutionOutcome.Completed] on successful execution or
-     *         [ExecutionOutcome.Failed] when the pipeline throws.
-     */
+      * @return [ExecutionOutcome.Completed] only when the delegated pipeline reports a
+      *         successful completed status; otherwise [ExecutionOutcome.Failed].
+      */
     fun execute(
         unit: DelegatedRuntimeUnit,
         initialRecord: DelegatedActivationRecord,
@@ -320,27 +331,58 @@ class DelegatedTakeoverExecutor(
         // ── 6. Run the pipeline and emit the terminal RESULT signal ───────────
         return try {
             val result = pipeline.executeGoal(goalPayload)
+            val terminalResultKind = classifyTerminalResultKind(result)
 
-            // Record a step for the completed goal execution and advance to COMPLETED.
+            // Record a step for the returned goal execution result and advance to the
+            // terminal tracker state that matches the actual returned status.
             tracker = tracker
                 .recordStep(nowMs)
-                .advance(DelegatedActivationRecord.ActivationStatus.COMPLETED)
+                .advance(
+                    if (terminalResultKind == DelegatedExecutionSignal.ResultKind.COMPLETED) {
+                        DelegatedActivationRecord.ActivationStatus.COMPLETED
+                    } else {
+                        DelegatedActivationRecord.ActivationStatus.FAILED
+                    }
+                )
 
-            val resultSignal = DelegatedExecutionSignal.result(
-                tracker = tracker,
-                resultKind = DelegatedExecutionSignal.ResultKind.COMPLETED
-            )
+            val resultSignal = when (terminalResultKind) {
+                DelegatedExecutionSignal.ResultKind.COMPLETED ->
+                    DelegatedExecutionSignal.result(
+                        tracker = tracker,
+                        resultKind = DelegatedExecutionSignal.ResultKind.COMPLETED
+                    )
+                DelegatedExecutionSignal.ResultKind.TIMEOUT ->
+                    DelegatedExecutionSignal.timeout(tracker = tracker)
+                DelegatedExecutionSignal.ResultKind.CANCELLED ->
+                    DelegatedExecutionSignal.cancelled(tracker = tracker)
+                else ->
+                    DelegatedExecutionSignal.result(
+                        tracker = tracker,
+                        resultKind = DelegatedExecutionSignal.ResultKind.FAILED
+                    )
+            }
             recordEmitted(ledgerExecutionKey, ledger, resultSignal)
             emitSignalIfNew(resultSignal)
 
             Log.d(
                 TAG,
-                "[PR15:TAKEOVER] RESULT(completed) emitted unit_id=${unit.unitId} " +
+                "[PR15:TAKEOVER] RESULT(${resultSignal.resultKind?.wireValue ?: "unknown"}) emitted unit_id=${unit.unitId} " +
                     "task_id=${unit.taskId} steps=${tracker.stepCount} status=${result.status} " +
                     "signal_id=${resultSignal.signalId} emission_seq=${resultSignal.emissionSeq}"
             )
 
-            ExecutionOutcome.Completed(tracker = tracker, goalResult = result, ledger = ledger)
+            if (terminalResultKind == DelegatedExecutionSignal.ResultKind.COMPLETED) {
+                ExecutionOutcome.Completed(tracker = tracker, goalResult = result, ledger = ledger)
+            } else {
+                ExecutionOutcome.Failed(
+                    tracker = tracker,
+                    error = result.error
+                        ?: result.hold_reason
+                        ?: "non_completed_result:${result.status}",
+                    goalResult = result,
+                    ledger = ledger
+                )
+            }
 
         } catch (e: TimeoutCancellationException) {
             // Execution timed out — emit RESULT(TIMEOUT) so the host knows this was a
@@ -401,6 +443,24 @@ class DelegatedTakeoverExecutor(
             ExecutionOutcome.Failed(tracker = tracker, error = errorMessage, ledger = ledger)
         }
     }
+
+    /**
+     * Maps a returned [GoalResultPayload.status] into the delegated result-signal kind.
+     *
+     * Lifecycle aliases are normalized through [UgcpSharedSchemaAlignment.normalizeLifecycleStatus].
+     * Only `success`, `timeout`, and `cancelled` keep their dedicated terminal kinds; every
+     * other returned status (`disabled`, `hold`, `error`, `partial`, unknown) is treated as
+     * not-closed on Android and therefore collapses to [DelegatedExecutionSignal.ResultKind.FAILED].
+     */
+    private fun classifyTerminalResultKind(
+        result: GoalResultPayload
+    ): DelegatedExecutionSignal.ResultKind =
+        when (UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)) {
+            "success" -> DelegatedExecutionSignal.ResultKind.COMPLETED
+            "timeout" -> DelegatedExecutionSignal.ResultKind.TIMEOUT
+            "cancelled" -> DelegatedExecutionSignal.ResultKind.CANCELLED
+            else -> DelegatedExecutionSignal.ResultKind.FAILED
+        }
 
     private fun recordEmitted(
         executionKey: String,
