@@ -534,6 +534,23 @@ class DelegatedTakeoverExecutorTest {
         assertEquals(DelegatedExecutionSignal.ResultKind.CANCELLED, outcome.ledger.lastResult?.resultKind)
     }
 
+    @Test
+    fun `returned partial and error statuses both remain non-completed failed outcomes`() {
+        val partialOutcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "partial", error = "partial_progress")
+        ).execute(makeUnit(taskId = "task-partial"), pendingRecord(makeUnit(taskId = "task-partial")), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+        val errorOutcome = buildExecutor(
+            pipeline = returnedResultPipeline(status = "error", error = "runtime_error")
+        ).execute(makeUnit(taskId = "task-error"), pendingRecord(makeUnit(taskId = "task-error")), nowMs = 1_000L)
+            as DelegatedTakeoverExecutor.ExecutionOutcome.Failed
+
+        assertEquals("partial", partialOutcome.goalResult?.status)
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, partialOutcome.ledger.lastResult?.resultKind)
+        assertEquals("error", errorOutcome.goalResult?.status)
+        assertEquals(DelegatedExecutionSignal.ResultKind.FAILED, errorOutcome.ledger.lastResult?.resultKind)
+    }
+
     // ── GoalExecutionPayload construction ─────────────────────────────────────
 
     @Test

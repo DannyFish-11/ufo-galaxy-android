@@ -366,7 +366,7 @@ class DelegatedTakeoverExecutor(
 
             Log.d(
                 TAG,
-                "[PR15:TAKEOVER] RESULT(${resultSignal.resultKind?.wireValue}) emitted unit_id=${unit.unitId} " +
+                "[PR15:TAKEOVER] RESULT(${resultSignal.resultKind?.wireValue ?: "unknown"}) emitted unit_id=${unit.unitId} " +
                     "task_id=${unit.taskId} steps=${tracker.stepCount} status=${result.status} " +
                     "signal_id=${resultSignal.signalId} emission_seq=${resultSignal.emissionSeq}"
             )
