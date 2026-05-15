@@ -2639,16 +2639,23 @@ class GalaxyConnectionService : Service() {
                 val durableSessionTag = UFOGalaxyApplication.runtimeController
                     .durableSessionContinuityRecord.value
                     ?.durableSessionId
-                val queueSucceeded = runCatching {
+                val queueResult = runCatching {
                     webSocketClient.offlineQueue.enqueue(
                         type = MsgType.GOAL_EXECUTION_RESULT.value,
                         json = envelopeJson,
                         sessionTag = durableSessionTag
                     )
-                }.isSuccess
+                }
+                val queueSucceeded = queueResult.isSuccess
                 if (queueSucceeded) {
                     ResultDeliveryDisposition.OFFLINE_QUEUED
                 } else {
+                    Log.e(
+                        TAG,
+                        "goal_execution_result enqueue failed task_id=${enriched.task_id} " +
+                            "trace_id=${traceId ?: ""} error=${queueResult.exceptionOrNull()?.message}",
+                        queueResult.exceptionOrNull()
+                    )
                     ResultDeliveryDisposition.SEND_FAILED
                 }
             }

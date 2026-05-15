@@ -3184,6 +3184,8 @@ class RuntimeController(
          * dropping events when the V2 consumer is briefly slow to drain.
          */
         private const val RECONCILIATION_SIGNAL_BUFFER_CAPACITY = 32
+        // Terminal reconciliation retry should remain short-lived: long enough to survive
+        // brief collector backpressure, but bounded to avoid hanging retry coroutines.
         private const val RECONCILIATION_SIGNAL_RETRY_TIMEOUT_MS = 2_000L
     }
 }
