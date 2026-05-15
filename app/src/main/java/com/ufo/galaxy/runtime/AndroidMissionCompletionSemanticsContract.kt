@@ -31,6 +31,12 @@ object AndroidMissionCompletionSemanticsContract {
         NON_TERMINAL("non_terminal", false)
     }
 
+    data class CompletionVisibility(
+        val resultReturned: Boolean,
+        val completionSignaled: Boolean,
+        val closureReadyForAcceptance: Boolean
+    )
+
     /**
      * Classifies the local terminal observation from execution-event/result facts.
      */
@@ -119,4 +125,21 @@ object AndroidMissionCompletionSemanticsContract {
             TerminalOutcomeKind.FALLBACK ->
                 AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL
         }
+
+    fun deriveExecutionCompletionVisibility(
+        phase: String,
+        lifecycleTerminalPhase: Boolean?
+    ): CompletionVisibility {
+        val terminalByPhase =
+            phase == DeviceExecutionEventPayload.PHASE_COMPLETED ||
+                phase == DeviceExecutionEventPayload.PHASE_FAILED ||
+                phase == DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED ||
+                phase == DeviceExecutionEventPayload.PHASE_CANCELLED
+        val isTerminal = lifecycleTerminalPhase == true || terminalByPhase
+        return CompletionVisibility(
+            resultReturned = isTerminal,
+            completionSignaled = isTerminal,
+            closureReadyForAcceptance = isTerminal
+        )
+    }
 }

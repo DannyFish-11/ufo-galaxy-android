@@ -477,6 +477,33 @@ class GalaxyConnectionService : Service() {
                 requestedTimestampMs = payload.timestamp_ms,
                 taskId = payload.task_id
             )
+            val completionVisibility =
+                AndroidMissionCompletionSemanticsContract.deriveExecutionCompletionVisibility(
+                    phase = payload.phase,
+                    lifecycleTerminalPhase = eventStamp.lifecycleTerminalPhase
+                )
+            val reconnectState = UFOGalaxyApplication.runtimeController
+                .reconnectRecoveryState.value.wireValue
+            val eventSemanticClass = when (payload.reported_state_semantic_class) {
+                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.CAPABILITY.wireValue ->
+                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.CAPABILITY
+                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.OBSERVATION.wireValue ->
+                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.OBSERVATION
+                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.DERIVED_LOCAL.wireValue ->
+                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.DERIVED_LOCAL
+                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING.wireValue ->
+                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING
+                else ->
+                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.ACTIVE_RUNTIME
+            }
+            val eventObservationBasis =
+                AndroidDeviceSurfaceSourceContract.deriveSnapshotObservationBasis(
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = webSocketClient.isConnected(),
+                    reconnectRecoveryState = reconnectState,
+                    offlineQueueDepth = offlineTaskQueue.queueDepth(),
+                    reportedStateSemanticClass = eventSemanticClass
+                )
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -488,6 +515,9 @@ class GalaxyConnectionService : Service() {
                 lifecycle_result_uplink_required = eventStamp.lifecycleResultUplinkRequired,
                 lifecycle_state_uplink_required = eventStamp.lifecycleStateUplinkRequired,
                 lifecycle_terminal_phase = eventStamp.lifecycleTerminalPhase,
+                result_returned = completionVisibility.resultReturned,
+                completion_signaled = completionVisibility.completionSignaled,
+                closure_ready_for_acceptance = completionVisibility.closureReadyForAcceptance,
                 mode_state = modeState.modeState,
                 mode_readiness_state = modeState.modeReadinessState,
                 cross_device_eligibility = modeState.crossDeviceEligibility,
@@ -536,10 +566,10 @@ class GalaxyConnectionService : Service() {
                 observability_reliability_class = AndroidRuntimeObservabilityAuditContract.classifyObservabilityReliability(
                     evidencePresenceKind = payload.evidence_presence_kind,
                     degradedConditionClass = null,
-                    reconnectRecoveryState = UFOGalaxyApplication.runtimeController
-                        .reconnectRecoveryState.value.wireValue,
-                    localObservationBasis = AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
+                    reconnectRecoveryState = reconnectState,
+                    localObservationBasis = eventObservationBasis.wireValue
                 ).wireValue,
+                local_observation_basis = eventObservationBasis.wireValue,
                 // ── 统一参与者生命周期阶段字段（在执行事件发射层填充）─────────────────────────────
                 // 确保 V2 可将每个执行事件关联到 Android 在发射时的精确生命周期阶段，
                 // 无需通过 participation_tier + carrier_runtime_state 组合推断。

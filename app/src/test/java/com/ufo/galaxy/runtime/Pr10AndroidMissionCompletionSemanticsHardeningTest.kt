@@ -6,6 +6,7 @@ import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Pr10AndroidMissionCompletionSemanticsHardeningTest {
@@ -120,12 +121,42 @@ class Pr10AndroidMissionCompletionSemanticsHardeningTest {
             phase = DeviceExecutionEventPayload.PHASE_FAILED,
             reported_state_semantic_class = "terminal_reporting",
             result_uplink_semantic_class = "authoritative_terminal",
-            terminal_outcome_kind = "timeout"
+            terminal_outcome_kind = "timeout",
+            result_returned = true,
+            completion_signaled = true,
+            closure_ready_for_acceptance = true,
+            local_observation_basis = "cached_state"
         )
 
         val json = asJsonObject(event)
         assertEquals("terminal_reporting", json["reported_state_semantic_class"].asString)
         assertEquals("authoritative_terminal", json["result_uplink_semantic_class"].asString)
         assertEquals("timeout", json["terminal_outcome_kind"].asString)
+        assertTrue(json["result_returned"].asBoolean)
+        assertTrue(json["completion_signaled"].asBoolean)
+        assertTrue(json["closure_ready_for_acceptance"].asBoolean)
+        assertEquals("cached_state", json["local_observation_basis"].asString)
+    }
+
+    @Test
+    fun `terminal phase derives completion visibility as true across closure fields`() {
+        val visibility = AndroidMissionCompletionSemanticsContract.deriveExecutionCompletionVisibility(
+            phase = DeviceExecutionEventPayload.PHASE_COMPLETED,
+            lifecycleTerminalPhase = true
+        )
+        assertTrue(visibility.resultReturned)
+        assertTrue(visibility.completionSignaled)
+        assertTrue(visibility.closureReadyForAcceptance)
+    }
+
+    @Test
+    fun `non terminal phase keeps completion visibility false`() {
+        val visibility = AndroidMissionCompletionSemanticsContract.deriveExecutionCompletionVisibility(
+            phase = DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS,
+            lifecycleTerminalPhase = false
+        )
+        assertEquals(false, visibility.resultReturned)
+        assertEquals(false, visibility.completionSignaled)
+        assertEquals(false, visibility.closureReadyForAcceptance)
     }
 }
