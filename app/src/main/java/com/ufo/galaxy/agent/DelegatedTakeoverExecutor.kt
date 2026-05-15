@@ -444,6 +444,14 @@ class DelegatedTakeoverExecutor(
         }
     }
 
+    /**
+     * Maps a returned [GoalResultPayload.status] into the delegated result-signal kind.
+     *
+     * Lifecycle aliases are normalized through [UgcpSharedSchemaAlignment.normalizeLifecycleStatus].
+     * Only `success`, `timeout`, and `cancelled` keep their dedicated terminal kinds; every
+     * other returned status (`disabled`, `hold`, `error`, `partial`, unknown) is treated as
+     * not-closed on Android and therefore collapses to [DelegatedExecutionSignal.ResultKind.FAILED].
+     */
     private fun classifyTerminalResultKind(
         result: GoalResultPayload
     ): DelegatedExecutionSignal.ResultKind =

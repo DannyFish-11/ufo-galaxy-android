@@ -2939,6 +2939,14 @@ class GalaxyConnectionService : Service() {
         )
     }
 
+    /**
+     * Returns `true` when takeover failure should still emit runtime diagnostics.
+     *
+     * Structured non-success terminal results that already describe an expected closure shape
+     * (`cancelled`, `timeout`, `disabled`, `hold`) do not need an extra diagnostics emission.
+     * We still emit diagnostics when no structured result was returned, or when Android surfaced
+     * any other status that implies an unexpected execution failure and needs extra observability.
+     */
     private fun shouldEmitTakeoverFailureDiagnostics(
         returnedGoalResult: GoalResultPayload?,
         normalizedReturnedStatus: String?
