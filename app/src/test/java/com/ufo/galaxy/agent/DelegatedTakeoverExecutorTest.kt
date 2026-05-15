@@ -535,7 +535,7 @@ class DelegatedTakeoverExecutorTest {
     }
 
     @Test
-    fun `returned partial and error statuses both remain non-completed failed outcomes`() {
+    fun `returned partial and error statuses emit FAILED signals with preserved results`() {
         val partialOutcome = buildExecutor(
             pipeline = returnedResultPipeline(status = "partial", error = "partial_progress")
         ).execute(makeUnit(taskId = "task-partial"), pendingRecord(makeUnit(taskId = "task-partial")), nowMs = 1_000L)
