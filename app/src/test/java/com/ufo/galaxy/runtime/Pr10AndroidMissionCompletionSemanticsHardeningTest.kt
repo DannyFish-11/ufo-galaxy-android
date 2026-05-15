@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -155,8 +156,8 @@ class Pr10AndroidMissionCompletionSemanticsHardeningTest {
             phase = DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS,
             lifecycleTerminalPhase = false
         )
-        assertEquals(false, visibility.resultReturned)
-        assertEquals(false, visibility.completionSignaled)
-        assertEquals(false, visibility.closureReadyForAcceptance)
+        assertFalse(visibility.resultReturned)
+        assertFalse(visibility.completionSignaled)
+        assertFalse(visibility.closureReadyForAcceptance)
     }
 }

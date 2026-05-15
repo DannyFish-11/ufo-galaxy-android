@@ -200,6 +200,9 @@ object AndroidCanonicalRuntimeTruthContract {
         companion object {
             /** All stable wire values; used for wire-stability contract tests. */
             val ALL_WIRE_VALUES: Set<String> = entries.map { it.wireValue }.toSet()
+
+            fun fromWireValue(value: String?): ReportedStateSemanticClass? =
+                entries.firstOrNull { it.wireValue == value }
         }
     }
 

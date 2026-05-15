@@ -484,18 +484,10 @@ class GalaxyConnectionService : Service() {
                 )
             val reconnectState = UFOGalaxyApplication.runtimeController
                 .reconnectRecoveryState.value.wireValue
-            val eventSemanticClass = when (payload.reported_state_semantic_class) {
-                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.CAPABILITY.wireValue ->
-                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.CAPABILITY
-                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.OBSERVATION.wireValue ->
-                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.OBSERVATION
-                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.DERIVED_LOCAL.wireValue ->
-                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.DERIVED_LOCAL
-                AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING.wireValue ->
-                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING
-                else ->
-                    AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.ACTIVE_RUNTIME
-            }
+            val eventSemanticClass = AndroidCanonicalRuntimeTruthContract
+                .ReportedStateSemanticClass
+                .fromWireValue(payload.reported_state_semantic_class)
+                ?: AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.ACTIVE_RUNTIME
             val eventObservationBasis =
                 AndroidDeviceSurfaceSourceContract.deriveSnapshotObservationBasis(
                     crossDeviceEnabled = settings.crossDeviceEnabled,

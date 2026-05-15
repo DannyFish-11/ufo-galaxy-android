@@ -18,6 +18,12 @@ object AndroidMissionCompletionSemanticsContract {
     private const val KEYWORD_FALLBACK = "fallback"
     private const val KEYWORD_PARTIAL = "partial"
     private const val KEYWORD_RECOVER = "recover"
+    private val TERMINAL_EXECUTION_PHASES: Set<String> = setOf(
+        DeviceExecutionEventPayload.PHASE_COMPLETED,
+        DeviceExecutionEventPayload.PHASE_FAILED,
+        DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
+        DeviceExecutionEventPayload.PHASE_CANCELLED
+    )
 
     enum class TerminalOutcomeKind(val wireValue: String, val isTerminal: Boolean) {
         COMPLETION("completion", true),
@@ -130,11 +136,7 @@ object AndroidMissionCompletionSemanticsContract {
         phase: String,
         lifecycleTerminalPhase: Boolean?
     ): CompletionVisibility {
-        val terminalByPhase =
-            phase == DeviceExecutionEventPayload.PHASE_COMPLETED ||
-                phase == DeviceExecutionEventPayload.PHASE_FAILED ||
-                phase == DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED ||
-                phase == DeviceExecutionEventPayload.PHASE_CANCELLED
+        val terminalByPhase = TERMINAL_EXECUTION_PHASES.contains(phase)
         val isTerminal = lifecycleTerminalPhase == true || terminalByPhase
         return CompletionVisibility(
             resultReturned = isTerminal,
