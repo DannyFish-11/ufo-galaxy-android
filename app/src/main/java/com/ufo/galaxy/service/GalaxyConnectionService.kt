@@ -2594,6 +2594,9 @@ class GalaxyConnectionService : Service() {
         val normalizedLifecycleStatus =
             UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)
         val isHoldStatus = PolicyRoutingContext.isHoldStatus(result.status)
+        // A hold status is non-terminal ("temporarily unavailable; retry later"), so it must not
+        // trigger completion/acceptance closure semantics. Non-hold goal results are treated as
+        // terminal contributions for this execution chain.
         val goalResultCompletionVisibility = if (isHoldStatus) {
             AndroidMissionCompletionSemanticsContract.CompletionVisibility(
                 resultReturned = false,
@@ -2614,7 +2617,11 @@ class GalaxyConnectionService : Service() {
         )
         val resultDurableParticipantId = try {
             UFOGalaxyApplication.appSettings.durableParticipantId.takeIf { it.isNotBlank() }
-        } catch (_: Exception) {
+        } catch (e: IllegalStateException) {
+            Log.d(TAG, "[GOAL_RESULT] Failed to resolve durableParticipantId during result emission (IllegalStateException)", e)
+            null
+        } catch (e: SecurityException) {
+            Log.d(TAG, "[GOAL_RESULT] Failed to resolve durableParticipantId due to security restrictions during result emission", e)
             null
         }
         val resultUnifiedLifecyclePhase = AndroidUnifiedParticipantLifecyclePhase.derive(
