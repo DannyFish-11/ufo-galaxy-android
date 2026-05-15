@@ -2623,7 +2623,31 @@ data class DeviceStateSnapshotPayload(
     val takeover_state: String? = null,
     val local_llm_ready: Boolean? = null,
     val local_mode_capable: Boolean? = null,
-    val local_capability_state: String? = null
+    val local_capability_state: String? = null,
+
+    // ── 统一参与者生命周期阶段（AndroidUnifiedParticipantLifecyclePhase）─────────────────────
+    //
+    // unified_lifecycle_phase: Android 参与者在共享中心—分布式生命周期模型中的精确位置。
+    //   取自 AndroidUnifiedParticipantLifecyclePhase.derive() 的推导结果。
+    //   Values:
+    //     "unregistered"     — 跨设备未启用或未注册；无参与可能
+    //     "registered"       — 跨设备已启用且持有参与者身份，但 WS 未连接
+    //     "connected"        — WS 已连接，能力通告尚未完成
+    //     "visible"          — 能力已通告，V2 可见；会话附加或就绪可能尚未满足
+    //     "ready"            — 运行时健康、会话已附加、就绪满足；可接受委托工作
+    //     "takeover_eligible"— READY 且无活跃执行；接管门控放行
+    //     "participating"    — 活跃分布式执行或接管正在运行
+    //     "degraded"         — 运行时降级或治理阻断；仅基础能力
+    //     "recovering"       — WS 重连中或运行时恢复中；分发阻断
+    //     "unavailable"      — 运行时不可用或已停止；无执行可能
+    //   V2 MUST 直接读取此字段作为 Android 生命周期阶段的权威来源，
+    //   而非通过 participation_tier / carrier_runtime_state 等字段组合自行推导。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // unified_lifecycle_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION。
+    val unified_lifecycle_phase: String? = null,
+    val unified_lifecycle_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2867,7 +2891,16 @@ data class DeviceExecutionEventPayload(
     val observability_audit_schema_version: String? = null,
     val execution_path_tag: String? = null,
     val audit_contribution_class: String? = null,
-    val observability_reliability_class: String? = null
+    val observability_reliability_class: String? = null,
+
+    // ── 统一参与者生命周期阶段（AndroidUnifiedParticipantLifecyclePhase）─────────────────────
+    //
+    // unified_lifecycle_phase: 与 DeviceStateSnapshotPayload 语义相同；此处记录事件发射时
+    //   的精确生命周期阶段，便于 V2 将执行事件与当时的参与者阶段关联。
+    //   Values 同 DeviceStateSnapshotPayload.unified_lifecycle_phase。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在事件发射时填充。
+    val unified_lifecycle_phase: String? = null,
+    val unified_lifecycle_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

@@ -37,6 +37,8 @@ import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
 import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
 import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
+import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
+import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
@@ -533,7 +535,45 @@ class GalaxyConnectionService : Service() {
                     reconnectRecoveryState = UFOGalaxyApplication.runtimeController
                         .reconnectRecoveryState.value.wireValue,
                     localObservationBasis = AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.LIVE_RUNTIME.wireValue
-                ).wireValue
+                ).wireValue,
+                // ── 统一参与者生命周期阶段字段（在执行事件发射层填充）─────────────────────────────
+                // 确保 V2 可将每个执行事件关联到 Android 在发射时的精确生命周期阶段，
+                // 无需通过 participation_tier + carrier_runtime_state 组合推断。
+                unified_lifecycle_phase = run {
+                    val eventFormalLifecycle = FormalParticipantLifecycleState.fromManagerState(
+                        UFOGalaxyApplication.localInferenceRuntimeManager.state.value
+                    )
+                    val eventCapabilityVisible = hasVisibleCrossDeviceCapability(
+                        crossDeviceEligibility = modeState.crossDeviceEligibility,
+                        sessionIsAttached = dispatchReadiness.sessionIsAttached
+                    )
+                    val eventDurableId = try {
+                        UFOGalaxyApplication.appSettings.durableParticipantId
+                            .takeIf { it.isNotBlank() }
+                    } catch (e: Exception) { null }
+                    val eventInteractionSurface = UFOGalaxyApplication.appSettings.let {
+                        it.accessibilityReady == true && it.overlayReady == true
+                    }
+                    val eventReconnectState = UFOGalaxyApplication.runtimeController
+                        .reconnectRecoveryState.value.wireValue
+                    AndroidUnifiedParticipantLifecyclePhase.derive(
+                        AndroidUnifiedParticipantLifecyclePhase.DerivationInput(
+                            formalLifecycleState = eventFormalLifecycle,
+                            reconnectRecoveryStateWire = eventReconnectState,
+                            crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+                            wsConnected = webSocketClient.isConnected(),
+                            hasDurableParticipantId = eventDurableId != null,
+                            capabilityVisible = eventCapabilityVisible,
+                            sessionAttached = dispatchReadiness.sessionIsAttached,
+                            readinessSatisfied = modeState.crossDeviceEligibility,
+                            executionBusy = eventStamp.executionBusy == true,
+                            takeoverActive = currentActiveTakeoverId() != null,
+                            interactionSurfaceReady = eventInteractionSurface,
+                            governanceBlocked = governanceTruth.governance_blocked
+                        )
+                    ).wireValue
+                },
+                unified_lifecycle_schema_version = AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -3552,6 +3592,31 @@ class GalaxyConnectionService : Service() {
 
             val governanceTruth = currentGovernanceTruth()
 
+            // ── 统一参与者生命周期阶段推导 ─────────────────────────────────────────────────────
+            // 从已计算的运行时信号推导 unified_lifecycle_phase，无需额外探针。
+            // 该字段为 V2 提供单一权威阶段字段，消除多字段组合推断的歧义。
+            val snapshotFormalLifecycle = FormalParticipantLifecycleState.fromManagerState(managerState)
+            val snapshotCapabilityVisible = hasVisibleCrossDeviceCapability(
+                crossDeviceEligibility = modeState.crossDeviceEligibility,
+                sessionIsAttached = dispatchReadiness.sessionIsAttached
+            )
+            val snapshotUnifiedLifecyclePhase = AndroidUnifiedParticipantLifecyclePhase.derive(
+                AndroidUnifiedParticipantLifecyclePhase.DerivationInput(
+                    formalLifecycleState = snapshotFormalLifecycle,
+                    reconnectRecoveryStateWire = reconnectRecoveryState,
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = wsConnected,
+                    hasDurableParticipantId = snapshotDurableParticipantId != null,
+                    capabilityVisible = snapshotCapabilityVisible,
+                    sessionAttached = dispatchReadiness.sessionIsAttached,
+                    readinessSatisfied = modeState.crossDeviceEligibility,
+                    executionBusy = snapshotStamp.executionBusy == true,
+                    takeoverActive = currentActiveTakeoverId() != null,
+                    interactionSurfaceReady = interactionSurfaceReady,
+                    governanceBlocked = governanceTruth.governance_blocked
+                )
+            )
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -3708,7 +3773,11 @@ class GalaxyConnectionService : Service() {
                 takeover_state = governanceTruth.takeover_state,
                 local_llm_ready = snapshotLocalLlmReady,
                 local_mode_capable = snapshotLocalCapState.isLocalModeCapable,
-                local_capability_state = snapshotLocalCapState.wireValue
+                local_capability_state = snapshotLocalCapState.wireValue,
+                // ── 统一参与者生命周期阶段字段 ─────────────────────────────────────
+                // 在快照发送层唯一填充，提供 V2 可直接消费的单一权威阶段字段。
+                unified_lifecycle_phase = snapshotUnifiedLifecyclePhase.wireValue,
+                unified_lifecycle_schema_version = AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
@@ -3727,7 +3796,8 @@ class GalaxyConnectionService : Service() {
                     "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier " +
                     "mode_state=${modeState.modeState} mode_readiness_state=${modeState.modeReadinessState} " +
                     "execution_mode_state=${modeState.executionModeState} " +
-                    "cross_device_eligibility=${modeState.crossDeviceEligibility} sent=$sent"
+                    "cross_device_eligibility=${modeState.crossDeviceEligibility} " +
+                    "unified_lifecycle_phase=${snapshotUnifiedLifecyclePhase.wireValue} sent=$sent"
             )
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_STATE_SNAPSHOT, mapOf(
@@ -3752,6 +3822,7 @@ class GalaxyConnectionService : Service() {
                     "parallel_execution_eligibility" to modeState.parallelExecutionEligibility,
                     "llama_cpp_available" to llamaCppAvailable,
                     "ncnn_available" to ncnnAvailable,
+                    "unified_lifecycle_phase" to snapshotUnifiedLifecyclePhase.wireValue,
                     "sent" to sent
                 )
             )

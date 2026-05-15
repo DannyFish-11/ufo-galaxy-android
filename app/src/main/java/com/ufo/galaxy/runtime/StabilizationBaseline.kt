@@ -2087,7 +2087,6 @@ object StabilizationBaseline {
     ) + listOf(
 
         // ── PR-9: Android 最小可用路径与可操作性合约 ─────────────────────────────
-
         BaselineSurfaceEntry(
             surfaceId = "android-minimal-operability-contract",
             displayName = "AndroidMinimalOperabilityContract",
@@ -2110,6 +2109,41 @@ object StabilizationBaseline {
                 "toContractMetaWireMap() 提供合约元数据 wire 序列化，可嵌入诊断载体或设备状态快照。" +
                 "Test: Pr9AndroidMinimalOperabilityContractTest.",
             introducedPr = 9
+        )
+    ) + listOf(
+
+        // ── 统一参与者生命周期阶段合约 ────────────────────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-unified-participant-lifecycle-phase",
+            displayName = "AndroidUnifiedParticipantLifecyclePhase",
+            packagePath = "com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "Android 侧统一参与者生命周期阶段合约，消除注册/连接/可见/就绪/参与/接管就绪 " +
+                "之间的多字段组合推断歧义，提供 V2 可直接消费的单一权威 wire 字段 unified_lifecycle_phase。" +
+                "引入 Phase（10 值枚举：UNREGISTERED/REGISTERED/CONNECTED/VISIBLE/READY/" +
+                "TAKEOVER_ELIGIBLE/PARTICIPATING/DEGRADED/RECOVERING/UNAVAILABLE），每个阶段具有 " +
+                "稳定 wireValue 和 phaseRank（正值=主路径前进，负值=降级/恢复/不可用）。" +
+                "DerivationInput 汇聚 12 个现有运行时信号（FormalParticipantLifecycleState/" +
+                "ReconnectRecoveryState/crossDeviceEnabled/wsConnected/hasDurableParticipantId/" +
+                "capabilityVisible/sessionAttached/readinessSatisfied/executionBusy/takeoverActive/" +
+                "interactionSurfaceReady/governanceBlocked），derive() 按 12 级优先级推导阶段，" +
+                "无需新探针。TAKEOVER_ELIGIBLE 明确建模接管就绪语义（READY + 无活跃执行 + 交互面就绪），" +
+                "消除原先通过 dispatch_eligible + governance_blocked + execution_busy 组合推断的歧义。" +
+                "isActivelyParticipating()/isDispatchAllowed()/isTakeoverAcceptable() 为 V2 提供" +
+                "语义查询方法；isForwardTransition()/isDegradationTransition() 支持降级事件检测与" +
+                "formation 重平衡触发。DeviceStateSnapshotPayload 新增 unified_lifecycle_phase/" +
+                "unified_lifecycle_schema_version 字段；DeviceExecutionEventPayload 同步新增。" +
+                "GalaxyConnectionService.sendDeviceStateSnapshot() 在快照发送层唯一推导并填充，" +
+                "deviceExecutionEventSink 在执行事件发射层同步填充，确保每条上行消息均携带精确阶段。" +
+                "PHASE_INVARIANTS 声明 12 条形式化不变量，覆盖各阶段前提条件、wire 字段填充要求。" +
+                "V2 集成点：core/android_device_state_store.py（unified_lifecycle_phase），" +
+                "core/android_runtime_transition_reducer.py（阶段迁移检测），" +
+                "core/takeover_eligibility_router.py（isTakeoverAcceptable 语义），" +
+                "metrics/android_lifecycle_metrics.py（phaseRank SLO 计算）。" +
+                "Test: AndroidUnifiedParticipantLifecyclePhaseTest.",
+            introducedPr = 91
         )
     )
 
