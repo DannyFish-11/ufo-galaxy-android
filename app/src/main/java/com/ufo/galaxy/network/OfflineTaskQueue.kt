@@ -81,7 +81,9 @@ class OfflineTaskQueue(
             "goal_result",
             "goal_execution_result",
             "delegated_execution_signal",
-            "device_execution_event"
+            "device_execution_event",
+            "device_state_snapshot",
+            "device_acceptance_report"
         )
     }
 
