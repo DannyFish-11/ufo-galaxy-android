@@ -2229,9 +2229,49 @@ object StabilizationBaseline {
                 "Test: AndroidParticipationSemanticNormalizationContractTest.",
             introducedPr = 93
         )
+    ) + listOf(
+
+        // ── PR-4Android: 工程边界可靠性合约 ──────────────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-boundary-reliability-contract",
+            displayName = "AndroidBoundaryReliabilityContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-4Android 工程边界可靠性合约，修复 Android 侧上行消息中三类工程边界弱点：" +
+                "（1）异步范围不透明：GalaxyConnectionService 中协程启动方式多样，" +
+                "V2 无法判断事件来自哪种生命周期绑定类型，网络断开时丢失事件的风险无法被识别；" +
+                "（2）来源字段覆盖等级不可观测：V2 消费 Android 上行消息时依赖多个来源字段，" +
+                "但字段完整性在不同发送路径上不一致，V2 无法区分可信填充与防御性缺省；" +
+                "（3）权限检查模式隐式：执行委托任务前均已通过治理合约检查，" +
+                "但上行事件中没有显式声明检查模式，V2 审计链无法区分形式化门控与隐式假设。" +
+                "引入 AsyncScopeClass（4 值枚举：SERVICE_SCOPED/TIMEOUT_GUARDED/" +
+                "LIFECYCLE_BOUND/DETACHED_FIRE_AND_FORGET），声明协程的生命周期绑定类型；" +
+                "引入 SourceFieldCoverageClass（3 值枚举：COMPLETE/PARTIAL/ABSENT），" +
+                "声明来源字段的完整性等级；" +
+                "引入 AuthorityBoundaryCheckMode（4 值枚举：EXPLICIT_CONTRACT_GATE/" +
+                "GOVERNANCE_VALIDATED/AUDIT_TRAIL_ONLY/ASSUMED_IMPLICIT），" +
+                "声明权限检查的显式程度。" +
+                "BoundaryReliabilityDerivationInput 汇聚 9 个现有运行时信号（无需新探针），" +
+                "derive() 通过优先级规则推导 BoundaryReliabilitySnapshot（toWireMap() 可嵌入上行消息）。" +
+                "DeviceExecutionEventPayload 新增 async_scope_class/source_field_coverage_class/" +
+                "authority_boundary_check_mode/boundary_reliability_schema_version 字段。" +
+                "DeviceStateSnapshotPayload 新增 source_field_coverage_class/" +
+                "boundary_reliability_schema_version 字段。" +
+                "GalaxyConnectionService.deviceExecutionEventSink 在执行事件发射层唯一填充全部 4 个字段；" +
+                "GalaxyConnectionService.sendDeviceStateSnapshot() 在快照发送层唯一填充 2 个字段。" +
+                "BOUNDARY_RELIABILITY_INVARIANTS 声明 8 条形式化不变量，覆盖异步范围约束、" +
+                "来源字段覆盖要求、权限检查一致性及 schema 版本要求。" +
+                "V2 集成点：core/android_device_state_store.py（source_field_coverage_class 过滤），" +
+                "core/problem_solving_audit_chain.py（authority_boundary_check_mode 审计置信度），" +
+                "core/android_runtime_transition_reducer.py（async_scope_class 延迟容忍），" +
+                "metrics/android_reliability_metrics.py（source_field_coverage_class SLO）。" +
+                "Test: Pr4AndroidBoundaryReliabilityContractTest.",
+            introducedPr = 94
+        )
     )
 
-    // ── Query helpers ─────────────────────────────────────────────────────────
 
     /**
      * Returns all entries with the given [stability] tier.

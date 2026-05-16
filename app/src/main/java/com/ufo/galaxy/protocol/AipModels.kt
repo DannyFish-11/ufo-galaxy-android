@@ -2731,7 +2731,24 @@ data class DeviceStateSnapshotPayload(
     val participation_mode_class: String? = null,
     val local_execution_active: Boolean? = null,
     val local_execution_activity_kind: String? = null,
-    val participation_semantic_schema_version: String? = null
+    val participation_semantic_schema_version: String? = null,
+
+    // ── PR-4Android: 工程边界可靠性字段（AndroidBoundaryReliabilityContract）─────────────────────
+    //
+    // source_field_coverage_class: 本快照中 V2 路由和审计所需来源字段的完整性等级。
+    //   取自 AndroidBoundaryReliabilityContract.SourceFieldCoverageClass.wireValue。
+    //   Values:
+    //     "complete" — device_id + runtime_session_id 均存在，V2 可高置信度关联此快照
+    //     "partial"  — device_id 存在但 runtime_session_id 缺失，V2 路由可行但关联能力降低
+    //     "absent"   — device_id 缺失，V2 无法路由此快照（MUST 视为异常）
+    //   V2 SHOULD 过滤 absent 等级的快照并记录诊断，
+    //   MUST 对 partial 等级的快照降低 android_device_state_store.py 的关联置信度。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // boundary_reliability_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidBoundaryReliabilityContract.SCHEMA_VERSION。
+    val source_field_coverage_class: String? = null,
+    val boundary_reliability_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -3020,7 +3037,42 @@ data class DeviceExecutionEventPayload(
     val participation_mode_class: String? = null,
     val local_execution_active: Boolean? = null,
     val local_execution_activity_kind: String? = null,
-    val participation_semantic_schema_version: String? = null
+    val participation_semantic_schema_version: String? = null,
+
+    // ── PR-4Android: 工程边界可靠性字段（AndroidBoundaryReliabilityContract）─────────────────────
+    //
+    // async_scope_class: 发送此执行事件的协程的生命周期绑定类型。
+    //   取自 AndroidBoundaryReliabilityContract.AsyncScopeClass.wireValue。
+    //   Values:
+    //     "service_scoped"           — 在 serviceScope（SupervisorJob）内发送（标准路径）
+    //     "timeout_guarded"          — 在 withTimeout/withTimeoutOrNull 块内发送（时间有界）
+    //     "lifecycle_bound"          — 在 UI 组件生命周期范围内发送（Activity/ViewModel 等）
+    //     "detached_fire_and_forget" — 无生命周期绑定，脱管即发即弃（高风险路径）
+    //   V2 MUST 对 detached_fire_and_forget 事件应用更宽松的延迟容忍（INV-BR-01）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // source_field_coverage_class: 本执行事件中 V2 路由和审计所需来源字段的完整性等级。
+    //   取自 AndroidBoundaryReliabilityContract.SourceFieldCoverageClass.wireValue。
+    //   Values: "complete" | "partial" | "absent"。
+    //   V2 MUST 拒绝 absent 等级的执行事件进入权威状态更新路径（INV-BR-02）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // authority_boundary_check_mode: 发送此执行事件前 Android 侧权限检查的显式程度。
+    //   取自 AndroidBoundaryReliabilityContract.AuthorityBoundaryCheckMode.wireValue。
+    //   Values:
+    //     "explicit_contract_gate" — 通过形式化 Android 治理合约门控（最高级别）
+    //     "governance_validated"   — 通过治理评估器验证（标准委托执行路径）
+    //     "audit_trail_only"       — 仅记录审计追踪，未进行门控
+    //     "assumed_implicit"       — 依赖隐式上下文假设（最低级别）
+    //   V2 SHOULD 对 governance_validated 及以上的事件赋予更高的审计置信度（INV-BR-03）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // boundary_reliability_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidBoundaryReliabilityContract.SCHEMA_VERSION。
+    val async_scope_class: String? = null,
+    val source_field_coverage_class: String? = null,
+    val authority_boundary_check_mode: String? = null,
+    val boundary_reliability_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
