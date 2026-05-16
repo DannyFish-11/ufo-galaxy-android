@@ -41,6 +41,7 @@ import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
 import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
 import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
+import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
@@ -498,6 +499,35 @@ class GalaxyConnectionService : Service() {
                     offlineQueueDepth = offlineTaskQueue.queueDepth(),
                     reportedStateSemanticClass = eventSemanticClass
                 )
+            // ── PR-3Android: 执行事件参与语义规范化（预计算，避免 copy() 中三次重复 derive() 调用）──
+            // localCapabilityStateWire 从 LocalCapabilityState.derive() 在事件发射时计算，
+            // 确保降级/不可用路径在执行事件的参与模式分类中同样被正确检测，
+            // 与 sendDeviceStateSnapshot() 的 snapshotLocalCapState 逻辑保持一致。
+            val eventLocalLlmReady = localLlmReady()
+            val eventLocalCapState = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
+                localLlmReady = eventLocalLlmReady,
+                localInferenceAvailable = localInferenceAvailable(),
+                accessibilityReady = UFOGalaxyApplication.appSettings.accessibilityReady,
+                isDegraded = managerStateDegraded()
+            )
+            val eventNormalization = AndroidParticipationSemanticNormalizationContract.derive(
+                AndroidParticipationSemanticNormalizationContract.NormalizationDerivationInput(
+                    localModeActive = modeState.executionModeState ==
+                        LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue,
+                    executionBusy = eventStamp.executionBusy == true,
+                    distributedParticipant = AndroidAuthoritativeParticipationTruth
+                        .participationTierFor(participationSnapshot.state) ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT,
+                    delegatedExecutionActive = governanceTruth.delegated_execution_active,
+                    takeoverStateWire = governanceTruth.takeover_state,
+                    runtimeConstrained = false,
+                    runtimeDeferred = false,
+                    governanceBlocked = governanceTruth.governance_blocked,
+                    crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+                    dispatchEligible = modeState.crossDeviceEligibility == true,
+                    localCapabilityStateWire = eventLocalCapState.wireValue
+                )
+            )
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -601,7 +631,16 @@ class GalaxyConnectionService : Service() {
                         )
                     ).wireValue
                 },
-                unified_lifecycle_schema_version = AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION
+                unified_lifecycle_schema_version = AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
+                // ── PR-3Android: 参与语义规范化字段（在执行事件发射层填充）────────────────────────────
+                // 从 eventNormalization（已在 copy() 前预计算）直接读取，
+                // 确保 V2 在消费执行事件时可直接读取参与模式分类，
+                // 无需跨域字段组合推断（distributed_participant + delegated_execution_active +
+                // local_mode_active）即可区分本地辅助执行与委托/接管执行路径。
+                participation_mode_class = eventNormalization.participationModeClass.wireValue,
+                local_execution_active = eventNormalization.localExecutionActive,
+                local_execution_activity_kind = eventNormalization.localExecutionActivityKind.wireValue,
+                participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -3841,6 +3880,30 @@ class GalaxyConnectionService : Service() {
                 )
             )
 
+            // ── PR-3Android: 参与语义规范化快照（在快照发送层唯一推导）────────────────────────
+            // 从已计算的运行时信号派生，无需额外探针。
+            // 单次 derive() 调用替代三个独立的 run {} 块，消除重复计算开销。
+            val snapshotNormalization = AndroidParticipationSemanticNormalizationContract.derive(
+                AndroidParticipationSemanticNormalizationContract.NormalizationDerivationInput(
+                    localModeActive = modeState.executionModeState ==
+                        LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue,
+                    executionBusy = snapshotStamp.executionBusy == true,
+                    distributedParticipant = snapshotParticipationTier ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT,
+                    delegatedExecutionActive = governanceTruth.delegated_execution_active,
+                    takeoverStateWire = governanceTruth.takeover_state,
+                    runtimeConstrained = snapshotConstraintSem.isConstraint,
+                    runtimeDeferred = snapshotConstraintSem.isDeferred,
+                    governanceBlocked = governanceTruth.governance_blocked,
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    dispatchEligible = (snapshotParticipationTier ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISPATCH_ELIGIBLE ||
+                        snapshotParticipationTier ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT),
+                    localCapabilityStateWire = snapshotLocalCapState.wireValue
+                )
+            )
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -4001,7 +4064,14 @@ class GalaxyConnectionService : Service() {
                 // ── 统一参与者生命周期阶段字段 ─────────────────────────────────────
                 // 在快照发送层唯一填充，提供 V2 可直接消费的单一权威阶段字段。
                 unified_lifecycle_phase = snapshotUnifiedLifecyclePhase.wireValue,
-                unified_lifecycle_schema_version = AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION
+                unified_lifecycle_schema_version = AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
+                // ── PR-3Android: 参与语义规范化字段 ──────────────────────────────────────
+                // 从 snapshotNormalization（已在快照发送层唯一推导）直接读取，
+                // 无需 run {} 块，消除重复 derive() 调用开销。
+                participation_mode_class = snapshotNormalization.participationModeClass.wireValue,
+                local_execution_active = snapshotNormalization.localExecutionActive,
+                local_execution_activity_kind = snapshotNormalization.localExecutionActivityKind.wireValue,
+                participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(

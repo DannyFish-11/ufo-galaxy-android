@@ -2188,6 +2188,47 @@ object StabilizationBaseline {
                 "Test: OperatorActionReceiverTest.",
             introducedPr = 92
         )
+    ) + listOf(
+
+        // ── PR-3Android: 参与语义规范化合约 ──────────────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-participation-semantic-normalization",
+            displayName = "AndroidParticipationSemanticNormalizationContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-3Android 参与语义规范化合约，统一 Android 侧参与语义、模式信号与真相上报行为，" +
+                "使 Android 成为双仓运行时真值模型中更清晰、更一致的来源参与方。" +
+                "解决以下三类问题：" +
+                "（1）本地参与、分布式参与与执行活跃语义之间的混叠歧义：" +
+                "distributed_participant、delegated_execution_active、execution_busy 三字段分布在不同真相域，" +
+                "V2 须跨域组合推断才能区分本地执行与分布式参与；" +
+                "（2）模式信号语义漂移：local_mode_active / mode_state / execution_mode_state 三组信号并存，" +
+                "V2 在四种执行路径上的路由决策存在不一致；" +
+                "（3）participation_tier tri-state 解释歧义：dispatch_eligible 与 distributed_participant " +
+                "含义不对称，字段名无法传达此区别。" +
+                "引入 ParticipationModeClass（8 值枚举：LOCAL_ONLY_IDLE/LOCAL_ONLY_EXECUTING/" +
+                "CROSS_DEVICE_READY/DISTRIBUTED_EXECUTING/TAKEOVER_EXECUTING/DEGRADED/CONSTRAINED/UNAVAILABLE），" +
+                "为 V2 提供单一、机器可读的模式分类标签，替代跨域字段组合推断。" +
+                "引入 LocalExecutionActivityKind（4 值枚举：NONE/LOCAL_ASSISTIVE/DELEGATED_PARTICIPANT/" +
+                "TAKEOVER_PARTICIPANT），明确本地执行活跃的语义种类，消除与分布式参与概念的混叠。" +
+                "NormalizationDerivationInput 汇聚 11 个现有运行时信号（无需新探针），" +
+                "derive() 按 10 级优先级推导 NormalizationSnapshot。" +
+                "DeviceStateSnapshotPayload 新增 participation_mode_class/local_execution_active/" +
+                "local_execution_activity_kind/participation_semantic_schema_version 字段。" +
+                "DeviceExecutionEventPayload 同步新增相同 4 个字段。" +
+                "GalaxyConnectionService.sendDeviceStateSnapshot() 和 deviceExecutionEventSink " +
+                "在各自发送层唯一推导并填充，确保每条上行消息均携带规范化参与语义。" +
+                "NORMALIZATION_INVARIANTS 声明 10 条形式化不变量，覆盖参与模式分类、" +
+                "本地执行种类、ambiguity-resolved 保证，以及 V2 直接读取要求。" +
+                "V2 集成点：core/participation_tier_router.py（participation_mode_class），" +
+                "core/android_device_state_store.py（local_execution_active），" +
+                "panels/operator_board.py（local_execution_activity_kind），" +
+                "core/android_runtime_transition_reducer.py（participation_mode_class）。" +
+                "Test: AndroidParticipationSemanticNormalizationContractTest.",
+            introducedPr = 93
+        )
     )
 
     // ── Query helpers ─────────────────────────────────────────────────────────

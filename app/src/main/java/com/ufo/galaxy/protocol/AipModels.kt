@@ -2691,7 +2691,47 @@ data class DeviceStateSnapshotPayload(
     // unified_lifecycle_schema_version: 本字段组 schema 版本。
     //   取自 AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION。
     val unified_lifecycle_phase: String? = null,
-    val unified_lifecycle_schema_version: String? = null
+    val unified_lifecycle_schema_version: String? = null,
+
+    // ── PR-3Android: 参与语义规范化字段（AndroidParticipationSemanticNormalizationContract）──────
+    //
+    // participation_mode_class: Android 当前参与模式的统一语义分类 wire 值。
+    //   取自 AndroidParticipationSemanticNormalizationContract.ParticipationModeClass.wireValue。
+    //   Values:
+    //     "local_only_idle"        — 本地模式，无活跃执行
+    //     "local_only_executing"   — 本地模式，任务执行中
+    //     "cross_device_ready"     — 跨设备模式，等待调度（V2 可派发新任务）
+    //     "distributed_executing"  — 跨设备模式，委托执行中（分布式主链活跃节点）
+    //     "takeover_executing"     — 接管执行中
+    //     "degraded"               — 运行时降级，参与受限
+    //     "constrained"            — 受约束，不可分发
+    //     "unavailable"            — 未参与，无执行可能
+    //   V2 MUST 直接读取此字段替代跨域字段组合推断（distributed_participant +
+    //   delegated_execution_active + local_mode_active 组合推断是语义漂移来源）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // local_execution_active: Android 当前是否存在活跃的本地执行（无论路径）。
+    //   = (local_execution_activity_kind != "none")。
+    //   V2 可用此单一布尔字段替代解析 execution_busy + distributed_participant 的组合。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // local_execution_activity_kind: 本地执行活跃的语义种类 wire 值。
+    //   取自 AndroidParticipationSemanticNormalizationContract.LocalExecutionActivityKind.wireValue。
+    //   Values:
+    //     "none"                  — 无活跃本地执行
+    //     "local_assistive"       — 本地辅助执行（非分布式路径）
+    //     "delegated_participant" — 委托执行参与（V2 委托的分布式主链执行）
+    //     "takeover_participant"  — 接管执行（V2 接管路径）
+    //   V2 MUST 读取此字段以区分本地辅助执行与委托/接管执行，
+    //   不得仅凭 execution_busy = true 将所有执行活动归入分布式参与统计。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService 在 sendDeviceStateSnapshot() 时填充。
+    //
+    // participation_semantic_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION。
+    val participation_mode_class: String? = null,
+    val local_execution_active: Boolean? = null,
+    val local_execution_activity_kind: String? = null,
+    val participation_semantic_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -2958,7 +2998,29 @@ data class DeviceExecutionEventPayload(
     //   Values 同 DeviceStateSnapshotPayload.unified_lifecycle_phase。
     //   Null 仅作为防御性默认值；GalaxyConnectionService 在事件发射时填充。
     val unified_lifecycle_phase: String? = null,
-    val unified_lifecycle_schema_version: String? = null
+    val unified_lifecycle_schema_version: String? = null,
+
+    // ── PR-3Android: 参与语义规范化字段（AndroidParticipationSemanticNormalizationContract）──────
+    //
+    // 与 DeviceStateSnapshotPayload 语义相同；此处在执行事件中携带事件发射时刻的规范化参与模式，
+    // 使 V2 无需跨消息重建上下文即可将执行事件关联到精确的参与语义状态。
+    //
+    // participation_mode_class: 执行事件发射时 Android 的统一参与模式分类 wire 值。
+    //   V2 可直接用于执行事件路由，区分本地执行与分布式执行路径，
+    //   无需组合 distributed_participant + delegated_execution_active + local_mode_active。
+    //
+    // local_execution_active: 执行事件发射时是否存在活跃的本地执行。
+    //   对于执行事件，此字段通常为 true；Null 仅作为防御性默认值。
+    //
+    // local_execution_activity_kind: 执行事件发射时本地执行活跃的语义种类 wire 值。
+    //   V2 MUST 读取此字段以区分本地辅助执行与委托/接管执行，
+    //   确保执行事件进入正确的审计链（problem_solving_audit_chain.py）。
+    //
+    // participation_semantic_schema_version: 本字段组 schema 版本。
+    val participation_mode_class: String? = null,
+    val local_execution_active: Boolean? = null,
+    val local_execution_activity_kind: String? = null,
+    val participation_semantic_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
