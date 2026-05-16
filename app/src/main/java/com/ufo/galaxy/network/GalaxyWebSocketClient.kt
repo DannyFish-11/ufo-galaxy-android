@@ -15,6 +15,7 @@ import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
 import com.ufo.galaxy.protocol.MeshLeavePayload
@@ -1059,6 +1060,18 @@ class GalaxyWebSocketClient(
         val durableId = durableSessionId
         val continuityEpoch = sessionContinuityEpoch
 
+        // ── PR-B2: 在握手开始时推导注册体位（source_runtime_posture）─────────────────────
+        // source_runtime_posture 声明本设备是作为纯控制/发起端（control_only）接入，
+        // 还是同时作为运行时执行者（join_runtime）加入分发池。V2 可在注册阶段即获取
+        // 此字段，实现更早、更准确的参与层级推断，而无需等待后续快照或执行事件。
+        // 推导规则：crossDeviceEnabled && goal_execution_enabled → join_runtime；否则 control_only。
+        // 两条握手消息（device_register + capability_report）携带相同值以保证一致性。
+        val registrationPosture = run {
+            val goalExecutionEnabled = deviceMetadata["goal_execution_enabled"] as? Boolean ?: false
+            if (crossDeviceEnabled && goalExecutionEnabled) SourceRuntimePosture.JOIN_RUNTIME
+            else SourceRuntimePosture.CONTROL_ONLY
+        }
+
         // Step 1: device_register — server expects this before capability_report (H2)
         val register = JsonObject().apply {
             addProperty("type", MsgType.DEVICE_REGISTER.value)
@@ -1087,6 +1100,8 @@ class GalaxyWebSocketClient(
                 addProperty(RuntimeHostDescriptor.KEY_FORMATION_ROLE, hostDescriptor.formationRole.wireValue)
                 addProperty(RuntimeHostDescriptor.KEY_PARTICIPATION_STATE, hostDescriptor.participationState.wireValue)
             }
+            // PR-B2: registration posture — enables V2 early participation-tier derivation.
+            addProperty("source_runtime_posture", registrationPosture)
         }
         val registerSent = sendJson(gson.toJson(register))
         if (registerSent) {
@@ -1095,6 +1110,7 @@ class GalaxyWebSocketClient(
         Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=$deviceId trace_id=$sessionTraceId" +
                 (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
                 (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
+                " source_runtime_posture=$registrationPosture" +
                 if (hostDescriptor != null) " host_id=${hostDescriptor.hostId} " +
                     "formation_role=${hostDescriptor.formationRole.wireValue} " +
                     "participation_state=${hostDescriptor.participationState.wireValue}" else "")
@@ -1180,6 +1196,10 @@ class GalaxyWebSocketClient(
             add("supported_actions", gson.toJsonTree(report.supported_actions))
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(handshakeMetadata))
+            // PR-B2: registration posture — carried in capability_report for consistency with
+            // device_register; allows V2 to derive participation tier from the first complete
+            // capability report without waiting for device_state_snapshot.
+            addProperty("source_runtime_posture", registrationPosture)
         }
 
         val handshakeJson = gson.toJson(handshake)
@@ -1225,6 +1245,7 @@ class GalaxyWebSocketClient(
                 " canonical_gate_valid=${malformedCanonicalGate.isEmpty() && canonicalGateContractIssues.isEmpty()}" +
                 " scheduling_basis_complete=${missingSchedulingBasis.isEmpty()}" +
                 " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
+                " source_runtime_posture=$registrationPosture" +
                 (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
                 (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
                 if (hostDescriptor != null) " host_id=${hostDescriptor.hostId}" else "")

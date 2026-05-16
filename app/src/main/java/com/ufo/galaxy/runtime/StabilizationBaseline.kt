@@ -2144,6 +2144,49 @@ object StabilizationBaseline {
                 "metrics/android_lifecycle_metrics.py（phaseRank SLO 计算）。" +
                 "Test: AndroidUnifiedParticipantLifecyclePhaseTest.",
             introducedPr = 91
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-registration-posture-handshake",
+            displayName = "RegistrationPostureHandshake",
+            packagePath = "com.ufo.galaxy.network.GalaxyWebSocketClient",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-B2 (Android) 在 device_register 和 capability_report 两条握手消息中补充了 " +
+                "缺失的 source_runtime_posture 字段，使 V2 在注册阶段即可进行更早、更准确的参与层级推断，" +
+                "而无需等待后续的 device_state_snapshot 或 device_execution_event。" +
+                "推导规则：crossDeviceEnabled && goal_execution_enabled → join_runtime；否则 control_only。" +
+                "两条握手消息携带相同值以保证一致性。" +
+                "V2 集成点：core/android_session_registrar.py（device_register 消费 source_runtime_posture），" +
+                "core/capability_report_ingress.py（capability_report 消费 source_runtime_posture），" +
+                "core/participation_tier_router.py（利用注册阶段 posture 实现早期层级推断）。" +
+                "Test: HandshakeRegistrationPostureTest.",
+            introducedPr = 92
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-operator-action-receiver",
+            displayName = "OperatorActionReceiver",
+            packagePath = "com.ufo.galaxy.runtime.OperatorActionReceiver",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-B2 (Android) 创建了 OperatorActionReceiver 作为 Android 侧接收和路由 " +
+                "V2 下行 directed operator action 的专用、可独立测试组件，解决了以下三个问题：" +
+                "（1）V2 下行 operator action 的接收与治理验证逻辑此前以内联方式嵌入 GalaxyConnectionService，" +
+                "缺少可独立测试的接收器组件；" +
+                "（2）OperatorActionResultPayload 缺少关键参与上下文字段（participation_tier、" +
+                "local_mode_active、runtime_constrained、runtime_deferred、delegated_execution_active），" +
+                "导致 V2 下游消费方无法对 operator action 的完整运行时语境作出判断；" +
+                "（3）本地参与状态、分布式参与状态与执行活跃状态之间的歧义未消除。" +
+                "OperatorActionReceiver 提供 buildParticipationContext()（在 action 接收时刻捕获完整" +
+                "参与上下文快照）和 evaluateGovernanceDecision()（将 V2 下行 action 路由至" +
+                "AndroidOperatorActionGovernanceContract 并返回携带完整参与上下文的 GovernanceDecision）。" +
+                "RECEIVER_INVARIANTS 声明 7 条形式化不变量。" +
+                "GalaxyConnectionService.handleOperatorActionRequest() 更新为通过 OperatorActionReceiver" +
+                "进行治理门控，并在 DECISION 和 EXECUTION 两个阶段均携带完整参与上下文。" +
+                "V2 集成点：core/operator_action_consumer.py（消费新增参与上下文字段），" +
+                "core/participation_tier_router.py（利用 operator_action_result 中的 participation_tier），" +
+                "panels/operator_board.py（利用 delegated_execution_active 字段）。" +
+                "Test: OperatorActionReceiverTest.",
+            introducedPr = 92
         )
     )
 

@@ -33,6 +33,7 @@ import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
 import com.ufo.galaxy.runtime.AndroidNlDrivenExecutionSpineContract
 import com.ufo.galaxy.runtime.AndroidOperationalStateSurfaceContract
 import com.ufo.galaxy.runtime.AndroidOperatorActionGovernanceContract
+import com.ufo.galaxy.runtime.OperatorActionReceiver
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
@@ -5331,16 +5332,33 @@ class GalaxyConnectionService : Service() {
         val governanceContext = UFOGalaxyApplication.runtimeController
             .buildOperatorActionEligibilityContext(currentActiveTakeoverId())
         val targetTaskId = request.task_id ?: UFOGalaxyApplication.runtimeController.activeTaskId
-        val eligibility = AndroidOperatorActionGovernanceContract.evaluateEligibility(
-            action = actionKind,
-            context = governanceContext,
-            taskId = targetTaskId
-        )
         val participationSnapshot = UFOGalaxyApplication.runtimeController
             .evaluateAuthoritativeParticipationSnapshot(
                 readinessSatisfied = governanceContext.dispatchEligible,
                 distributedRuntimeActivity = governanceContext.activeTaskId != null
             )
+        // ── PR-B2: 在 action 接收时刻构建完整参与上下文快照 ────────────────────────────
+        // 参与上下文在此处一次性捕获，并原样传入 DECISION 和 EXECUTION 两个阶段的上行结果载体，
+        // 确保 V2 下游消费方可以将 operator action 决策与执行结果关联到同一参与语境。
+        val governanceTruth = currentGovernanceTruth()
+        val receiveTimeParticipationContext = OperatorActionReceiver.buildParticipationContext(
+            participationSnapshot = participationSnapshot,
+            isLocalModeActive = !governanceContext.crossDeviceEnabled,
+            isRuntimeConstrained = !governanceContext.dispatchEligible,
+            isRuntimeDeferred = governanceContext.reconnectRecoveryStateWire ==
+                ReconnectRecoveryState.RECOVERING.wireValue,
+            isDelegatedExecutionActive = governanceTruth.delegated_execution_active
+        )
+        // ── PR-B2: 通过 OperatorActionReceiver 进行治理门控 ────────────────────────────
+        // 所有 V2 下行 directed operator action 必须经过 OperatorActionReceiver 的治理门控，
+        // 并通过 GovernanceDecision 返回携带完整参与上下文的决策结果。
+        val governanceDecision = OperatorActionReceiver.evaluateGovernanceDecision(
+            actionKind = actionKind,
+            context = governanceContext,
+            taskId = targetTaskId,
+            participationContext = receiveTimeParticipationContext
+        )
+        val eligibility = governanceDecision.eligibility
         val decisionPayloadBase = OperatorActionResultPayload(
             action_id = actionId,
             action_kind = actionKind.wireValue,
@@ -5362,19 +5380,26 @@ class GalaxyConnectionService : Service() {
             runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
             reconnect_recovery_state = UFOGalaxyApplication.runtimeController
                 .reconnectRecoveryState.value.wireValue,
-            authoritative_participation_state = participationSnapshot.state.wireValue,
+            authoritative_participation_state = governanceDecision.participationContext.authoritativeParticipationState,
+            // ── PR-B2: 参与上下文字段——保留完整上下文供 V2 消费 ───────────────────────
+            participation_tier = governanceDecision.participationContext.participationTier,
+            local_mode_active = governanceDecision.participationContext.localModeActive,
+            runtime_constrained = governanceDecision.participationContext.runtimeConstrained,
+            runtime_deferred = governanceDecision.participationContext.runtimeDeferred,
+            delegated_execution_active = governanceDecision.participationContext.delegatedExecutionActive,
             attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
             active_takeover_id = currentActiveTakeoverId(),
-            error = (eligibility as? AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected)?.reason
+            error = governanceDecision.rejectionReason
         )
         sendOperatorActionResult(decisionPayloadBase)
-        if (eligibility is AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected) {
+        if (!governanceDecision.isAccepted) {
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "operator_action_rejected",
                     "action_id" to actionId,
                     "action_kind" to actionKind.wireValue,
-                    "reason" to eligibility.reason
+                    "reason" to (governanceDecision.rejectionReason ?: ""),
+                    "participation_tier" to governanceDecision.participationContext.participationTier
                 )
             )
             return
@@ -5383,12 +5408,30 @@ class GalaxyConnectionService : Service() {
         val executionOutcome = executeOperatorAction(actionKind, targetTaskId, actionId)
         val refreshedParticipation = UFOGalaxyApplication.runtimeController
             .refreshOperatorGovernanceTruthSnapshot()
+        // ── PR-B2: 刷新执行阶段参与上下文 ─────────────────────────────────────────────
+        // 执行后可能发生参与状态迁移，刷新参与上下文以确保 EXECUTION 阶段结果
+        // 携带执行完成后的真实参与语境，而非仅保留 DECISION 阶段的快照。
+        val refreshedGovernanceTruth = currentGovernanceTruth()
+        val execPhaseParticipationContext = OperatorActionReceiver.buildParticipationContext(
+            participationSnapshot = refreshedParticipation,
+            isLocalModeActive = !governanceContext.crossDeviceEnabled,
+            isRuntimeConstrained = !UFOGalaxyApplication.runtimeController
+                .currentDispatchReadiness().isEligible,
+            isRuntimeDeferred = UFOGalaxyApplication.runtimeController
+                .reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING,
+            isDelegatedExecutionActive = refreshedGovernanceTruth.delegated_execution_active
+        )
         sendOperatorActionResult(
             decisionPayloadBase.copy(
                 phase = OperatorActionResultPayload.PHASE_EXECUTION,
                 execution_status = executionOutcome.executionStatus,
                 rollback_status = executionOutcome.rollbackStatus,
-                authoritative_participation_state = refreshedParticipation.state.wireValue,
+                authoritative_participation_state = execPhaseParticipationContext.authoritativeParticipationState,
+                participation_tier = execPhaseParticipationContext.participationTier,
+                local_mode_active = execPhaseParticipationContext.localModeActive,
+                runtime_constrained = execPhaseParticipationContext.runtimeConstrained,
+                runtime_deferred = execPhaseParticipationContext.runtimeDeferred,
+                delegated_execution_active = execPhaseParticipationContext.delegatedExecutionActive,
                 runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
                 reconnect_recovery_state = UFOGalaxyApplication.runtimeController
                     .reconnectRecoveryState.value.wireValue,
