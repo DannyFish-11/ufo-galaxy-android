@@ -160,7 +160,7 @@ object AndroidParticipationSemanticNormalizationContract {
         /**
          * 运行时降级，参与受限。
          *
-         * Android 运行时处于降级状态（LocalCapabilityState = DEGRADED / PARTIAL）或
+         * Android 运行时处于降级状态（LocalCapabilityState = DEGRADED / UNAVAILABLE）或
          * 治理层已阻断参与（governance_blocked = true）。
          * V2 MUST NOT 派发需要完整能力的任务；降级路径可能仍可接受有限任务。
          */
@@ -375,6 +375,32 @@ object AndroidParticipationSemanticNormalizationContract {
     /** DeviceStateSnapshotPayload / DeviceExecutionEventPayload 中的 wire 字段键：schema 版本。 */
     const val KEY_SCHEMA_VERSION = "participation_semantic_schema_version"
 
+    // ── 推导输入 wire 值常量（避免 derive() 中的硬编码字符串）──────────────────────
+
+    /**
+     * 接管状态 wire 值：接管执行活跃。
+     *
+     * 对应 AndroidUnifiedTruthUplinkContract.TakeoverState.ACTIVE.wireValue。
+     * 在 [derive] 中用于检测接管路径。
+     */
+    const val TAKEOVER_STATE_ACTIVE = "active"
+
+    /**
+     * 本地能力状态 wire 值：降级。
+     *
+     * 对应 AndroidUnifiedTruthUplinkContract.LocalCapabilityState.DEGRADED.wireValue。
+     * 在 [derive] 中用于检测降级路径。
+     */
+    const val LOCAL_CAPABILITY_STATE_DEGRADED = "degraded"
+
+    /**
+     * 本地能力状态 wire 值：不可用。
+     *
+     * 对应 AndroidUnifiedTruthUplinkContract.LocalCapabilityState.UNAVAILABLE.wireValue。
+     * 在 [derive] 中用于检测降级路径。
+     */
+    const val LOCAL_CAPABILITY_STATE_UNAVAILABLE = "unavailable"
+
     // ── 推导函数 ──────────────────────────────────────────────────────────────
 
     /**
@@ -396,13 +422,13 @@ object AndroidParticipationSemanticNormalizationContract {
      * @return 规范化快照。
      */
     fun derive(input: NormalizationDerivationInput): NormalizationSnapshot {
-        val isCapabilityDegraded = input.localCapabilityStateWire == "degraded" ||
-            input.localCapabilityStateWire == "unavailable"
+        val isCapabilityDegraded = input.localCapabilityStateWire == LOCAL_CAPABILITY_STATE_DEGRADED ||
+            input.localCapabilityStateWire == LOCAL_CAPABILITY_STATE_UNAVAILABLE
 
         val participationModeClass = when {
             !input.crossDeviceEnabled && !input.localModeActive ->
                 ParticipationModeClass.UNAVAILABLE
-            input.takeoverStateWire == "active" ->
+            input.takeoverStateWire == TAKEOVER_STATE_ACTIVE ->
                 ParticipationModeClass.TAKEOVER_EXECUTING
             input.runtimeConstrained ->
                 ParticipationModeClass.CONSTRAINED
@@ -424,7 +450,7 @@ object AndroidParticipationSemanticNormalizationContract {
         }
 
         val localExecutionActivityKind = when {
-            input.takeoverStateWire == "active" && input.executionBusy ->
+            input.takeoverStateWire == TAKEOVER_STATE_ACTIVE && input.executionBusy ->
                 LocalExecutionActivityKind.TAKEOVER_PARTICIPANT
             (input.distributedParticipant || input.delegatedExecutionActive) &&
                 input.executionBusy ->

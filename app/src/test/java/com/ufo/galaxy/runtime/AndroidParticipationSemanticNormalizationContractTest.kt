@@ -580,6 +580,45 @@ class AndroidParticipationSemanticNormalizationContractTest {
         assertTrue(snapshot.modeSignalAmbiguityResolved)
     }
 
+    @Test
+    fun `modeSignalAmbiguityResolved=true 当分布式执行中且 executionBusy=true（无歧义）`() {
+        val snapshot = derive(
+            localModeActive = false,
+            crossDeviceEnabled = true,
+            distributedParticipant = true,
+            executionBusy = true,
+            dispatchEligible = false
+        )
+        // distributedParticipant=true 且 executionBusy=true：两个信号方向一致（节点参与且执行中），
+        // 无模式歧义。（区别于下方测试：distributedParticipant=true 但 executionBusy=false 时有歧义。）
+        assertTrue(snapshot.modeSignalAmbiguityResolved)
+    }
+
+    @Test
+    fun `modeSignalAmbiguityResolved=true 当 localModeActive=true executionBusy=true crossDevice=false`() {
+        val snapshot = derive(
+            localModeActive = true,
+            executionBusy = true,
+            crossDeviceEnabled = false,
+            distributedParticipant = false
+        )
+        // localModeActive=true 但 crossDeviceEnabled=false：无 localMode/crossDevice 冲突
+        assertTrue(snapshot.modeSignalAmbiguityResolved)
+    }
+
+    @Test
+    fun `modeSignalAmbiguityResolved=true 当 TAKEOVER_EXECUTING 路径（接管活跃且执行中）`() {
+        val snapshot = derive(
+            takeoverStateWire = "active",
+            executionBusy = true,
+            crossDeviceEnabled = true,
+            localModeActive = false,
+            distributedParticipant = false
+        )
+        // takeoverStateWire=active 且 localModeActive=false：无歧义
+        assertTrue(snapshot.modeSignalAmbiguityResolved)
+    }
+
     // ── NormalizationSnapshot.toWireMap() ────────────────────────────────────
 
     @Test

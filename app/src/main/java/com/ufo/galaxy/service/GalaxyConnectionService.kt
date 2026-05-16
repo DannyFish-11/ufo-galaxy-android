@@ -500,6 +500,16 @@ class GalaxyConnectionService : Service() {
                     reportedStateSemanticClass = eventSemanticClass
                 )
             // ── PR-3Android: 执行事件参与语义规范化（预计算，避免 copy() 中三次重复 derive() 调用）──
+            // localCapabilityStateWire 从 LocalCapabilityState.derive() 在事件发射时计算，
+            // 确保降级/不可用路径在执行事件的参与模式分类中同样被正确检测，
+            // 与 sendDeviceStateSnapshot() 的 snapshotLocalCapState 逻辑保持一致。
+            val eventLocalLlmReady = localLlmReady()
+            val eventLocalCapState = AndroidUnifiedTruthUplinkContract.LocalCapabilityState.derive(
+                localLlmReady = eventLocalLlmReady,
+                localInferenceAvailable = localInferenceAvailable(),
+                accessibilityReady = UFOGalaxyApplication.appSettings.accessibilityReady,
+                isDegraded = managerStateDegraded()
+            )
             val eventNormalization = AndroidParticipationSemanticNormalizationContract.derive(
                 AndroidParticipationSemanticNormalizationContract.NormalizationDerivationInput(
                     localModeActive = modeState.executionModeState ==
@@ -515,7 +525,7 @@ class GalaxyConnectionService : Service() {
                     governanceBlocked = governanceTruth.governance_blocked,
                     crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
                     dispatchEligible = modeState.crossDeviceEligibility == true,
-                    localCapabilityStateWire = null
+                    localCapabilityStateWire = eventLocalCapState.wireValue
                 )
             )
             val enrichedPayload = payload.copy(
