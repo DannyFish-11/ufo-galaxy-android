@@ -42,6 +42,7 @@ import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
 import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
 import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
+import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
@@ -640,7 +641,35 @@ class GalaxyConnectionService : Service() {
                 participation_mode_class = eventNormalization.participationModeClass.wireValue,
                 local_execution_active = eventNormalization.localExecutionActive,
                 local_execution_activity_kind = eventNormalization.localExecutionActivityKind.wireValue,
-                participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION
+                participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION,
+                // ── PR-4Android: 工程边界可靠性字段（在执行事件发射层填充）──────────────────────────
+                // 在单一发射层唯一计算，使 V2 可识别每条执行事件的异步边界类型、
+                // 来源字段完整性等级与权限检查模式，无需 V2 侧推断或容忍缺失字段。
+                //
+                // async_scope_class: 执行事件发射层始终从 serviceScope 发送（SERVICE_SCOPED）；
+                //   仅当 blocking_reason 含 "timeout_ms=" 时才为 TIMEOUT_GUARDED（任务有超时守护）。
+                //   这是 GalaxyConnectionService 中执行事件发射的标准边界。
+                async_scope_class = AndroidBoundaryReliabilityContract.classifyAsyncScope(
+                    isServiceScoped = true,
+                    hasTimeoutGuard = payload.blocking_reason.contains("timeout_ms="),
+                    isLifecycleBound = false
+                ).wireValue,
+                // source_field_coverage_class: 从事件发射时的实际字段存在性推导，
+                //   确保 V2 可直接判断此事件是否满足最低路由和审计字段要求。
+                source_field_coverage_class = AndroidBoundaryReliabilityContract.classifySourceFieldCoverage(
+                    deviceId = payload.device_id.takeIf { it.isNotBlank() },
+                    sourceComponent = payload.source_component.takeIf { it.isNotBlank() },
+                    taskId = payload.task_id.takeIf { it.isNotBlank() },
+                    runtimeSessionId = payload.runtime_session_id
+                ).wireValue,
+                // authority_boundary_check_mode: 治理上下文存在时即为 GOVERNANCE_VALIDATED；
+                //   这反映了 GalaxyConnectionService 中所有委托执行路径在接受任务时
+                //   均已通过 DelegatedRuntimeAcceptanceEvaluator 进行治理评估的事实。
+                authority_boundary_check_mode = AndroidBoundaryReliabilityContract.classifyAuthorityBoundaryCheckMode(
+                    hasGovernanceContext = payload.governance_state != null,
+                    hasExplicitContractGate = false
+                ).wireValue,
+                boundary_reliability_schema_version = AndroidBoundaryReliabilityContract.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -4071,7 +4100,21 @@ class GalaxyConnectionService : Service() {
                 participation_mode_class = snapshotNormalization.participationModeClass.wireValue,
                 local_execution_active = snapshotNormalization.localExecutionActive,
                 local_execution_activity_kind = snapshotNormalization.localExecutionActivityKind.wireValue,
-                participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION
+                participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION,
+                // ── PR-4Android: 工程边界可靠性字段（在快照发送层填充）─────────────────────────────
+                // 在单一发送层唯一计算，使 V2 可直接判断快照来源字段的完整性，
+                // 无需对每条快照进行字段存在性检查。
+                //
+                // source_field_coverage_class: 快照不携带 source_component 和 task_id，
+                //   因此采用快照路径规则：device_id + runtime_session_id 均存在 → COMPLETE；
+                //   仅 device_id 存在 → PARTIAL；device_id 缺失 → ABSENT。
+                source_field_coverage_class = AndroidBoundaryReliabilityContract.classifySourceFieldCoverage(
+                    deviceId = deviceId.takeIf { it.isNotBlank() },
+                    sourceComponent = null,
+                    taskId = null,
+                    runtimeSessionId = UFOGalaxyApplication.runtimeSessionId
+                ).wireValue,
+                boundary_reliability_schema_version = AndroidBoundaryReliabilityContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
