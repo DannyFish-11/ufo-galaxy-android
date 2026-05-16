@@ -129,6 +129,23 @@ class OfflineQueueTest {
     }
 
     @Test
+    fun `QUEUEABLE_TYPES contains device_state_snapshot`() {
+        assertTrue(
+            "device_state_snapshot must be queueable so disconnect-time freshness snapshots " +
+                "can replay across reconnect for stale-state degradation",
+            "device_state_snapshot" in OfflineTaskQueue.QUEUEABLE_TYPES
+        )
+    }
+
+    @Test
+    fun `QUEUEABLE_TYPES contains device_acceptance_report`() {
+        assertTrue(
+            "device_acceptance_report must be queueable so closure evidence survives transient disconnects",
+            "device_acceptance_report" in OfflineTaskQueue.QUEUEABLE_TYPES
+        )
+    }
+
+    @Test
     fun `heartbeat type is NOT in QUEUEABLE_TYPES`() {
         assertFalse("heartbeat" in OfflineTaskQueue.QUEUEABLE_TYPES)
     }

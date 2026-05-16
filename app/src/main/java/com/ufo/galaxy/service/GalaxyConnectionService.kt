@@ -52,6 +52,7 @@ import com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeGovernanceSnapshot
 import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceSnapshot
+import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceDimension
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
 import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
@@ -630,6 +631,12 @@ class GalaxyConnectionService : Service() {
                 )
             )
             val sent = webSocketClient.sendDeviceExecutionEvent(closedLoopPayload)
+            delegatedRuntimeAcceptanceEvaluator.markDimensionEvidenced(
+                DelegatedRuntimeAcceptanceDimension.CANONICAL_EXECUTION_EVENT_EVIDENCE
+            )
+            if (closedLoopPayload.lifecycle_terminal_phase == true) {
+                sendDeviceAcceptanceReport()
+            }
             crossRepoRegressionHooks.recordExecutionSignal(
                 taskId = closedLoopPayload.task_id,
                 traceId = closedLoopPayload.trace_id,
@@ -811,12 +818,20 @@ class GalaxyConnectionService : Service() {
             override fun onDisconnected() {
                 Log.d(TAG, "与 Galaxy 断开连接")
                 updateNotification("已断开")
+                delegatedRuntimeAcceptanceEvaluator.markDimensionGap(
+                    DelegatedRuntimeAcceptanceDimension.CONTINUITY_REPLAY_RECONNECT_EVIDENCE,
+                    "ws_disconnected_runtime_snapshot_stale_risk"
+                )
                 emitRuntimeDiagnostics(
                     taskId = activeTakeoverId ?: "runtime",
                     nodeName = "ws_runtime",
                     errorType = "ws_disconnected",
                     errorContext = "websocket disconnected during runtime operation"
                 )
+                serviceScope.launch {
+                    sendDeviceStateSnapshot()
+                    sendDeviceAcceptanceReport()
+                }
                 // Safety: unblock the local LoopController in case the Gateway disconnected
                 // while a remote task was in flight. The finally blocks in handleTaskAssign,
                 // handleGoalExecution, and handleParallelSubtask cover normal completion;
@@ -2749,6 +2764,11 @@ class GalaxyConnectionService : Service() {
                 }
             }
         }
+        updateAcceptanceEvidenceFromResult(
+            result = enriched,
+            deliveryDisposition = deliveryDisposition
+        )
+        sendDeviceAcceptanceReport()
         crossRepoRegressionHooks.recordGoalResultFeedback(
             taskId = enriched.task_id,
             traceId = traceId,
@@ -3721,6 +3741,17 @@ class GalaxyConnectionService : Service() {
             } catch (e: Exception) {
                 Log.d(TAG, "[DEVICE_STATE_SNAPSHOT] could not build reconnect participation snapshot: ${e.message}")
                 null
+            }
+            when (reconnectParticipationSnapshot?.replayEligibility?.wireValue) {
+                "stale_session_blocked" -> delegatedRuntimeAcceptanceEvaluator.markDimensionGap(
+                    DelegatedRuntimeAcceptanceDimension.CONTINUITY_REPLAY_RECONNECT_EVIDENCE,
+                    "replay_stale_session_blocked"
+                )
+                else -> if (wsConnected) {
+                    delegatedRuntimeAcceptanceEvaluator.markDimensionEvidenced(
+                        DelegatedRuntimeAcceptanceDimension.CONTINUITY_REPLAY_RECONNECT_EVIDENCE
+                    )
+                }
             }
             val readinessSurfaceSnapshot = delegatedRuntimeReadinessEvaluator.buildSnapshot(deviceId)
             val acceptanceSurfaceSnapshot = delegatedRuntimeAcceptanceEvaluator.buildSnapshot(deviceId)
@@ -5836,6 +5867,40 @@ class GalaxyConnectionService : Service() {
         crossDeviceEligibility: Boolean,
         sessionIsAttached: Boolean
     ): Boolean = crossDeviceEligibility || sessionIsAttached
+
+    private fun updateAcceptanceEvidenceFromResult(
+        result: GoalResultPayload,
+        deliveryDisposition: ResultDeliveryDisposition
+    ) {
+        if (result.local_mode_active == true || result.cross_device_eligibility == true) {
+            delegatedRuntimeAcceptanceEvaluator.markDimensionEvidenced(
+                DelegatedRuntimeAcceptanceDimension.READINESS_PREREQUISITE
+            )
+        }
+
+        if (!result.unified_lifecycle_phase.isNullOrBlank()) {
+            delegatedRuntimeAcceptanceEvaluator.markDimensionEvidenced(
+                DelegatedRuntimeAcceptanceDimension.TRUTH_OWNERSHIP_ALIGNMENT_EVIDENCE
+            )
+        }
+
+        if (result.result_returned == true && result.completion_signaled == true) {
+            if (deliveryDisposition == ResultDeliveryDisposition.SEND_FAILED) {
+                delegatedRuntimeAcceptanceEvaluator.markDimensionGap(
+                    DelegatedRuntimeAcceptanceDimension.RESULT_CONVERGENCE_EVIDENCE,
+                    "goal_execution_result_send_failed"
+                )
+            } else {
+                delegatedRuntimeAcceptanceEvaluator.markDimensionEvidenced(
+                    DelegatedRuntimeAcceptanceDimension.RESULT_CONVERGENCE_EVIDENCE
+                )
+            }
+        }
+
+        delegatedRuntimeAcceptanceEvaluator.markDimensionEvidenced(
+            DelegatedRuntimeAcceptanceDimension.COMPAT_LEGACY_BLOCKING_EVIDENCE
+        )
+    }
 
     private fun storeMemoryEntry(
         taskId: String,
