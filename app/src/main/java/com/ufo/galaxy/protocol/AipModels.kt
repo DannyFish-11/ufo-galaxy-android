@@ -1763,6 +1763,22 @@ data class OperatorActionRequestPayload(
  * Uplink payload for [MsgType.OPERATOR_ACTION_RESULT].
  *
  * Carries both decision (accepted/rejected) and execution outcome semantics for operator actions.
+ *
+ * ## PR-B2 参与上下文字段（V2 消费约定）
+ *
+ * PR-B2 新增以下参与上下文字段，确保 V2 下游消费方可以将 operator action 的决策与执行
+ * 结果关联到精确的 Android 侧参与语境，而无需跨消息重建上下文：
+ *
+ * | 字段                         | 语义                                                        |
+ * |------------------------------|-------------------------------------------------------------|
+ * | [participation_tier]         | 七级参与层级（wire 值），从 [authoritative_participation_state] 派生 |
+ * | [local_mode_active]          | Android 当前是否处于本地模式（非跨设备）                        |
+ * | [runtime_constrained]        | Android 是否因运行时约束而无法正常分发                          |
+ * | [runtime_deferred]           | Android 是否处于延迟/保持状态                                  |
+ * | [delegated_execution_active] | Android 当前是否有活跃的委托执行任务                            |
+ *
+ * V2 消费方 MUST 使用 [participation_tier] 而非通过 [authoritative_participation_state]
+ * 组合推断参与层级；MUST 将 [delegated_execution_active] 作为委托执行状态的权威信号。
  */
 data class OperatorActionResultPayload(
     val action_id: String,
@@ -1776,6 +1792,19 @@ data class OperatorActionResultPayload(
     val runtime_state: String? = null,
     val reconnect_recovery_state: String? = null,
     val authoritative_participation_state: String? = null,
+    // ── PR-B2: 参与上下文保留字段 ────────────────────────────────────────────────
+    // 这些字段在 action 接收时刻由 OperatorActionReceiver 捕获，并在 DECISION 和
+    // EXECUTION 两个阶段保持一致，使 V2 无需跨消息重建参与上下文。
+    /** 七级参与层级（wire 值），从 [authoritative_participation_state] 派生。*/
+    val participation_tier: String? = null,
+    /** Android 当前是否处于本地执行模式（LocalExecutionModeGate.ExecutionModeState == LOCAL_ONLY）。 */
+    val local_mode_active: Boolean? = null,
+    /** Android 是否因运行时约束无法正常分发（dispatch_eligible == false 或 CONSTRAINED 降级）。 */
+    val runtime_constrained: Boolean? = null,
+    /** Android 是否处于延迟/保持状态（isHoldState == true）。 */
+    val runtime_deferred: Boolean? = null,
+    /** Android 当前是否有活跃的委托执行任务（来自 AndroidUnifiedTruthUplinkContract.GovernanceTruth）。 */
+    val delegated_execution_active: Boolean? = null,
     val attached_session_id: String? = null,
     val active_takeover_id: String? = null,
     val error: String? = null,
