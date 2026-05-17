@@ -1993,7 +1993,7 @@ class GalaxyConnectionService : Service() {
                             taskId = taskId,
                             nodeName = "parallel_subtask_mesh_direct",
                             errorType = "mesh_direct_join_failed",
-                            errorContext = "mesh_id=$activeMeshId reasons=${meshDirectRuntime.reasonCodes.joinToString(",")}"
+                            errorContext = formatMeshDirectErrorContext(activeMeshId, meshDirectRuntime.reasonCodes)
                         )
                     }
                 } else {
@@ -2006,7 +2006,7 @@ class GalaxyConnectionService : Service() {
                         taskId = taskId,
                         nodeName = "parallel_subtask_mesh_direct",
                         errorType = "mesh_direct_unavailable",
-                        errorContext = "mesh_id=$activeMeshId reasons=${meshDirectRuntime.reasonCodes.joinToString(",")}"
+                        errorContext = formatMeshDirectErrorContext(activeMeshId, meshDirectRuntime.reasonCodes)
                     )
                 }
                 updateMeshRuntimeSignalState(collaborationState = CollaborationLifecycleState.EXECUTING)
@@ -2065,7 +2065,7 @@ class GalaxyConnectionService : Service() {
                                 taskId = taskId,
                                 nodeName = "parallel_subtask_mesh_direct",
                                 errorType = "mesh_direct_result_failed",
-                                errorContext = "mesh_id=$activeMeshId reasons=${meshDirectRuntime.reasonCodes.joinToString(",")}"
+                                errorContext = formatMeshDirectErrorContext(activeMeshId, meshDirectRuntime.reasonCodes)
                             )
                         }
                     }
@@ -2149,9 +2149,7 @@ class GalaxyConnectionService : Service() {
                     participationActive = false
                 )
                 if (meshSessionAtClose.shouldAttemptLeave) {
-                    if (meshDirectRuntime.lastAttemptSucceeded == true ||
-                        meshDirectRuntime.route == AndroidMeshDirectRuntimeContract.DirectPathRoute.DIRECT_PEER
-                    ) {
+                    if (meshDirectRuntime.lastAttemptSucceeded == true) {
                         val leaveSent = webSocketClient.sendMeshLeave(meshSessionAtClose.meshId, leaveReason)
                         meshDirectRuntime = updateMeshDirectRuntimeSnapshot(
                             AndroidMeshDirectRuntimeContract.onDirectSendAttempt(
@@ -3260,6 +3258,9 @@ class GalaxyConnectionService : Service() {
             )
         )
     }
+
+    private fun formatMeshDirectErrorContext(meshId: String, reasonCodes: List<String>): String =
+        "mesh_id=$meshId reasons=${reasonCodes.joinToString(",")}"
 
     private fun buildTerminalExecutionEvent(
         taskId: String,
@@ -6187,7 +6188,10 @@ class GalaxyConnectionService : Service() {
     ): AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot {
         val derived = deriveMeshDirectRuntimeSnapshot(meshId)
         val remembered = lastMeshDirectRuntimeSnapshot
-        return if (remembered.meshId == derived.meshId && remembered.lastAttemptStage != null) {
+        return if (
+            remembered.meshId == derived.meshId &&
+            remembered.lastAttemptStage?.isNotBlank() == true
+        ) {
             derived.copy(
                 state = when {
                     remembered.lastAttemptSucceeded == false ->
@@ -6217,7 +6221,7 @@ class GalaxyConnectionService : Service() {
         val snapshot = lastMeshDirectRuntimeSnapshot
         return if ((payload.source_component.contains("handleParallelSubtask") ||
                 payload.phase == DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION) &&
-            (snapshot.meshId != null || snapshot.lastAttemptStage != null)
+            (snapshot.meshId != null || snapshot.lastAttemptStage?.isNotBlank() == true)
         ) {
             snapshot
         } else {
