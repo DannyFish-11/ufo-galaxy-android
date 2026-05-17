@@ -2449,6 +2449,18 @@ data class DeviceStateSnapshotPayload(
     val mesh_runtime_engaged: Boolean? = null,
     val mesh_runtime_closed: Boolean? = null,
     val mesh_runtime_proof_quality: String? = null,
+    // PR-14 Android: explicit mesh direct-runtime truth surface.
+    // These fields let V2 and reviewers distinguish direct peer viability from explicit
+    // gateway fallback without inferring it from scattered peer/topology hints.
+    val mesh_direct_schema_version: String? = null,
+    val mesh_direct_state: String? = null,
+    val mesh_direct_route: String? = null,
+    val mesh_direct_channel_ready: Boolean? = null,
+    val mesh_direct_peer_count: Int? = null,
+    val mesh_direct_ready_peer_count: Int? = null,
+    val mesh_direct_reason_codes: List<String> = emptyList(),
+    val mesh_direct_last_attempt_stage: String? = null,
+    val mesh_direct_last_attempt_succeeded: Boolean? = null,
 
     // PR-8Android: Canonical execution mode state from LocalExecutionModeGate.
     //
@@ -3069,6 +3081,19 @@ data class DeviceExecutionEventPayload(
     //
     // boundary_reliability_schema_version: 本字段组 schema 版本。
     //   取自 AndroidBoundaryReliabilityContract.SCHEMA_VERSION。
+    //
+    // ── PR-14Android: mesh direct-runtime truth fields ──────────────────────────────────────────
+    // 与 DeviceStateSnapshotPayload 同语义，但表示执行事件发射时刻 Android 对 mesh direct
+    // peer path 的判断与最近一次 direct send 尝试结果。
+    val mesh_direct_schema_version: String? = null,
+    val mesh_direct_state: String? = null,
+    val mesh_direct_route: String? = null,
+    val mesh_direct_channel_ready: Boolean? = null,
+    val mesh_direct_peer_count: Int? = null,
+    val mesh_direct_ready_peer_count: Int? = null,
+    val mesh_direct_reason_codes: List<String> = emptyList(),
+    val mesh_direct_last_attempt_stage: String? = null,
+    val mesh_direct_last_attempt_succeeded: Boolean? = null,
     val async_scope_class: String? = null,
     val source_field_coverage_class: String? = null,
     val authority_boundary_check_mode: String? = null,
