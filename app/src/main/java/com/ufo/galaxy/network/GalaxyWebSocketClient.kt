@@ -150,6 +150,7 @@ class GalaxyWebSocketClient(
     @Volatile private var sessionContinuityEpoch: Int? = null
     companion object {
         private const val TAG = "GalaxyWebSocket"
+        const val ENTRYPOINT_ROLE = "internal_entry"
         private const val HEARTBEAT_INTERVAL_MS = 30000L
 
         // Exponential backoff base delays (ms); last value is the cap.

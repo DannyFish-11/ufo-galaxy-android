@@ -313,5 +313,6 @@ class InputRouter(
 
     companion object {
         private const val TAG = "InputRouter"
+        const val ENTRYPOINT_ROLE = "sub_entry"
     }
 }

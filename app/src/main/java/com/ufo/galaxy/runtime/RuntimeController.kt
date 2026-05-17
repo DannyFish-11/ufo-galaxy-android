@@ -3132,6 +3132,7 @@ class RuntimeController(
 
     companion object {
         private const val TAG = "GALAXY:RUNTIME"
+        const val ENTRYPOINT_ROLE = "stage_entry"
 
         /** Default maximum time to wait for a WS connection during [startWithTimeout]. */
         const val DEFAULT_REGISTRATION_TIMEOUT_MS = 15_000L

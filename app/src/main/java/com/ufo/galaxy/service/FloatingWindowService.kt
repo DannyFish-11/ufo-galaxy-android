@@ -43,6 +43,7 @@ class FloatingWindowService : Service() {
     
     companion object {
         private const val TAG = "FloatingWindowService"
+        const val ENTRYPOINT_ROLE = "legacy_entry"
         private const val NOTIFICATION_ID = 1002
         private const val OVERLAY_PROMPT_NOTIFICATION_ID = 1004
     }

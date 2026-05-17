@@ -23,6 +23,7 @@ class BootReceiver : BroadcastReceiver() {
     
     companion object {
         private const val TAG = "BootReceiver"
+        const val ENTRYPOINT_ROLE = "sub_entry"
     }
     
     override fun onReceive(context: Context, intent: Intent) {
@@ -32,7 +33,7 @@ class BootReceiver : BroadcastReceiver() {
             Log.i(TAG, "设备启动完成，启动 Galaxy 服务")
             
             // 启动连接服务（负责恢复 crossDeviceEnabled 与 WS 连接）
-            val serviceIntent = Intent(context, GalaxyConnectionService::class.java)
+            val serviceIntent = GalaxyConnectionService.createMainEntryIntent(context)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(serviceIntent)
             } else {
