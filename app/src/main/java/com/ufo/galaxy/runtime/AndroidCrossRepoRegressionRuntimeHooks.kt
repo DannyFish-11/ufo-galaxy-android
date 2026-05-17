@@ -154,7 +154,7 @@ data class AndroidCrossRepoRegressionSnapshot(
             allRecordedPassed && missingEvidence.isEmpty() -> ScenarioOutcomeStatus.PASSED
             allRecordedPassed -> ScenarioOutcomeStatus.FAILED
             recordedStatuses.any { it == ScenarioOutcomeStatus.SKIPPED } -> ScenarioOutcomeStatus.SKIPPED
-            ScenarioOutcomeStatus.FAILED
+            else -> ScenarioOutcomeStatus.FAILED
         }
         val aggregatedReasons = normalizedReasons.values
             .distinct()
