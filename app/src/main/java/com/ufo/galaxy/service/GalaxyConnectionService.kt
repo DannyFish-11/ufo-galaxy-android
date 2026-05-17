@@ -6190,7 +6190,7 @@ class GalaxyConnectionService : Service() {
         val remembered = lastMeshDirectRuntimeSnapshot
         return if (
             remembered.meshId == derived.meshId &&
-            remembered.lastAttemptStage?.isNotBlank() == true
+            remembered.lastAttemptStage != null
         ) {
             derived.copy(
                 state = when {
@@ -6221,7 +6221,7 @@ class GalaxyConnectionService : Service() {
         val snapshot = lastMeshDirectRuntimeSnapshot
         return if ((payload.source_component.contains("handleParallelSubtask") ||
                 payload.phase == DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION) &&
-            (snapshot.meshId != null || snapshot.lastAttemptStage?.isNotBlank() == true)
+            (snapshot.meshId != null || snapshot.lastAttemptStage != null)
         ) {
             snapshot
         } else {

@@ -114,6 +114,8 @@ object AndroidMeshDirectRuntimeContract {
         val topologyMatchesMesh = meshId != null &&
             input.topologyMeshId != null &&
             input.topologyMeshId == meshId
+        // Topology snapshots are treated as transport truth, so blank node ids are discarded
+        // before deduplication to avoid counting malformed entries as viable direct peers.
         val topologyNodes = if (topologyMatchesMesh) input.topologyNodes.filter { it.isNotBlank() }.distinct() else emptyList()
         val localIncluded = meshId != null && topologyNodes.contains(input.localDeviceId)
         val remotePeers = topologyNodes.filter { it != input.localDeviceId }
