@@ -154,7 +154,10 @@ data class AndroidCrossRepoRegressionSnapshot(
             observedStatuses.values.any { it == ScenarioOutcomeStatus.SKIPPED } -> ScenarioOutcomeStatus.SKIPPED
             else -> ScenarioOutcomeStatus.FAILED
         }
-        val reason = normalizedReasons.values.firstOrNull()
+        val aggregatedReasons = normalizedReasons.values
+            .distinct()
+            .sorted()
+        val reason = aggregatedReasons.takeIf { it.isNotEmpty() }?.joinToString(separator = "; ")
             ?: missingEvidence.takeIf { it.isNotEmpty() }?.joinToString(
                 prefix = "missing_stage_evidence:",
                 separator = ","
@@ -419,12 +422,12 @@ class AndroidCrossRepoRegressionRuntimeHooks(
     fun recordMeshLifecycle(state: AndroidMeshLifecycleEmissionChain.SessionState) {
         meshLifecycleState = state
         when {
-            state.leaveAttempted && !state.leaveEmitted ->
-                setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, state.leaveReason ?: "mesh_leave_not_emitted")
-            state.resultAttempted && !state.resultEmitted ->
-                setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, "mesh_result_not_emitted")
             state.joinAttempted && !state.joinEmitted ->
                 setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, "mesh_join_not_emitted")
+            state.resultAttempted && !state.resultEmitted ->
+                setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, "mesh_result_not_emitted")
+            state.leaveAttempted && !state.leaveEmitted ->
+                setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, state.leaveReason ?: "mesh_leave_not_emitted")
             state.leaveEmitted && state.resultEmitted && state.joinEmitted ->
                 setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.PASSED)
         }
