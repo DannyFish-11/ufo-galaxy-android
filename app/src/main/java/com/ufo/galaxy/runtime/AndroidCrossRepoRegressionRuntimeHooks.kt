@@ -22,7 +22,7 @@ enum class AndroidCrossRepoRegressionFlow(val wireValue: String) {
 data class AndroidCrossRepoRegressionSnapshot(
     val e2eReport: DualRepoE2EVerificationReport,
     val flowOutcomes: Map<AndroidCrossRepoRegressionFlow, ScenarioOutcomeStatus>,
-    val flowReasons: Map<AndroidCrossRepoRegressionFlow, String>,
+    val flowReasonByFlow: Map<AndroidCrossRepoRegressionFlow, String>,
     val meshLifecycleState: AndroidMeshLifecycleEmissionChain.SessionState?,
     val reportedAtMs: Long,
     val schemaVersion: String = SCHEMA_VERSION
@@ -39,7 +39,7 @@ data class AndroidCrossRepoRegressionSnapshot(
         "reported_at_ms" to reportedAtMs,
         "is_dual_runtime_regression_ready" to isDualRuntimeRegressionReady,
         "flow_outcomes" to flowOutcomes.mapKeys { it.key.wireValue }.mapValues { it.value.wireValue },
-        "flow_reasons" to flowReasons.mapKeys { it.key.wireValue },
+        "flow_reasons" to flowReasonByFlow.mapKeys { it.key.wireValue },
         "stage_chain" to buildStageChainWireMap(),
         "mesh_lifecycle_state" to meshLifecycleState?.toWireMap(),
         "dual_repo_e2e" to e2eReport.toWireMap()
@@ -51,7 +51,7 @@ data class AndroidCrossRepoRegressionSnapshot(
                 "connection" to flowOutcomes[AndroidCrossRepoRegressionFlow.CONNECTION]
             ),
             observedReasons = mapOf(
-                "connection" to flowReasons[AndroidCrossRepoRegressionFlow.CONNECTION]
+                "connection" to flowReasonByFlow[AndroidCrossRepoRegressionFlow.CONNECTION]
             )
         ),
         "registration_facing" to buildStageEvidence(
@@ -95,11 +95,11 @@ data class AndroidCrossRepoRegressionSnapshot(
                 DualRepoE2EVerificationHookKind.SIGNAL_EMITTED.wireValue to
                     e2eReport.verificationHooks[DualRepoE2EVerificationHookKind.SIGNAL_EMITTED]?.reason,
                 AndroidCrossRepoRegressionFlow.LOCAL_RUNTIME.wireValue to
-                    flowReasons[AndroidCrossRepoRegressionFlow.LOCAL_RUNTIME],
+                    flowReasonByFlow[AndroidCrossRepoRegressionFlow.LOCAL_RUNTIME],
                 AndroidCrossRepoRegressionFlow.DIAGNOSTICS.wireValue to
-                    flowReasons[AndroidCrossRepoRegressionFlow.DIAGNOSTICS],
+                    flowReasonByFlow[AndroidCrossRepoRegressionFlow.DIAGNOSTICS],
                 AndroidCrossRepoRegressionFlow.TAKEOVER.wireValue to
-                    flowReasons[AndroidCrossRepoRegressionFlow.TAKEOVER]
+                    flowReasonByFlow[AndroidCrossRepoRegressionFlow.TAKEOVER]
             ),
             supplemental = mapOf(
                 "is_participation_ready_evidence" to e2eReport.isParticipationReadyEvidence
@@ -164,7 +164,7 @@ data class AndroidCrossRepoRegressionSnapshot(
         val reason = distinctSortedReasons.takeIf { it.isNotEmpty() }?.joinToString(separator = "; ")
             ?: missingEvidence.takeIf { it.isNotEmpty() }?.joinToString(
                 prefix = "missing_stage_evidence:",
-                separator = ","
+                separator = ";"
             )
 
         return buildMap {
@@ -216,7 +216,7 @@ data class AndroidCrossRepoRegressionSnapshot(
     }
 
     private fun buildMeshObservedReasons(): Map<String, String?> = buildMap {
-        put(AndroidCrossRepoRegressionFlow.MESH.wireValue, flowReasons[AndroidCrossRepoRegressionFlow.MESH])
+        put(AndroidCrossRepoRegressionFlow.MESH.wireValue, flowReasonByFlow[AndroidCrossRepoRegressionFlow.MESH])
         meshLifecycleState?.let { state ->
             if (state.joinAttempted && !state.joinEmitted) {
                 put("mesh_join", "mesh_join_not_emitted")
@@ -247,7 +247,7 @@ class AndroidCrossRepoRegressionRuntimeHooks(
     )
     private val flowOutcomes: MutableMap<AndroidCrossRepoRegressionFlow, ScenarioOutcomeStatus> =
         mutableMapOf()
-    private val flowReasons: MutableMap<AndroidCrossRepoRegressionFlow, String> = mutableMapOf()
+    private val flowReasonByFlow: MutableMap<AndroidCrossRepoRegressionFlow, String> = mutableMapOf()
     private var meshLifecycleState: AndroidMeshLifecycleEmissionChain.SessionState? = null
 
     /**
@@ -451,7 +451,7 @@ class AndroidCrossRepoRegressionRuntimeHooks(
         AndroidCrossRepoRegressionSnapshot(
             e2eReport = harness.buildReport(nowMs = nowMs),
             flowOutcomes = flowOutcomes.toMap(),
-            flowReasons = flowReasons.toMap(),
+            flowReasonByFlow = flowReasonByFlow.toMap(),
             meshLifecycleState = meshLifecycleState,
             reportedAtMs = nowMs
         )
@@ -467,9 +467,9 @@ class AndroidCrossRepoRegressionRuntimeHooks(
         }
         flowOutcomes[flow] = status
         if (!reason.isNullOrBlank()) {
-            flowReasons[flow] = reason
+            flowReasonByFlow[flow] = reason
         } else if (status == ScenarioOutcomeStatus.PASSED) {
-            flowReasons.remove(flow)
+            flowReasonByFlow.remove(flow)
         }
     }
 }

@@ -123,7 +123,7 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
     }
 
     @Test
-    fun `wire map exposes stage chain reasons and mesh lifecycle state`() {
+    fun `wire map exposes stage chain reason and mesh lifecycle state`() {
         val hooks = AndroidCrossRepoRegressionRuntimeHooks(
             deviceId = "device-pr11b",
             participantId = "participant-pr11b",
