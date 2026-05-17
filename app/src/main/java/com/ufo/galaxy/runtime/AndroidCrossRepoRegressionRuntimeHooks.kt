@@ -158,10 +158,10 @@ data class AndroidCrossRepoRegressionSnapshot(
             hasSkipped -> ScenarioOutcomeStatus.SKIPPED
             else -> ScenarioOutcomeStatus.FAILED
         }
-        val aggregatedReasons = normalizedReasons.values
+        val distinctSortedReasons = normalizedReasons.values
             .distinct()
             .sorted()
-        val reason = aggregatedReasons.takeIf { it.isNotEmpty() }?.joinToString(separator = "; ")
+        val reason = distinctSortedReasons.takeIf { it.isNotEmpty() }?.joinToString(separator = "; ")
             ?: missingEvidence.takeIf { it.isNotEmpty() }?.joinToString(
                 prefix = "missing_stage_evidence:",
                 separator = ","
@@ -255,6 +255,9 @@ class AndroidCrossRepoRegressionRuntimeHooks(
      *
      * Call this from the connection lifecycle callbacks so the regression snapshot can expose
      * an explicit connection-stage verdict and reason instead of requiring raw log inspection.
+     *
+     * @param status Current connection-stage verdict.
+     * @param reason Optional diagnostic reason when the connection stage is not healthy.
      */
     fun recordConnection(status: ScenarioOutcomeStatus, reason: String? = null) {
         setFlowOutcome(AndroidCrossRepoRegressionFlow.CONNECTION, status, reason)
