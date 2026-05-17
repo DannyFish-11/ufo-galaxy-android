@@ -43,6 +43,7 @@ import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
 import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
 import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
 import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
+import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalRecoveryDecision
@@ -1901,7 +1902,9 @@ class GalaxyConnectionService : Service() {
         val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
             ?: java.util.UUID.randomUUID().toString()
         val meshId = payload.group_id?.takeIf { it.isNotBlank() }
-        var meshJoined = false
+        var meshLifecycleSession = meshId?.let {
+            AndroidMeshLifecycleEmissionChain.create(meshId = it, taskId = taskId)
+        }
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
@@ -1935,12 +1938,20 @@ class GalaxyConnectionService : Service() {
         )
 
         try {
-            if (meshId != null) {
-                meshJoined = webSocketClient.sendMeshJoin(
-                    meshId = meshId,
+            meshLifecycleSession?.let { meshSession ->
+                updateMeshRuntimeSignalState(
+                    collaborationState = CollaborationLifecycleState.SUBTASK_ASSIGNED,
+                    participationActive = true
+                )
+                val activeMeshId = meshSession.meshId
+                val joinSent = webSocketClient.sendMeshJoin(
+                    meshId = activeMeshId,
                     role = "participant",
                     capabilities = listOf("parallel_subtask")
                 )
+                meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onJoin(meshSession, emitted = joinSent)
+                updateMeshRuntimeSignalState(collaborationState = CollaborationLifecycleState.EXECUTING)
+                sendDeviceStateSnapshot()
             }
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
@@ -1958,9 +1969,10 @@ class GalaxyConnectionService : Service() {
                         "latency=${enriched.latency_ms}ms trace_id=$traceId " +
                         "delivery=${disposition.name.lowercase()}"
                 )
-                if (meshId != null && meshJoined) {
-                    webSocketClient.sendMeshResult(
-                        meshId = meshId,
+                meshLifecycleSession?.let { meshSession ->
+                    val activeMeshId = meshSession.meshId
+                    val meshResultSent = webSocketClient.sendMeshResult(
+                        meshId = activeMeshId,
                         taskId = taskId,
                         status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
                         results = listOf(
@@ -1975,6 +1987,7 @@ class GalaxyConnectionService : Service() {
                         summary = "parallel_subtask:${enriched.status}",
                         latencyMs = enriched.latency_ms ?: 0L
                     )
+                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onResult(meshSession, emitted = meshResultSent)
                 }
                 // ── PR-2: emit terminal execution event from parallel result ──────────
                 deviceExecutionEventSink.onEvent(
@@ -2040,13 +2053,43 @@ class GalaxyConnectionService : Service() {
                 )
             )
         } finally {
-            if (meshId != null && meshJoined) {
+            meshLifecycleSession?.let { meshSessionAtClose ->
                 val leaveReason = when (finalResult?.status) {
                     EdgeExecutor.STATUS_SUCCESS -> "task_complete"
                     EdgeExecutor.STATUS_CANCELLED -> "cancelled"
                     else -> "error"
                 }
-                webSocketClient.sendMeshLeave(meshId, leaveReason)
+                updateMeshRuntimeSignalState(
+                    collaborationState = when (finalResult?.status) {
+                        EdgeExecutor.STATUS_SUCCESS -> CollaborationLifecycleState.COMPLETED
+                        EdgeExecutor.STATUS_CANCELLED -> CollaborationLifecycleState.CANCELLED
+                        else -> CollaborationLifecycleState.FAILED
+                    },
+                    participationActive = false
+                )
+                if (meshSessionAtClose.shouldAttemptLeave) {
+                    val leaveSent = webSocketClient.sendMeshLeave(meshSessionAtClose.meshId, leaveReason)
+                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onLeave(
+                        state = meshSessionAtClose,
+                        emitted = leaveSent,
+                        reason = leaveReason
+                    )
+                }
+                meshLifecycleSession?.toWireMap()?.let { payload ->
+                    GalaxyLogger.log(
+                        TAG,
+                        payload + mapOf("event" to "parallel_subtask_mesh_lifecycle_state")
+                    )
+                    if (payload["mesh_leave_emitted"] == false) {
+                        emitRuntimeDiagnostics(
+                            taskId = taskId,
+                            nodeName = "parallel_subtask_mesh_lifecycle",
+                            errorType = "mesh_leave_unsent",
+                            errorContext = "mesh_id=${meshSessionAtClose.meshId} leave_reason=$leaveReason"
+                        )
+                    }
+                }
+                sendDeviceStateSnapshot()
             }
             taskCancelRegistry.deregister(taskId)
             // Unblock local loop.
