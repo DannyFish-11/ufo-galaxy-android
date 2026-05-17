@@ -37,6 +37,7 @@ import com.ufo.galaxy.runtime.OperatorActionReceiver
 import com.ufo.galaxy.runtime.AndroidTakeoverOwnershipTransferContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
+import com.ufo.galaxy.runtime.AndroidMeshDirectRuntimeContract
 import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
 import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
@@ -506,6 +507,7 @@ class GalaxyConnectionService : Service() {
                 accessibilityReady = UFOGalaxyApplication.appSettings.accessibilityReady,
                 isDegraded = managerStateDegraded()
             )
+            val meshDirectSnapshot = currentMeshDirectRuntimeSnapshotForEvent(payload)
             val eventNormalization = AndroidParticipationSemanticNormalizationContract.derive(
                 AndroidParticipationSemanticNormalizationContract.NormalizationDerivationInput(
                     localModeActive = modeState.executionModeState ==
@@ -637,6 +639,15 @@ class GalaxyConnectionService : Service() {
                 local_execution_active = eventNormalization.localExecutionActive,
                 local_execution_activity_kind = eventNormalization.localExecutionActivityKind.wireValue,
                 participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION,
+                mesh_direct_schema_version = meshDirectSnapshot?.schemaVersion,
+                mesh_direct_state = meshDirectSnapshot?.state?.wireValue,
+                mesh_direct_route = meshDirectSnapshot?.route?.wireValue,
+                mesh_direct_channel_ready = meshDirectSnapshot?.channelReady,
+                mesh_direct_peer_count = meshDirectSnapshot?.peerCount,
+                mesh_direct_ready_peer_count = meshDirectSnapshot?.readyPeerCount,
+                mesh_direct_reason_codes = meshDirectSnapshot?.reasonCodes ?: emptyList(),
+                mesh_direct_last_attempt_stage = meshDirectSnapshot?.lastAttemptStage,
+                mesh_direct_last_attempt_succeeded = meshDirectSnapshot?.lastAttemptSucceeded,
                 // ── PR-4Android: 工程边界可靠性字段（在执行事件发射层填充）──────────────────────────
                 // 在单一发射层唯一计算，使 V2 可识别每条执行事件的异步边界类型、
                 // 来源字段完整性等级与权限检查模式，无需 V2 侧推断或容忍缺失字段。
@@ -817,6 +828,8 @@ class GalaxyConnectionService : Service() {
      */
     @Volatile
     private var lastMeshTopologyNodes: List<String> = emptyList()
+    @Volatile
+    private var lastMeshTopologyMeshId: String? = null
 
     /**
      * The [MeshTopologyPayload.topology_seq] of the last retained topology snapshot.
@@ -824,6 +837,9 @@ class GalaxyConnectionService : Service() {
      */
     @Volatile
     private var lastMeshTopologySeq: Int = -1
+    @Volatile
+    private var lastMeshDirectRuntimeSnapshot =
+        AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot()
 
     /**
      * Monotonic count of COORD_SYNC ticks received in this service lifecycle.
@@ -862,6 +878,7 @@ class GalaxyConnectionService : Service() {
         wsListener = object : GalaxyWebSocketClient.Listener {
             override fun onConnected() {
                 Log.d(TAG, "已连接到 Galaxy")
+                updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot())
                 updateNotification("已连接")
                 crossRepoRegressionHooks.recordConnection(ScenarioOutcomeStatus.PASSED)
                 emitCrossRepoRegressionSnapshot("cross_repo_connection_established")
@@ -883,6 +900,7 @@ class GalaxyConnectionService : Service() {
             
             override fun onDisconnected() {
                 Log.d(TAG, "与 Galaxy 断开连接")
+                updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot())
                 updateNotification("已断开")
                 crossRepoRegressionHooks.recordConnection(
                     status = ScenarioOutcomeStatus.FAILED,
@@ -1911,6 +1929,7 @@ class GalaxyConnectionService : Service() {
         var meshLifecycleSession = meshId?.let {
             AndroidMeshLifecycleEmissionChain.create(meshId = it, taskId = taskId)
         }
+        var meshDirectRuntime = updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(meshId))
 
         val timeoutMs = payload.effectiveTimeoutMs
         var finalResult: GoalResultPayload? = null
@@ -1950,12 +1969,46 @@ class GalaxyConnectionService : Service() {
                     participationActive = true
                 )
                 val activeMeshId = meshSession.meshId
-                val joinSent = webSocketClient.sendMeshJoin(
-                    meshId = activeMeshId,
-                    role = "participant",
-                    capabilities = listOf("parallel_subtask")
-                )
-                meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onJoin(meshSession, emitted = joinSent)
+                if (meshDirectRuntime.route == AndroidMeshDirectRuntimeContract.DirectPathRoute.DIRECT_PEER) {
+                    val joinSent = webSocketClient.sendMeshJoin(
+                        meshId = activeMeshId,
+                        role = "participant",
+                        capabilities = listOf("parallel_subtask")
+                    )
+                    meshDirectRuntime = updateMeshDirectRuntimeSnapshot(
+                        AndroidMeshDirectRuntimeContract.onDirectSendAttempt(
+                            snapshot = meshDirectRuntime,
+                            stage = AndroidMeshDirectRuntimeContract.AttemptStage.JOIN,
+                            succeeded = joinSent
+                        )
+                    )
+                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onJoin(meshSession, emitted = joinSent)
+                    if (!joinSent) {
+                        emitMeshDirectFallbackTransition(
+                            taskId = taskId,
+                            flowId = activeMeshId,
+                            fallbackReason = AndroidMeshDirectRuntimeContract.REASON_SEND_FAILED_JOIN
+                        )
+                        emitRuntimeDiagnostics(
+                            taskId = taskId,
+                            nodeName = "parallel_subtask_mesh_direct",
+                            errorType = "mesh_direct_join_failed",
+                            errorContext = formatMeshDirectErrorContext(activeMeshId, meshDirectRuntime.reasonCodes)
+                        )
+                    }
+                } else {
+                    emitMeshDirectFallbackTransition(
+                        taskId = taskId,
+                        flowId = activeMeshId,
+                        fallbackReason = formatMeshDirectReasonCodes(meshDirectRuntime.reasonCodes)
+                    )
+                    emitRuntimeDiagnostics(
+                        taskId = taskId,
+                        nodeName = "parallel_subtask_mesh_direct",
+                        errorType = "mesh_direct_unavailable",
+                        errorContext = formatMeshDirectErrorContext(activeMeshId, meshDirectRuntime.reasonCodes)
+                    )
+                }
                 updateMeshRuntimeSignalState(collaborationState = CollaborationLifecycleState.EXECUTING)
                 sendDeviceStateSnapshot()
             }
@@ -1977,23 +2030,45 @@ class GalaxyConnectionService : Service() {
                 )
                 meshLifecycleSession?.let { meshSession ->
                     val activeMeshId = meshSession.meshId
-                    val meshResultSent = webSocketClient.sendMeshResult(
-                        meshId = activeMeshId,
-                        taskId = taskId,
-                        status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
-                        results = listOf(
-                            MeshSubtaskResult(
-                                device_id = localDeviceId,
-                                subtask_id = "${meshId}_${enriched.subtask_index ?: 0}",
-                                status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
-                                output = enriched.result_summary,
-                                error = enriched.error
+                    if (meshDirectRuntime.route == AndroidMeshDirectRuntimeContract.DirectPathRoute.DIRECT_PEER) {
+                        val meshResultSent = webSocketClient.sendMeshResult(
+                            meshId = activeMeshId,
+                            taskId = taskId,
+                            status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
+                            results = listOf(
+                                MeshSubtaskResult(
+                                    device_id = localDeviceId,
+                                    subtask_id = "${meshId}_${enriched.subtask_index ?: 0}",
+                                    status = if (enriched.status == EdgeExecutor.STATUS_SUCCESS) "success" else "error",
+                                    output = enriched.result_summary,
+                                    error = enriched.error
+                                )
+                            ),
+                            summary = "parallel_subtask:${enriched.status}",
+                            latencyMs = enriched.latency_ms ?: 0L
+                        )
+                        meshDirectRuntime = updateMeshDirectRuntimeSnapshot(
+                            AndroidMeshDirectRuntimeContract.onDirectSendAttempt(
+                                snapshot = meshDirectRuntime,
+                                stage = AndroidMeshDirectRuntimeContract.AttemptStage.RESULT,
+                                succeeded = meshResultSent
                             )
-                        ),
-                        summary = "parallel_subtask:${enriched.status}",
-                        latencyMs = enriched.latency_ms ?: 0L
-                    )
-                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onResult(meshSession, emitted = meshResultSent)
+                        )
+                        meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onResult(meshSession, emitted = meshResultSent)
+                        if (!meshResultSent) {
+                            emitMeshDirectFallbackTransition(
+                                taskId = taskId,
+                                flowId = activeMeshId,
+                                fallbackReason = AndroidMeshDirectRuntimeContract.REASON_SEND_FAILED_RESULT
+                            )
+                            emitRuntimeDiagnostics(
+                                taskId = taskId,
+                                nodeName = "parallel_subtask_mesh_direct",
+                                errorType = "mesh_direct_result_failed",
+                                errorContext = formatMeshDirectErrorContext(activeMeshId, meshDirectRuntime.reasonCodes)
+                            )
+                        }
+                    }
                 }
                 // ── PR-2: emit terminal execution event from parallel result ──────────
                 deviceExecutionEventSink.onEvent(
@@ -2074,12 +2149,21 @@ class GalaxyConnectionService : Service() {
                     participationActive = false
                 )
                 if (meshSessionAtClose.shouldAttemptLeave) {
-                    val leaveSent = webSocketClient.sendMeshLeave(meshSessionAtClose.meshId, leaveReason)
-                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onLeave(
-                        state = meshSessionAtClose,
-                        emitted = leaveSent,
-                        reason = leaveReason
-                    )
+                    if (meshDirectRuntime.lastAttemptSucceeded == true) {
+                        val leaveSent = webSocketClient.sendMeshLeave(meshSessionAtClose.meshId, leaveReason)
+                        meshDirectRuntime = updateMeshDirectRuntimeSnapshot(
+                            AndroidMeshDirectRuntimeContract.onDirectSendAttempt(
+                                snapshot = meshDirectRuntime,
+                                stage = AndroidMeshDirectRuntimeContract.AttemptStage.LEAVE,
+                                succeeded = leaveSent
+                            )
+                        )
+                        meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onLeave(
+                            state = meshSessionAtClose,
+                            emitted = leaveSent,
+                            reason = leaveReason
+                        )
+                    }
                 }
                 meshLifecycleSession?.let { crossRepoRegressionHooks.recordMeshLifecycle(it) }
                 emitCrossRepoRegressionSnapshot("cross_repo_mesh_lifecycle_state")
@@ -3156,6 +3240,31 @@ class GalaxyConnectionService : Service() {
      * @param source   Canonical name of the originating component for traceability.
      * @param flowId   Delegated flow identifier; defaults to [taskId] when absent.
      */
+    private fun emitMeshDirectFallbackTransition(
+        taskId: String,
+        flowId: String,
+        fallbackReason: String
+    ) {
+        deviceExecutionEventSink.onEvent(
+            DeviceExecutionEventPayload(
+                flow_id = flowId,
+                task_id = taskId,
+                phase = DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION,
+                is_blocking = true,
+                blocking_reason = fallbackReason,
+                fallback_tier = "gateway_mesh_fallback",
+                device_id = localDeviceId,
+                source_component = "GalaxyConnectionService.handleParallelSubtask"
+            )
+        )
+    }
+
+    private fun formatMeshDirectErrorContext(meshId: String, reasonCodes: List<String>): String =
+        "mesh_id=$meshId reasons=${formatMeshDirectReasonCodes(reasonCodes)}"
+
+    private fun formatMeshDirectReasonCodes(reasonCodes: List<String>): String =
+        reasonCodes.joinToString(",")
+
     private fun buildTerminalExecutionEvent(
         taskId: String,
         result: GoalResultPayload,
@@ -3700,6 +3809,9 @@ class GalaxyConnectionService : Service() {
                 Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not build mesh runtime state report: ${e.message}")
                 null
             }
+            val meshDirectRuntimeSnapshot = snapshotViewOfMeshDirectRuntime(
+                lastMeshDirectRuntimeSnapshot.meshId ?: lastMeshTopologyMeshId
+            )
 
             val capabilityDegradedForMode = when (managerState) {
                 is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded,
@@ -4065,6 +4177,15 @@ class GalaxyConnectionService : Service() {
                 mesh_runtime_engaged = meshRuntimeStateReport?.isRuntimeEngaged,
                 mesh_runtime_closed = meshRuntimeStateReport?.isRuntimeClosed,
                 mesh_runtime_proof_quality = meshRuntimeStateReport?.proofQuality?.wireValue,
+                mesh_direct_schema_version = meshDirectRuntimeSnapshot.schemaVersion,
+                mesh_direct_state = meshDirectRuntimeSnapshot.state.wireValue,
+                mesh_direct_route = meshDirectRuntimeSnapshot.route.wireValue,
+                mesh_direct_channel_ready = meshDirectRuntimeSnapshot.channelReady,
+                mesh_direct_peer_count = meshDirectRuntimeSnapshot.peerCount,
+                mesh_direct_ready_peer_count = meshDirectRuntimeSnapshot.readyPeerCount,
+                mesh_direct_reason_codes = meshDirectRuntimeSnapshot.reasonCodes,
+                mesh_direct_last_attempt_stage = meshDirectRuntimeSnapshot.lastAttemptStage,
+                mesh_direct_last_attempt_succeeded = meshDirectRuntimeSnapshot.lastAttemptSucceeded,
                 // PR-8Android: canonical execution mode state and participant identity fields.
                 // These close the R8 gap: V2 can read execution_mode_state and
                 // durable_participant_id without inferring them from field combinations.
@@ -4182,6 +4303,8 @@ class GalaxyConnectionService : Service() {
                 "[DEVICE_STATE_SNAPSHOT] device_id=$deviceId model_ready=$modelReady " +
                     "local_loop_ready=$localLoopReady active_runtime=$activeRuntimeType " +
                     "offline_queue_depth=$offlineQueueDepth fallback_tier=$currentFallbackTier " +
+                    "mesh_direct_state=${meshDirectRuntimeSnapshot.state.wireValue} " +
+                    "mesh_direct_route=${meshDirectRuntimeSnapshot.route.wireValue} " +
                     "mode_state=${modeState.modeState} mode_readiness_state=${modeState.modeReadinessState} " +
                     "execution_mode_state=${modeState.executionModeState} " +
                     "cross_device_eligibility=${modeState.crossDeviceEligibility} " +
@@ -4199,6 +4322,8 @@ class GalaxyConnectionService : Service() {
                     "warmup_result" to warmupResult,
                     "offline_queue_depth" to offlineQueueDepth,
                     "current_fallback_tier" to currentFallbackTier,
+                    "mesh_direct_state" to meshDirectRuntimeSnapshot.state.wireValue,
+                    "mesh_direct_route" to meshDirectRuntimeSnapshot.route.wireValue,
                     "snapshot_sequence" to snapshotStamp.snapshotSequence,
                     "active_execution_count" to snapshotStamp.activeExecutionCount,
                     "execution_busy" to snapshotStamp.executionBusy,
@@ -4645,6 +4770,7 @@ class GalaxyConnectionService : Service() {
         // Update per-peer capability record when we have a valid source device.
         if (payload.source_device_id.isNotBlank()) {
             lastPeerCapabilities = lastPeerCapabilities + (payload.source_device_id to payload.capabilities)
+            updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(payload.mesh_id ?: lastMeshTopologyMeshId))
         }
 
         // Send delivery ack.
@@ -4699,6 +4825,7 @@ class GalaxyConnectionService : Service() {
             val existing = lastPeerAnnouncements[payload.peer_device_id]
             if (existing == null || payload.announce_seq >= existing.announce_seq) {
                 lastPeerAnnouncements = lastPeerAnnouncements + (payload.peer_device_id to payload)
+                updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(lastMeshTopologyMeshId))
             }
         }
 
@@ -4751,8 +4878,10 @@ class GalaxyConnectionService : Service() {
         // Only retain topology updates that are newer than what we already have.
         val accepted = payload.topology_seq > lastMeshTopologySeq
         if (accepted) {
+            lastMeshTopologyMeshId = payload.mesh_id.takeIf { it.isNotBlank() }
             lastMeshTopologyNodes = payload.nodes
             lastMeshTopologySeq = payload.topology_seq
+            updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(lastMeshTopologyMeshId))
         }
 
         // Send delivery ack regardless of whether we retained the snapshot.
@@ -6035,6 +6164,74 @@ class GalaxyConnectionService : Service() {
      * Called from [deviceExecutionEventSink] and [sendDeviceStateSnapshot] to populate
      * `execution_mode_state` without re-reading the full manager state.
      */
+    private fun deriveMeshDirectRuntimeSnapshot(
+        meshId: String? = lastMeshTopologyMeshId
+    ): AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot =
+        AndroidMeshDirectRuntimeContract.derive(
+            AndroidMeshDirectRuntimeContract.DerivationInput(
+                meshId = meshId,
+                localDeviceId = localDeviceId,
+                wsConnected = webSocketClient.isConnected(),
+                topologyMeshId = lastMeshTopologyMeshId,
+                topologyNodes = lastMeshTopologyNodes,
+                peerAnnouncements = lastPeerAnnouncements,
+                peerCapabilities = lastPeerCapabilities
+            )
+        )
+
+    private fun updateMeshDirectRuntimeSnapshot(
+        snapshot: AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot
+    ): AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot {
+        lastMeshDirectRuntimeSnapshot = snapshot
+        return snapshot
+    }
+
+    private fun snapshotViewOfMeshDirectRuntime(
+        meshId: String? = lastMeshTopologyMeshId
+    ): AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot {
+        val derived = deriveMeshDirectRuntimeSnapshot(meshId)
+        val remembered = lastMeshDirectRuntimeSnapshot
+        return if (
+            remembered.meshId == derived.meshId &&
+            remembered.lastAttemptStage != null
+        ) {
+            derived.copy(
+                state = when {
+                    remembered.lastAttemptSucceeded == false ->
+                        AndroidMeshDirectRuntimeContract.DirectPathState.FALLBACK
+                    remembered.lastAttemptSucceeded == true &&
+                        remembered.lastAttemptStage != AndroidMeshDirectRuntimeContract.AttemptStage.LEAVE.wireValue ->
+                        AndroidMeshDirectRuntimeContract.DirectPathState.ACTIVE
+                    else -> derived.state
+                },
+                route = if (remembered.lastAttemptSucceeded == false) {
+                    AndroidMeshDirectRuntimeContract.DirectPathRoute.GATEWAY_FALLBACK
+                } else {
+                    remembered.route
+                },
+                reasonCodes = (derived.reasonCodes + remembered.reasonCodes).distinct(),
+                lastAttemptStage = remembered.lastAttemptStage,
+                lastAttemptSucceeded = remembered.lastAttemptSucceeded
+            )
+        } else {
+            derived
+        }
+    }
+
+    private fun currentMeshDirectRuntimeSnapshotForEvent(
+        payload: DeviceExecutionEventPayload
+    ): AndroidMeshDirectRuntimeContract.MeshDirectRuntimeSnapshot? {
+        val snapshot = lastMeshDirectRuntimeSnapshot
+        return if ((payload.source_component.contains("handleParallelSubtask") ||
+                payload.phase == DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION) &&
+            (snapshot.meshId != null || snapshot.lastAttemptStage != null)
+        ) {
+            snapshot
+        } else {
+            null
+        }
+    }
+
     private fun managerStateDegraded(): Boolean {
         return when (UFOGalaxyApplication.localInferenceRuntimeManager.state.value) {
             is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded,
