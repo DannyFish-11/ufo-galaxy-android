@@ -141,17 +141,19 @@ data class AndroidCrossRepoRegressionSnapshot(
             .mapValues { it.value!!.wireValue }
         val normalizedReasons = observedReasons.filterValues { !it.isNullOrBlank() }
             .mapValues { it.value!! }
+        val recordedStatuses = observedStatuses.values.filterNotNull()
         val missingEvidence = observedStatuses
             .filterValues { it == null }
             .keys
             .sorted()
         val status = when {
-            normalizedStatuses.isEmpty() -> ScenarioOutcomeStatus.SKIPPED
-            observedStatuses.values.any { it == ScenarioOutcomeStatus.FAILED || it == ScenarioOutcomeStatus.TIMED_OUT } ->
+            recordedStatuses.isEmpty() -> ScenarioOutcomeStatus.SKIPPED
+            recordedStatuses.any { it == ScenarioOutcomeStatus.FAILED || it == ScenarioOutcomeStatus.TIMED_OUT } ->
                 ScenarioOutcomeStatus.FAILED
+            recordedStatuses.all { it == ScenarioOutcomeStatus.PASSED } && missingEvidence.isEmpty() ->
+                ScenarioOutcomeStatus.PASSED
             missingEvidence.isNotEmpty() -> ScenarioOutcomeStatus.FAILED
-            observedStatuses.values.all { it == ScenarioOutcomeStatus.PASSED } -> ScenarioOutcomeStatus.PASSED
-            observedStatuses.values.any { it == ScenarioOutcomeStatus.SKIPPED } -> ScenarioOutcomeStatus.SKIPPED
+            recordedStatuses.any { it == ScenarioOutcomeStatus.SKIPPED } -> ScenarioOutcomeStatus.SKIPPED
             else -> ScenarioOutcomeStatus.FAILED
         }
         val aggregatedReasons = normalizedReasons.values
@@ -422,14 +424,14 @@ class AndroidCrossRepoRegressionRuntimeHooks(
     fun recordMeshLifecycle(state: AndroidMeshLifecycleEmissionChain.SessionState) {
         meshLifecycleState = state
         when {
+            state.leaveEmitted && state.resultEmitted && state.joinEmitted ->
+                setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.PASSED)
             state.joinAttempted && !state.joinEmitted ->
                 setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, "mesh_join_not_emitted")
             state.resultAttempted && !state.resultEmitted ->
                 setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, "mesh_result_not_emitted")
             state.leaveAttempted && !state.leaveEmitted ->
                 setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.FAILED, state.leaveReason ?: "mesh_leave_not_emitted")
-            state.leaveEmitted && state.resultEmitted && state.joinEmitted ->
-                setFlowOutcome(AndroidCrossRepoRegressionFlow.MESH, ScenarioOutcomeStatus.PASSED)
         }
     }
 
