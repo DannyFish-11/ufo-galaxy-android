@@ -1938,20 +1938,18 @@ class GalaxyConnectionService : Service() {
         )
 
         try {
-            if (meshLifecycleSession != null) {
+            meshLifecycleSession?.let { meshSession ->
                 updateMeshRuntimeSignalState(
                     collaborationState = CollaborationLifecycleState.SUBTASK_ASSIGNED,
                     participationActive = true
                 )
-                val activeMeshId = meshLifecycleSession?.meshId ?: ""
+                val activeMeshId = meshSession.meshId
                 val joinSent = webSocketClient.sendMeshJoin(
                     meshId = activeMeshId,
                     role = "participant",
                     capabilities = listOf("parallel_subtask")
                 )
-                meshLifecycleSession = meshLifecycleSession?.let {
-                    AndroidMeshLifecycleEmissionChain.onJoin(it, emitted = joinSent)
-                }
+                meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onJoin(meshSession, emitted = joinSent)
                 updateMeshRuntimeSignalState(collaborationState = CollaborationLifecycleState.EXECUTING)
                 sendDeviceStateSnapshot()
             }
@@ -1971,8 +1969,8 @@ class GalaxyConnectionService : Service() {
                         "latency=${enriched.latency_ms}ms trace_id=$traceId " +
                         "delivery=${disposition.name.lowercase()}"
                 )
-                if (meshLifecycleSession != null) {
-                    val activeMeshId = meshLifecycleSession?.meshId ?: ""
+                meshLifecycleSession?.let { meshSession ->
+                    val activeMeshId = meshSession.meshId
                     val meshResultSent = webSocketClient.sendMeshResult(
                         meshId = activeMeshId,
                         taskId = taskId,
@@ -1989,9 +1987,7 @@ class GalaxyConnectionService : Service() {
                         summary = "parallel_subtask:${enriched.status}",
                         latencyMs = enriched.latency_ms ?: 0L
                     )
-                    meshLifecycleSession = meshLifecycleSession?.let {
-                        AndroidMeshLifecycleEmissionChain.onResult(it, emitted = meshResultSent)
-                    }
+                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onResult(meshSession, emitted = meshResultSent)
                 }
                 // ── PR-2: emit terminal execution event from parallel result ──────────
                 deviceExecutionEventSink.onEvent(
@@ -2057,7 +2053,7 @@ class GalaxyConnectionService : Service() {
                 )
             )
         } finally {
-            if (meshLifecycleSession != null) {
+            meshLifecycleSession?.let { meshSessionAtClose ->
                 val leaveReason = when (finalResult?.status) {
                     EdgeExecutor.STATUS_SUCCESS -> "task_complete"
                     EdgeExecutor.STATUS_CANCELLED -> "cancelled"
@@ -2071,17 +2067,13 @@ class GalaxyConnectionService : Service() {
                     },
                     participationActive = false
                 )
-                val shouldAttemptLeave = meshLifecycleSession?.shouldAttemptLeave == true
-                if (shouldAttemptLeave) {
-                    val activeMeshId = meshLifecycleSession?.meshId ?: ""
-                    val leaveSent = webSocketClient.sendMeshLeave(activeMeshId, leaveReason)
-                    meshLifecycleSession = meshLifecycleSession?.let {
-                        AndroidMeshLifecycleEmissionChain.onLeave(
-                            state = it,
-                            emitted = leaveSent,
-                            reason = leaveReason
-                        )
-                    }
+                if (meshSessionAtClose.shouldAttemptLeave) {
+                    val leaveSent = webSocketClient.sendMeshLeave(meshSessionAtClose.meshId, leaveReason)
+                    meshLifecycleSession = AndroidMeshLifecycleEmissionChain.onLeave(
+                        state = meshSessionAtClose,
+                        emitted = leaveSent,
+                        reason = leaveReason
+                    )
                 }
                 meshLifecycleSession?.toWireMap()?.let { payload ->
                     GalaxyLogger.log(
@@ -2093,7 +2085,7 @@ class GalaxyConnectionService : Service() {
                             taskId = taskId,
                             nodeName = "parallel_subtask_mesh_lifecycle",
                             errorType = "mesh_leave_unsent",
-                            errorContext = "mesh_id=${meshLifecycleSession?.meshId ?: ""} leave_reason=$leaveReason"
+                            errorContext = "mesh_id=${meshSessionAtClose.meshId} leave_reason=$leaveReason"
                         )
                     }
                 }
