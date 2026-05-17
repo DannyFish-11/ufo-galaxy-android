@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     
     companion object {
         private const val TAG = "MainActivity"
+        const val ENTRYPOINT_ROLE = "sub_entry"
     }
 
     // Proper ViewModel creation using the activity-level delegate so the Application is
@@ -153,7 +154,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun startServices() {
         // 启动 Galaxy 连接服务
-        val connectionIntent = Intent(this, GalaxyConnectionService::class.java)
+        val connectionIntent = GalaxyConnectionService.createMainEntryIntent(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(connectionIntent)
         } else {

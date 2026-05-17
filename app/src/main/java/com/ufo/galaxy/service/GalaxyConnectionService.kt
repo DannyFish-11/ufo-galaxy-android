@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
@@ -158,6 +159,7 @@ class GalaxyConnectionService : Service() {
     companion object {
         private const val TAG = "GalaxyConnectionService"
         private const val NOTIFICATION_ID = 1001
+        const val ENTRYPOINT_ROLE = "main_entry"
 
         // ── Route-mode constants ──────────────────────────────────────────────
         /**
@@ -195,6 +197,9 @@ class GalaxyConnectionService : Service() {
         private const val DELEGATED_SIGNAL_ATTEMPT_INITIAL_CAPACITY = 512
         private const val DELEGATED_SIGNAL_ATTEMPT_MAX_ENTRIES = 2048
         private const val SIGNAL_ATTEMPT_FIRST = 1
+
+        fun createMainEntryIntent(context: Context): Intent =
+            Intent(context, GalaxyConnectionService::class.java)
     }
     
     private val binder = LocalBinder()

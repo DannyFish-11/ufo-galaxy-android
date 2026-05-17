@@ -489,6 +489,7 @@ class AgentRuntimeBridge(
 
     companion object {
         private const val TAG = "GALAXY:BRIDGE"
+        const val ENTRYPOINT_ROLE = "compat_fallback"
 
         // ── Message type ──────────────────────────────────────────────────────
 
