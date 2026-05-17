@@ -15,6 +15,7 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
             verificationKind = RealDeviceVerificationKind.REAL_DEVICE
         )
 
+        hooks.recordConnection(ScenarioOutcomeStatus.PASSED)
         hooks.recordDeviceRegisterSent()
         hooks.recordCapabilityReportSent()
         hooks.recordExecutionReceipt(
@@ -47,6 +48,10 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
         assertTrue(snapshot.isDualRuntimeRegressionReady)
         assertTrue(snapshot.e2eReport.isRuntimeClosedEvidence)
         assertTrue(snapshot.e2eReport.hasCanonicalRoundTripHooks)
+        assertEquals(
+            ScenarioOutcomeStatus.PASSED,
+            snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.CONNECTION]
+        )
         assertEquals(
             ScenarioOutcomeStatus.PASSED,
             snapshot.flowOutcomes[AndroidCrossRepoRegressionFlow.CAPABILITY]
@@ -103,6 +108,7 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
             participantId = "participant-pr11b",
             verificationKind = RealDeviceVerificationKind.EMULATOR
         )
+        hooks.recordConnection(ScenarioOutcomeStatus.PASSED)
         hooks.recordDeviceRegisterSent()
         hooks.recordCapabilityReportSent()
         hooks.recordLocalRuntimeBehavior(RuntimeStartResult.Degraded("planner_only"))
@@ -114,6 +120,46 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
         assertEquals("1.0", wire["schema_version"])
         assertTrue(wire.containsKey("flow_outcomes"))
         assertTrue(wire.containsKey("dual_repo_e2e"))
+    }
+
+    @Test
+    fun `wire map exposes stage chain reason and mesh lifecycle state`() {
+        val hooks = AndroidCrossRepoRegressionRuntimeHooks(
+            deviceId = "device-pr11b",
+            participantId = "participant-pr11b",
+            verificationKind = RealDeviceVerificationKind.REAL_DEVICE
+        )
+        hooks.recordConnection(ScenarioOutcomeStatus.FAILED, "ws_disconnected")
+        hooks.recordMeshLifecycle(
+            AndroidMeshLifecycleEmissionChain.onLeave(
+                state = AndroidMeshLifecycleEmissionChain.onResult(
+                    state = AndroidMeshLifecycleEmissionChain.onJoin(
+                        state = AndroidMeshLifecycleEmissionChain.create(
+                            meshId = "mesh-pr11b",
+                            taskId = "task-pr11b"
+                        ),
+                        emitted = true
+                    ),
+                    emitted = false
+                ),
+                emitted = false,
+                reason = "error"
+            )
+        )
+
+        val wire = hooks.buildSnapshot(nowMs = 77L).toWireMap()
+        val flowReasons = wire["flow_reasons"] as Map<*, *>
+        val stageChain = wire["stage_chain"] as Map<*, *>
+        val connectionStage = stageChain["connection"] as Map<*, *>
+        val meshStage = stageChain["mesh_lifecycle"] as Map<*, *>
+        val meshLifecycleState = wire["mesh_lifecycle_state"] as Map<*, *>
+
+        assertEquals("ws_disconnected", flowReasons["connection"])
+        assertEquals("failed", connectionStage["status"])
+        assertEquals("failed", meshStage["status"])
+        assertEquals("error", (meshStage["observed_reasons"] as Map<*, *>)["mesh_leave"])
+        assertEquals("leave_attempted", meshLifecycleState["mesh_lifecycle_phase"])
+        assertEquals(false, meshLifecycleState["mesh_leave_emitted"])
     }
 
     @Test
