@@ -334,14 +334,8 @@ class GalaxyConnectionService : Service() {
     private fun emitCrossRepoRegressionSnapshot(event: String) {
         val snapshot = crossRepoRegressionHooks.buildSnapshot()
         GalaxyLogger.log(
-            TAG, mapOf(
-                "event" to event,
-                "cross_repo_regression_ready" to snapshot.isDualRuntimeRegressionReady,
-                "e2e_artifact_tag" to snapshot.e2eReport.overallArtifact.artifactTag,
-                "flow_outcomes" to snapshot.flowOutcomes
-                    .mapKeys { it.key.wireValue }
-                    .mapValues { it.value.wireValue }
-            )
+            TAG,
+            snapshot.toWireMap() + mapOf("event" to event)
         )
     }
 
@@ -869,6 +863,8 @@ class GalaxyConnectionService : Service() {
             override fun onConnected() {
                 Log.d(TAG, "已连接到 Galaxy")
                 updateNotification("已连接")
+                crossRepoRegressionHooks.recordConnection(ScenarioOutcomeStatus.PASSED)
+                emitCrossRepoRegressionSnapshot("cross_repo_connection_established")
                 if (hasObservedWsConnection) {
                     crossRepoRegressionHooks.recordReconnectRecovery(
                         status = ScenarioOutcomeStatus.PASSED
@@ -888,6 +884,11 @@ class GalaxyConnectionService : Service() {
             override fun onDisconnected() {
                 Log.d(TAG, "与 Galaxy 断开连接")
                 updateNotification("已断开")
+                crossRepoRegressionHooks.recordConnection(
+                    status = ScenarioOutcomeStatus.FAILED,
+                    reason = "ws_disconnected"
+                )
+                emitCrossRepoRegressionSnapshot("cross_repo_connection_lost")
                 delegatedRuntimeAcceptanceEvaluator.markDimensionGap(
                     DelegatedRuntimeAcceptanceDimension.CONTINUITY_REPLAY_RECONNECT_EVIDENCE,
                     "ws_disconnected_runtime_snapshot_stale_risk"
@@ -933,6 +934,11 @@ class GalaxyConnectionService : Service() {
             override fun onError(error: String) {
                 Log.e(TAG, "连接错误: $error")
                 updateNotification("连接错误")
+                crossRepoRegressionHooks.recordConnection(
+                    status = ScenarioOutcomeStatus.FAILED,
+                    reason = error
+                )
+                emitCrossRepoRegressionSnapshot("cross_repo_connection_error")
                 emitRuntimeDiagnostics(
                     taskId = activeTakeoverId ?: "runtime",
                     nodeName = "ws_runtime",
@@ -2075,6 +2081,8 @@ class GalaxyConnectionService : Service() {
                         reason = leaveReason
                     )
                 }
+                meshLifecycleSession?.let { crossRepoRegressionHooks.recordMeshLifecycle(it) }
+                emitCrossRepoRegressionSnapshot("cross_repo_mesh_lifecycle_state")
                 meshLifecycleSession?.toWireMap()?.let { payload ->
                     GalaxyLogger.log(
                         TAG,
