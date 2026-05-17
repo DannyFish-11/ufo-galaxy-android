@@ -243,6 +243,12 @@ class AndroidCrossRepoRegressionRuntimeHooks(
     private val flowReasons: MutableMap<AndroidCrossRepoRegressionFlow, String> = mutableMapOf()
     private var meshLifecycleState: AndroidMeshLifecycleEmissionChain.SessionState? = null
 
+    /**
+     * Records the current WebSocket connection stage for the Android↔V2 acceptance chain.
+     *
+     * Call this from the connection lifecycle callbacks so the regression snapshot can expose
+     * an explicit connection-stage verdict and reason instead of requiring raw log inspection.
+     */
     fun recordConnection(status: ScenarioOutcomeStatus, reason: String? = null) {
         setFlowOutcome(AndroidCrossRepoRegressionFlow.CONNECTION, status, reason)
     }
@@ -403,6 +409,13 @@ class AndroidCrossRepoRegressionRuntimeHooks(
         }
     }
 
+    /**
+     * Records the latest structured mesh lifecycle emission state for a parallel subtask run.
+     *
+     * The provided [state] is preserved in the exported regression snapshot and is also used
+     * to derive a concrete mesh flow verdict when join/result/leave emission attempts fail or
+     * when the full lifecycle closes successfully.
+     */
     fun recordMeshLifecycle(state: AndroidMeshLifecycleEmissionChain.SessionState) {
         meshLifecycleState = state
         when {
