@@ -507,7 +507,7 @@ class GalaxyConnectionService : Service() {
                 accessibilityReady = UFOGalaxyApplication.appSettings.accessibilityReady,
                 isDegraded = managerStateDegraded()
             )
-            val meshDirectRuntimeForEvent = currentMeshDirectRuntimeSnapshotForEvent(payload)
+            val meshDirectSnapshot = currentMeshDirectRuntimeSnapshotForEvent(payload)
             val eventNormalization = AndroidParticipationSemanticNormalizationContract.derive(
                 AndroidParticipationSemanticNormalizationContract.NormalizationDerivationInput(
                     localModeActive = modeState.executionModeState ==
@@ -639,15 +639,15 @@ class GalaxyConnectionService : Service() {
                 local_execution_active = eventNormalization.localExecutionActive,
                 local_execution_activity_kind = eventNormalization.localExecutionActivityKind.wireValue,
                 participation_semantic_schema_version = AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION,
-                mesh_direct_schema_version = meshDirectRuntimeForEvent?.schemaVersion,
-                mesh_direct_state = meshDirectRuntimeForEvent?.state?.wireValue,
-                mesh_direct_route = meshDirectRuntimeForEvent?.route?.wireValue,
-                mesh_direct_channel_ready = meshDirectRuntimeForEvent?.channelReady,
-                mesh_direct_peer_count = meshDirectRuntimeForEvent?.peerCount,
-                mesh_direct_ready_peer_count = meshDirectRuntimeForEvent?.readyPeerCount,
-                mesh_direct_reason_codes = meshDirectRuntimeForEvent?.reasonCodes ?: emptyList(),
-                mesh_direct_last_attempt_stage = meshDirectRuntimeForEvent?.lastAttemptStage,
-                mesh_direct_last_attempt_succeeded = meshDirectRuntimeForEvent?.lastAttemptSucceeded,
+                mesh_direct_schema_version = meshDirectSnapshot?.schemaVersion,
+                mesh_direct_state = meshDirectSnapshot?.state?.wireValue,
+                mesh_direct_route = meshDirectSnapshot?.route?.wireValue,
+                mesh_direct_channel_ready = meshDirectSnapshot?.channelReady,
+                mesh_direct_peer_count = meshDirectSnapshot?.peerCount,
+                mesh_direct_ready_peer_count = meshDirectSnapshot?.readyPeerCount,
+                mesh_direct_reason_codes = meshDirectSnapshot?.reasonCodes ?: emptyList(),
+                mesh_direct_last_attempt_stage = meshDirectSnapshot?.lastAttemptStage,
+                mesh_direct_last_attempt_succeeded = meshDirectSnapshot?.lastAttemptSucceeded,
                 // ── PR-4Android: 工程边界可靠性字段（在执行事件发射层填充）──────────────────────────
                 // 在单一发射层唯一计算，使 V2 可识别每条执行事件的异步边界类型、
                 // 来源字段完整性等级与权限检查模式，无需 V2 侧推断或容忍缺失字段。
@@ -2000,7 +2000,7 @@ class GalaxyConnectionService : Service() {
                     emitMeshDirectFallbackTransition(
                         taskId = taskId,
                         flowId = activeMeshId,
-                        fallbackReason = meshDirectRuntime.reasonCodes.joinToString(",")
+                        fallbackReason = formatMeshDirectReasonCodes(meshDirectRuntime.reasonCodes)
                     )
                     emitRuntimeDiagnostics(
                         taskId = taskId,
@@ -3260,7 +3260,10 @@ class GalaxyConnectionService : Service() {
     }
 
     private fun formatMeshDirectErrorContext(meshId: String, reasonCodes: List<String>): String =
-        "mesh_id=$meshId reasons=${reasonCodes.joinToString(",")}"
+        "mesh_id=$meshId reasons=${formatMeshDirectReasonCodes(reasonCodes)}"
+
+    private fun formatMeshDirectReasonCodes(reasonCodes: List<String>): String =
+        reasonCodes.joinToString(",")
 
     private fun buildTerminalExecutionEvent(
         taskId: String,
