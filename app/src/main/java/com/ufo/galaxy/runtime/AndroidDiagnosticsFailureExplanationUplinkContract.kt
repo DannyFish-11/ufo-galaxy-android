@@ -102,14 +102,15 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
             .toSet()
     }
 
+    // Accepts source forms like:
+    // - "GalaxyConnectionService.handleGoalExecution"
+    // - "com.ufo.galaxy.runtime.RuntimeController.update"
+    // - "LocalLoopExecutor:progress"
+    private val sourceRootRegex = Regex("\\b([A-Z][A-Za-z0-9_]*)\\b")
+
     private fun isCanonicalRuntimeMainchainSource(sourceComponent: String?): Boolean {
         if (sourceComponent.isNullOrBlank()) return false
-        val sourceRoot = sourceComponent
-            .substringAfterLast('/')
-            .substringBefore('.')
-            .substringBefore(':')
-            .substringBefore('(')
-            .trim()
+        val sourceRoot = sourceRootRegex.find(sourceComponent.trim())?.groupValues?.get(1) ?: return false
         return runtimeMainchainSourceHints.contains(sourceRoot)
     }
 
@@ -129,8 +130,8 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
         "INV-DFE-02: operator_projection_class MUST NOT upgrade projection payloads into authority truth.",
         "INV-DFE-03: diagnostics payload MUST be failure_diagnostics_signal + local_interpretation.",
         "INV-DFE-04: goal result payload MUST be artifact_result_signal; summary/explanation are subordinate projection.",
-        "INV-DFE-05: execution_event authority_runtime_signal MUST originate from minimal runtime mainchain " +
-            "(RuntimeController/GalaxyConnectionService/AutonomousExecutionPipeline/LocalLoopExecutor) " +
+        "INV-DFE-05: execution_event authority_runtime_signal MUST originate from " +
+            "AndroidMinimalRuntimeAccessChainContract.minimalMainChainEntries " +
             "and an execution-capable LocalExecutionModeGate state.",
         "INV-DFE-06: schema version MUST equal SCHEMA_VERSION."
     )
