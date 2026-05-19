@@ -443,6 +443,9 @@ data class DiagnosticsPayload(
     val diagnostic_domain: String? = null,
     val diagnostic_reason: String? = null,
     val local_cause: String? = null,
+    val uplink_semantic_boundary_class: String? = null,
+    val operator_projection_class: String? = null,
+    val diagnostics_failure_explanation_schema_version: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 

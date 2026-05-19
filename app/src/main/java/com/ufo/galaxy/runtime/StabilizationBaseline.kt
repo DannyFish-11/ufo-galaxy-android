@@ -2454,6 +2454,24 @@ object StabilizationBaseline {
                 "StabilizationBaseline: android-distributed-truth-ownership-uplink (introducedPr=99). " +
                 "Test: Pr09AndroidDistributedTruthOwnershipUplinkContractTest.",
             introducedPr = 99
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-diagnostics-failure-explanation-uplink-contract",
+            displayName = "AndroidDiagnosticsFailureExplanationUplinkContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-10Android — Android diagnostics/failure/explanation uplink semantic boundary contract。" +
+                "在 GoalResultPayload、DeviceExecutionEventPayload、DeviceStateSnapshotPayload、DiagnosticsPayload " +
+                "中新增 uplink_semantic_boundary_class/operator_projection_class/" +
+                "diagnostics_failure_explanation_schema_version，固定 authority runtime signal、" +
+                "failure diagnostics signal、artifact/result signal、operator-visible summary/explanation/local interpretation " +
+                "的语义边界，防止 summary/explanation 越权为 authority truth。" +
+                "GalaxyConnectionService 与 GalaxyWebSocketClient 在真实上行链路统一填充字段，" +
+                "使 V2 侧可直接路由到 canonical truth / diagnostics / artifact / operator surface。" +
+                "Test: Pr10AndroidDiagnosticsFailureExplanationUplinkContractTest.",
+            introducedPr = 100
         )
     )
 

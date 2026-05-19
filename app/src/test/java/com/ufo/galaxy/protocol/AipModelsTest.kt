@@ -455,6 +455,9 @@ class AipModelsTest {
         assertNull(payload.diagnostic_domain)
         assertNull(payload.diagnostic_reason)
         assertNull(payload.local_cause)
+        assertNull(payload.uplink_semantic_boundary_class)
+        assertNull(payload.operator_projection_class)
+        assertNull(payload.diagnostics_failure_explanation_schema_version)
         assertTrue(payload.timestamp in before..after)
     }
 
@@ -491,13 +494,19 @@ class AipModelsTest {
             diagnostic_schema_version = "1",
             diagnostic_domain = "mesh_participation",
             diagnostic_reason = "parallel_subtask_timeout",
-            local_cause = "parallel_subtask_pipeline"
+            local_cause = "parallel_subtask_pipeline",
+            uplink_semantic_boundary_class = "failure_diagnostics_signal",
+            operator_projection_class = "local_interpretation",
+            diagnostics_failure_explanation_schema_version = "1"
         )
 
         assertEquals("1", payload.diagnostic_schema_version)
         assertEquals("mesh_participation", payload.diagnostic_domain)
         assertEquals("parallel_subtask_timeout", payload.diagnostic_reason)
         assertEquals("parallel_subtask_pipeline", payload.local_cause)
+        assertEquals("failure_diagnostics_signal", payload.uplink_semantic_boundary_class)
+        assertEquals("local_interpretation", payload.operator_projection_class)
+        assertEquals("1", payload.diagnostics_failure_explanation_schema_version)
     }
 
     // ── MeshJoinPayload (H5) ──────────────────────────────────────────────────

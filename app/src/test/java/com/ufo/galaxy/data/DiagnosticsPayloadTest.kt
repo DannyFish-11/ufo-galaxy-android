@@ -26,6 +26,9 @@ class DiagnosticsPayloadTest {
         assertNull(payload.diagnostic_domain)
         assertNull(payload.diagnostic_reason)
         assertNull(payload.local_cause)
+        assertNull(payload.uplink_semantic_boundary_class)
+        assertNull(payload.operator_projection_class)
+        assertNull(payload.diagnostics_failure_explanation_schema_version)
         assertTrue("timestamp must be positive", payload.timestamp > 0)
     }
 
@@ -71,12 +74,18 @@ class DiagnosticsPayloadTest {
             diagnostic_schema_version = "1",
             diagnostic_domain = "takeover",
             diagnostic_reason = "takeover_execution_failed",
-            local_cause = "takeover_execution"
+            local_cause = "takeover_execution",
+            uplink_semantic_boundary_class = "failure_diagnostics_signal",
+            operator_projection_class = "local_interpretation",
+            diagnostics_failure_explanation_schema_version = "1"
         )
 
         assertEquals("1", payload.diagnostic_schema_version)
         assertEquals("takeover", payload.diagnostic_domain)
         assertEquals("takeover_execution_failed", payload.diagnostic_reason)
         assertEquals("takeover_execution", payload.local_cause)
+        assertEquals("failure_diagnostics_signal", payload.uplink_semantic_boundary_class)
+        assertEquals("local_interpretation", payload.operator_projection_class)
+        assertEquals("1", payload.diagnostics_failure_explanation_schema_version)
     }
 }

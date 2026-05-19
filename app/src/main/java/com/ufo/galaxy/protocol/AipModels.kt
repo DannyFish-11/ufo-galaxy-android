@@ -1214,7 +1214,10 @@ data class GoalResultPayload(
     //   取自 AndroidResultUplinkBoundaryContract.SCHEMA_VERSION。
     val result_signal_class: String? = null,
     val acceptance_candidate_class: String? = null,
-    val result_uplink_boundary_schema_version: String? = null
+    val result_uplink_boundary_schema_version: String? = null,
+    val uplink_semantic_boundary_class: String? = null,
+    val operator_projection_class: String? = null,
+    val diagnostics_failure_explanation_schema_version: String? = null
 )
 
 /**
@@ -1282,6 +1285,9 @@ data class DiagnosticsPayload(
     val diagnostic_domain: String? = null,
     val diagnostic_reason: String? = null,
     val local_cause: String? = null,
+    val uplink_semantic_boundary_class: String? = null,
+    val operator_projection_class: String? = null,
+    val diagnostics_failure_explanation_schema_version: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -2863,6 +2869,9 @@ data class DeviceStateSnapshotPayload(
     val result_signal_class: String? = null,
     val acceptance_candidate_class: String? = null,
     val result_uplink_boundary_schema_version: String? = null,
+    val uplink_semantic_boundary_class: String? = null,
+    val operator_projection_class: String? = null,
+    val diagnostics_failure_explanation_schema_version: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段 ────────────────────────────────────────
     //
@@ -3270,6 +3279,9 @@ data class DeviceExecutionEventPayload(
     val result_signal_class: String? = null,
     val acceptance_candidate_class: String? = null,
     val result_uplink_boundary_schema_version: String? = null,
+    val uplink_semantic_boundary_class: String? = null,
+    val operator_projection_class: String? = null,
+    val diagnostics_failure_explanation_schema_version: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）───────────────────────
     //
