@@ -1184,7 +1184,37 @@ data class GoalResultPayload(
     //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
     val local_llm_ready: Boolean? = null,
     val accessibility_ready: Boolean? = null,
-    val local_mode_capable: Boolean? = null
+    val local_mode_capable: Boolean? = null,
+
+    // ── PR-05v2 (Android): 结果上行闭环边界字段（AndroidResultUplinkBoundaryContract）────────────
+    //
+    // result_signal_class: 本上行信号的结果信号语义分类。
+    //   使 V2 无需字段组合推断即可将结果路由至正确的消费路径。
+    //   Values:
+    //     "authority_result"          — 权威终态结果，V2 MUST 关闭任务（truth anchor）
+    //     "acceptance_closure_signal" — 验收/闭合相关信号，V2 MAY 进入 acceptance adjudication
+    //     "diagnostics_informational" — 诊断性信号，V2 MUST NOT 用于任务关闭
+    //   V2 core/task_result_canonical_truth_chain.py MUST 读取此字段，
+    //   仅对 "authority_result" 执行任务关闭逻辑。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // acceptance_candidate_class: 本上行的验收候选资格分类。
+    //   消除 V2 通过 result_returned + completion_signaled + closure_ready_for_acceptance
+    //   + governance_blocked 四个布尔字段组合推断验收资格的复杂性。
+    //   Values:
+    //     "eligible_for_acceptance"  — 可接受候选结果，V2 可执行 acceptance closure
+    //     "pending_result_return"    — 执行中，等待终态结果
+    //     "acceptance_blocked"       — 治理阻塞或运行时受限，等待约束解除
+    //     "closure_not_applicable"   — 诊断性上行，不纳入验收链
+    //   V2 core/acceptance_adjudication.py MUST 读取此字段，
+    //   仅对 "eligible_for_acceptance" 执行 acceptance closure。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendGoalResult 在发送时填充。
+    //
+    // result_uplink_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidResultUplinkBoundaryContract.SCHEMA_VERSION。
+    val result_signal_class: String? = null,
+    val acceptance_candidate_class: String? = null,
+    val result_uplink_boundary_schema_version: String? = null
 )
 
 /**
@@ -2812,7 +2842,25 @@ data class DeviceStateSnapshotPayload(
     val ingress_boundary_class: String? = null,
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
-    val ingress_schema_version: String? = null
+    val ingress_schema_version: String? = null,
+
+    // ── PR-05v2 (Android): 结果上行闭环边界字段（AndroidResultUplinkBoundaryContract）────────────
+    //
+    // result_signal_class: 快照发送时本信号的结果信号语义分类。
+    //   device_state_snapshot 始终为 "diagnostics_informational"（参与状态快照，非任务结果）。
+    //   V2 core/android_device_state_store.py MUST 对此分类仅存储而不触发任务关闭。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // acceptance_candidate_class: 快照发送时本信号的验收候选资格分类。
+    //   device_state_snapshot 始终为 "closure_not_applicable"（无任务结果语义）。
+    //   V2 MUST NOT 对快照信号执行任何验收或任务关闭操作。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // result_uplink_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidResultUplinkBoundaryContract.SCHEMA_VERSION。
+    val result_signal_class: String? = null,
+    val acceptance_candidate_class: String? = null,
+    val result_uplink_boundary_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -3173,7 +3221,28 @@ data class DeviceExecutionEventPayload(
     //   取自 AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION。
     val dispatch_boundary_class: String? = null,
     val dispatch_path_consumption_kind: String? = null,
-    val dispatch_boundary_schema_version: String? = null
+    val dispatch_boundary_schema_version: String? = null,
+
+    // ── PR-05v2 (Android): 结果上行闭环边界字段（AndroidResultUplinkBoundaryContract）────────────
+    //
+    // result_signal_class: 执行事件发射时本信号的结果信号语义分类。
+    //   使 V2 无需字段组合推断即可将执行事件路由至正确的消费路径。
+    //   Values: "authority_result" | "acceptance_closure_signal" | "diagnostics_informational"
+    //   V2 core/task_result_canonical_truth_chain.py MUST 读取此字段，
+    //   仅对 "authority_result" 执行任务关闭逻辑。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // acceptance_candidate_class: 执行事件发射时本信号的验收候选资格分类。
+    //   Values: "eligible_for_acceptance" | "pending_result_return" | "acceptance_blocked" | "closure_not_applicable"
+    //   V2 core/acceptance_adjudication.py MUST 读取此字段，
+    //   仅对 "eligible_for_acceptance" 执行 acceptance closure。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // result_uplink_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidResultUplinkBoundaryContract.SCHEMA_VERSION。
+    val result_signal_class: String? = null,
+    val acceptance_candidate_class: String? = null,
+    val result_uplink_boundary_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

@@ -47,6 +47,7 @@ import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
 import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
 import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
 import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
+import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
@@ -592,6 +593,19 @@ class GalaxyConnectionService : Service() {
                         governanceTruth.takeover_state == AndroidUnifiedTruthUplinkContract.TAKEOVER_STATE_ACTIVE
                 )
             )
+            // ── PR-05v2 (Android): 预先推导执行事件级结果上行闭环边界快照 ─────────────────────────
+            // 在 payload.copy() 前唯一计算，避免在 copy() 内重复调用 derive()。
+            val eventUplinkBoundary = AndroidResultUplinkBoundaryContract.derive(
+                AndroidResultUplinkBoundaryContract.UplinkBoundaryDerivationInput(
+                    isTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
+                    resultReturned = completionVisibility.resultReturned,
+                    completionSignaled = completionVisibility.completionSignaled,
+                    closureReadyForAcceptance = completionVisibility.closureReadyForAcceptance,
+                    isGovernanceBlocked = governanceTruth.governance_blocked == true,
+                    isRuntimeConstrained = false,
+                    isHoldState = false
+                )
+            )
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -750,7 +764,13 @@ class GalaxyConnectionService : Service() {
                 // 正确的 dispatch 边界类型而无需字段组合推断。
                 dispatch_boundary_class = eventDispatchBoundary.dispatchBoundaryClass.wireValue,
                 dispatch_path_consumption_kind = eventDispatchBoundary.dispatchPathConsumptionKind.wireValue,
-                dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION
+                dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION,
+                // ── PR-05v2 (Android): 结果上行闭环边界字段（在执行事件发射层填充）────────────────────
+                // 从已预计算的 eventUplinkBoundary 直接读取，使 V2 可无歧义地将执行事件路由至
+                // truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
+                result_signal_class = eventUplinkBoundary.resultSignalClass.wireValue,
+                acceptance_candidate_class = eventUplinkBoundary.acceptanceCandidateClass.wireValue,
+                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -2952,6 +2972,21 @@ class GalaxyConnectionService : Service() {
                 participationKind = participationKind,
                 taskSucceeded = normalizedLifecycleStatus == EdgeExecutor.STATUS_SUCCESS
             ).wireValue
+        // ── PR-05v2 (Android): 预先推导结果上行闭环边界快照 ─────────────────────────────────────
+        // 在 result.copy() 前唯一计算，使 V2 可无歧义地将 goal_execution_result 路由至
+        // truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
+        val resultUplinkBoundary = AndroidResultUplinkBoundaryContract.derive(
+            AndroidResultUplinkBoundaryContract.UplinkBoundaryDerivationInput(
+                isTerminalPhase = true,
+                resultReturned = result.result_returned ?: goalResultCompletionVisibility.resultReturned,
+                completionSignaled = result.completion_signaled ?: goalResultCompletionVisibility.completionSignaled,
+                closureReadyForAcceptance = result.closure_ready_for_acceptance
+                    ?: goalResultCompletionVisibility.closureReadyForAcceptance,
+                isGovernanceBlocked = (result.governance_blocked ?: governanceTruth.governance_blocked) == true,
+                isRuntimeConstrained = constraintSem.isConstraint,
+                isHoldState = resolvedIsHoldState
+            )
+        )
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
@@ -2997,7 +3032,13 @@ class GalaxyConnectionService : Service() {
             unified_lifecycle_schema_version = result.unified_lifecycle_schema_version
                 ?: AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
             execution_spine_participation_kind = resolvedSpineParticipation,
-            problem_solving_closure_class = resolvedProblemClosureClass
+            problem_solving_closure_class = resolvedProblemClosureClass,
+            // ── PR-05v2 (Android): 结果上行闭环边界字段（在单一发送层强制填充）────────────────────────
+            // 从已预计算的 resultUplinkBoundary 直接读取，使 V2 可无歧义地将 goal_execution_result
+            // 路由至 truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
+            result_signal_class = resultUplinkBoundary.resultSignalClass.wireValue,
+            acceptance_candidate_class = resultUplinkBoundary.acceptanceCandidateClass.wireValue,
+            result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -4423,7 +4464,13 @@ class GalaxyConnectionService : Service() {
                 ingress_boundary_class = snapshotIngress.boundaryClass.wireValue,
                 ingress_consumption_kind = snapshotIngress.consumptionKind.wireValue,
                 ingress_signal_class = snapshotIngress.signalClass.wireValue,
-                ingress_schema_version = snapshotIngress.schemaVersion
+                ingress_schema_version = snapshotIngress.schemaVersion,
+                // ── PR-05v2 (Android): 结果上行闭环边界字段（在快照发送层填充）──────────────────────
+                // device_state_snapshot 始终为诊断性信号：无任务结果语义，V2 MUST NOT 用于任务关闭。
+                // 这使 V2 core/android_device_state_store.py 可直接读取字段而无需推断快照信号类型。
+                result_signal_class = AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL.wireValue,
+                acceptance_candidate_class = AndroidResultUplinkBoundaryContract.AcceptanceCandidateClass.CLOSURE_NOT_APPLICABLE.wireValue,
+                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
