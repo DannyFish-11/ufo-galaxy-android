@@ -3078,6 +3078,23 @@ class GalaxyConnectionService : Service() {
                 closureReadyForAcceptance = resolvedGoalClosureReady,
                 operatorProjectionClass = resultSemanticBoundary.operatorProjectionClass
             )
+        // ── PR-08v2 (Android): 结果上行分布式运行参与边界快照 ─────────────────────────────────────
+        // 在 result.copy() 前唯一计算，确保 goal_execution_result 与执行事件/状态快照在
+        // distributed runtime participation 语义上保持同一合约。
+        val resultParticipationBoundary = AndroidDistributedRuntimeParticipationBoundaryContract.derive(
+            AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
+                sourceRuntimePosture = result.source_runtime_posture
+                    ?: UFOGalaxyApplication.runtimeController.hostSessionSnapshot?.posture
+                    ?: SourceRuntimePosture.CONTROL_ONLY,
+                executionBusy = resolvedGoalResultReturned && !isHoldStatus,
+                executionModeStateWire = resolvedModeState,
+                crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+                isFallbackTierActive = false,
+                isCapabilityDegraded = resultManagerDegraded,
+                takeoverActive = currentActiveTakeoverId() != null,
+                isDiagnosticsSignal = false
+            )
+        )
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
@@ -3143,7 +3160,12 @@ class GalaxyConnectionService : Service() {
             operator_done_projection_class = resultCompletionClosureBoundary
                 .operatorDoneProjectionClass.wireValue,
             completion_closure_uplink_schema_version =
-                AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+                AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+            participation_boundary_role = resultParticipationBoundary.participationBoundaryRole.wireValue,
+            ownership_posture_class = resultParticipationBoundary.ownershipPostureClass.wireValue,
+            remote_local_mode_class = resultParticipationBoundary.remoteLocalModeClass.wireValue,
+            participation_boundary_schema_version =
+                AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,

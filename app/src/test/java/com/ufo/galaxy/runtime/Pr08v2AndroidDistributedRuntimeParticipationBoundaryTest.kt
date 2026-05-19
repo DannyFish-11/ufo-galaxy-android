@@ -1,5 +1,6 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.protocol.GoalResultPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -793,5 +794,65 @@ class Pr08v2AndroidDistributedRuntimeParticipationBoundaryTest {
             "HANDOFF_PARTICIPANT ownershipPostureClass must differ from RUNTIME_HOST_EXECUTOR",
             handoffPosture != executorPosture
         )
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 15. GoalResultPayload participation boundary fields (result uplink)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `GoalResultPayload supports participation boundary fields for result uplink`() {
+        val snapshot = AndroidDistributedRuntimeParticipationBoundaryContract.derive(
+            AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
+                sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME,
+                executionBusy = true,
+                executionModeStateWire = LocalExecutionModeGate.ExecutionModeState.CROSS_DEVICE_ACTIVE.wireValue,
+                crossDeviceEnabled = true,
+                isFallbackTierActive = false,
+                isCapabilityDegraded = false,
+                takeoverActive = false,
+                isDiagnosticsSignal = false
+            )
+        )
+        val payload = GoalResultPayload(
+            task_id = "task-pr08-result-boundary",
+            status = "success",
+            participation_boundary_role = snapshot.participationBoundaryRole.wireValue,
+            ownership_posture_class = snapshot.ownershipPostureClass.wireValue,
+            remote_local_mode_class = snapshot.remoteLocalModeClass.wireValue,
+            participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
+        )
+
+        assertEquals(
+            AndroidDistributedRuntimeParticipationBoundaryContract
+                .ParticipationBoundaryRole.DISTRIBUTED_RUNTIME_PARTICIPANT.wireValue,
+            payload.participation_boundary_role
+        )
+        assertEquals(
+            AndroidDistributedRuntimeParticipationBoundaryContract
+                .OwnershipPostureClass.RUNTIME_HOST_EXECUTOR.wireValue,
+            payload.ownership_posture_class
+        )
+        assertEquals(
+            AndroidDistributedRuntimeParticipationBoundaryContract
+                .RemoteLocalModeClass.DISTRIBUTED_EXECUTING.wireValue,
+            payload.remote_local_mode_class
+        )
+        assertEquals(
+            AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION,
+            payload.participation_boundary_schema_version
+        )
+    }
+
+    @Test
+    fun `GoalResultPayload participation boundary defaults are nullable for legacy senders`() {
+        val payload = GoalResultPayload(
+            task_id = "task-pr08-result-legacy",
+            status = "success"
+        )
+        assertEquals(null, payload.participation_boundary_role)
+        assertEquals(null, payload.ownership_posture_class)
+        assertEquals(null, payload.remote_local_mode_class)
+        assertEquals(null, payload.participation_boundary_schema_version)
     }
 }
