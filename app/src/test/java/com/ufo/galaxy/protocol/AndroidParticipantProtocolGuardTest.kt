@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.data.InMemoryAppSettings
+import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import org.junit.Assert.assertEquals
@@ -450,7 +451,17 @@ class AndroidParticipantProtocolGuardTest {
             reported_state_semantic_class = "active_runtime",
             local_observation_basis = "live_runtime",
             evidence_presence_kind = AndroidTruthPublicationSemanticsContract
-                .EvidencePresenceKind.UNKNOWN.wireValue
+                .EvidencePresenceKind.UNKNOWN.wireValue,
+            authority_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .AuthoritySignalClass.DIAGNOSTICS_AUDIT.wireValue,
+            ownership_uplink_class = AndroidDistributedTruthOwnershipUplinkContract
+                .OwnershipUplinkClass.NO_TRANSFER.wireValue,
+            session_continuity_class = AndroidDistributedTruthOwnershipUplinkContract
+                .SessionContinuityClass.SESSION_RECOVERY_PENDING.wireValue,
+            device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .DevicePostureSignalClass.RUNTIME_NODE_RECOVERING.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
 
         val obj = gson.fromJson(gson.toJson(payload), JsonObject::class.java)
@@ -459,11 +470,18 @@ class AndroidParticipantProtocolGuardTest {
         assertTrue(obj.has("reported_state_semantic_class"))
         assertTrue(obj.has("local_observation_basis"))
         assertTrue(obj.has("evidence_presence_kind"))
+        assertTrue(obj.has("authority_signal_class"))
+        assertTrue(obj.has("ownership_uplink_class"))
+        assertTrue(obj.has("session_continuity_class"))
+        assertTrue(obj.has("device_posture_signal_class"))
+        assertTrue(obj.has("distributed_truth_ownership_uplink_schema_version"))
         assertEquals("starting", obj.get("carrier_runtime_state").asString)
         assertEquals("recovering", obj.get("reconnect_recovery_state").asString)
         assertEquals("active_runtime", obj.get("reported_state_semantic_class").asString)
         assertEquals("live_runtime", obj.get("local_observation_basis").asString)
         assertEquals("unknown", obj.get("evidence_presence_kind").asString)
+        assertEquals("diagnostics_audit", obj.get("authority_signal_class").asString)
+        assertEquals("no_transfer", obj.get("ownership_uplink_class").asString)
     }
 
     @Test
@@ -483,7 +501,17 @@ class AndroidParticipantProtocolGuardTest {
             lifecycle_state_uplink_required = true,
             lifecycle_terminal_phase = true,
             evidence_presence_kind = AndroidTruthPublicationSemanticsContract
-                .EvidencePresenceKind.FAILED_OBSERVATION.wireValue
+                .EvidencePresenceKind.FAILED_OBSERVATION.wireValue,
+            authority_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .AuthoritySignalClass.AUTHORITY_RUNTIME.wireValue,
+            ownership_uplink_class = AndroidDistributedTruthOwnershipUplinkContract
+                .OwnershipUplinkClass.AUTHORITY_HELD.wireValue,
+            session_continuity_class = AndroidDistributedTruthOwnershipUplinkContract
+                .SessionContinuityClass.SESSION_LIVE_AUTHORITATIVE.wireValue,
+            device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .DevicePostureSignalClass.RUNTIME_NODE_ACTIVE.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
 
         val obj = gson.fromJson(gson.toJson(payload), JsonObject::class.java)
@@ -498,9 +526,69 @@ class AndroidParticipantProtocolGuardTest {
         assertTrue(obj.has("lifecycle_state_uplink_required"))
         assertTrue(obj.has("lifecycle_terminal_phase"))
         assertTrue(obj.has("evidence_presence_kind"))
+        assertTrue(obj.has("authority_signal_class"))
+        assertTrue(obj.has("ownership_uplink_class"))
+        assertTrue(obj.has("session_continuity_class"))
+        assertTrue(obj.has("device_posture_signal_class"))
+        assertTrue(obj.has("distributed_truth_ownership_uplink_schema_version"))
         assertEquals("failed", obj.get("execution_lifecycle_phase").asString)
         assertEquals("active", obj.get("previous_execution_lifecycle_phase").asString)
         assertEquals("failed_observation", obj.get("evidence_presence_kind").asString)
+        assertEquals("authority_runtime", obj.get("authority_signal_class").asString)
+        assertEquals("authority_held", obj.get("ownership_uplink_class").asString)
+    }
+
+    @Test
+    fun `goal_result publishes distributed truth ownership boundary fields for V2`() {
+        val payload = GoalResultPayload(
+            task_id = "guard-goal-result-01",
+            status = "success",
+            result = "done",
+            device_id = "guard-device-22",
+            authority_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .AuthoritySignalClass.AUTHORITY_RUNTIME.wireValue,
+            ownership_uplink_class = AndroidDistributedTruthOwnershipUplinkContract
+                .OwnershipUplinkClass.AUTHORITY_HELD.wireValue,
+            session_continuity_class = AndroidDistributedTruthOwnershipUplinkContract
+                .SessionContinuityClass.SESSION_LIVE_AUTHORITATIVE.wireValue,
+            device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .DevicePostureSignalClass.RUNTIME_NODE_ACTIVE.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
+        )
+
+        val obj = gson.fromJson(gson.toJson(payload), JsonObject::class.java)
+        assertEquals("authority_runtime", obj.get("authority_signal_class").asString)
+        assertEquals("authority_held", obj.get("ownership_uplink_class").asString)
+        assertEquals("session_live_authoritative", obj.get("session_continuity_class").asString)
+        assertEquals("runtime_node_active", obj.get("device_posture_signal_class").asString)
+    }
+
+    @Test
+    fun `diagnostics payload publishes distributed truth ownership boundary fields for V2`() {
+        val payload = DiagnosticsPayload(
+            task_id = "guard-diag-01",
+            device_id = "guard-device-33",
+            node_name = "transport",
+            error_type = "timeout",
+            error_context = "socket timeout",
+            authority_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .AuthoritySignalClass.DIAGNOSTICS_AUDIT.wireValue,
+            ownership_uplink_class = AndroidDistributedTruthOwnershipUplinkContract
+                .OwnershipUplinkClass.NO_TRANSFER.wireValue,
+            session_continuity_class = AndroidDistributedTruthOwnershipUplinkContract
+                .SessionContinuityClass.SESSION_CONTINUATION.wireValue,
+            device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
+                .DevicePostureSignalClass.POSTURE_SIGNAL_ONLY.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
+        )
+
+        val obj = gson.fromJson(gson.toJson(payload), JsonObject::class.java)
+        assertEquals("diagnostics_audit", obj.get("authority_signal_class").asString)
+        assertEquals("no_transfer", obj.get("ownership_uplink_class").asString)
+        assertEquals("session_continuation", obj.get("session_continuity_class").asString)
+        assertEquals("posture_signal_only", obj.get("device_posture_signal_class").asString)
     }
 
     @Test

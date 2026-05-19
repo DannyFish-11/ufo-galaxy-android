@@ -13,6 +13,7 @@ import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
+import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
@@ -509,6 +510,15 @@ class GalaxyWebSocketClient(
      * `session_continuity_epoch` wire field when [durableSessionId] is non-null.
      */
     internal fun getSessionContinuityEpoch(): Int? = sessionContinuityEpoch
+
+    private fun currentRegistrationPosture(): String {
+        val goalExecutionEnabled = (deviceMetadata["goal_execution_enabled"] as? Boolean) == true
+        return if (crossDeviceEnabled && goalExecutionEnabled) {
+            SourceRuntimePosture.JOIN_RUNTIME
+        } else {
+            SourceRuntimePosture.CONTROL_ONLY
+        }
+    }
 
     /**
      * Additional action capabilities reported when models are loaded.
@@ -1068,11 +1078,7 @@ class GalaxyWebSocketClient(
         // 此字段，实现更早、更准确的参与层级推断，而无需等待后续快照或执行事件。
         // 推导规则：crossDeviceEnabled && goal_execution_enabled → join_runtime；否则 control_only。
         // 两条握手消息（device_register + capability_report）携带相同值以保证一致性。
-        val registrationPosture = run {
-            val goalExecutionEnabled = deviceMetadata["goal_execution_enabled"] as? Boolean ?: false
-            if (crossDeviceEnabled && goalExecutionEnabled) SourceRuntimePosture.JOIN_RUNTIME
-            else SourceRuntimePosture.CONTROL_ONLY
-        }
+        val registrationPosture = currentRegistrationPosture()
 
         // Step 1: device_register — server expects this before capability_report (H2)
         val register = JsonObject().apply {
@@ -1275,6 +1281,22 @@ class GalaxyWebSocketClient(
         )
         val diagnosticsBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
             .forDiagnosticsPayload()
+        val truthOwnershipBoundary = AndroidDistributedTruthOwnershipUplinkContract.derive(
+            AndroidDistributedTruthOwnershipUplinkContract.TruthOwnershipUplinkDerivationInput(
+                executionBusy = false,
+                crossDeviceEnabled = crossDeviceEnabled,
+                sourceRuntimePosture = currentRegistrationPosture(),
+                takeoverActive = false,
+                isHandoffInitiator = false,
+                isOwnershipReturnPending = false,
+                sessionId = runtimeSessionId,
+                isSessionRecoveryActive = false,
+                isCapabilityDegraded = false,
+                isRecoveryActive = false,
+                isDiagnosticsSignal = true,
+                isOperatorVisibleSummary = false
+            )
+        )
 
         val diagnosticsPayload = DiagnosticsPayload(
             task_id = taskId,
@@ -1289,7 +1311,13 @@ class GalaxyWebSocketClient(
             uplink_semantic_boundary_class = diagnosticsBoundary.uplinkSemanticBoundaryClass.wireValue,
             operator_projection_class = diagnosticsBoundary.operatorProjectionClass.wireValue,
             diagnostics_failure_explanation_schema_version =
-                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION
+                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
+            authority_signal_class = truthOwnershipBoundary.authoritySignalClass.wireValue,
+            ownership_uplink_class = truthOwnershipBoundary.ownershipUplinkClass.wireValue,
+            session_continuity_class = truthOwnershipBoundary.sessionContinuityClass.wireValue,
+            device_posture_signal_class = truthOwnershipBoundary.devicePostureSignalClass.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.DIAGNOSTICS_PAYLOAD,

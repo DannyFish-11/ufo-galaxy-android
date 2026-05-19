@@ -48,6 +48,7 @@ import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
 import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
 import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDistributedRuntimeParticipationBoundaryContract
+import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
@@ -312,6 +313,36 @@ class GalaxyConnectionService : Service() {
             operatorSuspendedOrIsolated = eligibilityContext.operatorSuspendedOrIsolated
         )
     }
+
+    private fun deriveTruthOwnershipBoundary(
+        executionBusy: Boolean,
+        sourceRuntimePosture: String,
+        takeoverActive: Boolean,
+        sessionId: String?,
+        isSessionRecoveryActive: Boolean,
+        isCapabilityDegraded: Boolean,
+        isRecoveryActive: Boolean,
+        isDiagnosticsSignal: Boolean,
+        isOperatorVisibleSummary: Boolean,
+        isHandoffInitiator: Boolean = false,
+        isOwnershipReturnPending: Boolean = false
+    ): AndroidDistributedTruthOwnershipUplinkContract.TruthOwnershipUplinkSnapshot =
+        AndroidDistributedTruthOwnershipUplinkContract.derive(
+            AndroidDistributedTruthOwnershipUplinkContract.TruthOwnershipUplinkDerivationInput(
+                executionBusy = executionBusy,
+                crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+                sourceRuntimePosture = SourceRuntimePosture.fromValue(sourceRuntimePosture),
+                takeoverActive = takeoverActive,
+                isHandoffInitiator = isHandoffInitiator,
+                isOwnershipReturnPending = isOwnershipReturnPending,
+                sessionId = sessionId,
+                isSessionRecoveryActive = isSessionRecoveryActive,
+                isCapabilityDegraded = isCapabilityDegraded,
+                isRecoveryActive = isRecoveryActive,
+                isDiagnosticsSignal = isDiagnosticsSignal,
+                isOperatorVisibleSummary = isOperatorVisibleSummary
+            )
+        )
 
     private fun clearActiveTakeoverIdIfMatches(expectedTakeoverId: String) {
         synchronized(activeTakeoverLock) {
@@ -625,6 +656,24 @@ class GalaxyConnectionService : Service() {
                     closureReadyForAcceptance = completionVisibility.closureReadyForAcceptance,
                     operatorProjectionClass = eventSemanticBoundary.operatorProjectionClass
                 )
+            val eventHasCanonicalTruthSignal =
+                eventStamp.lifecycleTerminalPhase == true &&
+                    eventUplinkBoundary.resultSignalClass !=
+                    AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL
+            val eventRepresentsHandoff =
+                payload.phase == DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE
+            val eventTruthOwnershipBoundary = deriveTruthOwnershipBoundary(
+                executionBusy = (eventStamp.executionBusy == true) || eventHasCanonicalTruthSignal,
+                sourceRuntimePosture = runtimeController.hostSessionSnapshot?.posture
+                    ?: SourceRuntimePosture.CONTROL_ONLY,
+                takeoverActive = eventRepresentsHandoff,
+                sessionId = UFOGalaxyApplication.runtimeSessionId,
+                isSessionRecoveryActive = reconnectState == ReconnectRecoveryState.RECOVERING.wireValue,
+                isCapabilityDegraded = managerStateDegraded(),
+                isRecoveryActive = reconnectState == ReconnectRecoveryState.RECOVERING.wireValue,
+                isDiagnosticsSignal = !eventRepresentsHandoff && !eventHasCanonicalTruthSignal,
+                isOperatorVisibleSummary = false
+            )
             // ── PR-08v2 (Android): 预先推导执行事件级分布式运行参与边界快照 ────────────────────────
             // 在 payload.copy() 前唯一计算，避免在 copy() 内重复调用 derive()。
             // isDiagnosticsSignal=false 使推导规则真实反映 Android 在执行事件发射时的角色，
@@ -839,7 +888,14 @@ class GalaxyConnectionService : Service() {
                 participation_boundary_role = eventParticipationBoundary?.participationBoundaryRole?.wireValue,
                 ownership_posture_class = eventParticipationBoundary?.ownershipPostureClass?.wireValue,
                 remote_local_mode_class = eventParticipationBoundary?.remoteLocalModeClass?.wireValue,
-                participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
+                participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION,
+                authority_signal_class = eventTruthOwnershipBoundary.authoritySignalClass.wireValue,
+                ownership_uplink_class = eventTruthOwnershipBoundary.ownershipUplinkClass.wireValue,
+                session_continuity_class = eventTruthOwnershipBoundary.sessionContinuityClass.wireValue,
+                device_posture_signal_class =
+                    eventTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
+                distributed_truth_ownership_uplink_schema_version =
+                    AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -3078,6 +3134,24 @@ class GalaxyConnectionService : Service() {
                 closureReadyForAcceptance = resolvedGoalClosureReady,
                 operatorProjectionClass = resultSemanticBoundary.operatorProjectionClass
             )
+        val resultTruthOwnershipBoundary = deriveTruthOwnershipBoundary(
+            executionBusy = resolvedGoalResultReturned ||
+                resolvedGoalCompletionSignaled ||
+                resolvedGoalClosureReady,
+            sourceRuntimePosture = result.source_runtime_posture
+                ?: UFOGalaxyApplication.runtimeController.hostSessionSnapshot?.posture
+                ?: SourceRuntimePosture.CONTROL_ONLY,
+            takeoverActive = false,
+            sessionId = runtimeSession,
+            isSessionRecoveryActive = UFOGalaxyApplication.runtimeController
+                .reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING,
+            isCapabilityDegraded = resultManagerDegraded,
+            isRecoveryActive = UFOGalaxyApplication.runtimeController
+                .reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING,
+            isDiagnosticsSignal = resultUplinkBoundary.resultSignalClass ==
+                AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL,
+            isOperatorVisibleSummary = false
+        )
         // ── PR-08v2 (Android): 结果上行分布式运行参与边界快照 ─────────────────────────────────────
         // 在 result.copy() 前唯一计算，确保 goal_execution_result 与执行事件/状态快照在
         // distributed runtime participation 语义上保持同一合约。
@@ -3165,7 +3239,14 @@ class GalaxyConnectionService : Service() {
             ownership_posture_class = resultParticipationBoundary.ownershipPostureClass.wireValue,
             remote_local_mode_class = resultParticipationBoundary.remoteLocalModeClass.wireValue,
             participation_boundary_schema_version =
-                AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
+                AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION,
+            authority_signal_class = resultTruthOwnershipBoundary.authoritySignalClass.wireValue,
+            ownership_uplink_class = resultTruthOwnershipBoundary.ownershipUplinkClass.wireValue,
+            session_continuity_class = resultTruthOwnershipBoundary.sessionContinuityClass.wireValue,
+            device_posture_signal_class =
+                resultTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -4417,6 +4498,21 @@ class GalaxyConnectionService : Service() {
                 Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not derive participation boundary snapshot: ${e.message}")
                 null
             }
+            val snapshotTruthOwnershipBoundary = deriveTruthOwnershipBoundary(
+                executionBusy = snapshotStamp.executionBusy == true,
+                sourceRuntimePosture = UFOGalaxyApplication.runtimeController
+                    .hostSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                takeoverActive = false,
+                sessionId = UFOGalaxyApplication.runtimeSessionId,
+                isSessionRecoveryActive =
+                    reconnectRecoveryState == ReconnectRecoveryState.RECOVERING.wireValue,
+                isCapabilityDegraded = capabilityDegradedForMode,
+                isRecoveryActive =
+                    reconnectRecoveryState == ReconnectRecoveryState.RECOVERING.wireValue ||
+                        managerState is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Recovering,
+                isDiagnosticsSignal = true,
+                isOperatorVisibleSummary = false
+            )
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -4648,7 +4744,14 @@ class GalaxyConnectionService : Service() {
                 participation_boundary_role = snapshotParticipationBoundary?.participationBoundaryRole?.wireValue,
                 ownership_posture_class = snapshotParticipationBoundary?.ownershipPostureClass?.wireValue,
                 remote_local_mode_class = snapshotParticipationBoundary?.remoteLocalModeClass?.wireValue,
-                participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
+                participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION,
+                authority_signal_class = snapshotTruthOwnershipBoundary.authoritySignalClass.wireValue,
+                ownership_uplink_class = snapshotTruthOwnershipBoundary.ownershipUplinkClass.wireValue,
+                session_continuity_class = snapshotTruthOwnershipBoundary.sessionContinuityClass.wireValue,
+                device_posture_signal_class =
+                    snapshotTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
+                distributed_truth_ownership_uplink_schema_version =
+                    AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(

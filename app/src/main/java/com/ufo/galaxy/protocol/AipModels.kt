@@ -1242,7 +1242,15 @@ data class GoalResultPayload(
     val participation_boundary_role: String? = null,
     val ownership_posture_class: String? = null,
     val remote_local_mode_class: String? = null,
-    val participation_boundary_schema_version: String? = null
+    val participation_boundary_schema_version: String? = null,
+    // PR-09Android: distributed truth / ownership uplink boundary fields.
+    // These keep transport/reporting/result carriers distinct from canonical truth / handoff /
+    // diagnostics semantics so V2 can route Android uplinks without weakening authoritative input.
+    val authority_signal_class: String? = null,
+    val ownership_uplink_class: String? = null,
+    val session_continuity_class: String? = null,
+    val device_posture_signal_class: String? = null,
+    val distributed_truth_ownership_uplink_schema_version: String? = null
 )
 
 /**
@@ -1313,6 +1321,11 @@ data class DiagnosticsPayload(
     val uplink_semantic_boundary_class: String? = null,
     val operator_projection_class: String? = null,
     val diagnostics_failure_explanation_schema_version: String? = null,
+    val authority_signal_class: String? = null,
+    val ownership_uplink_class: String? = null,
+    val session_continuity_class: String? = null,
+    val device_posture_signal_class: String? = null,
+    val distributed_truth_ownership_uplink_schema_version: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -2941,7 +2954,15 @@ data class DeviceStateSnapshotPayload(
     val participation_boundary_role: String? = null,
     val ownership_posture_class: String? = null,
     val remote_local_mode_class: String? = null,
-    val participation_boundary_schema_version: String? = null
+    val participation_boundary_schema_version: String? = null,
+    // PR-09Android: distributed truth / ownership uplink boundary fields for snapshot/reporting
+    // carriers. device_state_snapshot remains ordinary reporting / diagnostics, but now declares
+    // that explicitly instead of forcing V2 to infer it from mixed fields.
+    val authority_signal_class: String? = null,
+    val ownership_uplink_class: String? = null,
+    val session_continuity_class: String? = null,
+    val device_posture_signal_class: String? = null,
+    val distributed_truth_ownership_uplink_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -3353,7 +3374,15 @@ data class DeviceExecutionEventPayload(
     val participation_boundary_role: String? = null,
     val ownership_posture_class: String? = null,
     val remote_local_mode_class: String? = null,
-    val participation_boundary_schema_version: String? = null
+    val participation_boundary_schema_version: String? = null,
+    // PR-09Android: distributed truth / ownership uplink boundary fields for execution events.
+    // These let V2 distinguish transport/reporting flow from canonical result truth and
+    // handoff/ownership governance without re-deriving semantics from event phase names.
+    val authority_signal_class: String? = null,
+    val ownership_uplink_class: String? = null,
+    val session_continuity_class: String? = null,
+    val device_posture_signal_class: String? = null,
+    val distributed_truth_ownership_uplink_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.
