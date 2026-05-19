@@ -24,7 +24,7 @@ package com.ufo.galaxy.runtime
  *
  * [AndroidCrossDeviceDispatchBoundaryContract] 在现有执行路径和运行时信号之上引入：
  *
- * - [DispatchBoundaryClass]：4 值枚举，声明 Android 当前消费的 dispatch 边界类型，
+ * - [DispatchBoundaryClass]：5 值枚举，声明 Android 当前消费的 dispatch 边界类型，
  *   与 V2 PR-02v2 的 `dispatch_path` 词汇直接对应，使 V2 可在不进行字段组合推断的情况下
  *   建立跨仓 dispatch 叙事一致性。
  * - [DispatchPathConsumptionKind]：3 值枚举，声明 Android 在当前 dispatch 边界中
