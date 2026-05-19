@@ -1217,7 +1217,12 @@ data class GoalResultPayload(
     val result_uplink_boundary_schema_version: String? = null,
     val uplink_semantic_boundary_class: String? = null,
     val operator_projection_class: String? = null,
-    val diagnostics_failure_explanation_schema_version: String? = null
+    val diagnostics_failure_explanation_schema_version: String? = null,
+    val authority_runtime_completion_signal_class: String? = null,
+    val result_completion_signal_class: String? = null,
+    val closure_finalization_signal_class: String? = null,
+    val operator_done_projection_class: String? = null,
+    val completion_closure_uplink_schema_version: String? = null
 )
 
 /**
@@ -2887,6 +2892,11 @@ data class DeviceStateSnapshotPayload(
     val uplink_semantic_boundary_class: String? = null,
     val operator_projection_class: String? = null,
     val diagnostics_failure_explanation_schema_version: String? = null,
+    val authority_runtime_completion_signal_class: String? = null,
+    val result_completion_signal_class: String? = null,
+    val closure_finalization_signal_class: String? = null,
+    val operator_done_projection_class: String? = null,
+    val completion_closure_uplink_schema_version: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段 ────────────────────────────────────────
     //
@@ -3297,6 +3307,11 @@ data class DeviceExecutionEventPayload(
     val uplink_semantic_boundary_class: String? = null,
     val operator_projection_class: String? = null,
     val diagnostics_failure_explanation_schema_version: String? = null,
+    val authority_runtime_completion_signal_class: String? = null,
+    val result_completion_signal_class: String? = null,
+    val closure_finalization_signal_class: String? = null,
+    val operator_done_projection_class: String? = null,
+    val completion_closure_uplink_schema_version: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）───────────────────────
     //
