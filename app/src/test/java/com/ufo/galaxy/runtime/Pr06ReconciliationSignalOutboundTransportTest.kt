@@ -115,7 +115,14 @@ class Pr06ReconciliationSignalOutboundTransportTest {
             correlation_id = signal.correlationId,
             session_id = null,
             payload = signal.payload,
-            runtime_truth = signal.runtimeTruth?.toMap()
+            runtime_truth = signal.runtimeTruth?.toMap(),
+            ingress_boundary_class = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyReconciliation(signal.kind).boundaryClass.wireValue,
+            ingress_consumption_kind = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyReconciliation(signal.kind).consumptionKind.wireValue,
+            ingress_signal_class = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyReconciliation(signal.kind).signalClass.wireValue,
+            ingress_schema_version = AndroidGovernanceExecutionPolicyIngressContract.SCHEMA_VERSION
         )
 
     private fun toEnvelopeJson(signal: ReconciliationSignal, deviceId: String = "device-pr06"): String {
@@ -236,6 +243,26 @@ class Pr06ReconciliationSignalOutboundTransportTest {
         val signal = makeParticipantStateSignal()
         val payload = toPayload(signal)
         assertEquals("participant_state", payload.kind)
+    }
+
+    @Test
+    fun `PARTICIPANT_STATE payload is marked as canonical governance ingress`() {
+        val payload = toPayload(makeParticipantStateSignal())
+        assertEquals(
+            AndroidGovernanceExecutionPolicyIngressContract.IngressBoundaryClass
+                .CANONICAL_GOVERNANCE_EXECUTION_POLICY.wireValue,
+            payload.ingress_boundary_class
+        )
+    }
+
+    @Test
+    fun `TASK_RESULT payload is marked as generic transport ingress`() {
+        val payload = toPayload(makeTaskResultSignal())
+        assertEquals(
+            AndroidGovernanceExecutionPolicyIngressContract.IngressBoundaryClass
+                .GENERIC_TRANSPORT_REPORTING.wireValue,
+            payload.ingress_boundary_class
+        )
     }
 
     @Test

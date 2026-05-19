@@ -601,6 +601,58 @@ class Pr4AndroidEvaluatorArtifactEmissionTest {
     }
 
     @Test
+    fun `evaluator payloads expose canonical ingress boundary markers`() {
+        val governanceIngress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.DEVICE_GOVERNANCE_REPORT)
+        val acceptanceIngress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.DEVICE_ACCEPTANCE_REPORT)
+        val strategyIngress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.DEVICE_STRATEGY_REPORT)
+
+        val governancePayload = DeviceGovernanceReportPayload(
+            artifact_tag = DelegatedRuntimePostGraduationGovernanceEvaluator
+                .ARTIFACT_DEVICE_GOVERNANCE_UNKNOWN_DUE_TO_MISSING_SIGNAL,
+            snapshot_id = "snap-gov-ingress",
+            device_id = "device-gov-ingress",
+            session_id = null,
+            ingress_boundary_class = governanceIngress.boundaryClass.wireValue,
+            ingress_consumption_kind = governanceIngress.consumptionKind.wireValue,
+            ingress_signal_class = governanceIngress.signalClass.wireValue,
+            ingress_schema_version = governanceIngress.schemaVersion
+        )
+        val acceptancePayload = DeviceAcceptanceReportPayload(
+            artifact_tag = DelegatedRuntimeAcceptanceEvaluator
+                .ARTIFACT_DEVICE_ACCEPTANCE_UNKNOWN_DUE_TO_INCOMPLETE_SIGNAL,
+            snapshot_id = "snap-acc-ingress",
+            device_id = "device-acc-ingress",
+            session_id = null,
+            ingress_boundary_class = acceptanceIngress.boundaryClass.wireValue,
+            ingress_consumption_kind = acceptanceIngress.consumptionKind.wireValue,
+            ingress_signal_class = acceptanceIngress.signalClass.wireValue,
+            ingress_schema_version = acceptanceIngress.schemaVersion
+        )
+        val strategyPayload = DeviceStrategyReportPayload(
+            artifact_tag = DelegatedRuntimeStrategyEvaluator
+                .ARTIFACT_DEVICE_STRATEGY_UNKNOWN_DUE_TO_MISSING_PROGRAM_SIGNAL,
+            snapshot_id = "snap-str-ingress",
+            device_id = "device-str-ingress",
+            session_id = null,
+            ingress_boundary_class = strategyIngress.boundaryClass.wireValue,
+            ingress_consumption_kind = strategyIngress.consumptionKind.wireValue,
+            ingress_signal_class = strategyIngress.signalClass.wireValue,
+            ingress_schema_version = strategyIngress.schemaVersion
+        )
+
+        assertEquals(
+            AndroidGovernanceExecutionPolicyIngressContract.IngressBoundaryClass
+                .CANONICAL_GOVERNANCE_EXECUTION_POLICY.wireValue,
+            governancePayload.ingress_boundary_class
+        )
+        assertEquals(governancePayload.ingress_boundary_class, acceptancePayload.ingress_boundary_class)
+        assertEquals(strategyPayload.ingress_boundary_class, governancePayload.ingress_boundary_class)
+    }
+
+    @Test
     fun `all three new MsgType entries are distinct`() {
         val governance = MsgType.DEVICE_GOVERNANCE_REPORT.value
         val acceptance = MsgType.DEVICE_ACCEPTANCE_REPORT.value
