@@ -50,6 +50,7 @@ import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDistributedRuntimeParticipationBoundaryContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
@@ -614,6 +615,16 @@ class GalaxyConnectionService : Service() {
                     lifecycleTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
                     resultSignalClass = eventUplinkBoundary.resultSignalClass
                 )
+            val eventCompletionClosureBoundary = AndroidCompletionClosureUplinkContract
+                .deriveForExecutionEvent(
+                    isLifecycleTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
+                    resultSignalClass = eventUplinkBoundary.resultSignalClass,
+                    acceptanceCandidateClass = eventUplinkBoundary.acceptanceCandidateClass,
+                    resultReturned = completionVisibility.resultReturned,
+                    completionSignaled = completionVisibility.completionSignaled,
+                    closureReadyForAcceptance = completionVisibility.closureReadyForAcceptance,
+                    operatorProjectionClass = eventSemanticBoundary.operatorProjectionClass
+                )
             // ── PR-08v2 (Android): 预先推导执行事件级分布式运行参与边界快照 ────────────────────────
             // 在 payload.copy() 前唯一计算，避免在 copy() 内重复调用 derive()。
             // isDiagnosticsSignal=false 使推导规则真实反映 Android 在执行事件发射时的角色，
@@ -810,6 +821,16 @@ class GalaxyConnectionService : Service() {
                 operator_projection_class = eventSemanticBoundary.operatorProjectionClass.wireValue,
                 diagnostics_failure_explanation_schema_version =
                     AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
+                authority_runtime_completion_signal_class = eventCompletionClosureBoundary
+                    .authorityRuntimeCompletionSignalClass.wireValue,
+                result_completion_signal_class = eventCompletionClosureBoundary
+                    .resultCompletionSignalClass.wireValue,
+                closure_finalization_signal_class = eventCompletionClosureBoundary
+                    .closureFinalizationSignalClass.wireValue,
+                operator_done_projection_class = eventCompletionClosureBoundary
+                    .operatorDoneProjectionClass.wireValue,
+                completion_closure_uplink_schema_version =
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）────────────────
                 // 从已预计算的 eventParticipationBoundary 直接读取，使 V2 可无歧义地将执行事件
                 // 路由至正确的分布式运行参与链，无需字段组合推断。
@@ -3042,6 +3063,21 @@ class GalaxyConnectionService : Service() {
                 details = result.details,
                 error = result.error
             )
+        val resolvedGoalResultReturned = result.result_returned ?: goalResultCompletionVisibility.resultReturned
+        val resolvedGoalCompletionSignaled = result.completion_signaled
+            ?: goalResultCompletionVisibility.completionSignaled
+        val resolvedGoalClosureReady = result.closure_ready_for_acceptance
+            ?: goalResultCompletionVisibility.closureReadyForAcceptance
+        val resultCompletionClosureBoundary = AndroidCompletionClosureUplinkContract
+            .deriveForGoalResult(
+                isLifecycleTerminalPhase = !isHoldStatus,
+                resultSignalClass = resultUplinkBoundary.resultSignalClass,
+                acceptanceCandidateClass = resultUplinkBoundary.acceptanceCandidateClass,
+                resultReturned = resolvedGoalResultReturned,
+                completionSignaled = resolvedGoalCompletionSignaled,
+                closureReadyForAcceptance = resolvedGoalClosureReady,
+                operatorProjectionClass = resultSemanticBoundary.operatorProjectionClass
+            )
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
@@ -3079,10 +3115,9 @@ class GalaxyConnectionService : Service() {
             local_llm_ready = localLlmReady,
             accessibility_ready = accessibilityReady,
             local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable,
-            result_returned = result.result_returned ?: goalResultCompletionVisibility.resultReturned,
-            completion_signaled = result.completion_signaled ?: goalResultCompletionVisibility.completionSignaled,
-            closure_ready_for_acceptance = result.closure_ready_for_acceptance
-                ?: goalResultCompletionVisibility.closureReadyForAcceptance,
+            result_returned = resolvedGoalResultReturned,
+            completion_signaled = resolvedGoalCompletionSignaled,
+            closure_ready_for_acceptance = resolvedGoalClosureReady,
             unified_lifecycle_phase = result.unified_lifecycle_phase ?: resultUnifiedLifecyclePhase,
             unified_lifecycle_schema_version = result.unified_lifecycle_schema_version
                 ?: AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
@@ -3098,7 +3133,17 @@ class GalaxyConnectionService : Service() {
                 resultSemanticBoundary.uplinkSemanticBoundaryClass.wireValue,
             operator_projection_class = resultSemanticBoundary.operatorProjectionClass.wireValue,
             diagnostics_failure_explanation_schema_version =
-                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION
+                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
+            authority_runtime_completion_signal_class = resultCompletionClosureBoundary
+                .authorityRuntimeCompletionSignalClass.wireValue,
+            result_completion_signal_class = resultCompletionClosureBoundary
+                .resultCompletionSignalClass.wireValue,
+            closure_finalization_signal_class = resultCompletionClosureBoundary
+                .closureFinalizationSignalClass.wireValue,
+            operator_done_projection_class = resultCompletionClosureBoundary
+                .operatorDoneProjectionClass.wireValue,
+            completion_closure_uplink_schema_version =
+                AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -4325,6 +4370,8 @@ class GalaxyConnectionService : Service() {
                 .classifyMsgType(MsgType.DEVICE_STATE_SNAPSHOT)
             val snapshotSemanticBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
                 .forDeviceStateSnapshot()
+            val snapshotCompletionClosureBoundary = AndroidCompletionClosureUplinkContract
+                .deriveForDeviceStateSnapshot()
 
             // ── PR-08v2 (Android): 预先推导分布式运行参与边界快照（在快照发送层唯一计算）────────────
             // device_state_snapshot 为诊断性信号，isDiagnosticsSignal=true 确保 role 始终为
@@ -4560,6 +4607,16 @@ class GalaxyConnectionService : Service() {
                 operator_projection_class = snapshotSemanticBoundary.operatorProjectionClass.wireValue,
                 diagnostics_failure_explanation_schema_version =
                     AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
+                authority_runtime_completion_signal_class = snapshotCompletionClosureBoundary
+                    .authorityRuntimeCompletionSignalClass.wireValue,
+                result_completion_signal_class = snapshotCompletionClosureBoundary
+                    .resultCompletionSignalClass.wireValue,
+                closure_finalization_signal_class = snapshotCompletionClosureBoundary
+                    .closureFinalizationSignalClass.wireValue,
+                operator_done_projection_class = snapshotCompletionClosureBoundary
+                    .operatorDoneProjectionClass.wireValue,
+                completion_closure_uplink_schema_version =
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在快照发送层填充）────────────────────
                 // device_state_snapshot 为诊断性信号，participation_boundary_role 始终为
                 // DIAGNOSTICS_SUMMARY_ONLY，明确声明本快照不参与 distributed runtime 决策，

@@ -358,6 +358,25 @@ class Pr52ReconciliationSignalEmissionTest {
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_RESULT_RETURNED])
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_COMPLETION_SIGNALED])
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE])
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.AuthorityRuntimeCompletionSignalClass
+                .NOT_RUNTIME_COMPLETION.wireValue,
+            signal.payload[ReconciliationSignal.KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.ResultCompletionSignalClass
+                .RESULT_INFORMATIONAL.wireValue,
+            signal.payload[ReconciliationSignal.KEY_RESULT_COMPLETION_SIGNAL_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.ClosureFinalizationSignalClass
+                .SESSION_FINALIZATION_NOT_APPLICABLE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+            signal.payload[ReconciliationSignal.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION]
+        )
     }
 
     @Test
@@ -581,6 +600,16 @@ class Pr52ReconciliationSignalEmissionTest {
         val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
         assertNotNull(signal)
         assertEquals(ReconciliationSignal.STATUS_SUCCESS, signal!!.status)
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.AuthorityRuntimeCompletionSignalClass
+                .RUNTIME_COMPLETION_EVIDENCE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.ResultCompletionSignalClass
+                .RESULT_COMPLETED.wireValue,
+            signal.payload[ReconciliationSignal.KEY_RESULT_COMPLETION_SIGNAL_CLASS]
+        )
     }
 
     // ── RuntimeController — publishTaskCancelled ──────────────────────────────

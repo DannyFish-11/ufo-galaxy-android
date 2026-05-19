@@ -269,6 +269,26 @@ data class ReconciliationSignal(
          */
         const val KEY_CLOSURE_READY_FOR_ACCEPTANCE = "closure_ready_for_acceptance"
 
+        /** Payload key: authority runtime completion signal class. */
+        const val KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS
+
+        /** Payload key: result completion signal class. */
+        const val KEY_RESULT_COMPLETION_SIGNAL_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_RESULT_COMPLETION_SIGNAL_CLASS
+
+        /** Payload key: closure/session-finalization signal class. */
+        const val KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS
+
+        /** Payload key: operator-visible done projection class. */
+        const val KEY_OPERATOR_DONE_PROJECTION_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_OPERATOR_DONE_PROJECTION_CLASS
+
+        /** Payload key: completion/closure uplink schema version. */
+        const val KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION =
+            AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION
+
         /** Wire key for [signalId]. */
         const val KEY_SIGNAL_ID = "reconciliation_signal_id"
 
@@ -369,14 +389,34 @@ data class ReconciliationSignal(
         const val STATUS_SNAPSHOT = "snapshot"
 
         private fun closureSemanticsPayload(
+            isTerminalSignal: Boolean,
             resultReturned: Boolean,
             completionSignaled: Boolean,
             closureReadyForAcceptance: Boolean
-        ): Map<String, Any?> = mapOf(
-            KEY_RESULT_RETURNED to resultReturned,
-            KEY_COMPLETION_SIGNALED to completionSignaled,
-            KEY_CLOSURE_READY_FOR_ACCEPTANCE to closureReadyForAcceptance
-        )
+        ): Map<String, Any?> {
+            val completionClosure = AndroidCompletionClosureUplinkContract
+                .deriveForReconciliationSignal(
+                    isTerminalSignal = isTerminalSignal,
+                    resultReturned = resultReturned,
+                    completionSignaled = completionSignaled,
+                    closureReadyForAcceptance = closureReadyForAcceptance
+                )
+            return mapOf(
+                KEY_RESULT_RETURNED to resultReturned,
+                KEY_COMPLETION_SIGNALED to completionSignaled,
+                KEY_CLOSURE_READY_FOR_ACCEPTANCE to closureReadyForAcceptance,
+                KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS to
+                    completionClosure.authorityRuntimeCompletionSignalClass.wireValue,
+                KEY_RESULT_COMPLETION_SIGNAL_CLASS to
+                    completionClosure.resultCompletionSignalClass.wireValue,
+                KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS to
+                    completionClosure.closureFinalizationSignalClass.wireValue,
+                KEY_OPERATOR_DONE_PROJECTION_CLASS to
+                    completionClosure.operatorDoneProjectionClass.wireValue,
+                KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION to
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+            )
+        }
 
         // ── Factories ─────────────────────────────────────────────────────────
 
@@ -407,6 +447,7 @@ data class ReconciliationSignal(
             correlationId = correlationId,
             status = STATUS_RUNNING,
             payload = closureSemanticsPayload(
+                isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false
@@ -445,6 +486,7 @@ data class ReconciliationSignal(
             correlationId = correlationId,
             status = STATUS_CANCELLED,
             payload = closureSemanticsPayload(
+                isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false
@@ -480,6 +522,7 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
             val payload = closureSemanticsPayload(
+                isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false
@@ -528,6 +571,7 @@ data class ReconciliationSignal(
             correlationId = correlationId,
             status = STATUS_SUCCESS,
             payload = closureSemanticsPayload(
+                isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false
@@ -565,10 +609,12 @@ data class ReconciliationSignal(
             durableSessionId: String? = null,
             sessionContinuityEpoch: Int? = null
         ): ReconciliationSignal {
-            val payload = buildMap<String, Any?> {
-                put(KEY_RESULT_RETURNED, false)
-                put(KEY_COMPLETION_SIGNALED, false)
-                put(KEY_CLOSURE_READY_FOR_ACCEPTANCE, false)
+            val payload = closureSemanticsPayload(
+                isTerminalSignal = false,
+                resultReturned = false,
+                completionSignaled = false,
+                closureReadyForAcceptance = false
+            ).toMutableMap().apply {
                 progressDetail?.let { put("progress_detail", it) }
             }
             return ReconciliationSignal(
@@ -619,6 +665,7 @@ data class ReconciliationSignal(
             val payload = buildMap<String, Any?> {
                 putAll(
                     closureSemanticsPayload(
+                        isTerminalSignal = false,
                         resultReturned = false,
                         completionSignaled = false,
                         closureReadyForAcceptance = false
@@ -664,6 +711,7 @@ data class ReconciliationSignal(
             correlationId = null,
             status = STATUS_SNAPSHOT,
             payload = closureSemanticsPayload(
+                isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false

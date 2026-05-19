@@ -2493,6 +2493,25 @@ object StabilizationBaseline {
                 "task_result_canonical_truth_chain/operator_perception_surface。"+
                 "Test: Pr11AndroidToolActionAuthorizationUplinkContractTest.",
             introducedPr = 101
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-completion-closure-uplink-contract",
+            displayName = "AndroidCompletionClosureUplinkContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-12Android — completion/closure uplink 收束合约。" +
+                "在既有 result_signal_class + acceptance_candidate_class + " +
+                "uplink_semantic_boundary_class + operator_projection_class 基础上，" +
+                "新增 authority_runtime_completion_signal_class/result_completion_signal_class/" +
+                "closure_finalization_signal_class/operator_done_projection_class，" +
+                "固定 authority runtime completion、result completion、closure/finalization、" +
+                "operator-visible done summary/explanation 的边界，防止 operator 投影越权成为 authority 完成真相。" +
+                "GalaxyConnectionService 在 goal_result/device_execution_event/device_state_snapshot 真实上行链统一填充；" +
+                "RuntimeController 通过 ReconciliationSignal 工厂将同类边界键纳入 payload。" +
+                "Test: Pr12AndroidCompletionClosureUplinkContractTest.",
+            introducedPr = 102
         )
     )
 
