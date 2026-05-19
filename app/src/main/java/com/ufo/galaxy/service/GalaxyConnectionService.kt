@@ -47,6 +47,7 @@ import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
 import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
 import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
 import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
+import com.ufo.galaxy.runtime.AndroidDistributedRuntimeParticipationBoundaryContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
@@ -606,6 +607,32 @@ class GalaxyConnectionService : Service() {
                     isHoldState = false
                 )
             )
+            // ── PR-08v2 (Android): 预先推导执行事件级分布式运行参与边界快照 ────────────────────────
+            // 在 payload.copy() 前唯一计算，避免在 copy() 内重复调用 derive()。
+            // isDiagnosticsSignal=false 使推导规则真实反映 Android 在执行事件发射时的角色，
+            // 区分正在分布式执行（DISTRIBUTED_RUNTIME_PARTICIPANT）、fallback 本地执行
+            // （REMOTE_LOCAL_MODE_FALLBACK）与 handoff 参与（HANDOFF_PARTICIPANT）。
+            val eventParticipationBoundary = try {
+                val eventFallbackActive = payload.fallback_tier != null
+                val eventCapabilityDegraded = modeState.executionModeState ==
+                    LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue &&
+                    payload.fallback_tier != null
+                AndroidDistributedRuntimeParticipationBoundaryContract.derive(
+                    AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
+                        sourceRuntimePosture = UFOGalaxyApplication.runtimeController
+                            .hostSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                        executionBusy = eventStamp.executionBusy == true,
+                        executionModeStateWire = modeState.executionModeState,
+                        crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
+                        isFallbackTierActive = eventFallbackActive,
+                        isCapabilityDegraded = eventCapabilityDegraded,
+                        takeoverActive = payload.phase == DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                        isDiagnosticsSignal = false
+                    )
+                )
+            } catch (e: Exception) {
+                null
+            }
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -770,7 +797,16 @@ class GalaxyConnectionService : Service() {
                 // truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
                 result_signal_class = eventUplinkBoundary.resultSignalClass.wireValue,
                 acceptance_candidate_class = eventUplinkBoundary.acceptanceCandidateClass.wireValue,
-                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION
+                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
+                // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）────────────────
+                // 从已预计算的 eventParticipationBoundary 直接读取，使 V2 可无歧义地将执行事件
+                // 路由至正确的分布式运行参与链，无需字段组合推断。
+                // isDiagnosticsSignal=false 确保真实角色（DISTRIBUTED_RUNTIME_PARTICIPANT /
+                // REMOTE_LOCAL_MODE_FALLBACK / HANDOFF_PARTICIPANT）得到正确反映。
+                participation_boundary_role = eventParticipationBoundary?.participationBoundaryRole?.wireValue,
+                ownership_posture_class = eventParticipationBoundary?.ownershipPostureClass?.wireValue,
+                remote_local_mode_class = eventParticipationBoundary?.remoteLocalModeClass?.wireValue,
+                participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -4264,6 +4300,29 @@ class GalaxyConnectionService : Service() {
             val snapshotIngress = AndroidGovernanceExecutionPolicyIngressContract
                 .classifyMsgType(MsgType.DEVICE_STATE_SNAPSHOT)
 
+            // ── PR-08v2 (Android): 预先推导分布式运行参与边界快照（在快照发送层唯一计算）────────────
+            // device_state_snapshot 为诊断性信号，isDiagnosticsSignal=true 确保 role 始终为
+            // DIAGNOSTICS_SUMMARY_ONLY，同时填充 ownership_posture_class 和 remote_local_mode_class
+            // 供 V2 建立 Android 模式/姿态的历史轨迹，而不误用为 authority 决策依据。
+            val snapshotParticipationBoundary = try {
+                AndroidDistributedRuntimeParticipationBoundaryContract.derive(
+                    AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
+                        sourceRuntimePosture = UFOGalaxyApplication.runtimeController
+                            .hostSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                        executionBusy = snapshotStamp.executionBusy == true,
+                        executionModeStateWire = modeState.executionModeState,
+                        crossDeviceEnabled = settings.crossDeviceEnabled,
+                        isFallbackTierActive = snapshotFallbackActive,
+                        isCapabilityDegraded = capabilityDegradedForMode,
+                        takeoverActive = currentActiveTakeoverId() != null,
+                        isDiagnosticsSignal = true
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "[DEVICE_STATE_SNAPSHOT] could not derive participation boundary snapshot: ${e.message}")
+                null
+            }
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -4470,7 +4529,17 @@ class GalaxyConnectionService : Service() {
                 // 这使 V2 core/android_device_state_store.py 可直接读取字段而无需推断快照信号类型。
                 result_signal_class = AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL.wireValue,
                 acceptance_candidate_class = AndroidResultUplinkBoundaryContract.AcceptanceCandidateClass.CLOSURE_NOT_APPLICABLE.wireValue,
-                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION
+                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
+                // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在快照发送层填充）────────────────────
+                // device_state_snapshot 为诊断性信号，participation_boundary_role 始终为
+                // DIAGNOSTICS_SUMMARY_ONLY，明确声明本快照不参与 distributed runtime 决策，
+                // 防止 V2 将 operator-visible 摘要误用为 authority basis。
+                // ownership_posture_class 和 remote_local_mode_class 从快照发送时的真实运行时状态
+                // 推导，供 V2 在存储快照时建立 Android 模式/姿态的历史轨迹。
+                participation_boundary_role = snapshotParticipationBoundary?.participationBoundaryRole?.wireValue,
+                ownership_posture_class = snapshotParticipationBoundary?.ownershipPostureClass?.wireValue,
+                remote_local_mode_class = snapshotParticipationBoundary?.remoteLocalModeClass?.wireValue,
+                participation_boundary_schema_version = AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(

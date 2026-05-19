@@ -2862,7 +2862,32 @@ data class DeviceStateSnapshotPayload(
     //   取自 AndroidResultUplinkBoundaryContract.SCHEMA_VERSION。
     val result_signal_class: String? = null,
     val acceptance_candidate_class: String? = null,
-    val result_uplink_boundary_schema_version: String? = null
+    val result_uplink_boundary_schema_version: String? = null,
+
+    // ── PR-08v2 (Android): 分布式运行参与边界收束字段 ────────────────────────────────────────
+    //
+    // participation_boundary_role: 本快照发送时 Android 的参与边界角色分类。
+    //   由 AndroidDistributedRuntimeParticipationBoundaryContract.derive() 推导。
+    //   V2 MUST read this field to determine Android's current distributed runtime role;
+    //   MUST NOT re-derive from field combinations (distributed_participant + execution_mode_state).
+    //   device_state_snapshot 为诊断性信号，始终为 "diagnostics_summary_only"。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // ownership_posture_class: 本快照发送时 Android 的 ownership posture 语义分类。
+    //   V2 MAY 用于 dispatch routing；MUST NOT 用于 authority closure 或 takeover 终局判断。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // remote_local_mode_class: 本快照发送时 Android 的 remote/local 执行模式分类。
+    //   区分主动声明的本地模式（local_only_declared）与 fallback 转入（fallback_local / degraded_fallback）。
+    //   V2 MUST 区分这两种状态：主动声明表示策略性选择，不是能力故障。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // participation_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION。
+    val participation_boundary_role: String? = null,
+    val ownership_posture_class: String? = null,
+    val remote_local_mode_class: String? = null,
+    val participation_boundary_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -3244,7 +3269,29 @@ data class DeviceExecutionEventPayload(
     //   取自 AndroidResultUplinkBoundaryContract.SCHEMA_VERSION。
     val result_signal_class: String? = null,
     val acceptance_candidate_class: String? = null,
-    val result_uplink_boundary_schema_version: String? = null
+    val result_uplink_boundary_schema_version: String? = null,
+
+    // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）───────────────────────
+    //
+    // participation_boundary_role: 执行事件发射时 Android 的参与边界角色分类。
+    //   由 AndroidDistributedRuntimeParticipationBoundaryContract.derive() 推导。
+    //   V2 MUST read this field to route execution events to the correct distributed runtime chain.
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // ownership_posture_class: 执行事件发射时 Android 的 ownership posture 语义分类。
+    //   V2 MAY 用于 dispatch routing；MUST NOT 用于 authority closure 或 takeover 终局判断。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // remote_local_mode_class: 执行事件发射时 Android 的 remote/local 执行模式分类。
+    //   区分主动声明的本地模式（local_only_declared）与 fallback 转入（fallback_local / degraded_fallback）。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // participation_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION。
+    val participation_boundary_role: String? = null,
+    val ownership_posture_class: String? = null,
+    val remote_local_mode_class: String? = null,
+    val participation_boundary_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

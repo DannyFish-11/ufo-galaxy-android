@@ -2392,6 +2392,33 @@ object StabilizationBaseline {
                 "core/closure_truth_reconciler.py（acceptance_blocked 等待处理）。" +
                 "Test: Pr05v2AndroidResultUplinkBoundaryTest.",
             introducedPr = 96
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-distributed-runtime-participation-boundary",
+            displayName = "AndroidDistributedRuntimeParticipationBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-08v2 (Android) — Android 侧分布式运行参与边界收束合约，对应 V2 侧 PR-08v2。" +
+                "引入 ParticipationBoundaryRole（5 值：DISTRIBUTED_RUNTIME_PARTICIPANT / " +
+                "OWNERSHIP_POSTURE_SIGNAL / REMOTE_LOCAL_MODE_FALLBACK / HANDOFF_PARTICIPANT / " +
+                "DIAGNOSTICS_SUMMARY_ONLY），OwnershipPostureClass（4 值：RUNTIME_HOST_EXECUTOR / " +
+                "CONTROL_INITIATOR / HANDOFF_PARTICIPANT / POSTURE_SIGNAL_ONLY），" +
+                "RemoteLocalModeClass（4 值：DISTRIBUTED_EXECUTING / LOCAL_ONLY_DECLARED / " +
+                "FALLBACK_LOCAL / DEGRADED_FALLBACK），ParticipationBoundaryDerivationInput（8 字段），" +
+                "derive()（5 优先级推导规则），ParticipationBoundarySnapshot.toWireMap()，" +
+                "V2_OWNERSHIP_GOVERNANCE_PATH_MAP，PARTICIPATION_BOUNDARY_INVARIANTS（7 条）。" +
+                "DeviceStateSnapshotPayload 和 DeviceExecutionEventPayload 新增 " +
+                "participation_boundary_role / ownership_posture_class / remote_local_mode_class / " +
+                "participation_boundary_schema_version 字段。" +
+                "GalaxyConnectionService.sendDeviceStateSnapshot() 预计算 snapshotParticipationBoundary；" +
+                "deviceExecutionEventSink 预计算 eventParticipationBoundary。" +
+                "明确区分 Android 分布式运行参与、ownership posture 信号、remote/local 模式与 fallback，" +
+                "防止 mode/posture/summary 被误解成完整双向接管已成立。" +
+                "StabilizationBaseline: android-distributed-runtime-participation-boundary (introducedPr=98). " +
+                "Test: Pr08v2AndroidDistributedRuntimeParticipationBoundaryTest.",
+            introducedPr = 98
         )
     )
 
