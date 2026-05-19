@@ -671,6 +671,90 @@ object AndroidCanonicalRuntimeTruthContract {
         return DegradedConditionClass.NOMINAL
     }
 
+    // ── Event semantic projection ──────────────────────────────────────────────
+
+    /**
+     * Unified semantic projection for a runtime execution event.
+     *
+     * This keeps runtime semantic class, degraded-condition class, and observation basis
+     * on a single derivation path so event uplink consumers (state chain / diagnostics chain /
+     * policy chain) do not need to reconcile independently-derived values.
+     */
+    data class EventSemanticProjection(
+        val reportedStateSemanticClass: ReportedStateSemanticClass,
+        val degradedConditionClass: DegradedConditionClass,
+        val localObservationBasis: LocalObservationBasis
+    )
+
+    /**
+     * Derives a canonical [EventSemanticProjection] for execution-event emission.
+     *
+     * [isTerminalLifecyclePhase] has highest precedence and always forces
+     * [ReportedStateSemanticClass.TERMINAL_REPORTING], preventing terminal events from being
+     * accidentally downgraded to active/observation semantics by stale caller-provided hints.
+     */
+    fun deriveEventSemanticProjection(
+        reportedStateSemanticClassWire: String?,
+        isTerminalLifecyclePhase: Boolean,
+        carrierRuntimeState: String?,
+        reconnectRecoveryState: String?,
+        executionModeState: String?,
+        executionBusy: Boolean?,
+        carrierForegroundVisible: Boolean?,
+        plannerFallbackTier: String?,
+        groundingFallbackTier: String?,
+        degradedReasons: List<String>,
+        currentFallbackTier: String?,
+        crossDeviceEligibility: Boolean?,
+        offlineQueueDepth: Int,
+        crossDeviceEnabled: Boolean,
+        wsConnected: Boolean
+    ): EventSemanticProjection {
+        val snapshotSemanticClass = classifySnapshot(
+            carrierRuntimeState = carrierRuntimeState,
+            reconnectRecoveryState = reconnectRecoveryState,
+            executionModeState = executionModeState,
+            executionBusy = executionBusy,
+            meshParticipationLifecycle = null,
+            carrierForegroundVisible = carrierForegroundVisible,
+            plannerFallbackTier = plannerFallbackTier,
+            groundingFallbackTier = groundingFallbackTier
+        )
+        val explicitSemanticClass = ReportedStateSemanticClass.fromWireValue(
+            reportedStateSemanticClassWire
+        )
+        val semanticClass = when {
+            isTerminalLifecyclePhase -> ReportedStateSemanticClass.TERMINAL_REPORTING
+            explicitSemanticClass != null -> explicitSemanticClass
+            else -> snapshotSemanticClass
+        }
+        val degradedClass = classifyDegradedCondition(
+            reconnectRecoveryState = reconnectRecoveryState,
+            degradedReasons = degradedReasons,
+            executionModeState = executionModeState,
+            plannerFallbackTier = plannerFallbackTier,
+            groundingFallbackTier = groundingFallbackTier,
+            currentFallbackTier = currentFallbackTier,
+            meshConstrainedReasons = emptyList(),
+            crossDeviceEligibility = crossDeviceEligibility,
+            plannerReady = null,
+            groundingReady = null,
+            offlineQueueDepth = offlineQueueDepth
+        )
+        val observationBasis = AndroidDeviceSurfaceSourceContract.deriveSnapshotObservationBasis(
+            crossDeviceEnabled = crossDeviceEnabled,
+            wsConnected = wsConnected,
+            reconnectRecoveryState = reconnectRecoveryState,
+            offlineQueueDepth = offlineQueueDepth,
+            reportedStateSemanticClass = semanticClass
+        )
+        return EventSemanticProjection(
+            reportedStateSemanticClass = semanticClass,
+            degradedConditionClass = degradedClass,
+            localObservationBasis = observationBasis
+        )
+    }
+
     // ── Classifier: result uplink semantic class ──────────────────────────────
 
     /**

@@ -490,18 +490,41 @@ class GalaxyConnectionService : Service() {
                 )
             val reconnectState = UFOGalaxyApplication.runtimeController
                 .reconnectRecoveryState.value.wireValue
-            val eventSemanticClass = AndroidCanonicalRuntimeTruthContract
-                .ReportedStateSemanticClass
-                .fromWireValue(payload.reported_state_semantic_class)
-                ?: AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.ACTIVE_RUNTIME
-            val eventObservationBasis =
-                AndroidDeviceSurfaceSourceContract.deriveSnapshotObservationBasis(
-                    crossDeviceEnabled = settings.crossDeviceEnabled,
-                    wsConnected = webSocketClient.isConnected(),
+            val eventOfflineQueueDepth = offlineTaskQueue.queueDepth()
+            val eventDegradedReasons = if (managerStateDegraded()) {
+                listOf("runtime_manager_degraded")
+            } else {
+                emptyList()
+            }
+            val eventSemanticProjection = AndroidCanonicalRuntimeTruthContract
+                .deriveEventSemanticProjection(
+                    reportedStateSemanticClassWire = payload.reported_state_semantic_class,
+                    isTerminalLifecyclePhase = eventStamp.lifecycleTerminalPhase == true,
+                    carrierRuntimeState = payload.carrier_runtime_state
+                        ?: UFOGalaxyApplication.runtimeController.state.value.wireLabel,
                     reconnectRecoveryState = reconnectState,
-                    offlineQueueDepth = offlineTaskQueue.queueDepth(),
-                    reportedStateSemanticClass = eventSemanticClass
+                    executionModeState = modeState.executionModeState,
+                    executionBusy = eventStamp.executionBusy,
+                    carrierForegroundVisible = payload.carrier_foreground_visible
+                        ?: runtimeController.appForegroundVisible.value,
+                    plannerFallbackTier = payload.fallback_tier,
+                    groundingFallbackTier = null,
+                    degradedReasons = eventDegradedReasons,
+                    currentFallbackTier = payload.fallback_tier,
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    offlineQueueDepth = eventOfflineQueueDepth,
+                    crossDeviceEnabled = settings.crossDeviceEnabled,
+                    wsConnected = webSocketClient.isConnected()
                 )
+            val eventConstraintSem = AndroidUnifiedTruthUplinkContract.ConstraintSemantics.derive(
+                isConstrained = eventSemanticProjection.degradedConditionClass ==
+                    AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
+                isDeferred = eventSemanticProjection.degradedConditionClass ==
+                    AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.DELAYED,
+                isLocalModeGateHold = modeState.isHoldState,
+                isExecutionBusy = eventStamp.executionBusy == true,
+                isHold = false
+            )
             // ── PR-3Android: 执行事件参与语义规范化（预计算，避免 copy() 中三次重复 derive() 调用）──
             // localCapabilityStateWire 从 LocalCapabilityState.derive() 在事件发射时计算，
             // 确保降级/不可用路径在执行事件的参与模式分类中同样被正确检测，
@@ -524,8 +547,8 @@ class GalaxyConnectionService : Service() {
                         AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT,
                     delegatedExecutionActive = governanceTruth.delegated_execution_active,
                     takeoverStateWire = governanceTruth.takeover_state,
-                    runtimeConstrained = false,
-                    runtimeDeferred = false,
+                    runtimeConstrained = eventConstraintSem.isConstraint,
+                    runtimeDeferred = eventConstraintSem.isDeferred,
                     governanceBlocked = governanceTruth.governance_blocked,
                     crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
                     dispatchEligible = modeState.crossDeviceEligibility == true,
@@ -629,11 +652,14 @@ class GalaxyConnectionService : Service() {
                 ).wireValue,
                 observability_reliability_class = AndroidRuntimeObservabilityAuditContract.classifyObservabilityReliability(
                     evidencePresenceKind = payload.evidence_presence_kind,
-                    degradedConditionClass = null,
+                    degradedConditionClass = eventSemanticProjection.degradedConditionClass.wireValue,
                     reconnectRecoveryState = reconnectState,
-                    localObservationBasis = eventObservationBasis.wireValue
+                    localObservationBasis = eventSemanticProjection.localObservationBasis.wireValue
                 ).wireValue,
-                local_observation_basis = eventObservationBasis.wireValue,
+                reported_state_semantic_class =
+                    eventSemanticProjection.reportedStateSemanticClass.wireValue,
+                degraded_condition_class = eventSemanticProjection.degradedConditionClass.wireValue,
+                local_observation_basis = eventSemanticProjection.localObservationBasis.wireValue,
                 // ── 统一参与者生命周期阶段字段（在执行事件发射层填充）─────────────────────────────
                 // 确保 V2 可将每个执行事件关联到 Android 在发射时的精确生命周期阶段，
                 // 无需通过 participation_tier + carrier_runtime_state 组合推断。

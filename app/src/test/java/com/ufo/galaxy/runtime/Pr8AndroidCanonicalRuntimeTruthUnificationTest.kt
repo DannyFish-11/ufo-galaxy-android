@@ -625,6 +625,61 @@ class Pr8AndroidCanonicalRuntimeTruthUnificationTest {
         assertEquals(AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.PARTIAL, result)
     }
 
+    @Test
+    fun `deriveEventSemanticProjection forces terminal semantic class on terminal lifecycle phase`() {
+        val projection = AndroidCanonicalRuntimeTruthContract.deriveEventSemanticProjection(
+            reportedStateSemanticClassWire = AndroidCanonicalRuntimeTruthContract
+                .ReportedStateSemanticClass.ACTIVE_RUNTIME.wireValue,
+            isTerminalLifecyclePhase = true,
+            carrierRuntimeState = "active",
+            reconnectRecoveryState = "idle",
+            executionModeState = "cross_device_active",
+            executionBusy = true,
+            carrierForegroundVisible = true,
+            plannerFallbackTier = null,
+            groundingFallbackTier = null,
+            degradedReasons = emptyList(),
+            currentFallbackTier = null,
+            crossDeviceEligibility = true,
+            offlineQueueDepth = 0,
+            crossDeviceEnabled = true,
+            wsConnected = true
+        )
+        assertEquals(
+            AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.TERMINAL_REPORTING,
+            projection.reportedStateSemanticClass
+        )
+    }
+
+    @Test
+    fun `deriveEventSemanticProjection aligns degraded and observation semantics for constrained cached event`() {
+        val projection = AndroidCanonicalRuntimeTruthContract.deriveEventSemanticProjection(
+            reportedStateSemanticClassWire = null,
+            isTerminalLifecyclePhase = false,
+            carrierRuntimeState = "active",
+            reconnectRecoveryState = "recovering",
+            executionModeState = "cross_device_active",
+            executionBusy = false,
+            carrierForegroundVisible = false,
+            plannerFallbackTier = null,
+            groundingFallbackTier = null,
+            degradedReasons = emptyList(),
+            currentFallbackTier = null,
+            crossDeviceEligibility = false,
+            offlineQueueDepth = 2,
+            crossDeviceEnabled = true,
+            wsConnected = false
+        )
+        assertEquals(
+            AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.CONSTRAINED,
+            projection.degradedConditionClass
+        )
+        assertEquals(
+            AndroidCanonicalRuntimeTruthContract.LocalObservationBasis.CACHED_STATE,
+            projection.localObservationBasis
+        )
+    }
+
     // ── classifyResultUplink — result uplink semantic class ───────────────────
 
     @Test
