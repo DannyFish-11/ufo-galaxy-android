@@ -50,6 +50,7 @@ import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDistributedRuntimeParticipationBoundaryContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
+import com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
@@ -5893,6 +5894,16 @@ class GalaxyConnectionService : Service() {
             gson.fromJson(payloadJson, OperatorActionRequestPayload::class.java)
         } catch (e: Exception) {
             val actionId = resolveOperatorActionId(null, inboundActionId)
+            val uplinkBoundary = AndroidToolActionAuthorizationUplinkContract.derive(
+                AndroidToolActionAuthorizationUplinkContract.DerivationInput(
+                    actionKind = "unknown",
+                    phase = OperatorActionResultPayload.PHASE_DECISION,
+                    decisionStatus = OperatorActionResultPayload.DECISION_REJECTED,
+                    executionStatus = OperatorActionResultPayload.EXECUTION_REJECTED,
+                    error = "operator_action_parse_error:failed_to_parse_operator_action_request_payload",
+                    details = emptyMap()
+                )
+            )
             sendOperatorActionResult(
                 OperatorActionResultPayload(
                     action_id = actionId,
@@ -5900,7 +5911,15 @@ class GalaxyConnectionService : Service() {
                     phase = OperatorActionResultPayload.PHASE_DECISION,
                     decision_status = OperatorActionResultPayload.DECISION_REJECTED,
                     execution_status = OperatorActionResultPayload.EXECUTION_REJECTED,
-                    error = "operator_action_parse_error:failed_to_parse_operator_action_request_payload"
+                    error = "operator_action_parse_error:failed_to_parse_operator_action_request_payload",
+                    operator_intent_capture_class = uplinkBoundary.operatorIntentCaptureClass.wireValue,
+                    runtime_authority_class = uplinkBoundary.runtimeAuthorityClass.wireValue,
+                    actual_execution_signal_class = uplinkBoundary.actualExecutionSignalClass.wireValue,
+                    tool_invocation_signal_class = uplinkBoundary.toolInvocationSignalClass.wireValue,
+                    result_reporting_signal_class = uplinkBoundary.resultReportingSignalClass.wireValue,
+                    post_action_explanation_class = uplinkBoundary.postActionExplanationClass.wireValue,
+                    tool_action_authorization_schema_version =
+                        AndroidToolActionAuthorizationUplinkContract.SCHEMA_VERSION
                 )
             )
             return
@@ -5909,6 +5928,16 @@ class GalaxyConnectionService : Service() {
         val resolvedTraceId = resolveExecutionTraceId(traceId ?: request.trace_id)
         val actionKind = AndroidOperatorActionGovernanceContract.ActionKind.fromWire(request.action_kind)
         if (actionKind == null) {
+            val uplinkBoundary = AndroidToolActionAuthorizationUplinkContract.derive(
+                AndroidToolActionAuthorizationUplinkContract.DerivationInput(
+                    actionKind = request.action_kind,
+                    phase = OperatorActionResultPayload.PHASE_DECISION,
+                    decisionStatus = OperatorActionResultPayload.DECISION_REJECTED,
+                    executionStatus = OperatorActionResultPayload.EXECUTION_REJECTED,
+                    error = "operator_action_rejected:unknown_action_kind",
+                    details = emptyMap()
+                )
+            )
             sendOperatorActionResult(
                 OperatorActionResultPayload(
                     action_id = actionId,
@@ -5917,7 +5946,15 @@ class GalaxyConnectionService : Service() {
                     decision_status = OperatorActionResultPayload.DECISION_REJECTED,
                     execution_status = OperatorActionResultPayload.EXECUTION_REJECTED,
                     trace_id = resolvedTraceId,
-                    error = "operator_action_rejected:unknown_action_kind"
+                    error = "operator_action_rejected:unknown_action_kind",
+                    operator_intent_capture_class = uplinkBoundary.operatorIntentCaptureClass.wireValue,
+                    runtime_authority_class = uplinkBoundary.runtimeAuthorityClass.wireValue,
+                    actual_execution_signal_class = uplinkBoundary.actualExecutionSignalClass.wireValue,
+                    tool_invocation_signal_class = uplinkBoundary.toolInvocationSignalClass.wireValue,
+                    result_reporting_signal_class = uplinkBoundary.resultReportingSignalClass.wireValue,
+                    post_action_explanation_class = uplinkBoundary.postActionExplanationClass.wireValue,
+                    tool_action_authorization_schema_version =
+                        AndroidToolActionAuthorizationUplinkContract.SCHEMA_VERSION
                 )
             )
             return
@@ -5952,6 +5989,26 @@ class GalaxyConnectionService : Service() {
             participationContext = receiveTimeParticipationContext
         )
         val eligibility = governanceDecision.eligibility
+        val decisionBoundary = AndroidToolActionAuthorizationUplinkContract.derive(
+            AndroidToolActionAuthorizationUplinkContract.DerivationInput(
+                actionKind = actionKind.wireValue,
+                phase = OperatorActionResultPayload.PHASE_DECISION,
+                decisionStatus = when (eligibility) {
+                    AndroidOperatorActionGovernanceContract.EligibilityDecision.Accepted ->
+                        OperatorActionResultPayload.DECISION_ACCEPTED
+                    is AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected ->
+                        OperatorActionResultPayload.DECISION_REJECTED
+                },
+                executionStatus = when (eligibility) {
+                    AndroidOperatorActionGovernanceContract.EligibilityDecision.Accepted ->
+                        OperatorActionResultPayload.EXECUTION_PENDING
+                    is AndroidOperatorActionGovernanceContract.EligibilityDecision.Rejected ->
+                        OperatorActionResultPayload.EXECUTION_REJECTED
+                },
+                error = governanceDecision.rejectionReason,
+                details = emptyMap()
+            )
+        )
         val decisionPayloadBase = OperatorActionResultPayload(
             action_id = actionId,
             action_kind = actionKind.wireValue,
@@ -5980,6 +6037,14 @@ class GalaxyConnectionService : Service() {
             runtime_constrained = governanceDecision.participationContext.runtimeConstrained,
             runtime_deferred = governanceDecision.participationContext.runtimeDeferred,
             delegated_execution_active = governanceDecision.participationContext.delegatedExecutionActive,
+            operator_intent_capture_class = decisionBoundary.operatorIntentCaptureClass.wireValue,
+            runtime_authority_class = decisionBoundary.runtimeAuthorityClass.wireValue,
+            actual_execution_signal_class = decisionBoundary.actualExecutionSignalClass.wireValue,
+            tool_invocation_signal_class = decisionBoundary.toolInvocationSignalClass.wireValue,
+            result_reporting_signal_class = decisionBoundary.resultReportingSignalClass.wireValue,
+            post_action_explanation_class = decisionBoundary.postActionExplanationClass.wireValue,
+            tool_action_authorization_schema_version =
+                AndroidToolActionAuthorizationUplinkContract.SCHEMA_VERSION,
             attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
             active_takeover_id = currentActiveTakeoverId(),
             error = governanceDecision.rejectionReason
@@ -6014,6 +6079,16 @@ class GalaxyConnectionService : Service() {
                 .reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING,
             isDelegatedExecutionActive = refreshedGovernanceTruth.delegated_execution_active
         )
+        val executionBoundary = AndroidToolActionAuthorizationUplinkContract.derive(
+            AndroidToolActionAuthorizationUplinkContract.DerivationInput(
+                actionKind = actionKind.wireValue,
+                phase = OperatorActionResultPayload.PHASE_EXECUTION,
+                decisionStatus = OperatorActionResultPayload.DECISION_ACCEPTED,
+                executionStatus = executionOutcome.executionStatus,
+                error = executionOutcome.error,
+                details = executionOutcome.details
+            )
+        )
         sendOperatorActionResult(
             decisionPayloadBase.copy(
                 phase = OperatorActionResultPayload.PHASE_EXECUTION,
@@ -6030,6 +6105,10 @@ class GalaxyConnectionService : Service() {
                     .reconnectRecoveryState.value.wireValue,
                 attached_session_id = UFOGalaxyApplication.runtimeController.attachedSession.value?.sessionId,
                 active_takeover_id = currentActiveTakeoverId(),
+                actual_execution_signal_class = executionBoundary.actualExecutionSignalClass.wireValue,
+                tool_invocation_signal_class = executionBoundary.toolInvocationSignalClass.wireValue,
+                result_reporting_signal_class = executionBoundary.resultReportingSignalClass.wireValue,
+                post_action_explanation_class = executionBoundary.postActionExplanationClass.wireValue,
                 error = executionOutcome.error,
                 details = executionOutcome.details
             )

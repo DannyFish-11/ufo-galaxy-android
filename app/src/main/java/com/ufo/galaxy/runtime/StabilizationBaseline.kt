@@ -2472,6 +2472,27 @@ object StabilizationBaseline {
                 "使 V2 侧可直接路由到 canonical truth / diagnostics / artifact / operator surface。" +
                 "Test: Pr10AndroidDiagnosticsFailureExplanationUplinkContractTest.",
             introducedPr = 100
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-tool-action-authorization-uplink-contract",
+            displayName = "AndroidToolActionAuthorizationUplinkContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-11Android — Android tool/action/authorization uplink semantic boundary contract。" +
+                "在 operator_action_result 上行中新增 operator_intent_capture_class/" +
+                "runtime_authority_class/actual_execution_signal_class/tool_invocation_signal_class/" +
+                "result_reporting_signal_class/post_action_explanation_class/" +
+                "tool_action_authorization_schema_version，固定 operator intent capture、" +
+                "runtime-approved execution、actual local side effect/tool invocation、" +
+                "result reporting、post-action explanation 的边界。" +
+                "GalaxyConnectionService.handleOperatorActionRequest 在 DECISION/EXECUTION 两阶段" +
+                "统一使用 derive() 填充边界字段，防止 UI-visible explanation/summary 冒充执行事实。" +
+                "V2 集成链：operator_action_authorization_chain/tool_invocation_signal_chain/" +
+                "task_result_canonical_truth_chain/operator_perception_surface。"+
+                "Test: Pr11AndroidToolActionAuthorizationUplinkContractTest.",
+            introducedPr = 101
         )
     )
 
