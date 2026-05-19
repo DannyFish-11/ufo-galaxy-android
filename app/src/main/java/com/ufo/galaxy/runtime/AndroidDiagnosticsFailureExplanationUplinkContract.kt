@@ -61,10 +61,18 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
 
     fun forExecutionEvent(
         lifecycleTerminalPhase: Boolean,
-        resultSignalClass: AndroidResultUplinkBoundaryContract.ResultSignalClass
+        resultSignalClass: AndroidResultUplinkBoundaryContract.ResultSignalClass,
+        sourceComponent: String?,
+        executionModeStateWire: String?
     ): UplinkSemanticBoundarySnapshot {
+        val sourceIsCanonicalRuntimeMainchain = isCanonicalRuntimeMainchainSource(sourceComponent)
+        val modeState = LocalExecutionModeGate.ExecutionModeState.fromWireValue(executionModeStateWire)
+        val runtimeIsExecutionCapable = modeState == LocalExecutionModeGate.ExecutionModeState.CROSS_DEVICE_ACTIVE ||
+            modeState == LocalExecutionModeGate.ExecutionModeState.CROSS_DEVICE_DEGRADED
         val boundaryClass = if (lifecycleTerminalPhase &&
-            resultSignalClass == AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT
+            resultSignalClass == AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT &&
+            sourceIsCanonicalRuntimeMainchain &&
+            runtimeIsExecutionCapable
         ) {
             UplinkSemanticBoundaryClass.AUTHORITY_RUNTIME_SIGNAL
         } else {
@@ -88,6 +96,16 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
             operatorProjectionClass = OperatorProjectionClass.LOCAL_INTERPRETATION
         )
 
+    private val runtimeMainchainSourceHints: Set<String> =
+        AndroidMinimalRuntimeAccessChainContract.minimalMainChainEntries
+            .map { it.ownerClass.substringAfterLast('.') }
+            .toSet()
+
+    private fun isCanonicalRuntimeMainchainSource(sourceComponent: String?): Boolean {
+        if (sourceComponent.isNullOrBlank()) return false
+        return runtimeMainchainSourceHints.any { sourceComponent.contains(it) }
+    }
+
     val V2_CONSUMPTION_PATH_MAP: Map<UplinkSemanticBoundaryClass, String> = mapOf(
         UplinkSemanticBoundaryClass.AUTHORITY_RUNTIME_SIGNAL to
             "core/task_result_canonical_truth_chain.py",
@@ -104,6 +122,9 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
         "INV-DFE-02: operator_projection_class MUST NOT upgrade projection payloads into authority truth.",
         "INV-DFE-03: diagnostics payload MUST be failure_diagnostics_signal + local_interpretation.",
         "INV-DFE-04: goal result payload MUST be artifact_result_signal; summary/explanation are subordinate projection.",
-        "INV-DFE-05: schema version MUST equal SCHEMA_VERSION."
+        "INV-DFE-05: execution_event authority_runtime_signal MUST originate from minimal runtime mainchain " +
+            "(RuntimeController/GalaxyConnectionService/AutonomousExecutionPipeline/LocalLoopExecutor) " +
+            "and an execution-capable LocalExecutionModeGate state.",
+        "INV-DFE-06: schema version MUST equal SCHEMA_VERSION."
     )
 }

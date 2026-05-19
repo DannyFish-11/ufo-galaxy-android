@@ -46,7 +46,9 @@ class Pr10AndroidDiagnosticsFailureExplanationUplinkContractTest {
     fun `terminal authority execution event maps to authority runtime signal`() {
         val snapshot = AndroidDiagnosticsFailureExplanationUplinkContract.forExecutionEvent(
             lifecycleTerminalPhase = true,
-            resultSignalClass = AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT
+            resultSignalClass = AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT,
+            sourceComponent = "GalaxyConnectionService.handleGoalExecution",
+            executionModeStateWire = LocalExecutionModeGate.ExecutionModeState.CROSS_DEVICE_ACTIVE.wireValue
         )
         assertEquals(
             AndroidDiagnosticsFailureExplanationUplinkContract.UplinkSemanticBoundaryClass.AUTHORITY_RUNTIME_SIGNAL,
@@ -62,7 +64,9 @@ class Pr10AndroidDiagnosticsFailureExplanationUplinkContractTest {
     fun `non authority execution event maps to diagnostics signal`() {
         val snapshot = AndroidDiagnosticsFailureExplanationUplinkContract.forExecutionEvent(
             lifecycleTerminalPhase = false,
-            resultSignalClass = AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL
+            resultSignalClass = AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL,
+            sourceComponent = "DiagnosticsScreen",
+            executionModeStateWire = LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue
         )
         assertEquals(
             AndroidDiagnosticsFailureExplanationUplinkContract.UplinkSemanticBoundaryClass.FAILURE_DIAGNOSTICS_SIGNAL,
@@ -93,6 +97,34 @@ class Pr10AndroidDiagnosticsFailureExplanationUplinkContractTest {
         assertEquals(
             AndroidDiagnosticsFailureExplanationUplinkContract.OperatorProjectionClass.LOCAL_INTERPRETATION,
             snapshot.operatorProjectionClass
+        )
+    }
+
+    @Test
+    fun `terminal authority execution event from non-mainchain source is downgraded to diagnostics`() {
+        val snapshot = AndroidDiagnosticsFailureExplanationUplinkContract.forExecutionEvent(
+            lifecycleTerminalPhase = true,
+            resultSignalClass = AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT,
+            sourceComponent = "MainViewModel",
+            executionModeStateWire = LocalExecutionModeGate.ExecutionModeState.CROSS_DEVICE_ACTIVE.wireValue
+        )
+        assertEquals(
+            AndroidDiagnosticsFailureExplanationUplinkContract.UplinkSemanticBoundaryClass.FAILURE_DIAGNOSTICS_SIGNAL,
+            snapshot.uplinkSemanticBoundaryClass
+        )
+    }
+
+    @Test
+    fun `terminal authority execution event in local-only mode is downgraded to diagnostics`() {
+        val snapshot = AndroidDiagnosticsFailureExplanationUplinkContract.forExecutionEvent(
+            lifecycleTerminalPhase = true,
+            resultSignalClass = AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT,
+            sourceComponent = "RuntimeController",
+            executionModeStateWire = LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue
+        )
+        assertEquals(
+            AndroidDiagnosticsFailureExplanationUplinkContract.UplinkSemanticBoundaryClass.FAILURE_DIAGNOSTICS_SIGNAL,
+            snapshot.uplinkSemanticBoundaryClass
         )
     }
 
