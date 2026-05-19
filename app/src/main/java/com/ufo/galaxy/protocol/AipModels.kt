@@ -2760,7 +2760,35 @@ data class DeviceStateSnapshotPayload(
     // boundary_reliability_schema_version: 本字段组 schema 版本。
     //   取自 AndroidBoundaryReliabilityContract.SCHEMA_VERSION。
     val source_field_coverage_class: String? = null,
-    val boundary_reliability_schema_version: String? = null
+    val boundary_reliability_schema_version: String? = null,
+
+    // ── PR-02v2 (Android): 跨设备 dispatch 边界收束字段（AndroidCrossDeviceDispatchBoundaryContract）──
+    //
+    // dispatch_boundary_class: Android 当前消费的 cross-device dispatch 边界类型分类。
+    //   与 V2 PR-02v2 的 dispatch_path 词汇直接对应，消除 Android ↔ V2 dispatch 叙事漂移。
+    //   Values:
+    //     "canonical_cross_device"        — 主链 canonical cross-device dispatch 路径（V2: canonical_dispatch）
+    //     "controlled_canonical_fallback" — AgentRuntimeBridge 重试耗尽后的受控本地回退（V2: canonical_fallback）
+    //     "compat_fallback"               — 遗留消息映射或 AgentBridge compat 入口路径（V2: compat_fallback）
+    //     "legacy_bypass"                 — 绕过 canonical 链的遗留绕过路径（V2: legacy_bypass）
+    //     "not_cross_device"              — Android 处于本地模式，无 cross-device dispatch 边界
+    //   V2 core/device_router.py MUST 读取此字段与自身 dispatch_path 字段对齐，
+    //   而非通过 execution_path_tag / participation_tier 组合推断。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // dispatch_path_consumption_kind: Android 在当前 dispatch 边界中的消费角色。
+    //   Values:
+    //     "inbound_execution"        — 主链入站执行消费（V2 派发的 task_assign/goal_execution/takeover）
+    //     "local_fallback_execution" — 本地回退消费（canonical 路径失败后的本地执行）
+    //     "none"                     — 无活跃 dispatch 消费
+    //   V2 core/cross_device_coordinator.py MUST 读取此字段识别 Android 在 dispatch 链中的角色。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.sendDeviceStateSnapshot() 在发送时填充。
+    //
+    // dispatch_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION。
+    val dispatch_boundary_class: String? = null,
+    val dispatch_path_consumption_kind: String? = null,
+    val dispatch_boundary_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -3097,7 +3125,31 @@ data class DeviceExecutionEventPayload(
     val async_scope_class: String? = null,
     val source_field_coverage_class: String? = null,
     val authority_boundary_check_mode: String? = null,
-    val boundary_reliability_schema_version: String? = null
+    val boundary_reliability_schema_version: String? = null,
+
+    // ── PR-02v2 (Android): 跨设备 dispatch 边界收束字段（AndroidCrossDeviceDispatchBoundaryContract）──
+    //
+    // dispatch_boundary_class: 执行事件发射时 Android 消费的 cross-device dispatch 边界类型。
+    //   与 V2 PR-02v2 的 dispatch_path 词汇直接对应，使 V2 可将执行事件关联到正确的 dispatch 边界。
+    //   Values:
+    //     "canonical_cross_device"        — 主链 canonical cross-device dispatch 路径
+    //     "controlled_canonical_fallback" — AgentRuntimeBridge 受控本地回退
+    //     "compat_fallback"               — 遗留消息映射或 AgentBridge compat 入口路径
+    //     "legacy_bypass"                 — 遗留绕过路径
+    //     "not_cross_device"              — Android 处于本地模式
+    //   V2 core/device_router.py 和 core/cross_device_coordinator.py MUST 读取此字段
+    //   与自身 dispatch_path 字段对齐，而非通过组合推断。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // dispatch_path_consumption_kind: 执行事件发射时 Android 在 dispatch 边界中的消费角色。
+    //   Values: "inbound_execution" | "local_fallback_execution" | "none"。
+    //   Null 仅作为防御性默认值；GalaxyConnectionService.deviceExecutionEventSink 在发射时填充。
+    //
+    // dispatch_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION。
+    val dispatch_boundary_class: String? = null,
+    val dispatch_path_consumption_kind: String? = null,
+    val dispatch_boundary_schema_version: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

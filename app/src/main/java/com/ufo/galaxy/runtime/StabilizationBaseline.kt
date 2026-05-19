@@ -2269,6 +2269,52 @@ object StabilizationBaseline {
                 "metrics/android_reliability_metrics.py（source_field_coverage_class SLO）。" +
                 "Test: Pr4AndroidBoundaryReliabilityContractTest.",
             introducedPr = 94
+        ),
+
+        // ── PR-02v2 (Android): 跨设备 dispatch 边界收束合约 ─────────────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-cross-device-dispatch-boundary-contract",
+            displayName = "AndroidCrossDeviceDispatchBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-02v2 (Android) 跨设备 dispatch 边界收束合约，是 V2 仓库 PR-02v2 的 Android 侧联动 PR。" +
+                "在此合约引入之前，Android 侧上行消息缺少对 cross-device dispatch 边界类型的机器可读声明：" +
+                "V2 已通过 PR-02v2 在 DeviceRouter/CapabilityOrchestrator/CrossDeviceCoordinator 中引入" +
+                "dispatch_path/route_mode/fallback_reason 等 dispatch contract 语义字段，" +
+                "但 Android 侧对应的 dispatch 边界消费分类一直隐式存在，" +
+                "导致 V2 无法直接将 Android 上行消息与自身的 dispatch_path 字段建立跨仓关联。" +
+                "引入 DispatchBoundaryClass（5 值枚举：" +
+                "CANONICAL_CROSS_DEVICE（V2: canonical_dispatch）、" +
+                "CONTROLLED_CANONICAL_FALLBACK（V2: canonical_fallback，AgentRuntimeBridge 重试耗尽后的受控本地回退）、" +
+                "COMPAT_FALLBACK（V2: compat_fallback，遗留消息映射或 AgentBridge compat 入口）、" +
+                "LEGACY_BYPASS（V2: legacy_bypass，绕过 canonical 链的遗留绕过路径）、" +
+                "NOT_CROSS_DEVICE（Android 处于本地模式，无跨设备 dispatch 边界））；" +
+                "引入 DispatchPathConsumptionKind（3 值枚举：" +
+                "INBOUND_EXECUTION/LOCAL_FALLBACK_EXECUTION/NONE），" +
+                "声明 Android 在当前 dispatch 边界中的消费角色。" +
+                "DispatchBoundaryDerivationInput 汇聚 8 个现有运行时信号（isCrossDeviceMode/" +
+                "executionPathTag/isFallbackTierActive/isAgentBridgeFallback/" +
+                "isLegacyCompatRemapped/isAgentBridgeCompatEntry/isLegacyBypassEntry/" +
+                "hasDelegatedOrTakeoverExecution），无需新增运行时探针。" +
+                "derive() 通过 5 级优先级推导 DispatchBoundarySnapshot（toWireMap() 可嵌入上行消息）。" +
+                "DeviceStateSnapshotPayload 新增 dispatch_boundary_class/" +
+                "dispatch_path_consumption_kind/dispatch_boundary_schema_version 字段。" +
+                "DeviceExecutionEventPayload 同样新增这 3 个字段。" +
+                "GalaxyConnectionService.sendDeviceStateSnapshot() 在快照发送层预先计算 " +
+                "snapshotDispatchBoundary 后填充字段（snapshotExecutionPathTagForBoundary）；" +
+                "GalaxyConnectionService.deviceExecutionEventSink 在执行事件发射层预先计算 " +
+                "eventDispatchBoundary 后填充字段（eventIsFallbackTransition/eventExecutionPathTag）。" +
+                "DISPATCH_BOUNDARY_INVARIANTS 声明 7 条形式化不变量，覆盖字段完整性、" +
+                "not_cross_device 模式约束、canonical/fallback/compat/legacy 路径语义、" +
+                "平行 dispatch 体系禁令及 schema 版本要求。" +
+                "V2 集成点：core/device_router.py（dispatch_boundary_class ↔ dispatch_path 对齐），" +
+                "core/cross_device_coordinator.py（dispatch_path_consumption_kind 角色识别），" +
+                "core/android_device_state_store.py（dispatch 来源溯源），" +
+                "metrics/dispatch_boundary_metrics.py（路径分布 SLO）。" +
+                "Test: Pr02v2AndroidCrossDeviceDispatchBoundaryTest.",
+            introducedPr = 95
         )
     )
 
