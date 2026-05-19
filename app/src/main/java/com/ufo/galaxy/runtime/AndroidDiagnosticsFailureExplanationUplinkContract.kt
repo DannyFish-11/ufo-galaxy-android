@@ -96,14 +96,21 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
             operatorProjectionClass = OperatorProjectionClass.LOCAL_INTERPRETATION
         )
 
-    private val runtimeMainchainSourceHints: Set<String> =
+    private val runtimeMainchainSourceHints: Set<String> by lazy {
         AndroidMinimalRuntimeAccessChainContract.minimalMainChainEntries
             .map { it.ownerClass.substringAfterLast('.') }
             .toSet()
+    }
 
     private fun isCanonicalRuntimeMainchainSource(sourceComponent: String?): Boolean {
         if (sourceComponent.isNullOrBlank()) return false
-        return runtimeMainchainSourceHints.any { sourceComponent.contains(it) }
+        val sourceRoot = sourceComponent
+            .substringAfterLast('/')
+            .substringBefore('.')
+            .substringBefore(':')
+            .substringBefore('(')
+            .trim()
+        return runtimeMainchainSourceHints.contains(sourceRoot)
     }
 
     val V2_CONSUMPTION_PATH_MAP: Map<UplinkSemanticBoundaryClass, String> = mapOf(
