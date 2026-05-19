@@ -1222,7 +1222,27 @@ data class GoalResultPayload(
     val result_completion_signal_class: String? = null,
     val closure_finalization_signal_class: String? = null,
     val operator_done_projection_class: String? = null,
-    val completion_closure_uplink_schema_version: String? = null
+    val completion_closure_uplink_schema_version: String? = null,
+
+    // ── PR-08v2 (Android): 分布式运行参与边界收束字段（结果上行）───────────────────────────────
+    //
+    // participation_boundary_role: 结果上报时 Android 的参与边界角色分类。
+    //   由 AndroidDistributedRuntimeParticipationBoundaryContract.derive() 推导。
+    //   V2 MUST read this field to route goal_execution_result through the correct
+    //   distributed runtime participation chain; MUST NOT re-derive from field combinations.
+    //
+    // ownership_posture_class: 结果上报时 Android 的 ownership posture 语义分类。
+    //   V2 MAY 用于 dispatch routing；MUST NOT 用于 authority closure 或 takeover 终局判断。
+    //
+    // remote_local_mode_class: 结果上报时 Android 的 remote/local 执行模式分类。
+    //   区分主动声明本地模式（local_only_declared）与 fallback 转入（fallback_local / degraded_fallback）。
+    //
+    // participation_boundary_schema_version: 本字段组 schema 版本。
+    //   取自 AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION。
+    val participation_boundary_role: String? = null,
+    val ownership_posture_class: String? = null,
+    val remote_local_mode_class: String? = null,
+    val participation_boundary_schema_version: String? = null
 )
 
 /**
