@@ -45,6 +45,7 @@ import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
 import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
 import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
 import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
+import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
@@ -531,6 +532,42 @@ class GalaxyConnectionService : Service() {
                     localCapabilityStateWire = eventLocalCapState.wireValue
                 )
             )
+
+            // ── PR-02v2 (Android): 预先推导执行事件级 dispatch 边界收束快照 ─────────────────────
+            // 在 payload.copy() 前唯一计算，使 V2 可将执行事件关联到正确的 dispatch 边界类型。
+            //
+            // 执行事件级推导说明：
+            //   isLegacyCompatRemapped: 通过 phase == PHASE_FALLBACK_TRANSITION 近似检测
+            //     （compat 映射消息触发 fallback_transition 阶段）
+            //   isAgentBridgeCompatEntry: 通过 fallback_tier 非空判断
+            //     （AgentRuntimeBridge compat 入口通常携带有效的 fallback_tier）
+            //   isAgentBridgeFallback: 通过 phase == PHASE_FALLBACK_TRANSITION 检测
+            //   isLegacyBypassEntry: 快照和事件均无法从发射层检测，默认 false
+            val eventIsFallbackTransition = payload.phase == DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION
+            val eventExecutionPathTag = AndroidRuntimeObservabilityAuditContract.classifyExecutionPath(
+                spineParticipationKind = null,
+                executionModeState = modeState.executionModeState,
+                crossDeviceEligibility = modeState.crossDeviceEligibility,
+                isTakeoverPath = payload.phase == DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                isDelegated = modeState.crossDeviceEligibility == true &&
+                    payload.phase != DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE,
+                currentFallbackTier = payload.fallback_tier
+            )
+            val eventDispatchBoundary = AndroidCrossDeviceDispatchBoundaryContract.derive(
+                AndroidCrossDeviceDispatchBoundaryContract.DispatchBoundaryDerivationInput(
+                    isCrossDeviceMode = UFOGalaxyApplication.appSettings.crossDeviceEnabled &&
+                        modeState.executionModeState !=
+                        LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue,
+                    executionPathTag = eventExecutionPathTag,
+                    isFallbackTierActive = payload.fallback_tier != null,
+                    isAgentBridgeFallback = eventIsFallbackTransition,
+                    isLegacyCompatRemapped = eventIsFallbackTransition && payload.fallback_tier == null,
+                    isAgentBridgeCompatEntry = !eventIsFallbackTransition && payload.fallback_tier != null,
+                    isLegacyBypassEntry = false,
+                    hasDelegatedOrTakeoverExecution = governanceTruth.delegated_execution_active == true ||
+                        governanceTruth.takeover_state == AndroidUnifiedTruthUplinkContract.TAKEOVER_STATE_ACTIVE
+                )
+            )
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -680,7 +717,13 @@ class GalaxyConnectionService : Service() {
                     hasGovernanceContext = payload.governance_state != null,
                     hasExplicitContractGate = false
                 ).wireValue,
-                boundary_reliability_schema_version = AndroidBoundaryReliabilityContract.SCHEMA_VERSION
+                boundary_reliability_schema_version = AndroidBoundaryReliabilityContract.SCHEMA_VERSION,
+                // ── PR-02v2 (Android): 跨设备 dispatch 边界收束字段（在执行事件发射层填充）──────────
+                // 从已预计算的 eventDispatchBoundary 直接读取，确保 V2 可将执行事件关联到
+                // 正确的 dispatch 边界类型而无需字段组合推断。
+                dispatch_boundary_class = eventDispatchBoundary.dispatchBoundaryClass.wireValue,
+                dispatch_path_consumption_kind = eventDispatchBoundary.dispatchPathConsumptionKind.wireValue,
+                dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -4101,6 +4144,44 @@ class GalaxyConnectionService : Service() {
                 )
             )
 
+            // ── PR-02v2 (Android): 预先推导快照级 dispatch 边界收束快照 ─────────────────────────
+            // 在 DeviceStateSnapshotPayload 构造前唯一计算，使 V2 可将快照关联到正确的
+            // dispatch 边界类型（canonical / controlled_canonical_fallback / compat_fallback /
+            // legacy_bypass / not_cross_device），无需字段组合推断。
+            //
+            // 快照级推导说明：
+            //   isLegacyCompatRemapped / isAgentBridgeCompatEntry / isLegacyBypassEntry
+            //   在快照发送层均为 false，因为这三类场景只在单次消息处理时可检测；
+            //   快照发送时无单次消息上下文，采用保守默认值。
+            //   isAgentBridgeFallback：通过 currentFallbackTier + snapshotExecutionPathTag 组合判断。
+            val snapshotExecutionPathTagForBoundary =
+                AndroidRuntimeObservabilityAuditContract.classifyExecutionPath(
+                    spineParticipationKind = null,
+                    executionModeState = modeState.executionModeState,
+                    crossDeviceEligibility = modeState.crossDeviceEligibility,
+                    isTakeoverPath = false,
+                    isDelegated = false,
+                    currentFallbackTier = currentFallbackTier
+                )
+            val snapshotDispatchBoundary = AndroidCrossDeviceDispatchBoundaryContract.derive(
+                AndroidCrossDeviceDispatchBoundaryContract.DispatchBoundaryDerivationInput(
+                    isCrossDeviceMode = settings.crossDeviceEnabled &&
+                        modeState.executionModeState !=
+                        LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue,
+                    executionPathTag = snapshotExecutionPathTagForBoundary,
+                    isFallbackTierActive = currentFallbackTier != "center_delegated" &&
+                        currentFallbackTier != "no_execution",
+                    isAgentBridgeFallback = currentFallbackTier == FALLBACK_TIER_CENTER_DELEGATED_WITH_LOCAL &&
+                        snapshotExecutionPathTagForBoundary ==
+                        AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DEGRADED_PATH,
+                    isLegacyCompatRemapped = false,
+                    isAgentBridgeCompatEntry = false,
+                    isLegacyBypassEntry = false,
+                    hasDelegatedOrTakeoverExecution = governanceTruth.delegated_execution_active == true ||
+                        governanceTruth.takeover_state == AndroidUnifiedTruthUplinkContract.TAKEOVER_STATE_ACTIVE
+                )
+            )
+
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
                 snapshot_ts = snapshotStamp.timestampMs,
@@ -4291,7 +4372,13 @@ class GalaxyConnectionService : Service() {
                     taskId = null,
                     runtimeSessionId = UFOGalaxyApplication.runtimeSessionId
                 ).wireValue,
-                boundary_reliability_schema_version = AndroidBoundaryReliabilityContract.SCHEMA_VERSION
+                boundary_reliability_schema_version = AndroidBoundaryReliabilityContract.SCHEMA_VERSION,
+                // ── PR-02v2 (Android): 跨设备 dispatch 边界收束字段（在快照发送层填充）──────────────
+                // 从已计算的运行时信号推导，使 V2 可将快照关联到正确的 dispatch 边界类型，
+                // 无需通过 execution_path_tag / participation_tier 等字段组合推断。
+                dispatch_boundary_class = snapshotDispatchBoundary.dispatchBoundaryClass.wireValue,
+                dispatch_path_consumption_kind = snapshotDispatchBoundary.dispatchPathConsumptionKind.wireValue,
+                dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(

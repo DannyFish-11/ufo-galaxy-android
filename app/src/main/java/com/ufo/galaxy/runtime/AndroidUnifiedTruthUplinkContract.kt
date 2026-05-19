@@ -734,6 +734,19 @@ object AndroidUnifiedTruthUplinkContract {
     const val KEY_LOCAL_MODE_CAPABLE = "local_mode_capable"
     const val KEY_LOCAL_CAPABILITY_STATE = "local_capability_state"
 
+    // ── 治理状态 wire 值常量 ────────────────────────────────────────────────────
+    // 这些常量供外部模块（如 GalaxyConnectionService）在比较 GovernanceTruth 字段值时使用，
+    // 避免内联硬编码字符串。
+
+    /** [TakeoverState.ACTIVE] 的 wire 值常量（"active"）。 */
+    const val TAKEOVER_STATE_ACTIVE = "active"
+
+    /** [TakeoverState.PENDING] 的 wire 值常量（"pending"）。 */
+    const val TAKEOVER_STATE_PENDING = "pending"
+
+    /** [TakeoverState.INACTIVE] 的 wire 值常量（"inactive"）。 */
+    const val TAKEOVER_STATE_INACTIVE = "inactive"
+
     // ── 合约不变量 ───────────────────────────────────────────────────────────────
 
     /**
