@@ -2419,6 +2419,41 @@ object StabilizationBaseline {
                 "StabilizationBaseline: android-distributed-runtime-participation-boundary (introducedPr=98). " +
                 "Test: Pr08v2AndroidDistributedRuntimeParticipationBoundaryTest.",
             introducedPr = 98
+        ),
+
+        // ── PR-09Android: Distributed truth / ownership uplink 收束合约 ────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-distributed-truth-ownership-uplink",
+            displayName = "AndroidDistributedTruthOwnershipUplinkContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-09Android — Android 侧分布式真值与 ownership 上行语义收束合约，对应 V2 侧 PR-09v2。" +
+                "引入 AuthoritySignalClass（4 值：AUTHORITY_RUNTIME / OWNERSHIP_HANDOFF / " +
+                "SUMMARY_PROJECTION / DIAGNOSTICS_AUDIT），明确区分权威运行时信号、" +
+                "ownership/handoff 相关信号、operator-visible 摘要/投影信号与诊断/审计信号。" +
+                "引入 OwnershipUplinkClass（5 值：AUTHORITY_HELD / HANDOFF_INITIATOR / " +
+                "HANDOFF_PARTICIPANT / OWNERSHIP_RETURN / NO_TRANSFER）、" +
+                "SessionContinuityClass（4 值：SESSION_LIVE_AUTHORITATIVE / " +
+                "SESSION_RECOVERY_PENDING / SESSION_CONTINUATION / NO_ACTIVE_SESSION）、" +
+                "DevicePostureSignalClass（5 值：RUNTIME_NODE_ACTIVE / RUNTIME_NODE_DEGRADED / " +
+                "RUNTIME_NODE_RECOVERING / POSTURE_SIGNAL_ONLY / CONTROL_PLANE_ONLY）。" +
+                "TruthOwnershipUplinkDerivationInput（12 字段），derive()（5 优先级推导规则），" +
+                "TruthOwnershipUplinkSnapshot.toWireMap()，V2_CANONICAL_TRUTH_CONSUMPTION_PATH_MAP，" +
+                "DISTRIBUTED_TRUTH_OWNERSHIP_INVARIANTS（8 条）。" +
+                "固定 Android distributed truth / ownership uplink 边界：" +
+                "Android UI-visible summary / posture 不再越权；" +
+                "Android ↔ V2 distributed truth / ownership 语义更一致；" +
+                "Android 仍是强运行时节点，不是普通日志终端。" +
+                "V2 集成点：core/task_result_canonical_truth_chain.py（authority_signal_class），" +
+                "core/handoff_governance_chain.py（ownership_uplink_class），" +
+                "board/operator_perception_surface.py（summary_projection 路由），" +
+                "core/android_device_state_store.py（diagnostics_audit 存储）。" +
+                "StabilizationBaseline: android-distributed-truth-ownership-uplink (introducedPr=99). " +
+                "Test: Pr09AndroidDistributedTruthOwnershipUplinkContractTest.",
+            introducedPr = 99
         )
     )
 
