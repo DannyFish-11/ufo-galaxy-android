@@ -1845,6 +1845,21 @@ data class OperatorActionResultPayload(
     val runtime_deferred: Boolean? = null,
     /** Android 当前是否有活跃的委托执行任务（来自 AndroidUnifiedTruthUplinkContract.GovernanceTruth）。 */
     val delegated_execution_active: Boolean? = null,
+    // ── PR-11Android: tool/action/authorization uplink 收束字段 ───────────────────────────
+    // operator_intent_capture_class: 本消息中 operator 意图捕获语义分类。
+    // runtime_authority_class: 本消息中 runtime 授权结论分类（批准/拒绝）。
+    // actual_execution_signal_class: 本消息中实际执行信号分类（未执行/尝试但无 side effect/确认 side effect）。
+    // tool_invocation_signal_class: 本消息中工具调用信号分类（已确认调用/未调用）。
+    // result_reporting_signal_class: 本消息中结果上报语义分类（decision/execution）。
+    // post_action_explanation_class: 本消息中 post-action 解释语义分类（none/factual/failure）。
+    // tool_action_authorization_schema_version: 上述字段 schema 版本。
+    val operator_intent_capture_class: String? = null,
+    val runtime_authority_class: String? = null,
+    val actual_execution_signal_class: String? = null,
+    val tool_invocation_signal_class: String? = null,
+    val result_reporting_signal_class: String? = null,
+    val post_action_explanation_class: String? = null,
+    val tool_action_authorization_schema_version: String? = null,
     val attached_session_id: String? = null,
     val active_takeover_id: String? = null,
     val error: String? = null,
