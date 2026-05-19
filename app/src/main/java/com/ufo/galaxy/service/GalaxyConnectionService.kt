@@ -49,6 +49,7 @@ import com.ufo.galaxy.runtime.AndroidBoundaryReliabilityContract
 import com.ufo.galaxy.runtime.AndroidCrossDeviceDispatchBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDistributedRuntimeParticipationBoundaryContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
+import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
@@ -607,6 +608,11 @@ class GalaxyConnectionService : Service() {
                     isHoldState = false
                 )
             )
+            val eventSemanticBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
+                .forExecutionEvent(
+                    lifecycleTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
+                    resultSignalClass = eventUplinkBoundary.resultSignalClass
+                )
             // ── PR-08v2 (Android): 预先推导执行事件级分布式运行参与边界快照 ────────────────────────
             // 在 payload.copy() 前唯一计算，避免在 copy() 内重复调用 derive()。
             // isDiagnosticsSignal=false 使推导规则真实反映 Android 在执行事件发射时的角色，
@@ -798,6 +804,11 @@ class GalaxyConnectionService : Service() {
                 result_signal_class = eventUplinkBoundary.resultSignalClass.wireValue,
                 acceptance_candidate_class = eventUplinkBoundary.acceptanceCandidateClass.wireValue,
                 result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
+                uplink_semantic_boundary_class =
+                    eventSemanticBoundary.uplinkSemanticBoundaryClass.wireValue,
+                operator_projection_class = eventSemanticBoundary.operatorProjectionClass.wireValue,
+                diagnostics_failure_explanation_schema_version =
+                    AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）────────────────
                 // 从已预计算的 eventParticipationBoundary 直接读取，使 V2 可无歧义地将执行事件
                 // 路由至正确的分布式运行参与链，无需字段组合推断。
@@ -3023,6 +3034,13 @@ class GalaxyConnectionService : Service() {
                 isHoldState = resolvedIsHoldState
             )
         )
+        val resultSemanticBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
+            .forGoalResult(
+                resultSummary = result.result_summary,
+                result = result.result,
+                details = result.details,
+                error = result.error
+            )
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
@@ -3074,7 +3092,12 @@ class GalaxyConnectionService : Service() {
             // 路由至 truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
             result_signal_class = resultUplinkBoundary.resultSignalClass.wireValue,
             acceptance_candidate_class = resultUplinkBoundary.acceptanceCandidateClass.wireValue,
-            result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION
+            result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
+            uplink_semantic_boundary_class =
+                resultSemanticBoundary.uplinkSemanticBoundaryClass.wireValue,
+            operator_projection_class = resultSemanticBoundary.operatorProjectionClass.wireValue,
+            diagnostics_failure_explanation_schema_version =
+                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -4299,6 +4322,8 @@ class GalaxyConnectionService : Service() {
             )
             val snapshotIngress = AndroidGovernanceExecutionPolicyIngressContract
                 .classifyMsgType(MsgType.DEVICE_STATE_SNAPSHOT)
+            val snapshotSemanticBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
+                .forDeviceStateSnapshot()
 
             // ── PR-08v2 (Android): 预先推导分布式运行参与边界快照（在快照发送层唯一计算）────────────
             // device_state_snapshot 为诊断性信号，isDiagnosticsSignal=true 确保 role 始终为
@@ -4530,6 +4555,10 @@ class GalaxyConnectionService : Service() {
                 result_signal_class = AndroidResultUplinkBoundaryContract.ResultSignalClass.DIAGNOSTICS_INFORMATIONAL.wireValue,
                 acceptance_candidate_class = AndroidResultUplinkBoundaryContract.AcceptanceCandidateClass.CLOSURE_NOT_APPLICABLE.wireValue,
                 result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
+                uplink_semantic_boundary_class = snapshotSemanticBoundary.uplinkSemanticBoundaryClass.wireValue,
+                operator_projection_class = snapshotSemanticBoundary.operatorProjectionClass.wireValue,
+                diagnostics_failure_explanation_schema_version =
+                    AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在快照发送层填充）────────────────────
                 // device_state_snapshot 为诊断性信号，participation_boundary_role 始终为
                 // DIAGNOSTICS_SUMMARY_ONLY，明确声明本快照不参与 distributed runtime 决策，
