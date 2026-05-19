@@ -2586,6 +2586,7 @@ data class DeviceStateSnapshotPayload(
      //     - capability_visibility
      //     - operational_readiness
      //     - active_usable_path
+     //     - runtime_host_posture
      //     - degraded_mode
      //     - recovery_repair
      //     - cross_device_participation
@@ -2593,6 +2594,7 @@ data class DeviceStateSnapshotPayload(
      //     - task_initiation_eligibility
      //     - result_closure
      //     - minimum_access_admission
+     //     - operator_visible_control_perception
      //
      // operational_surface_authority: per-axis authority classification. Makes explicit where
      //   Android is locally authoritative versus where V2 retains final admission / closure /

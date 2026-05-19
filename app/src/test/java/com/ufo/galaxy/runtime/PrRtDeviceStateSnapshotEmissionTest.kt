@@ -148,14 +148,19 @@ class PrRtDeviceStateSnapshotEmissionTest {
             operational_surface_schema_version = "1",
             operational_surface_states = mapOf(
                 "operational_readiness" to "ready",
-                "minimum_access_admission" to "minimum_access_ready_v2_admission_required"
+                "minimum_access_admission" to "minimum_access_ready_v2_admission_required",
+                "runtime_host_posture" to "strong_runtime_node_active",
+                "operator_visible_control_perception" to "operator_visible_cross_device_ready"
             ),
             operational_surface_authority = mapOf(
                 "operational_readiness" to "android_local_authoritative",
-                "minimum_access_admission" to "v2_authoritative"
+                "minimum_access_admission" to "v2_authoritative",
+                "runtime_host_posture" to "android_local_authoritative",
+                "operator_visible_control_perception" to "android_local_signal_v2_coordinated"
             ),
             operational_surface_limitations = listOf(
-                "v2_retains_final_admission_authority"
+                "v2_retains_final_admission_authority",
+                "operator_visible_control_perception_is_projection_only"
             )
         )
 
@@ -236,6 +241,10 @@ class PrRtDeviceStateSnapshotEmissionTest {
             "ready",
             json.getAsJsonObject("operational_surface_states").get("operational_readiness").asString
         )
+        assertEquals(
+            "strong_runtime_node_active",
+            json.getAsJsonObject("operational_surface_states").get("runtime_host_posture").asString
+        )
     }
 
     @Test
@@ -247,10 +256,20 @@ class PrRtDeviceStateSnapshotEmissionTest {
             json.getAsJsonObject("operational_surface_authority")
                 .get("minimum_access_admission").asString
         )
+        assertEquals(
+            "android_local_signal_v2_coordinated",
+            json.getAsJsonObject("operational_surface_authority")
+                .get("operator_visible_control_perception").asString
+        )
         assertTrue(
             json.getAsJsonArray("operational_surface_limitations")
                 .map { it.asString }
                 .contains("v2_retains_final_admission_authority")
+        )
+        assertTrue(
+            json.getAsJsonArray("operational_surface_limitations")
+                .map { it.asString }
+                .contains("operator_visible_control_perception_is_projection_only")
         )
     }
 
