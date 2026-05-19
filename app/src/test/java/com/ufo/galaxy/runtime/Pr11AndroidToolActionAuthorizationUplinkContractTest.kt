@@ -57,6 +57,10 @@ class Pr11AndroidToolActionAuthorizationUplinkContractTest {
             AndroidToolActionAuthorizationUplinkContract.ResultReportingSignalClass.EXECUTION_RESULT_SIGNAL,
             snapshot.resultReportingSignalClass
         )
+        assertEquals(
+            AndroidToolActionAuthorizationUplinkContract.PostActionExplanationClass.FACTUAL_RESULT_SUMMARY,
+            snapshot.postActionExplanationClass
+        )
     }
 
     @Test
@@ -129,6 +133,24 @@ class Pr11AndroidToolActionAuthorizationUplinkContractTest {
         assertTrue(wire.containsKey("tool_invocation_signal_class"))
         assertTrue(wire.containsKey("result_reporting_signal_class"))
         assertTrue(wire.containsKey("post_action_explanation_class"))
+    }
+
+    @Test
+    fun `non empty success details do not escalate to failure explanation`() {
+        val snapshot = AndroidToolActionAuthorizationUplinkContract.derive(
+            AndroidToolActionAuthorizationUplinkContract.DerivationInput(
+                actionKind = AndroidOperatorActionGovernanceContract.ActionKind.RETRY_DELEGATED_EXECUTION.wireValue,
+                phase = OperatorActionResultPayload.PHASE_EXECUTION,
+                decisionStatus = OperatorActionResultPayload.DECISION_ACCEPTED,
+                executionStatus = OperatorActionResultPayload.EXECUTION_EXECUTED,
+                error = null,
+                details = mapOf("task_id" to "task-2", "status" to "updated")
+            )
+        )
+        assertEquals(
+            AndroidToolActionAuthorizationUplinkContract.PostActionExplanationClass.FACTUAL_RESULT_SUMMARY,
+            snapshot.postActionExplanationClass
+        )
     }
 
     @Test

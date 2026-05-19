@@ -117,7 +117,7 @@ object AndroidToolActionAuthorizationUplinkContract {
         else ToolInvocationSignalClass.TOOL_NOT_INVOKED
 
         val explanationClass = when {
-            !input.error.isNullOrBlank() || input.details.isNotEmpty() ->
+            !input.error.isNullOrBlank() ->
                 PostActionExplanationClass.FAILURE_EXPLANATION
             !isDecisionPhase -> PostActionExplanationClass.FACTUAL_RESULT_SUMMARY
             else -> PostActionExplanationClass.NONE
