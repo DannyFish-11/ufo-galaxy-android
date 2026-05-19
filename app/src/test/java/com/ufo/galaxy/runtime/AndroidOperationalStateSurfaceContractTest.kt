@@ -83,16 +83,22 @@ class AndroidOperationalStateSurfaceContractTest {
         assertEquals("capability_visible", projection.states["capability_visibility"])
         assertEquals("ready", projection.states["operational_readiness"])
         assertEquals("cross_device_active", projection.states["active_usable_path"])
+        assertEquals("strong_runtime_node_active", projection.states["runtime_host_posture"])
         assertEquals("participating_active", projection.states["cross_device_participation"])
         assertEquals("continuity_confirmed", projection.states["session_continuity"])
         assertEquals("eligible_under_v2_governance", projection.states["task_initiation_eligibility"])
         assertEquals("closure_ready_for_v2", projection.states["result_closure"])
+        assertEquals(
+            "operator_visible_cross_device_ready",
+            projection.states["operator_visible_control_perception"]
+        )
         assertTrue(
             projection.limitations.containsAll(
                 listOf(
                     "v2_retains_final_admission_authority",
                     "v2_retains_cross_repo_aggregation_authority",
-                    "v2_retains_final_closure_authority"
+                    "v2_retains_final_closure_authority",
+                    "operator_visible_control_perception_is_projection_only"
                 )
             )
         )
@@ -137,6 +143,7 @@ class AndroidOperationalStateSurfaceContractTest {
         assertEquals("capability_unreported", projection.states["capability_visibility"])
         assertEquals("unknown", projection.states["operational_readiness"])
         assertEquals("cross_device_degraded", projection.states["active_usable_path"])
+        assertEquals("strong_runtime_node_degraded", projection.states["runtime_host_posture"])
         assertEquals("compat_only", projection.states["degraded_mode"])
         assertEquals("recovery_active", projection.states["recovery_repair"])
         assertEquals("participating_degraded", projection.states["cross_device_participation"])
@@ -144,6 +151,10 @@ class AndroidOperationalStateSurfaceContractTest {
         assertEquals("blocked_pending_readiness", projection.states["task_initiation_eligibility"])
         assertEquals("closure_in_flight", projection.states["result_closure"])
         assertEquals("minimum_access_blocked", projection.states["minimum_access_admission"])
+        assertEquals(
+            "operator_visible_runtime_in_flight",
+            projection.states["operator_visible_control_perception"]
+        )
         assertTrue(projection.limitations.contains("android_readiness_surface_incomplete"))
         assertTrue(projection.limitations.contains("durable_participant_identity_missing"))
         assertTrue(projection.limitations.contains("capability_visibility_partial"))
@@ -179,8 +190,13 @@ class AndroidOperationalStateSurfaceContractTest {
 
         assertEquals("identity_present", projection.states["registration_discoverability"])
         assertEquals("local_only_usable", projection.states["active_usable_path"])
+        assertEquals("strong_runtime_node_local_execution", projection.states["runtime_host_posture"])
         assertEquals("local_only", projection.states["cross_device_participation"])
         assertEquals("eligible_local_only", projection.states["task_initiation_eligibility"])
+        assertEquals(
+            "operator_visible_local_ready",
+            projection.states["operator_visible_control_perception"]
+        )
         assertEquals(
             AndroidOperationalStateSurfaceContract.AuthorityScope.ANDROID_LOCAL_AUTHORITATIVE.wireValue,
             projection.authority["active_usable_path"]
@@ -225,8 +241,13 @@ class AndroidOperationalStateSurfaceContractTest {
         assertEquals("identity_missing", projection.states["registration_discoverability"])
         assertEquals("capability_unreported", projection.states["capability_visibility"])
         assertEquals("no_usable_path", projection.states["active_usable_path"])
+        assertEquals("runtime_node_unavailable", projection.states["runtime_host_posture"])
         assertEquals("blocked", projection.states["task_initiation_eligibility"])
         assertEquals("minimum_access_unknown", projection.states["minimum_access_admission"])
+        assertEquals(
+            "operator_visible_limited",
+            projection.states["operator_visible_control_perception"]
+        )
         assertTrue(projection.limitations.contains("android_readiness_surface_incomplete"))
         assertTrue(projection.limitations.contains("android_minimum_access_surface_incomplete"))
         assertTrue(projection.limitations.contains("capability_visibility_partial"))
@@ -269,7 +290,7 @@ class AndroidOperationalStateSurfaceContractTest {
     @Test
     fun `derive schema version is present in every projection and ALL_WIRE_KEYS contains all axes`() {
         assertEquals("1", AndroidOperationalStateSurfaceContract.SCHEMA_VERSION)
-        assertEquals(11, AndroidOperationalStateSurfaceContract.SurfaceAxis.ALL_WIRE_KEYS.size)
+        assertEquals(13, AndroidOperationalStateSurfaceContract.SurfaceAxis.ALL_WIRE_KEYS.size)
         assertTrue(
             AndroidOperationalStateSurfaceContract.SurfaceAxis.ALL_WIRE_KEYS.containsAll(
                 setOf(
@@ -277,13 +298,15 @@ class AndroidOperationalStateSurfaceContractTest {
                     "capability_visibility",
                     "operational_readiness",
                     "active_usable_path",
+                    "runtime_host_posture",
                     "degraded_mode",
                     "recovery_repair",
                     "cross_device_participation",
                     "session_continuity",
                     "task_initiation_eligibility",
                     "result_closure",
-                    "minimum_access_admission"
+                    "minimum_access_admission",
+                    "operator_visible_control_perception"
                 )
             )
         )
