@@ -2317,6 +2317,41 @@ object StabilizationBaseline {
             introducedPr = 95
         ),
 
+        // ── PR-06v2 (Android): 最小真实运行接入链固定合约 ─────────────────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-minimal-runtime-access-chain-contract",
+            displayName = "AndroidMinimalRuntimeAccessChainContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidMinimalRuntimeAccessChainContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-06v2 (Android) 最小真实运行接入链固定合约，是 V2 仓库 PR-06v2 的 Android 侧联动 PR。" +
+                "在此合约引入之前，Android 侧 facade/helper/compat/legacy 路径与最小真实运行接入链共存，" +
+                "缺少机器可读的层级声明，导致后续贡献者难以判断 Android 到底从哪条链真正接入。" +
+                "引入 RuntimeAccessLayerClass（5 值枚举：MAIN_CHAIN/FACADE_HELPER/COMPAT_FALLBACK/" +
+                "LEGACY_BRIDGE/DIAGNOSTICS_PROJECTION），为每个 Android 运行时模块提供稳定的层级分类；" +
+                "引入 ChainModuleRole（8 值枚举：LIFECYCLE_TRIGGER/LIFECYCLE_MANAGER/TRANSPORT_LAYER/" +
+                "INBOUND_DISPATCHER/EXECUTION_RUNTIME/LOCAL_EXECUTOR/RESULT_UPLINK/NOT_APPLICABLE），" +
+                "声明主链各阶段的具体职责角色；" +
+                "引入 AccessChainEntry（moduleId/displayName/ownerClass/layerClass/role/v2Counterpart/rationale），" +
+                "为每个已知模块记录完整的层级分类和 V2 对应关系。" +
+                "minimalMainChainEntries 固定 Android 最小真实运行接入链的有序 7 阶段模块列表：" +
+                "GalaxyConnectionService（lifecycle trigger）→ RuntimeController（lifecycle manager）→ " +
+                "GalaxyWebSocketClient（transport layer）→ GalaxyConnectionService（inbound dispatcher）→ " +
+                "AutonomousExecutionPipeline（execution runtime）→ LocalLoopExecutor（local executor）→ " +
+                "GalaxyConnectionService（result uplink）。" +
+                "V2_CONSUMPTION_PATH_MAP 固定 Android 主链阶段与 V2 侧 DesktopPresenceRuntime/OpenClawd/" +
+                "CommandRouter/DeviceRouter 主链的双仓叙事一致性映射。" +
+                "CHAIN_INVARIANTS 声明 9 条形式化不变量，涵盖唯一主入口、唯一生命周期管理器、唯一传输通道、" +
+                "主链入站分发、主链执行运行时、结果上行完整性、compat/legacy 不得冒充主链、" +
+                "diagnostics 层不参与准入控制、双仓主链叙事一致性。" +
+                "AgentRuntimeBridge 被明确标注为 COMPAT_FALLBACK；FloatingWindowService 和 " +
+                "RuntimeController.registrationError 被明确标注为 LEGACY_BRIDGE；" +
+                "AndroidDelegatedRuntimeAudit 和 AndroidOperationalStateSurfaceContract 被明确标注为 DIAGNOSTICS_PROJECTION。" +
+                "Test: Pr06v2AndroidMinimalRuntimeAccessChainContractTest.",
+            introducedPr = 97
+        ),
+
         // ── PR-05v2 (Android): 结果上行闭环边界合约 ─────────────────────────────────────────────
 
         BaselineSurfaceEntry(
