@@ -96,27 +96,18 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
             operatorProjectionClass = OperatorProjectionClass.LOCAL_INTERPRETATION
         )
 
-    private val runtimeMainchainSourceHints: Set<String> by lazy {
+    private val runtimeMainchainSourceHints: Set<String> =
         AndroidMinimalRuntimeAccessChainContract.minimalMainChainEntries
             .map { it.ownerClass.substringAfterLast('.') }
             .toSet()
-    }
-
-    // Extracts the class-name token from source strings, e.g.:
-    // - "GalaxyConnectionService.handleGoalExecution" -> "GalaxyConnectionService"
-    // - "com.ufo.galaxy.runtime.RuntimeController.update" -> "RuntimeController"
-    // - "LocalLoopExecutor:progress" -> "LocalLoopExecutor"
-    private val sourceRootRegex = Regex("\\b(?<className>[A-Z][A-Za-z0-9_]*)\\b")
 
     private fun isCanonicalRuntimeMainchainSource(sourceComponent: String?): Boolean {
         if (sourceComponent.isNullOrBlank()) return false
-        val sourceRoot = sourceRootRegex
-            .find(sourceComponent.trim())
-            ?.groups
-            ?.get("className")
-            ?.value
-            ?: return false
-        return runtimeMainchainSourceHints.contains(sourceRoot)
+        val sourceTokens = sourceComponent
+            .trim()
+            .split('.', ':', '/', '(', ')', ' ', '\t')
+            .filter { it.isNotBlank() }
+        return sourceTokens.any { token -> runtimeMainchainSourceHints.contains(token) }
     }
 
     val V2_CONSUMPTION_PATH_MAP: Map<UplinkSemanticBoundaryClass, String> = mapOf(
