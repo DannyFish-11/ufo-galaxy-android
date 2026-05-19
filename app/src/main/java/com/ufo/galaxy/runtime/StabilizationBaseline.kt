@@ -2315,6 +2315,48 @@ object StabilizationBaseline {
                 "metrics/dispatch_boundary_metrics.py（路径分布 SLO）。" +
                 "Test: Pr02v2AndroidCrossDeviceDispatchBoundaryTest.",
             introducedPr = 95
+        ),
+
+        // ── PR-05v2 (Android): 结果上行闭环边界合约 ─────────────────────────────────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-result-uplink-boundary-contract",
+            displayName = "AndroidResultUplinkBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale = "PR-05v2 (Android) 结果上行闭环边界合约，是 V2 仓库 PR-05v2 的 Android 侧联动 PR。" +
+                "在此合约引入之前，Android 侧上行信号（goal_execution_result/device_execution_event/" +
+                "device_state_snapshot）缺少对权威运行时结果信号、验收/闭合相关信号与诊断性信号三类" +
+                "上行语义的机器可读区分：V2 必须依赖 status + result_returned + completion_signaled +" +
+                "closure_ready_for_acceptance + governance_blocked 五个字段组合推断，" +
+                "增加了 V2 侧消费逻辑的复杂度和错误概率。" +
+                "引入 ResultSignalClass（3 值枚举：" +
+                "AUTHORITY_RESULT（权威终态结果，V2 MUST 关闭任务）、" +
+                "ACCEPTANCE_CLOSURE_SIGNAL（验收/闭合相关信号，V2 MAY 进入 acceptance adjudication）、" +
+                "DIAGNOSTICS_INFORMATIONAL（诊断性信号，V2 MUST NOT 用于任务关闭））；" +
+                "引入 AcceptanceCandidateClass（4 值枚举：" +
+                "ELIGIBLE_FOR_ACCEPTANCE/PENDING_RESULT_RETURN/ACCEPTANCE_BLOCKED/CLOSURE_NOT_APPLICABLE），" +
+                "消除 V2 通过布尔字段组合推断验收资格的复杂性。" +
+                "UplinkBoundaryDerivationInput 汇聚 7 个现有运行时信号（isTerminalPhase/" +
+                "resultReturned/completionSignaled/closureReadyForAcceptance/" +
+                "isGovernanceBlocked/isRuntimeConstrained/isHoldState），无需新增运行时探针。" +
+                "derive() 通过 4 级优先级推导 UplinkBoundarySnapshot（toWireMap() 可嵌入上行消息）。" +
+                "GoalResultPayload/DeviceExecutionEventPayload/DeviceStateSnapshotPayload 各新增 " +
+                "result_signal_class/acceptance_candidate_class/result_uplink_boundary_schema_version 字段。" +
+                "GalaxyConnectionService.sendGoalResult() 在结果发送层填充（isTerminalPhase=true 固定）；" +
+                "GalaxyConnectionService.deviceExecutionEventSink 在执行事件发射层填充；" +
+                "GalaxyConnectionService.sendDeviceStateSnapshot() 在快照发送层填充" +
+                "（result_signal_class=diagnostics_informational/acceptance_candidate_class=closure_not_applicable 固定）。" +
+                "RESULT_UPLINK_BOUNDARY_INVARIANTS 声明 6 条形式化不变量，覆盖字段完整性、" +
+                "authority_result 关闭规则、diagnostics_informational 禁止关闭规则、" +
+                "acceptance 资格规则、acceptance_blocked 等待规则及 schema 版本要求。" +
+                "V2 集成点：core/task_result_canonical_truth_chain.py（result_signal_class 关闭路由），" +
+                "core/acceptance_adjudication.py（acceptance_candidate_class 验收判定），" +
+                "core/android_device_state_store.py（diagnostics_informational 存储），" +
+                "core/closure_truth_reconciler.py（acceptance_blocked 等待处理）。" +
+                "Test: Pr05v2AndroidResultUplinkBoundaryTest.",
+            introducedPr = 96
         )
     )
 
