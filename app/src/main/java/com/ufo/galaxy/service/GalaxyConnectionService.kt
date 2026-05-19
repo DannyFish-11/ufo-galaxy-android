@@ -41,6 +41,7 @@ import com.ufo.galaxy.runtime.AndroidCrossRepoRegressionRuntimeHooks
 import com.ufo.galaxy.runtime.AndroidMeshDirectRuntimeContract
 import com.ufo.galaxy.runtime.AndroidRuntimeObservabilityAuditContract
 import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
+import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract
 import com.ufo.galaxy.runtime.AndroidUnifiedParticipantLifecyclePhase
 import com.ufo.galaxy.runtime.AndroidParticipationSemanticNormalizationContract
@@ -3468,6 +3469,8 @@ class GalaxyConnectionService : Service() {
         try {
             val runtimeTruth = signal.runtimeTruth?.toMap()
             val sessionId = UFOGalaxyApplication.runtimeSessionId
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyReconciliation(signal.kind)
             val payload = ReconciliationSignalPayload(
                 signal_id = signal.signalId,
                 kind = signal.kind.wireValue,
@@ -3482,7 +3485,11 @@ class GalaxyConnectionService : Service() {
                 durable_session_id = signal.durableSessionId,
                 session_continuity_epoch = signal.sessionContinuityEpoch,
                 payload = signal.payload,
-                runtime_truth = runtimeTruth
+                runtime_truth = runtimeTruth,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion
             )
             val envelope = AipMessage(
                 type = MsgType.RECONCILIATION_SIGNAL,
@@ -3563,6 +3570,8 @@ class GalaxyConnectionService : Service() {
                 snapshot.dimensionStates.values
                     .firstOrNull { it.status == DelegatedRuntimeReadinessSnapshot.DimensionStatus.GAP }
                     ?.gapReason
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_READINESS_REPORT)
 
             val payload = DeviceReadinessReportPayload(
                 artifact_tag = artifact.semanticTag,
@@ -3572,7 +3581,11 @@ class GalaxyConnectionService : Service() {
                 reported_at_ms = snapshot.reportedAtMs,
                 dimension_states = dimensionStates,
                 first_gap_reason = firstGapReason,
-                missing_dimensions = missingDimensions
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion
             )
 
             val envelope = AipMessage(
@@ -4207,6 +4220,8 @@ class GalaxyConnectionService : Service() {
                         governanceTruth.takeover_state == AndroidUnifiedTruthUplinkContract.TAKEOVER_STATE_ACTIVE
                 )
             )
+            val snapshotIngress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_STATE_SNAPSHOT)
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
@@ -4404,7 +4419,11 @@ class GalaxyConnectionService : Service() {
                 // 无需通过 execution_path_tag / participation_tier 等字段组合推断。
                 dispatch_boundary_class = snapshotDispatchBoundary.dispatchBoundaryClass.wireValue,
                 dispatch_path_consumption_kind = snapshotDispatchBoundary.dispatchPathConsumptionKind.wireValue,
-                dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION
+                dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION,
+                ingress_boundary_class = snapshotIngress.boundaryClass.wireValue,
+                ingress_consumption_kind = snapshotIngress.consumptionKind.wireValue,
+                ingress_signal_class = snapshotIngress.signalClass.wireValue,
+                ingress_schema_version = snapshotIngress.schemaVersion
             )
 
             val envelope = AipMessage(
@@ -4504,6 +4523,8 @@ class GalaxyConnectionService : Service() {
                 snapshot.dimensionStates.values
                     .firstOrNull { it.status == DelegatedRuntimeGovernanceSnapshot.DimensionStatus.REGRESSION }
                     ?.regressionReason
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_GOVERNANCE_REPORT)
 
             val payload = DeviceGovernanceReportPayload(
                 artifact_tag = artifact.semanticTag,
@@ -4513,7 +4534,11 @@ class GalaxyConnectionService : Service() {
                 reported_at_ms = snapshot.reportedAtMs,
                 dimension_states = dimensionStates,
                 first_regression_reason = firstRegressionReason,
-                missing_dimensions = missingDimensions
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion
             )
 
             val envelope = AipMessage(
@@ -4584,6 +4609,8 @@ class GalaxyConnectionService : Service() {
                 snapshot.dimensionStates.values
                     .firstOrNull { it.status == DelegatedRuntimeAcceptanceSnapshot.DimensionStatus.GAP }
                     ?.gapReason
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_ACCEPTANCE_REPORT)
 
             val payload = DeviceAcceptanceReportPayload(
                 artifact_tag = artifact.semanticTag,
@@ -4593,7 +4620,11 @@ class GalaxyConnectionService : Service() {
                 reported_at_ms = snapshot.reportedAtMs,
                 dimension_states = dimensionStates,
                 first_gap_reason = firstGapReason,
-                missing_dimensions = missingDimensions
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion
             )
 
             val envelope = AipMessage(
@@ -4664,6 +4695,8 @@ class GalaxyConnectionService : Service() {
                 snapshot.dimensionStates.values
                     .firstOrNull { it.status == DelegatedRuntimeStrategySnapshot.DimensionStatus.AT_RISK }
                     ?.riskReason
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_STRATEGY_REPORT)
 
             val payload = DeviceStrategyReportPayload(
                 artifact_tag = artifact.semanticTag,
@@ -4673,7 +4706,11 @@ class GalaxyConnectionService : Service() {
                 reported_at_ms = snapshot.reportedAtMs,
                 dimension_states = dimensionStates,
                 first_risk_reason = firstRiskReason,
-                missing_dimensions = missingDimensions
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion
             )
 
             val envelope = AipMessage(

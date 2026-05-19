@@ -1639,7 +1639,11 @@ data class ReconciliationSignalPayload(
     val durable_session_id: String? = null,
     val session_continuity_epoch: Int? = null,
     val payload: Map<String, Any?> = emptyMap(),
-    val runtime_truth: Map<String, Any>? = null
+    val runtime_truth: Map<String, Any>? = null,
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null
 )
 
 // ── PR-H: HandoffEnvelopeV2 native consumption result payload ─────────────────────────────
@@ -1878,7 +1882,11 @@ data class DeviceReadinessReportPayload(
     val reported_at_ms: Long = System.currentTimeMillis(),
     val dimension_states: Map<String, String> = emptyMap(),
     val first_gap_reason: String? = null,
-    val missing_dimensions: List<String> = emptyList()
+    val missing_dimensions: List<String> = emptyList(),
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null
 )
 
 // ── PR-4 (Android): Governance / acceptance / strategy report uplink payloads ────────────────
@@ -1936,7 +1944,11 @@ data class DeviceGovernanceReportPayload(
     val reported_at_ms: Long = System.currentTimeMillis(),
     val dimension_states: Map<String, String> = emptyMap(),
     val first_regression_reason: String? = null,
-    val missing_dimensions: List<String> = emptyList()
+    val missing_dimensions: List<String> = emptyList(),
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null
 )
 
 /**
@@ -1991,7 +2003,11 @@ data class DeviceAcceptanceReportPayload(
     val reported_at_ms: Long = System.currentTimeMillis(),
     val dimension_states: Map<String, String> = emptyMap(),
     val first_gap_reason: String? = null,
-    val missing_dimensions: List<String> = emptyList()
+    val missing_dimensions: List<String> = emptyList(),
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null
 )
 
 /**
@@ -2046,7 +2062,11 @@ data class DeviceStrategyReportPayload(
     val reported_at_ms: Long = System.currentTimeMillis(),
     val dimension_states: Map<String, String> = emptyMap(),
     val first_risk_reason: String? = null,
-    val missing_dimensions: List<String> = emptyList()
+    val missing_dimensions: List<String> = emptyList(),
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null
 )
 
 /**
@@ -2788,7 +2808,11 @@ data class DeviceStateSnapshotPayload(
     //   取自 AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION。
     val dispatch_boundary_class: String? = null,
     val dispatch_path_consumption_kind: String? = null,
-    val dispatch_boundary_schema_version: String? = null
+    val dispatch_boundary_schema_version: String? = null,
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
