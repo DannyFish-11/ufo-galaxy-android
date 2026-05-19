@@ -34,7 +34,7 @@ class Pr11AndroidToolActionAuthorizationUplinkContractTest {
     }
 
     @Test
-    fun `execution executed with closure action confirms side effect and tool invocation`() {
+    fun `executed closure action confirms side effect and tool invocation`() {
         val snapshot = AndroidToolActionAuthorizationUplinkContract.derive(
             AndroidToolActionAuthorizationUplinkContract.DerivationInput(
                 actionKind = AndroidOperatorActionGovernanceContract.ActionKind.FINALIZE_CLOSURE.wireValue,
