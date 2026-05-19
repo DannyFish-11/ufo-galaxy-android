@@ -644,7 +644,9 @@ class GalaxyConnectionService : Service() {
             val eventSemanticBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
                 .forExecutionEvent(
                     lifecycleTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
-                    resultSignalClass = eventUplinkBoundary.resultSignalClass
+                    resultSignalClass = eventUplinkBoundary.resultSignalClass,
+                    sourceComponent = payload.source_component,
+                    executionModeStateWire = modeState.executionModeState
                 )
             val eventCompletionClosureBoundary = AndroidCompletionClosureUplinkContract
                 .deriveForExecutionEvent(
