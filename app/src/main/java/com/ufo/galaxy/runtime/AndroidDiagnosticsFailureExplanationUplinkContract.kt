@@ -102,15 +102,20 @@ object AndroidDiagnosticsFailureExplanationUplinkContract {
             .toSet()
     }
 
-    // Accepts source forms like:
-    // - "GalaxyConnectionService.handleGoalExecution"
-    // - "com.ufo.galaxy.runtime.RuntimeController.update"
-    // - "LocalLoopExecutor:progress"
-    private val sourceRootRegex = Regex("\\b([A-Z][A-Za-z0-9_]*)\\b")
+    // Extracts the class-name token from source strings, e.g.:
+    // - "GalaxyConnectionService.handleGoalExecution" -> "GalaxyConnectionService"
+    // - "com.ufo.galaxy.runtime.RuntimeController.update" -> "RuntimeController"
+    // - "LocalLoopExecutor:progress" -> "LocalLoopExecutor"
+    private val sourceRootRegex = Regex("\\b(?<className>[A-Z][A-Za-z0-9_]*)\\b")
 
     private fun isCanonicalRuntimeMainchainSource(sourceComponent: String?): Boolean {
         if (sourceComponent.isNullOrBlank()) return false
-        val sourceRoot = sourceRootRegex.find(sourceComponent.trim())?.groupValues?.get(1) ?: return false
+        val sourceRoot = sourceRootRegex
+            .find(sourceComponent.trim())
+            ?.groups
+            ?.get("className")
+            ?.value
+            ?: return false
         return runtimeMainchainSourceHints.contains(sourceRoot)
     }
 
