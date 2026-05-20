@@ -111,6 +111,10 @@ class UnifiedResultPresentationTest {
             UnifiedResultPresentation.AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY,
             p.authorityBoundaryClass
         )
+        assertEquals(
+            UnifiedResultPresentation.FinalSurfaceBoundaryClass.PRODUCT_FACING_CONSUMPTION_ONLY,
+            p.finalSurfaceBoundaryClass
+        )
     }
 
     @Test
@@ -197,6 +201,10 @@ class UnifiedResultPresentationTest {
             UnifiedResultPresentation.UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS,
             p.uiConsumptionClass
         )
+        assertEquals(
+            UnifiedResultPresentation.FinalSurfaceBoundaryClass.PRODUCT_FACING_CONSUMPTION_ONLY,
+            p.finalSurfaceBoundaryClass
+        )
     }
 
     @Test
@@ -227,6 +235,10 @@ class UnifiedResultPresentationTest {
         assertEquals(
             UnifiedResultPresentation.AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY,
             p.authorityBoundaryClass
+        )
+        assertEquals(
+            UnifiedResultPresentation.FinalSurfaceBoundaryClass.PRODUCT_FACING_CONSUMPTION_ONLY,
+            p.finalSurfaceBoundaryClass
         )
     }
 
