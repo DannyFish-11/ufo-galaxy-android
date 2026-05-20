@@ -66,7 +66,8 @@ class Pr74LocalAiCanonicalUplinkVerificationTest {
                 formalLifecycleState = FormalParticipantLifecycleState.READY,
                 inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE,
                 plannerModelLoaded = true,
-                groundingModelLoaded = true
+                groundingModelLoaded = true,
+                runtimeHostActive = true
             ),
             managerState = LocalInferenceRuntimeManager.ManagerState.Running(RuntimeHealthSnapshot.unknown()),
             localResultProduced = true,
@@ -93,7 +94,8 @@ class Pr74LocalAiCanonicalUplinkVerificationTest {
                 formalLifecycleState = FormalParticipantLifecycleState.READY,
                 inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE,
                 plannerModelLoaded = true,
-                groundingModelLoaded = true
+                groundingModelLoaded = true,
+                runtimeHostActive = true
             ),
             managerState = LocalInferenceRuntimeManager.ManagerState.Running(RuntimeHealthSnapshot.unknown()),
             localResultProduced = true,
@@ -120,7 +122,8 @@ class Pr74LocalAiCanonicalUplinkVerificationTest {
                 formalLifecycleState = FormalParticipantLifecycleState.READY,
                 inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE,
                 plannerModelLoaded = true,
-                groundingModelLoaded = true
+                groundingModelLoaded = true,
+                runtimeHostActive = true
             ),
             managerState = LocalInferenceRuntimeManager.ManagerState.Running(RuntimeHealthSnapshot.unknown()),
             localResultProduced = true,

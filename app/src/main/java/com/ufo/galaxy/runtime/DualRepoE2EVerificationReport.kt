@@ -92,8 +92,7 @@ data class LocalAiCanonicalFlowEvidence(
         }
 
     val isLocalResultAuthorityBounded: Boolean
-        get() = authorityBoundaryClass == LocalAiResultAuthorityBoundaryClass.LOCAL_RUNTIME_CONTRIBUTION_ONLY ||
-            authorityBoundaryClass == LocalAiResultAuthorityBoundaryClass.CANONICAL_FINAL_TRUTH_FORBIDDEN
+        get() = authorityBoundaryClass == LocalAiResultAuthorityBoundaryClass.LOCAL_RUNTIME_CONTRIBUTION_ONLY
 
     fun toWireMap(): Map<String, Any?> = mapOf(
         "step_outcomes" to stepOutcomes.mapKeys { it.key.wireValue }.mapValues { it.value.wireValue },
