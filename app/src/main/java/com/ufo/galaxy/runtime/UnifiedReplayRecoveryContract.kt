@@ -79,8 +79,9 @@ import com.ufo.galaxy.network.OfflineTaskQueue
  *
  * | sessionTag        | currentDurableSessionId | Decision                        |
  * |-------------------|-------------------------|---------------------------------|
- * | `null`            | any                     | NO_SESSION_TAG_FORWARDED        |
- * | `"session-A"`     | `null`                  | SAME_SESSION_REPLAY_ALLOWED     |
+ * | `null` + authority-sensitive type | any     | NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED |
+ * | `null` + non-authority type       | any     | NO_SESSION_TAG_FORWARDED        |
+ * | `"session-A"`     | `null`                  | NO_CURRENT_AUTHORITY_BLOCKED    |
  * | `"session-A"`     | `"session-A"`           | SAME_SESSION_REPLAY_ALLOWED     |
  * | `"session-OLD"`   | `"session-NEW"`         | STALE_SESSION_BLOCKED           |
  *
@@ -170,6 +171,22 @@ object UnifiedReplayRecoveryContract {
         NO_SESSION_TAG_FORWARDED("no_session_tag_forwarded", isReplayAllowed = true),
 
         /**
+         * Message has no session tag (`null`) but its type is authority-sensitive under
+         * canonical result/closure replay semantics; replay is blocked and must be revalidated
+         * by V2 instead of being injected as a new authority event.
+         */
+        NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED(
+            "no_session_tag_authority_replay_blocked",
+            isReplayAllowed = false
+        ),
+
+        /**
+         * Message is session-tagged but there is no current durable session authority.
+         * Replay is blocked until V2 establishes the current authority era.
+         */
+        NO_CURRENT_AUTHORITY_BLOCKED("no_current_authority_blocked", isReplayAllowed = false),
+
+        /**
          * Message session tag matches (or is compatible with) the current durable session;
          * replay is allowed.
          */
@@ -188,6 +205,16 @@ object UnifiedReplayRecoveryContract {
         }
     }
 
+    /**
+     * Message types whose replay can affect canonical result/closure authority and therefore
+     * must not be replayed when the message has no durable session tag.
+     */
+    val AUTHORITY_SENSITIVE_REPLAY_TYPES: Set<String> = setOf(
+        "goal_execution_result",
+        "delegated_execution_signal",
+        "device_execution_event"
+    )
+
     // ── evaluateMessageAuthority ──────────────────────────────────────────────
 
     /**
@@ -202,7 +229,8 @@ object UnifiedReplayRecoveryContract {
      *
      * @param message                 The queued message to evaluate.
      * @param currentDurableSessionId The active durable session ID (`null` if no session is
-     *                                currently active — all tagged messages are allowed through).
+     *                                currently active — tagged replay is blocked until authority
+     *                                is re-established).
      * @return [MessageAuthorityDecision]; check [MessageAuthorityDecision.isReplayAllowed].
      */
     fun evaluateMessageAuthority(
@@ -211,8 +239,10 @@ object UnifiedReplayRecoveryContract {
     ): MessageAuthorityDecision {
         val tag = message.sessionTag
         return when {
+            tag == null && message.type in AUTHORITY_SENSITIVE_REPLAY_TYPES ->
+                MessageAuthorityDecision.NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED
             tag == null -> MessageAuthorityDecision.NO_SESSION_TAG_FORWARDED
-            currentDurableSessionId == null -> MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED
+            currentDurableSessionId == null -> MessageAuthorityDecision.NO_CURRENT_AUTHORITY_BLOCKED
             tag == currentDurableSessionId -> MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED
             else -> MessageAuthorityDecision.STALE_SESSION_BLOCKED
         }
@@ -255,10 +285,13 @@ object UnifiedReplayRecoveryContract {
         "required_send_gate" to REQUIRED_SEND_GATE,
         "canonical_phase_sequence" to canonicalPhaseSequence.map { it.wireValue },
         "authority_filter_decisions" to MessageAuthorityDecision.entries.map { it.wireValue },
+        "authority_sensitive_replay_types" to AUTHORITY_SENSITIVE_REPLAY_TYPES.toList(),
         // Contract assertions — all true in the closed PR-74 implementation:
         "session_tag_set_at_enqueue" to true,
         "replay_uses_unified_gate" to true,
         "stale_session_messages_blocked" to true,
+        "no_current_authority_replay_blocked" to true,
+        "authority_sensitive_null_tag_replay_blocked" to true,
         "online_offline_contract_unified" to true,
         "authority_filtering_precedes_replay" to true
     )

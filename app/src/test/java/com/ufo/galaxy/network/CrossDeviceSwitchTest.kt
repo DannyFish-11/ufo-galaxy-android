@@ -459,9 +459,9 @@ class CrossDeviceSwitchTest {
     }
 
     @Test
-    fun `discardForDifferentSession preserves null-tagged goal_execution_result messages`() {
-        // Messages enqueued without a sessionTag (null) must never be discarded by
-        // discardForDifferentSession — they are always forwarded regardless of session.
+    fun `discardForDifferentSession blocks null-tagged goal_execution_result messages`() {
+        // Authority-sensitive replay must require a session tag. A historical null-tagged
+        // canonical result must not be replayed as a new authority event.
         val queue = OfflineTaskQueue(prefs = null)
         queue.enqueue(
             "goal_execution_result",
@@ -469,7 +469,7 @@ class CrossDeviceSwitchTest {
             // no sessionTag → null
         )
         val discarded = queue.discardForDifferentSession("session-NEW")
-        assertEquals("Null-tagged messages must not be discarded", 0, discarded)
-        assertEquals(1, queue.size)
+        assertEquals("Null-tagged authority-sensitive messages must be discarded", 1, discarded)
+        assertEquals(0, queue.size)
     }
 }
