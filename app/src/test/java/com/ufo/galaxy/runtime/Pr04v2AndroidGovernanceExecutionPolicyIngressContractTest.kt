@@ -66,4 +66,27 @@ class Pr04v2AndroidGovernanceExecutionPolicyIngressContractTest {
         )
         assertEquals(diagnostics.boundaryClass, audit.boundaryClass)
     }
+
+    @Test
+    fun `result and execution event classify as canonical backend ingress instead of generic transport`() {
+        val goalResult = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.GOAL_EXECUTION_RESULT)
+        val executionEvent = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.DEVICE_EXECUTION_EVENT)
+
+        assertEquals(
+            AndroidGovernanceExecutionPolicyIngressContract.IngressBoundaryClass
+                .CANONICAL_GOVERNANCE_EXECUTION_POLICY,
+            goalResult.boundaryClass
+        )
+        assertEquals(goalResult.boundaryClass, executionEvent.boundaryClass)
+        assertEquals(
+            AndroidGovernanceExecutionPolicyIngressContract.IngressSignalClass.RESULT_TRUTH_ARTIFACT,
+            goalResult.signalClass
+        )
+        assertEquals(
+            AndroidGovernanceExecutionPolicyIngressContract.IngressSignalClass.EXECUTION_RUNTIME_EVENT,
+            executionEvent.signalClass
+        )
+    }
 }
