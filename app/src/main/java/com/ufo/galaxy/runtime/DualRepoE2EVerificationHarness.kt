@@ -131,6 +131,9 @@ class DualRepoE2EVerificationHarness(
     /** Optional post-graduation governance snapshot observed during verification. */
     var governanceSnapshot: DelegatedRuntimeGovernanceSnapshot? = null
 
+    /** Optional local AI consumer canonical-flow evidence observed during verification. */
+    var localAiCanonicalFlowEvidence: LocalAiCanonicalFlowEvidence? = null
+
     // ── Stage recording API ───────────────────────────────────────────────────
 
     /**
@@ -414,6 +417,103 @@ class DualRepoE2EVerificationHarness(
     }
 
     /**
+     * Records Android local AI consumer flow evidence across canonical uplink and V2 closure.
+     *
+     * This method explicitly keeps local inference output authority-bounded:
+     * Android local result is a runtime contribution only and must never be promoted to
+     * canonical final truth.
+     */
+    fun recordLocalAiCanonicalUplinkFlow(
+        activationInputs: LocalIntelligenceActivationPolicy.ActivationInputs,
+        managerState: LocalInferenceRuntimeManager.ManagerState,
+        localResultProduced: Boolean,
+        runtimeDiagnosticsVisible: Boolean,
+        resultUplinkStatus: ScenarioOutcomeStatus,
+        v2CanonicalIngressStatus: ScenarioOutcomeStatus,
+        v2TruthReconciliationStatus: ScenarioOutcomeStatus,
+        v2ClosureOutwardStatus: ScenarioOutcomeStatus,
+        reconciliationSignalKind: ReconciliationSignal.Kind = ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT,
+        localInferenceReason: String? = null
+    ) {
+        val localInferenceActivation = LocalIntelligenceActivationPolicy.evaluateActivation(
+            capability = LocalIntelligenceActivationPolicy.Capability.LOCAL_INFERENCE,
+            inputs = activationInputs
+        )
+        val localInferenceStatus = LocalIntelligenceCapabilityStatus.from(managerState)
+        val localInferenceStartedStatus = when (localInferenceStatus) {
+            LocalIntelligenceCapabilityStatus.ACTIVE,
+            LocalIntelligenceCapabilityStatus.DEGRADED,
+            LocalIntelligenceCapabilityStatus.RECOVERING -> ScenarioOutcomeStatus.PASSED
+            LocalIntelligenceCapabilityStatus.DISABLED,
+            LocalIntelligenceCapabilityStatus.UNAVAILABLE -> ScenarioOutcomeStatus.FAILED
+        }
+        val reconciliationSignalAllowed =
+            reconciliationSignalKind in ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS
+        val reconciliationStatus = if (reconciliationSignalAllowed) {
+            v2TruthReconciliationStatus
+        } else {
+            ScenarioOutcomeStatus.FAILED
+        }
+        val resolvedReason = buildString {
+            append(localInferenceReason ?: localInferenceActivation.reason)
+            if (!reconciliationSignalAllowed) {
+                append("; unsupported_reconciliation_signal_kind=")
+                append(reconciliationSignalKind.wireValue)
+                append("; requested_status=")
+                append(v2TruthReconciliationStatus.wireValue)
+            }
+        }
+
+        localAiCanonicalFlowEvidence = LocalAiCanonicalFlowEvidence(
+            stepOutcomes = mapOf(
+                LocalAiCanonicalVerificationStep.LOCAL_INFERENCE_STARTED to localInferenceStartedStatus,
+                LocalAiCanonicalVerificationStep.LOCAL_RESULT_GENERATED to
+                    if (localResultProduced) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+                LocalAiCanonicalVerificationStep.RUNTIME_VISIBLE_DIAGNOSTICS to
+                    if (runtimeDiagnosticsVisible) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
+                LocalAiCanonicalVerificationStep.RESULT_UPLINK_EMITTED to resultUplinkStatus,
+                LocalAiCanonicalVerificationStep.V2_CANONICAL_INGRESS to v2CanonicalIngressStatus,
+                LocalAiCanonicalVerificationStep.V2_TRUTH_RECONCILIATION to reconciliationStatus,
+                LocalAiCanonicalVerificationStep.V2_CLOSURE_OUTWARD_COMPILED to v2ClosureOutwardStatus
+            ),
+            localInferenceCapabilityStatus = localInferenceStatus,
+            localInferenceActivationTier = localInferenceActivation.capability.tier,
+            authorityBoundaryClass = LocalAiResultAuthorityBoundaryClass.LOCAL_RUNTIME_CONTRIBUTION_ONLY,
+            reconciliationSignalKind = reconciliationSignalKind,
+            localInferenceReason = resolvedReason
+        )
+
+        recordStageOutcome(
+            stage = DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE,
+            status = localInferenceStartedStatus,
+            reason = resolvedReason
+        )
+        recordStageOutcome(
+            stage = DualRepoE2EVerificationStage.TASK_RESULT_RETURN,
+            status = resultUplinkStatus,
+            reason = resolvedReason
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.RESULT_FEEDBACK,
+            status = resultUplinkStatus,
+            reason = resolvedReason
+        )
+        recordVerificationHook(
+            kind = DualRepoE2EVerificationHookKind.STATE_CORRELATED,
+            status = if (
+                v2CanonicalIngressStatus == ScenarioOutcomeStatus.PASSED &&
+                reconciliationStatus == ScenarioOutcomeStatus.PASSED &&
+                v2ClosureOutwardStatus == ScenarioOutcomeStatus.PASSED
+            ) {
+                ScenarioOutcomeStatus.PASSED
+            } else {
+                ScenarioOutcomeStatus.FAILED
+            },
+            reason = resolvedReason
+        )
+    }
+
+    /**
      * Clears all recorded stage outcomes, verification hooks, [lifecycleTruthState], and
      * [governanceSnapshot].
      *
@@ -425,6 +525,7 @@ class DualRepoE2EVerificationHarness(
         verificationHooks.clear()
         lifecycleTruthState = null
         governanceSnapshot = null
+        localAiCanonicalFlowEvidence = null
     }
 
     // ── Artifact derivation ───────────────────────────────────────────────────
@@ -551,6 +652,7 @@ class DualRepoE2EVerificationHarness(
             stageOutcomes = stageOutcomes.toMap(),
             verificationHooks = verificationHooks.toMap(),
             governanceSnapshot = governanceSnapshot,
+            localAiCanonicalFlowEvidence = localAiCanonicalFlowEvidence,
             overallArtifact = artifact,
             bridgeReport = bridgeReport,
             lifecycleTruthState = lifecycleTruthState,
@@ -686,6 +788,11 @@ class DualRepoE2EVerificationHarness(
             ParticipantLifecycleTruthState.RECOVERING,
             ParticipantLifecycleTruthState.RECOVERED,
             ParticipantLifecycleTruthState.CAPABILITY_RE_ALIGNED
+        )
+
+        private val ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS: Set<ReconciliationSignal.Kind> = setOf(
+            ReconciliationSignal.Kind.PARTICIPANT_STATE,
+            ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
         )
     }
 }
