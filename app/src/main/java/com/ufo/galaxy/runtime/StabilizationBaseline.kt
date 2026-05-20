@@ -2512,6 +2512,27 @@ object StabilizationBaseline {
                 "RuntimeController 通过 ReconciliationSignal 工厂将同类边界键纳入 payload。" +
                 "Test: Pr12AndroidCompletionClosureUplinkContractTest.",
             introducedPr = 102
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-bounded-subject-platform-boundary",
+            displayName = "AndroidBoundedSubjectPlatformBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidBoundedSubjectPlatformBoundaryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-13Android — Android bounded subject platform boundary 收束合约。" +
+                "固化 Android 在双仓准平台态中的正式定义：" +
+                "bounded_relative_subject_runtime / local_ai_consumer_host / canonical_aligned_participant_runtime。" +
+                "声明五个不重叠边界类：BOUNDED_RUNTIME_BOUNDARY / LOCAL_AI_CONSUMER_BOUNDARY / " +
+                "PARTICIPANT_TRUTH_UPLINK_BOUNDARY / OBSERVABILITY_DIAGNOSTICS_EVIDENCE_BOUNDARY / " +
+                "OUTWARD_CONSUMPTION_BOUNDARY。" +
+                "固定三方最终关系：Android bounded runtime → (uplink only) → V2 canonical center " +
+                "→ (consumption only) → outward consumers。" +
+                "八条不漂移 invariant 防止 Android 越权成为平行 canonical center，" +
+                "防止 outward 层重拼 authority/truth/dispatch/closure。" +
+                "V2 alignment map 对齐 v2 canonical truth convergence / governance / closure chain。" +
+                "Test: Pr13AndroidBoundedSubjectPlatformBoundaryContractTest.",
+            introducedPr = 103
         )
     )
 

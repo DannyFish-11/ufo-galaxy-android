@@ -95,12 +95,12 @@ import org.junit.Test
  *  - protocol-surface-transitional-compatibility has non-null retirementGate
  *
  * ### StabilizationBaseline — tier and guidance counts
- *  - CANONICAL_STABLE count is 136
+ *  - CANONICAL_STABLE count is 137
  *  - CANONICAL_FROZEN count is 1
  *  - TRANSITIONAL count is 2
  *  - RETIREMENT_GATED count is 3
- *  - total entry count is 142
- *  - EXTEND guidance count is 136
+ *  - total entry count is 143
+ *  - EXTEND guidance count is 137
  *  - CONVERGE guidance count is 3
  *  - WRAP_ONLY guidance count is 1
  *  - NO_NEW_WORK guidance count is 2
@@ -442,8 +442,8 @@ class Pr11StabilizationBaselineTest {
     // 12. Tier and guidance counts
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `CANONICAL_STABLE count is 136`() {
-        assertEquals(136, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
+    @Test fun `CANONICAL_STABLE count is 137`() {
+        assertEquals(137, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test fun `CANONICAL_FROZEN count is 1`() {
@@ -458,12 +458,12 @@ class Pr11StabilizationBaselineTest {
         assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 142`() {
-        assertEquals(142, StabilizationBaseline.entries.size)
+    @Test fun `total entry count is 143`() {
+        assertEquals(143, StabilizationBaseline.entries.size)
     }
 
-    @Test fun `EXTEND guidance count is 136`() {
-        assertEquals(136, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
+    @Test fun `EXTEND guidance count is 137`() {
+        assertEquals(137, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
     }
 
     @Test fun `CONVERGE guidance count is 3`() {

@@ -188,6 +188,46 @@ Visibility, diagnostics/evidence, and uplink boundaries are explicit in the same
 - canonical truth/result/continuity alignment is only via canonical uplink contract surfaces;
 - local-facing / product-facing / operator-facing / diagnostics-facing surfaces are consumption-only and must not reassemble authority truth/state/dispatch.
 
+### Android bounded subject platform boundary (PR-13Android)
+
+`AndroidBoundedSubjectPlatformBoundaryContract` (`app/src/main/java/com/ufo/galaxy/runtime/AndroidBoundedSubjectPlatformBoundaryContract.kt`) is the final convergence anchor that locks the dual-repo quasi-platform state and prevents boundary drift.
+
+#### Formal dual-repo quasi-platform state definition
+
+> **dual-repo quasi-platform state**: center-governed multi-relative-subject distributed AI runtime where Android is fixed as `bounded_relative_subject_runtime / local_ai_consumer_host / canonical_aligned_participant_runtime`, V2 holds canonical authority / truth convergence / closure, and outward consumers are strictly consumption-only.
+
+#### Android formal definition
+
+> **Android bounded relative subject runtime**: local AI consumer host, canonical-aligned participant runtime, bounded execution participant — not a parallel canonical center.
+
+#### Five non-overlapping boundary classes
+
+| Boundary class | Scope | Authority level |
+|----------------|-------|-----------------|
+| `BOUNDED_RUNTIME_BOUNDARY` | Local execution, continuity, recovery, participant lifecycle | Bounded to Android; V2 retains final truth convergence |
+| `LOCAL_AI_CONSUMER_BOUNDARY` | On-device ML inference, local result production | Local consumption only; does not re-dispatch as canonical truth |
+| `PARTICIPANT_TRUTH_UPLINK_BOUNDARY` | `goal_execution_result` / `device_execution_event` / `device_state_snapshot` uplinks | Participant contribution uplink via canonical contracts; V2 owns acceptance / closure |
+| `OBSERVABILITY_DIAGNOSTICS_EVIDENCE_BOUNDARY` | Diagnostics payloads, evidence projections, operator-visible summaries | Consumption-only; must not be elevated to canonical truth |
+| `OUTWARD_CONSUMPTION_BOUNDARY` | UI-visible, product-facing, operator-facing, local-facing surfaces | Consumption of bounded/canonical outputs only; no authority re-assembly |
+
+#### Three-way final relationship
+
+```
+Android bounded runtime  →(uplink only)→  V2 canonical center  →(consumption only)→  outward consumers
+```
+
+- Android does NOT finalize truth, arbitrate dispatch, or own closure.
+- V2 canonical center is the sole authority for truth convergence, dispatch arbitration, and closure.
+- Outward consumers (UI/product/operator/diagnostics layers) do NOT re-assemble authority, truth, dispatch, or closure.
+
+#### Hard constraints enforced by this contract
+
+1. No boundary entry may re-assemble canonical authority, finalize truth, arbitrate dispatch, or own closure.
+2. Android runtime boundary anchors must include `AndroidBoundedSubjectRuntimeContract` and `RuntimeController`.
+3. Participant truth uplink boundary must anchor through `AndroidResultUplinkBoundaryContract`, `AndroidDistributedTruthOwnershipUplinkContract`, `AndroidCompletionClosureUplinkContract`.
+4. Observability/diagnostics/evidence boundary is consumption-only.
+5. Outward consumption boundary must anchor through `AndroidFinalSurfaceConvergenceContract`.
+
 ### Truth vs projection boundary (Android-side)
 
 Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:
