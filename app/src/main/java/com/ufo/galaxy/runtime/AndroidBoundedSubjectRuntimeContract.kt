@@ -84,6 +84,49 @@ object AndroidBoundedSubjectRuntimeContract {
         COMPAT_MINIMAL_UPLINK("compat_minimal_uplink")
     }
 
+    enum class LocalAiConsumerFlowStage(val wireValue: String) {
+        RUNTIME_ENTRY("runtime_entry"),
+        LOCAL_MODE_GATE("local_mode_gate"),
+        LOCAL_POLICY_ROUTING("local_policy_routing"),
+        PIPELINE_EXECUTION("pipeline_execution"),
+        LOCAL_LOOP_EXECUTION("local_loop_execution"),
+        CONTINUITY_HANDLING("continuity_handling"),
+        OFFLINE_REPLAY_BUFFERING("offline_replay_buffering"),
+        CANONICAL_UPLINK("canonical_uplink")
+    }
+
+    enum class CanonicalArbitrationBoundary(val wireValue: String) {
+        LOCAL_RUNTIME_DECISION("local_runtime_decision"),
+        LOCAL_DECISION_WITH_CANONICAL_UPLINK("local_decision_with_canonical_uplink"),
+        CENTER_CANONICAL_ARBITRATION("center_canonical_arbitration")
+    }
+
+    data class LocalAiConsumerFlowBoundary(
+        val stage: LocalAiConsumerFlowStage,
+        val runtimeModule: String,
+        val arbitrationBoundary: CanonicalArbitrationBoundary
+    )
+
+    enum class LocalVisibleClass(val wireValue: String) {
+        LOCAL_VISIBLE("local_visible"),
+        PRODUCT_VISIBLE("product_visible"),
+        DIAGNOSTICS_VISIBLE("diagnostics_visible")
+    }
+
+    enum class CanonicalUplinkClass(val wireValue: String) {
+        PARTICIPANT_TRUTH_UPLINK("canonical_participant_truth_uplink"),
+        EXECUTION_RESULT_UPLINK("canonical_execution_result_uplink"),
+        CONTINUITY_STATE_UPLINK("canonical_continuity_state_uplink"),
+        DIAGNOSTICS_UPLINK("canonical_diagnostics_uplink"),
+        COMPAT_MINIMAL_UPLINK("compat_minimal_uplink")
+    }
+
+    enum class LocalConsumptionSurface {
+        LOCAL_RUNTIME_SURFACE,
+        PRODUCT_SURFACE,
+        DIAGNOSTICS_SURFACE
+    }
+
     private val PARTICIPANT_TRUTH_MSG_TYPES = setOf(
         MsgType.DEVICE_REGISTER,
         MsgType.CAPABILITY_REPORT,
@@ -137,6 +180,75 @@ object AndroidBoundedSubjectRuntimeContract {
         "android_continuity_integration" to "app/src/main/java/com/ufo/galaxy/runtime/AndroidContinuityIntegration.kt"
     )
 
+    val LOCAL_AI_CONSUMER_FLOW_BOUNDARIES: List<LocalAiConsumerFlowBoundary> = listOf(
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.RUNTIME_ENTRY,
+            runtimeModule = "RuntimeController",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_RUNTIME_DECISION
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.LOCAL_MODE_GATE,
+            runtimeModule = "LocalExecutionModeGate",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_RUNTIME_DECISION
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.LOCAL_POLICY_ROUTING,
+            runtimeModule = "GalaxyConnectionService",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_DECISION_WITH_CANONICAL_UPLINK
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.PIPELINE_EXECUTION,
+            runtimeModule = "AutonomousExecutionPipeline",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_RUNTIME_DECISION
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.LOCAL_LOOP_EXECUTION,
+            runtimeModule = "LocalLoopExecutor",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_RUNTIME_DECISION
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.CONTINUITY_HANDLING,
+            runtimeModule = "AndroidContinuityIntegration",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_DECISION_WITH_CANONICAL_UPLINK
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.OFFLINE_REPLAY_BUFFERING,
+            runtimeModule = "OfflineTaskQueue",
+            arbitrationBoundary = CanonicalArbitrationBoundary.LOCAL_DECISION_WITH_CANONICAL_UPLINK
+        ),
+        LocalAiConsumerFlowBoundary(
+            stage = LocalAiConsumerFlowStage.CANONICAL_UPLINK,
+            runtimeModule = "GalaxyWebSocketClient",
+            arbitrationBoundary = CanonicalArbitrationBoundary.CENTER_CANONICAL_ARBITRATION
+        )
+    )
+
+    fun classifyLocalSurface(surface: LocalConsumptionSurface): LocalVisibleClass = when (surface) {
+        LocalConsumptionSurface.LOCAL_RUNTIME_SURFACE -> LocalVisibleClass.LOCAL_VISIBLE
+        LocalConsumptionSurface.PRODUCT_SURFACE -> LocalVisibleClass.PRODUCT_VISIBLE
+        LocalConsumptionSurface.DIAGNOSTICS_SURFACE -> LocalVisibleClass.DIAGNOSTICS_VISIBLE
+    }
+
+    fun classifyCanonicalUplink(
+        msgType: MsgType,
+        reconciliationKind: ReconciliationSignal.Kind? = null
+    ): CanonicalUplinkClass {
+        if (reconciliationKind == ReconciliationSignal.Kind.PARTICIPANT_STATE ||
+            reconciliationKind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
+        ) {
+            return CanonicalUplinkClass.CONTINUITY_STATE_UPLINK
+        }
+        return when (msgType) {
+            in PARTICIPANT_TRUTH_MSG_TYPES -> CanonicalUplinkClass.PARTICIPANT_TRUTH_UPLINK
+            in EXECUTION_RESULT_MSG_TYPES -> CanonicalUplinkClass.EXECUTION_RESULT_UPLINK
+            MsgType.HEARTBEAT,
+            MsgType.HEARTBEAT_ACK,
+            MsgType.DEVICE_STATE_SNAPSHOT -> CanonicalUplinkClass.CONTINUITY_STATE_UPLINK
+            in DIAGNOSTICS_MSG_TYPES -> CanonicalUplinkClass.DIAGNOSTICS_UPLINK
+            else -> CanonicalUplinkClass.COMPAT_MINIMAL_UPLINK
+        }
+    }
+
     val V2_CANONICAL_GOVERNANCE_PATHS: Map<String, String> = mapOf(
         "canonical_dispatch_authority" to "core/command_router.py",
         "canonical_truth_ingress" to "core/unified_runtime_truth_ingress.py",
@@ -153,6 +265,9 @@ object AndroidBoundedSubjectRuntimeContract {
         "android_has_local_continuity_authority" to true,
         "android_participates_in_local_execution_policy" to true,
         "android_is_local_ai_consumer_host" to true,
+        "local_ai_consumer_flow_is_runtime_bounded_and_center_aligned" to true,
+        "local_visible_product_visible_diagnostics_visible_are_not_canonical_truth" to true,
+        "participant_truth_execution_result_continuity_uplinks_feed_canonical_chain" to true,
         "android_uplink_is_layered_participant_runtime_result_diagnostics_compat" to true,
         "android_does_not_finalize_global_truth" to true,
         "android_does_not_own_global_dispatch_authority" to true,

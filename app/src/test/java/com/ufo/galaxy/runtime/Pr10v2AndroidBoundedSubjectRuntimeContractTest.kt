@@ -96,11 +96,79 @@ class Pr10v2AndroidBoundedSubjectRuntimeContractTest {
     }
 
     @Test
+    fun `local ai consumer flow is fixed on real runtime modules with bounded arbitration`() {
+        val stages = AndroidBoundedSubjectRuntimeContract.LOCAL_AI_CONSUMER_FLOW_BOUNDARIES
+        assertTrue(stages.any { it.runtimeModule == "RuntimeController" })
+        assertTrue(stages.any { it.runtimeModule == "LocalExecutionModeGate" })
+        assertTrue(stages.any { it.runtimeModule == "GalaxyConnectionService" })
+        assertTrue(stages.any { it.runtimeModule == "AutonomousExecutionPipeline" })
+        assertTrue(stages.any { it.runtimeModule == "LocalLoopExecutor" })
+        assertTrue(stages.any { it.runtimeModule == "GalaxyWebSocketClient" })
+        assertTrue(stages.any { it.runtimeModule == "OfflineTaskQueue" })
+        assertTrue(stages.any { it.runtimeModule == "AndroidContinuityIntegration" })
+
+        val uplinkBoundary = stages.first {
+            it.stage == AndroidBoundedSubjectRuntimeContract.LocalAiConsumerFlowStage.CANONICAL_UPLINK
+        }
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.CanonicalArbitrationBoundary.CENTER_CANONICAL_ARBITRATION,
+            uplinkBoundary.arbitrationBoundary
+        )
+    }
+
+    @Test
+    fun `local and canonical visibility boundaries stay explicit`() {
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.LocalVisibleClass.LOCAL_VISIBLE,
+            AndroidBoundedSubjectRuntimeContract.classifyLocalSurface(
+                AndroidBoundedSubjectRuntimeContract.LocalConsumptionSurface.LOCAL_RUNTIME_SURFACE
+            )
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.LocalVisibleClass.PRODUCT_VISIBLE,
+            AndroidBoundedSubjectRuntimeContract.classifyLocalSurface(
+                AndroidBoundedSubjectRuntimeContract.LocalConsumptionSurface.PRODUCT_SURFACE
+            )
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.LocalVisibleClass.DIAGNOSTICS_VISIBLE,
+            AndroidBoundedSubjectRuntimeContract.classifyLocalSurface(
+                AndroidBoundedSubjectRuntimeContract.LocalConsumptionSurface.DIAGNOSTICS_SURFACE
+            )
+        )
+
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.CanonicalUplinkClass.PARTICIPANT_TRUTH_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyCanonicalUplink(MsgType.DEVICE_GOVERNANCE_REPORT)
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.CanonicalUplinkClass.EXECUTION_RESULT_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyCanonicalUplink(MsgType.GOAL_EXECUTION_RESULT)
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.CanonicalUplinkClass.CONTINUITY_STATE_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyCanonicalUplink(
+                MsgType.DEVICE_STATE_SNAPSHOT,
+                reconciliationKind = ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
+            )
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.CanonicalUplinkClass.DIAGNOSTICS_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyCanonicalUplink(MsgType.DIAGNOSTICS_PAYLOAD)
+        )
+    }
+
+    @Test
     fun `invariants explicitly prevent passive endpoint and parallel center drift`() {
         val invariants = AndroidBoundedSubjectRuntimeContract.BOUNDED_SUBJECT_RUNTIME_INVARIANTS
         assertEquals(true, invariants["android_is_not_passive_endpoint"])
         assertEquals(true, invariants["android_is_not_parallel_canonical_center"])
         assertEquals(true, invariants["android_is_local_ai_consumer_host"])
+        assertEquals(true, invariants["local_ai_consumer_flow_is_runtime_bounded_and_center_aligned"])
+        assertEquals(
+            true,
+            invariants["participant_truth_execution_result_continuity_uplinks_feed_canonical_chain"]
+        )
         assertEquals(true, invariants["android_does_not_finalize_global_truth"])
         assertEquals(true, invariants["android_does_not_own_global_dispatch_authority"])
     }
