@@ -63,7 +63,7 @@ enum class LocalAiCanonicalVerificationStep(val wireValue: String, val isRequire
     V2_CLOSURE_OUTWARD_COMPILED("v2_closure_outward_compiled", true);
 
     companion object {
-        val REQUIRED_STEPS: Set<LocalAiCanonicalVerificationStep> = entries.toSet()
+        val ALL_STEPS: Set<LocalAiCanonicalVerificationStep> = entries.toSet()
     }
 }
 
@@ -87,7 +87,7 @@ data class LocalAiCanonicalFlowEvidence(
     val localInferenceReason: String? = null
 ) {
     val isCanonicalChainVerified: Boolean
-        get() = LocalAiCanonicalVerificationStep.REQUIRED_STEPS.all { step ->
+        get() = LocalAiCanonicalVerificationStep.ALL_STEPS.all { step ->
             stepOutcomes[step] == ScenarioOutcomeStatus.PASSED
         }
 

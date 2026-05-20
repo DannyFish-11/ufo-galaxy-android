@@ -447,10 +447,21 @@ class DualRepoE2EVerificationHarness(
             LocalIntelligenceCapabilityStatus.DISABLED,
             LocalIntelligenceCapabilityStatus.UNAVAILABLE -> ScenarioOutcomeStatus.FAILED
         }
-        val reconciliationStatus = if (reconciliationSignalKind in ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS) {
+        val reconciliationSignalAllowed =
+            reconciliationSignalKind in ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS
+        val reconciliationStatus = if (reconciliationSignalAllowed) {
             v2TruthReconciliationStatus
         } else {
             ScenarioOutcomeStatus.FAILED
+        }
+        val resolvedReason = buildString {
+            append(localInferenceReason ?: localInferenceActivation.reason)
+            if (!reconciliationSignalAllowed) {
+                append("; unsupported_reconciliation_signal_kind=")
+                append(reconciliationSignalKind.wireValue)
+                append("; requested_status=")
+                append(v2TruthReconciliationStatus.wireValue)
+            }
         }
 
         localAiCanonicalFlowEvidence = LocalAiCanonicalFlowEvidence(
@@ -469,23 +480,23 @@ class DualRepoE2EVerificationHarness(
             localInferenceActivationTier = localInferenceActivation.capability.tier,
             authorityBoundaryClass = LocalAiResultAuthorityBoundaryClass.LOCAL_RUNTIME_CONTRIBUTION_ONLY,
             reconciliationSignalKind = reconciliationSignalKind,
-            localInferenceReason = localInferenceReason ?: localInferenceActivation.reason
+            localInferenceReason = resolvedReason
         )
 
         recordStageOutcome(
             stage = DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE,
             status = localInferenceStartedStatus,
-            reason = localInferenceReason
+            reason = resolvedReason
         )
         recordStageOutcome(
             stage = DualRepoE2EVerificationStage.TASK_RESULT_RETURN,
             status = resultUplinkStatus,
-            reason = localInferenceReason
+            reason = resolvedReason
         )
         recordVerificationHook(
             kind = DualRepoE2EVerificationHookKind.RESULT_FEEDBACK,
             status = resultUplinkStatus,
-            reason = localInferenceReason
+            reason = resolvedReason
         )
         recordVerificationHook(
             kind = DualRepoE2EVerificationHookKind.STATE_CORRELATED,
@@ -498,7 +509,7 @@ class DualRepoE2EVerificationHarness(
             } else {
                 ScenarioOutcomeStatus.FAILED
             },
-            reason = localInferenceReason
+            reason = resolvedReason
         )
     }
 
