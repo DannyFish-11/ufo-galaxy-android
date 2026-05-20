@@ -247,4 +247,25 @@ class OfflineQueueTest {
         assertEquals("attachment_only_recovery", decision.disposition.wireValue)
         assertFalse(decision.shouldForward)
     }
+
+    @Test
+    fun `previewReplayGovernance blocks null-tagged authority-sensitive replay`() {
+        queue.enqueue("goal_execution_result", """{"id":3}""")
+
+        val decision = queue.previewReplayGovernance(currentTag = "durable-3").single()
+
+        assertEquals("attachment_only_recovery", decision.disposition.wireValue)
+        assertFalse(decision.shouldForward)
+        assertEquals("authority_sensitive_replay_requires_session_tag", decision.reason)
+    }
+
+    @Test
+    fun `previewReplayGovernance still allows null-tagged non-authority replay`() {
+        queue.enqueue("device_state_snapshot", """{"id":4}""")
+
+        val decision = queue.previewReplayGovernance(currentTag = "durable-4").single()
+
+        assertEquals("replay", decision.disposition.wireValue)
+        assertTrue(decision.shouldForward)
+    }
 }

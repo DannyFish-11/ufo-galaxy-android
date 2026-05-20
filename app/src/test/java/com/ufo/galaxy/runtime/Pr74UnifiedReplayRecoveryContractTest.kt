@@ -206,6 +206,21 @@ class Pr74UnifiedReplayRecoveryContractTest {
     }
 
     @Test
+    fun `MessageAuthorityDecision NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED isReplayAllowed is false`() {
+        assertFalse(
+            UnifiedReplayRecoveryContract
+                .MessageAuthorityDecision
+                .NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED
+                .isReplayAllowed
+        )
+    }
+
+    @Test
+    fun `MessageAuthorityDecision NO_CURRENT_AUTHORITY_BLOCKED isReplayAllowed is false`() {
+        assertFalse(UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_CURRENT_AUTHORITY_BLOCKED.isReplayAllowed)
+    }
+
+    @Test
     fun `MessageAuthorityDecision SAME_SESSION_REPLAY_ALLOWED isReplayAllowed is true`() {
         assertTrue(UnifiedReplayRecoveryContract.MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED.isReplayAllowed)
     }
@@ -233,11 +248,24 @@ class Pr74UnifiedReplayRecoveryContractTest {
     // ── evaluateMessageAuthority ──────────────────────────────────────────────
 
     @Test
-    fun `null sessionTag always produces NO_SESSION_TAG_FORWARDED`() {
-        // Messages without a session tag are legacy / pre-PR74 messages.
-        // They must always be forwarded regardless of the current session.
+    fun `null sessionTag on authority-sensitive type is blocked`() {
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "goal_execution_result",
+            json = "{}",
+            sessionTag = null
+        )
+        val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
+        assertEquals(
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED,
+            decision
+        )
+        assertFalse(decision.isReplayAllowed)
+    }
+
+    @Test
+    fun `null sessionTag on non-authority type is forwarded`() {
+        val msg = OfflineTaskQueue.QueuedMessage(
+            type = "device_state_snapshot",
             json = "{}",
             sessionTag = null
         )
@@ -246,7 +274,7 @@ class Pr74UnifiedReplayRecoveryContractTest {
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_FORWARDED,
             decision
         )
-        assertTrue("Legacy null-tagged messages must be forwarded", decision.isReplayAllowed)
+        assertTrue(decision.isReplayAllowed)
     }
 
     @Test
@@ -281,9 +309,7 @@ class Pr74UnifiedReplayRecoveryContractTest {
     }
 
     @Test
-    fun `null currentDurableSessionId allows any non-null tagged message`() {
-        // When there is no active durable session (e.g. the device is starting fresh),
-        // tagged messages from any prior session are allowed through.
+    fun `null currentDurableSessionId blocks tagged message replay`() {
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "goal_execution_result",
             json = "{}",
@@ -294,10 +320,10 @@ class Pr74UnifiedReplayRecoveryContractTest {
             currentDurableSessionId = null
         )
         assertEquals(
-            UnifiedReplayRecoveryContract.MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED,
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_CURRENT_AUTHORITY_BLOCKED,
             decision
         )
-        assertTrue(decision.isReplayAllowed)
+        assertFalse(decision.isReplayAllowed)
     }
 
     // ── Session tag at enqueue time (sendJson integration) ────────────────────
@@ -383,7 +409,7 @@ class Pr74UnifiedReplayRecoveryContractTest {
         // Verifies the full stale-session recovery path used by flushOfflineQueue:
         // 1. Messages are enqueued under different sessions.
         // 2. discardForDifferentSession filters based on the current session.
-        // 3. Only current-session (and null-tagged) messages survive.
+        // 3. Only current-session messages survive for authority-sensitive replay types.
         val queue = OfflineTaskQueue(prefs = null)
         queue.enqueue(
             "goal_execution_result",
@@ -410,9 +436,7 @@ class Pr74UnifiedReplayRecoveryContractTest {
     }
 
     @Test
-    fun `null-tagged legacy messages survive stale-session filtering`() {
-        // Messages without a sessionTag (legacy / pre-PR74 callers) must always
-        // be forwarded, even when the current session has changed.
+    fun `null-tagged authority-sensitive messages are blocked during stale-session filtering`() {
         val queue = OfflineTaskQueue(prefs = null)
         queue.enqueue(
             "goal_execution_result",
@@ -427,9 +451,23 @@ class Pr74UnifiedReplayRecoveryContractTest {
 
         val discarded = queue.discardForDifferentSession("session-NEW")
 
-        assertEquals("Only the stale-tagged message must be discarded", 1, discarded)
-        assertEquals("Legacy null-tagged message must survive", 1, queue.size)
-        assertTrue(queue.drainAll()[0].json.contains("legacy"))
+        assertEquals("Both legacy-null and stale-tagged messages must be discarded", 2, discarded)
+        assertEquals(0, queue.size)
+    }
+
+    @Test
+    fun `null-tagged non-authority messages survive stale-session filtering`() {
+        val queue = OfflineTaskQueue(prefs = null)
+        queue.enqueue(
+            "device_state_snapshot",
+            """{"type":"device_state_snapshot","payload":{"task_id":"snapshot"}}"""
+        )
+
+        val discarded = queue.discardForDifferentSession("session-NEW")
+
+        assertEquals(0, discarded)
+        assertEquals(1, queue.size)
+        assertTrue(queue.drainAll()[0].json.contains("snapshot"))
     }
 
     // ── Gate enforcement ──────────────────────────────────────────────────────
@@ -509,6 +547,28 @@ class Pr74UnifiedReplayRecoveryContractTest {
     fun `buildContractWireMap stale_session_messages_blocked is true`() {
         val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
         assertTrue(wireMap["stale_session_messages_blocked"] as Boolean)
+    }
+
+    @Test
+    fun `buildContractWireMap no_current_authority_replay_blocked is true`() {
+        val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
+        assertTrue(wireMap["no_current_authority_replay_blocked"] as Boolean)
+    }
+
+    @Test
+    fun `buildContractWireMap authority_sensitive_null_tag_replay_blocked is true`() {
+        val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
+        assertTrue(wireMap["authority_sensitive_null_tag_replay_blocked"] as Boolean)
+    }
+
+    @Test
+    fun `buildContractWireMap includes authority_sensitive_replay_types`() {
+        val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
+        @Suppress("UNCHECKED_CAST")
+        val types = wireMap["authority_sensitive_replay_types"] as List<String>
+        assertTrue(types.contains("goal_execution_result"))
+        assertTrue(types.contains("delegated_execution_signal"))
+        assertTrue(types.contains("device_execution_event"))
     }
 
     @Test

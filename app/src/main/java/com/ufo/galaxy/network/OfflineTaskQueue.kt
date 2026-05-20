@@ -5,6 +5,7 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
+import com.ufo.galaxy.runtime.UnifiedReplayRecoveryContract
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -99,7 +100,9 @@ class OfflineTaskQueue(
      *                   stale authority.  Messages tagged with a session that has since
      *                   changed are discarded by [discardForDifferentSession] before flush.
      *                   Null for messages enqueued without session tracking (pre-PR-66
-     *                   callers), which are always forwarded regardless of current session.
+     *                   callers). Authority-sensitive null-tag replay is blocked by
+     *                   [classifyForReplay] to avoid promoting historical canonical outputs
+     *                   into new authority events during restore/replay.
      */
     data class QueuedMessage(
         val type: String,
@@ -171,8 +174,13 @@ class OfflineTaskQueue(
     fun classifyForReplay(
         message: QueuedMessage,
         currentTag: String?
-    ): ReplayGovernanceDecision = when {
-        currentTag == null && message.sessionTag != null ->
+    ): ReplayGovernanceDecision {
+        val authorityDecision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(
+            message = message,
+            currentDurableSessionId = currentTag
+        )
+        return when (authorityDecision) {
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_CURRENT_AUTHORITY_BLOCKED ->
             ReplayGovernanceDecision(
                 message = message,
                 disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
@@ -180,7 +188,15 @@ class OfflineTaskQueue(
                 shouldForward = false,
                 reason = "queued_result_without_current_durable_authority"
             )
-        message.sessionTag != null && message.sessionTag != currentTag ->
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                shouldForward = false,
+                reason = "authority_sensitive_replay_requires_session_tag"
+            )
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED ->
             ReplayGovernanceDecision(
                 message = message,
                 disposition = AndroidContinuityIntegration.ContinuityDisposition.STALE_RESULT,
@@ -188,7 +204,8 @@ class OfflineTaskQueue(
                 shouldForward = false,
                 reason = "stale_durable_session_tag"
             )
-        else ->
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_FORWARDED,
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED ->
             ReplayGovernanceDecision(
                 message = message,
                 disposition = AndroidContinuityIntegration.ContinuityDisposition.REPLAY,
@@ -200,6 +217,7 @@ class OfflineTaskQueue(
                     "durable_session_tag_matches_current_authority"
                 }
             )
+        }
     }
 
     fun previewReplayGovernance(currentTag: String?): List<ReplayGovernanceDecision> =
@@ -249,9 +267,10 @@ class OfflineTaskQueue(
      * pending.forEach { ws.sendJson(it.json) }
      * ```
      *
-     * Messages with a **null** [QueuedMessage.sessionTag] are left unchanged — they were
-     * enqueued without session tracking (pre-PR-66 callers or callers that do not need
-     * session-scoped authority bounding) and are always forwarded.
+     * Messages with a **null** [QueuedMessage.sessionTag] are evaluated by
+     * [classifyForReplay]. Authority-sensitive replay types are blocked to avoid replaying
+     * historical canonical outputs as new authority events, while non-authority types remain
+     * compatible.
      *
      * @param currentTag  The active durable session identity tag.  Messages tagged with a
      *                    **different** non-null value are discarded.
