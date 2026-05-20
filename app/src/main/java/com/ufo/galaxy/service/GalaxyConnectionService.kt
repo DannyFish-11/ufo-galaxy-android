@@ -648,6 +648,8 @@ class GalaxyConnectionService : Service() {
                     sourceComponent = payload.source_component,
                     executionModeStateWire = modeState.executionModeState
                 )
+            val eventIngress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_EXECUTION_EVENT)
             val eventCompletionClosureBoundary = AndroidCompletionClosureUplinkContract
                 .deriveForExecutionEvent(
                     isLifecycleTerminalPhase = eventStamp.lifecycleTerminalPhase == true,
@@ -861,6 +863,10 @@ class GalaxyConnectionService : Service() {
                 dispatch_boundary_class = eventDispatchBoundary.dispatchBoundaryClass.wireValue,
                 dispatch_path_consumption_kind = eventDispatchBoundary.dispatchPathConsumptionKind.wireValue,
                 dispatch_boundary_schema_version = AndroidCrossDeviceDispatchBoundaryContract.SCHEMA_VERSION,
+                ingress_boundary_class = eventIngress.boundaryClass.wireValue,
+                ingress_consumption_kind = eventIngress.consumptionKind.wireValue,
+                ingress_signal_class = eventIngress.signalClass.wireValue,
+                ingress_schema_version = eventIngress.schemaVersion,
                 // ── PR-05v2 (Android): 结果上行闭环边界字段（在执行事件发射层填充）────────────────────
                 // 从已预计算的 eventUplinkBoundary 直接读取，使 V2 可无歧义地将执行事件路由至
                 // truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
@@ -3121,6 +3127,8 @@ class GalaxyConnectionService : Service() {
                 details = result.details,
                 error = result.error
             )
+        val resultIngress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.GOAL_EXECUTION_RESULT)
         val resolvedGoalResultReturned = result.result_returned ?: goalResultCompletionVisibility.resultReturned
         val resolvedGoalCompletionSignaled = result.completion_signaled
             ?: goalResultCompletionVisibility.completionSignaled
@@ -3208,6 +3216,10 @@ class GalaxyConnectionService : Service() {
             local_llm_ready = localLlmReady,
             accessibility_ready = accessibilityReady,
             local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable,
+            ingress_boundary_class = result.ingress_boundary_class ?: resultIngress.boundaryClass.wireValue,
+            ingress_consumption_kind = result.ingress_consumption_kind ?: resultIngress.consumptionKind.wireValue,
+            ingress_signal_class = result.ingress_signal_class ?: resultIngress.signalClass.wireValue,
+            ingress_schema_version = result.ingress_schema_version ?: resultIngress.schemaVersion,
             result_returned = resolvedGoalResultReturned,
             completion_signaled = resolvedGoalCompletionSignaled,
             closure_ready_for_acceptance = resolvedGoalClosureReady,

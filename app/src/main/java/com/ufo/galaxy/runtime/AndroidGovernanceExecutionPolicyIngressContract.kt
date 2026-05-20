@@ -31,6 +31,8 @@ object AndroidGovernanceExecutionPolicyIngressContract {
         GOVERNANCE_ARTIFACT("governance_artifact"),
         ACCEPTANCE_ARTIFACT("acceptance_artifact"),
         STRATEGY_ARTIFACT("strategy_artifact"),
+        RESULT_TRUTH_ARTIFACT("result_truth_artifact"),
+        EXECUTION_RUNTIME_EVENT("execution_runtime_event"),
         PARTICIPANT_STATE_POSTURE("participant_state_posture"),
         RUNTIME_TRUTH_SNAPSHOT("runtime_truth_snapshot"),
         DEVICE_STATE_POSTURE("device_state_posture"),
@@ -85,6 +87,17 @@ object AndroidGovernanceExecutionPolicyIngressContract {
             boundaryClass = IngressBoundaryClass.CANONICAL_GOVERNANCE_EXECUTION_POLICY,
             consumptionKind = IngressConsumptionKind.EXECUTION_POLICY_INGRESS,
             signalClass = IngressSignalClass.STRATEGY_ARTIFACT
+        )
+        MsgType.GOAL_EXECUTION_RESULT,
+        MsgType.GOAL_RESULT -> IngressClassification(
+            boundaryClass = IngressBoundaryClass.CANONICAL_GOVERNANCE_EXECUTION_POLICY,
+            consumptionKind = IngressConsumptionKind.EXECUTION_POLICY_INGRESS,
+            signalClass = IngressSignalClass.RESULT_TRUTH_ARTIFACT
+        )
+        MsgType.DEVICE_EXECUTION_EVENT -> IngressClassification(
+            boundaryClass = IngressBoundaryClass.CANONICAL_GOVERNANCE_EXECUTION_POLICY,
+            consumptionKind = IngressConsumptionKind.EXECUTION_POLICY_INGRESS,
+            signalClass = IngressSignalClass.EXECUTION_RUNTIME_EVENT
         )
         MsgType.DEVICE_STATE_SNAPSHOT -> IngressClassification(
             boundaryClass = IngressBoundaryClass.CANONICAL_GOVERNANCE_EXECUTION_POLICY,

@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
+import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
 import com.ufo.galaxy.runtime.ReconnectRecoveryState
 import org.junit.Assert.assertEquals
@@ -510,6 +511,13 @@ class AndroidParticipantProtocolGuardTest {
                 .SessionContinuityClass.SESSION_LIVE_AUTHORITATIVE.wireValue,
             device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
                 .DevicePostureSignalClass.RUNTIME_NODE_ACTIVE.wireValue,
+            ingress_boundary_class = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressBoundaryClass.CANONICAL_GOVERNANCE_EXECUTION_POLICY.wireValue,
+            ingress_consumption_kind = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressConsumptionKind.EXECUTION_POLICY_INGRESS.wireValue,
+            ingress_signal_class = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressSignalClass.EXECUTION_RUNTIME_EVENT.wireValue,
+            ingress_schema_version = AndroidGovernanceExecutionPolicyIngressContract.SCHEMA_VERSION,
             distributed_truth_ownership_uplink_schema_version =
                 AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
@@ -530,6 +538,10 @@ class AndroidParticipantProtocolGuardTest {
         assertTrue(obj.has("ownership_uplink_class"))
         assertTrue(obj.has("session_continuity_class"))
         assertTrue(obj.has("device_posture_signal_class"))
+        assertTrue(obj.has("ingress_boundary_class"))
+        assertTrue(obj.has("ingress_consumption_kind"))
+        assertTrue(obj.has("ingress_signal_class"))
+        assertTrue(obj.has("ingress_schema_version"))
         assertTrue(obj.has("distributed_truth_ownership_uplink_schema_version"))
         assertEquals("failed", obj.get("execution_lifecycle_phase").asString)
         assertEquals("active", obj.get("previous_execution_lifecycle_phase").asString)
@@ -553,6 +565,13 @@ class AndroidParticipantProtocolGuardTest {
                 .SessionContinuityClass.SESSION_LIVE_AUTHORITATIVE.wireValue,
             device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
                 .DevicePostureSignalClass.RUNTIME_NODE_ACTIVE.wireValue,
+            ingress_boundary_class = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressBoundaryClass.CANONICAL_GOVERNANCE_EXECUTION_POLICY.wireValue,
+            ingress_consumption_kind = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressConsumptionKind.EXECUTION_POLICY_INGRESS.wireValue,
+            ingress_signal_class = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressSignalClass.RESULT_TRUTH_ARTIFACT.wireValue,
+            ingress_schema_version = AndroidGovernanceExecutionPolicyIngressContract.SCHEMA_VERSION,
             distributed_truth_ownership_uplink_schema_version =
                 AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
@@ -562,6 +581,9 @@ class AndroidParticipantProtocolGuardTest {
         assertEquals("authority_held", obj.get("ownership_uplink_class").asString)
         assertEquals("session_live_authoritative", obj.get("session_continuity_class").asString)
         assertEquals("runtime_node_active", obj.get("device_posture_signal_class").asString)
+        assertEquals("canonical_governance_execution_policy", obj.get("ingress_boundary_class").asString)
+        assertEquals("execution_policy_ingress", obj.get("ingress_consumption_kind").asString)
+        assertEquals("result_truth_artifact", obj.get("ingress_signal_class").asString)
     }
 
     @Test
@@ -572,6 +594,13 @@ class AndroidParticipantProtocolGuardTest {
             node_name = "transport",
             error_type = "timeout",
             error_context = "socket timeout",
+            ingress_boundary_class = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressBoundaryClass.DIAGNOSTICS_AUDIT_SUMMARY.wireValue,
+            ingress_consumption_kind = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressConsumptionKind.NONE.wireValue,
+            ingress_signal_class = AndroidGovernanceExecutionPolicyIngressContract
+                .IngressSignalClass.DIAGNOSTICS_SIGNAL.wireValue,
+            ingress_schema_version = AndroidGovernanceExecutionPolicyIngressContract.SCHEMA_VERSION,
             authority_signal_class = AndroidDistributedTruthOwnershipUplinkContract
                 .AuthoritySignalClass.DIAGNOSTICS_AUDIT.wireValue,
             ownership_uplink_class = AndroidDistributedTruthOwnershipUplinkContract
@@ -589,6 +618,9 @@ class AndroidParticipantProtocolGuardTest {
         assertEquals("no_transfer", obj.get("ownership_uplink_class").asString)
         assertEquals("session_continuation", obj.get("session_continuity_class").asString)
         assertEquals("posture_signal_only", obj.get("device_posture_signal_class").asString)
+        assertEquals("diagnostics_audit_summary", obj.get("ingress_boundary_class").asString)
+        assertEquals("none", obj.get("ingress_consumption_kind").asString)
+        assertEquals("diagnostics_signal", obj.get("ingress_signal_class").asString)
     }
 
     @Test

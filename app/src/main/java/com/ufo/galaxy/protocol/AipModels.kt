@@ -1185,6 +1185,10 @@ data class GoalResultPayload(
     val local_llm_ready: Boolean? = null,
     val accessibility_ready: Boolean? = null,
     val local_mode_capable: Boolean? = null,
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null,
 
     // ── PR-05v2 (Android): 结果上行闭环边界字段（AndroidResultUplinkBoundaryContract）────────────
     //
@@ -1318,6 +1322,10 @@ data class DiagnosticsPayload(
     val diagnostic_domain: String? = null,
     val diagnostic_reason: String? = null,
     val local_cause: String? = null,
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null,
     val uplink_semantic_boundary_class: String? = null,
     val operator_projection_class: String? = null,
     val diagnostics_failure_explanation_schema_version: String? = null,
@@ -3324,6 +3332,10 @@ data class DeviceExecutionEventPayload(
     val dispatch_boundary_class: String? = null,
     val dispatch_path_consumption_kind: String? = null,
     val dispatch_boundary_schema_version: String? = null,
+    val ingress_boundary_class: String? = null,
+    val ingress_consumption_kind: String? = null,
+    val ingress_signal_class: String? = null,
+    val ingress_schema_version: String? = null,
 
     // ── PR-05v2 (Android): 结果上行闭环边界字段（AndroidResultUplinkBoundaryContract）────────────
     //

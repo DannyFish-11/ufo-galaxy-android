@@ -14,6 +14,7 @@ import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
+import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
@@ -1281,6 +1282,8 @@ class GalaxyWebSocketClient(
         )
         val diagnosticsBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
             .forDiagnosticsPayload()
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.DIAGNOSTICS_PAYLOAD)
         val truthOwnershipBoundary = AndroidDistributedTruthOwnershipUplinkContract.derive(
             AndroidDistributedTruthOwnershipUplinkContract.TruthOwnershipUplinkDerivationInput(
                 executionBusy = false,
@@ -1308,6 +1311,10 @@ class GalaxyWebSocketClient(
             diagnostic_domain = diagnosticClassification.domain.wireValue,
             diagnostic_reason = diagnosticClassification.reason.wireValue,
             local_cause = diagnosticClassification.localCause,
+            ingress_boundary_class = ingress.boundaryClass.wireValue,
+            ingress_consumption_kind = ingress.consumptionKind.wireValue,
+            ingress_signal_class = ingress.signalClass.wireValue,
+            ingress_schema_version = ingress.schemaVersion,
             uplink_semantic_boundary_class = diagnosticsBoundary.uplinkSemanticBoundaryClass.wireValue,
             operator_projection_class = diagnosticsBoundary.operatorProjectionClass.wireValue,
             diagnostics_failure_explanation_schema_version =
