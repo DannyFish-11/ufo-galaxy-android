@@ -51,6 +51,63 @@ data class DualRepoE2EVerificationHookRecord(
 )
 
 /**
+ * Canonical verification steps for Android local AI consumer flow uplinked to V2.
+ */
+enum class LocalAiCanonicalVerificationStep(val wireValue: String, val isRequired: Boolean) {
+    LOCAL_INFERENCE_STARTED("local_inference_started", true),
+    LOCAL_RESULT_GENERATED("local_result_generated", true),
+    RUNTIME_VISIBLE_DIAGNOSTICS("runtime_visible_diagnostics", true),
+    RESULT_UPLINK_EMITTED("result_uplink_emitted", true),
+    V2_CANONICAL_INGRESS("v2_canonical_ingress", true),
+    V2_TRUTH_RECONCILIATION("v2_truth_reconciliation", true),
+    V2_CLOSURE_OUTWARD_COMPILED("v2_closure_outward_compiled", true);
+
+    companion object {
+        val REQUIRED_STEPS: Set<LocalAiCanonicalVerificationStep> = entries.filter { it.isRequired }.toSet()
+    }
+}
+
+/**
+ * Explicit authority boundary class for Android local inference outputs.
+ */
+enum class LocalAiResultAuthorityBoundaryClass(val wireValue: String) {
+    LOCAL_RUNTIME_CONTRIBUTION_ONLY("local_runtime_contribution_only"),
+    CANONICAL_FINAL_TRUTH_FORBIDDEN("canonical_final_truth_forbidden")
+}
+
+/**
+ * Structured evidence showing whether Android local AI consumer flow stayed in canonical chain.
+ */
+data class LocalAiCanonicalFlowEvidence(
+    val stepOutcomes: Map<LocalAiCanonicalVerificationStep, ScenarioOutcomeStatus>,
+    val localInferenceCapabilityStatus: LocalIntelligenceCapabilityStatus,
+    val localInferenceActivationTier: LocalIntelligenceActivationPolicy.ActivationTier,
+    val authorityBoundaryClass: LocalAiResultAuthorityBoundaryClass,
+    val reconciliationSignalKind: ReconciliationSignal.Kind,
+    val localInferenceReason: String? = null
+) {
+    val isCanonicalChainVerified: Boolean
+        get() = LocalAiCanonicalVerificationStep.REQUIRED_STEPS.all { step ->
+            stepOutcomes[step] == ScenarioOutcomeStatus.PASSED
+        }
+
+    val isLocalResultAuthorityBounded: Boolean
+        get() = authorityBoundaryClass == LocalAiResultAuthorityBoundaryClass.LOCAL_RUNTIME_CONTRIBUTION_ONLY ||
+            authorityBoundaryClass == LocalAiResultAuthorityBoundaryClass.CANONICAL_FINAL_TRUTH_FORBIDDEN
+
+    fun toWireMap(): Map<String, Any?> = mapOf(
+        "step_outcomes" to stepOutcomes.mapKeys { it.key.wireValue }.mapValues { it.value.wireValue },
+        "local_inference_capability_status" to localInferenceCapabilityStatus.wireValue,
+        "local_inference_activation_tier" to localInferenceActivationTier.wireValue,
+        "authority_boundary_class" to authorityBoundaryClass.wireValue,
+        "reconciliation_signal_kind" to reconciliationSignalKind.wireValue,
+        "local_inference_reason" to localInferenceReason,
+        "is_canonical_chain_verified" to isCanonicalChainVerified,
+        "is_local_result_authority_bounded" to isLocalResultAuthorityBounded
+    )
+}
+
+/**
  * PR-72 (Android) — Structured dual-repo E2E verification report for cross-repo consumption
  * by V2 readiness / acceptance systems.
  *
@@ -130,6 +187,7 @@ data class DualRepoE2EVerificationReport(
     val stageOutcomes: Map<DualRepoE2EVerificationStage, DualRepoE2EStageOutcome>,
     val verificationHooks: Map<DualRepoE2EVerificationHookKind, DualRepoE2EVerificationHookRecord>,
     val governanceSnapshot: DelegatedRuntimeGovernanceSnapshot?,
+    val localAiCanonicalFlowEvidence: LocalAiCanonicalFlowEvidence? = null,
     val overallArtifact: DualRepoE2EVerificationArtifact,
     val bridgeReport: RealDeviceParticipantVerificationReport,
     val lifecycleTruthState: ParticipantLifecycleTruthState?,
@@ -212,6 +270,13 @@ data class DualRepoE2EVerificationReport(
     /** `true` when Android provided a structured governance snapshot alongside the E2E report. */
     val hasGovernanceSignal: Boolean
         get() = governanceSnapshot != null
+
+    /** `true` when local AI consumer flow is fully observed in canonical V2 chain. */
+    val isLocalAiCanonicalChainVerified: Boolean
+        get() {
+            val evidence = localAiCanonicalFlowEvidence ?: return false
+            return evidence.isCanonicalChainVerified && evidence.isLocalResultAuthorityBounded
+        }
 
     /**
      * Produces a stable, V2-consumable key-value map for cross-repo serialization.
@@ -314,10 +379,12 @@ data class DualRepoE2EVerificationReport(
             "is_identity_correlated" to isIdentityCorrelated,
             "is_participation_ready_evidence" to isParticipationReadyEvidence,
             "is_runtime_closed_evidence" to isRuntimeClosedEvidence,
+            "is_local_ai_canonical_chain_verified" to isLocalAiCanonicalChainVerified,
             "has_governance_signal" to hasGovernanceSignal,
             "correlated_trace_id" to correlatedTraceId,
             "correlated_runtime_session_id" to correlatedRuntimeSessionId,
             "correlated_task_id" to correlatedTaskId,
+            "canonical_uplink_path_map" to CANONICAL_UPLINK_PATH_MAP,
             "stage_outcomes" to stageOutcomesWire,
             "stage_reasons" to stageReasonsWire,
             "verification_hooks" to verificationHooksWire,
@@ -334,6 +401,7 @@ data class DualRepoE2EVerificationReport(
             "governance_missing_dimensions" to governanceMissingDimensionsWire,
             "governance_dimension_states" to governanceDimensionStatesWire,
             "governance_dimension_reasons" to governanceDimensionReasonsWire,
+            "local_ai_canonical_flow" to localAiCanonicalFlowEvidence?.toWireMap(),
             "bridge_artifact_tag" to bridgeReport.overallVerificationArtifact.artifactTag,
             "bridge_is_real_device_verified" to bridgeReport.isRealDeviceVerified
         )
@@ -349,6 +417,14 @@ data class DualRepoE2EVerificationReport(
             DualRepoE2EVerificationStage.CAPABILITY_REPORT,
             DualRepoE2EVerificationStage.TASK_ASSIGNMENT_RECEPTION,
             DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE
+        )
+
+        val CANONICAL_UPLINK_PATH_MAP: Map<String, String> = mapOf(
+            "android_result_uplink" to "goal_execution_result/device_execution_event",
+            "v2_result_ingress" to "core/unified_result_ingress.py",
+            "v2_android_truth_ssot" to "core/v2_android_truth_ssot.py",
+            "v2_truth_reconciliation" to "core/unified_runtime_truth_ingress.py",
+            "v2_closure_outward_compile" to "core/outward_runtime_truth.py::compile_outward_truth"
         )
 
         /** Human-readable description of this report surface. */
