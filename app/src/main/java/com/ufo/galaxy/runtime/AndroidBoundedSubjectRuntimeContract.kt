@@ -109,6 +109,7 @@ object AndroidBoundedSubjectRuntimeContract {
 
     enum class LocalVisibleClass(val wireValue: String) {
         LOCAL_VISIBLE("local_visible"),
+        RUNTIME_VISIBLE("runtime_visible"),
         PRODUCT_VISIBLE("product_visible"),
         DIAGNOSTICS_VISIBLE("diagnostics_visible")
     }
@@ -123,9 +124,38 @@ object AndroidBoundedSubjectRuntimeContract {
 
     enum class LocalConsumptionSurface {
         LOCAL_RUNTIME_SURFACE,
+        RUNTIME_VISIBLE_SURFACE,
         PRODUCT_SURFACE,
         DIAGNOSTICS_SURFACE
     }
+
+    enum class ObservabilityContractClass(val wireValue: String) {
+        LOCAL_VISIBLE("local_visible"),
+        RUNTIME_VISIBLE("runtime_visible"),
+        DIAGNOSTICS_VISIBLE("diagnostics_visible"),
+        PRODUCT_VISIBLE("product_visible"),
+        PARTICIPANT_TRUTH_UPLINK("participant_truth_uplink"),
+        EXECUTION_RESULT_UPLINK("execution_result_uplink"),
+        CONTINUITY_STATE_UPLINK("continuity_state_uplink")
+    }
+
+    enum class ObservabilityConsumptionBoundary(val wireValue: String) {
+        LOCAL_FACING_ONLY("local_facing_only"),
+        CANONICAL_UPLINK_ONLY("canonical_uplink_only")
+    }
+
+    enum class EvidenceBoundaryClass(val wireValue: String) {
+        LOCAL_VISIBLE_EVIDENCE("local_visible_evidence"),
+        PARTICIPANT_UPLINK_EVIDENCE("participant_uplink_evidence")
+    }
+
+    data class ObservabilityBoundaryEntry(
+        val contractClass: ObservabilityContractClass,
+        val runtimeModule: String,
+        val consumptionBoundary: ObservabilityConsumptionBoundary,
+        val evidenceBoundaryClass: EvidenceBoundaryClass,
+        val canonicalFinalAuthority: Boolean = false
+    )
 
     private val PARTICIPANT_TRUTH_MSG_TYPES = setOf(
         MsgType.DEVICE_REGISTER,
@@ -225,9 +255,87 @@ object AndroidBoundedSubjectRuntimeContract {
 
     fun classifyLocalSurface(surface: LocalConsumptionSurface): LocalVisibleClass = when (surface) {
         LocalConsumptionSurface.LOCAL_RUNTIME_SURFACE -> LocalVisibleClass.LOCAL_VISIBLE
+        LocalConsumptionSurface.RUNTIME_VISIBLE_SURFACE -> LocalVisibleClass.RUNTIME_VISIBLE
         LocalConsumptionSurface.PRODUCT_SURFACE -> LocalVisibleClass.PRODUCT_VISIBLE
         LocalConsumptionSurface.DIAGNOSTICS_SURFACE -> LocalVisibleClass.DIAGNOSTICS_VISIBLE
     }
+
+    fun classifyObservabilityContractClass(
+        localSurface: LocalConsumptionSurface? = null,
+        msgType: MsgType? = null,
+        reconciliationKind: ReconciliationSignal.Kind? = null
+    ): ObservabilityContractClass? {
+        localSurface?.let { surface ->
+            return when (classifyLocalSurface(surface)) {
+                LocalVisibleClass.LOCAL_VISIBLE -> ObservabilityContractClass.LOCAL_VISIBLE
+                LocalVisibleClass.RUNTIME_VISIBLE -> ObservabilityContractClass.RUNTIME_VISIBLE
+                LocalVisibleClass.DIAGNOSTICS_VISIBLE -> ObservabilityContractClass.DIAGNOSTICS_VISIBLE
+                LocalVisibleClass.PRODUCT_VISIBLE -> ObservabilityContractClass.PRODUCT_VISIBLE
+            }
+        }
+        val uplinkMsgType = msgType ?: return null
+        return when (classifyCanonicalUplink(uplinkMsgType, reconciliationKind)) {
+            CanonicalUplinkClass.PARTICIPANT_TRUTH_UPLINK ->
+                ObservabilityContractClass.PARTICIPANT_TRUTH_UPLINK
+            CanonicalUplinkClass.EXECUTION_RESULT_UPLINK ->
+                ObservabilityContractClass.EXECUTION_RESULT_UPLINK
+            CanonicalUplinkClass.CONTINUITY_STATE_UPLINK ->
+                ObservabilityContractClass.CONTINUITY_STATE_UPLINK
+            CanonicalUplinkClass.DIAGNOSTICS_UPLINK,
+            CanonicalUplinkClass.COMPAT_MINIMAL_UPLINK -> null
+        }
+    }
+
+    val OBSERVABILITY_BOUNDARY_ENTRIES: List<ObservabilityBoundaryEntry> = listOf(
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.LOCAL_VISIBLE,
+            runtimeModule = "LocalLoopExecutor",
+            consumptionBoundary = ObservabilityConsumptionBoundary.LOCAL_FACING_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.LOCAL_VISIBLE_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.RUNTIME_VISIBLE,
+            runtimeModule = "RuntimeController",
+            consumptionBoundary = ObservabilityConsumptionBoundary.LOCAL_FACING_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.LOCAL_VISIBLE_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.DIAGNOSTICS_VISIBLE,
+            runtimeModule = "GalaxyConnectionService",
+            consumptionBoundary = ObservabilityConsumptionBoundary.LOCAL_FACING_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.LOCAL_VISIBLE_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.PRODUCT_VISIBLE,
+            runtimeModule = "AutonomousExecutionPipeline",
+            consumptionBoundary = ObservabilityConsumptionBoundary.LOCAL_FACING_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.LOCAL_VISIBLE_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.PARTICIPANT_TRUTH_UPLINK,
+            runtimeModule = "GalaxyConnectionService",
+            consumptionBoundary = ObservabilityConsumptionBoundary.CANONICAL_UPLINK_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.PARTICIPANT_UPLINK_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.EXECUTION_RESULT_UPLINK,
+            runtimeModule = "GalaxyWebSocketClient",
+            consumptionBoundary = ObservabilityConsumptionBoundary.CANONICAL_UPLINK_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.PARTICIPANT_UPLINK_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.CONTINUITY_STATE_UPLINK,
+            runtimeModule = "AndroidContinuityIntegration",
+            consumptionBoundary = ObservabilityConsumptionBoundary.CANONICAL_UPLINK_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.PARTICIPANT_UPLINK_EVIDENCE
+        ),
+        ObservabilityBoundaryEntry(
+            contractClass = ObservabilityContractClass.CONTINUITY_STATE_UPLINK,
+            runtimeModule = "OfflineTaskQueue",
+            consumptionBoundary = ObservabilityConsumptionBoundary.CANONICAL_UPLINK_ONLY,
+            evidenceBoundaryClass = EvidenceBoundaryClass.PARTICIPANT_UPLINK_EVIDENCE
+        )
+    )
 
     fun classifyCanonicalUplink(
         msgType: MsgType,
@@ -267,7 +375,10 @@ object AndroidBoundedSubjectRuntimeContract {
         "android_is_local_ai_consumer_host" to true,
         "local_ai_consumer_flow_is_runtime_bounded_and_center_aligned" to true,
         "local_visible_product_visible_diagnostics_visible_are_not_canonical_truth" to true,
+        "runtime_visible_is_local_consumption_not_canonical_truth" to true,
         "participant_truth_execution_result_continuity_uplinks_feed_canonical_chain" to true,
+        "diagnostics_evidence_must_not_claim_canonical_final_truth" to true,
+        "outward_facing_layers_consume_only_bounded_or_canonical_outputs" to true,
         "android_uplink_is_layered_participant_runtime_result_diagnostics_compat" to true,
         "android_does_not_finalize_global_truth" to true,
         "android_does_not_own_global_dispatch_authority" to true,

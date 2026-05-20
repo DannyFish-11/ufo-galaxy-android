@@ -125,6 +125,12 @@ class Pr10v2AndroidBoundedSubjectRuntimeContractTest {
             )
         )
         assertEquals(
+            AndroidBoundedSubjectRuntimeContract.LocalVisibleClass.RUNTIME_VISIBLE,
+            AndroidBoundedSubjectRuntimeContract.classifyLocalSurface(
+                AndroidBoundedSubjectRuntimeContract.LocalConsumptionSurface.RUNTIME_VISIBLE_SURFACE
+            )
+        )
+        assertEquals(
             AndroidBoundedSubjectRuntimeContract.LocalVisibleClass.PRODUCT_VISIBLE,
             AndroidBoundedSubjectRuntimeContract.classifyLocalSurface(
                 AndroidBoundedSubjectRuntimeContract.LocalConsumptionSurface.PRODUCT_SURFACE
@@ -159,6 +165,64 @@ class Pr10v2AndroidBoundedSubjectRuntimeContractTest {
     }
 
     @Test
+    fun `observability diagnostics evidence contract classifies local and canonical boundaries`() {
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.RUNTIME_VISIBLE,
+            AndroidBoundedSubjectRuntimeContract.classifyObservabilityContractClass(
+                localSurface = AndroidBoundedSubjectRuntimeContract.LocalConsumptionSurface.RUNTIME_VISIBLE_SURFACE
+            )
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.PARTICIPANT_TRUTH_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyObservabilityContractClass(
+                msgType = MsgType.DEVICE_GOVERNANCE_REPORT
+            )
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.EXECUTION_RESULT_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyObservabilityContractClass(
+                msgType = MsgType.GOAL_EXECUTION_RESULT
+            )
+        )
+        assertEquals(
+            AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.CONTINUITY_STATE_UPLINK,
+            AndroidBoundedSubjectRuntimeContract.classifyObservabilityContractClass(
+                msgType = MsgType.DEVICE_STATE_SNAPSHOT,
+                reconciliationKind = ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
+            )
+        )
+        assertEquals(
+            null,
+            AndroidBoundedSubjectRuntimeContract.classifyObservabilityContractClass(
+                msgType = MsgType.DIAGNOSTICS_PAYLOAD
+            )
+        )
+    }
+
+    @Test
+    fun `observability boundary entries stay bounded and tied to real modules`() {
+        val entries = AndroidBoundedSubjectRuntimeContract.OBSERVABILITY_BOUNDARY_ENTRIES
+        assertTrue(entries.any { it.runtimeModule == "RuntimeController" })
+        assertTrue(entries.any { it.runtimeModule == "GalaxyConnectionService" })
+        assertTrue(entries.any { it.runtimeModule == "GalaxyWebSocketClient" })
+        assertTrue(entries.any { it.runtimeModule == "OfflineTaskQueue" })
+        assertTrue(entries.any { it.runtimeModule == "AndroidContinuityIntegration" })
+        assertTrue(entries.none { it.canonicalFinalAuthority })
+        assertTrue(
+            entries
+                .filter {
+                    it.contractClass == AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.PARTICIPANT_TRUTH_UPLINK ||
+                        it.contractClass == AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.EXECUTION_RESULT_UPLINK ||
+                        it.contractClass == AndroidBoundedSubjectRuntimeContract.ObservabilityContractClass.CONTINUITY_STATE_UPLINK
+                }
+                .all {
+                    it.consumptionBoundary ==
+                        AndroidBoundedSubjectRuntimeContract.ObservabilityConsumptionBoundary.CANONICAL_UPLINK_ONLY
+                }
+        )
+    }
+
+    @Test
     fun `invariants explicitly prevent passive endpoint and parallel center drift`() {
         val invariants = AndroidBoundedSubjectRuntimeContract.BOUNDED_SUBJECT_RUNTIME_INVARIANTS
         assertEquals(true, invariants["android_is_not_passive_endpoint"])
@@ -169,6 +233,9 @@ class Pr10v2AndroidBoundedSubjectRuntimeContractTest {
             true,
             invariants["participant_truth_execution_result_continuity_uplinks_feed_canonical_chain"]
         )
+        assertEquals(true, invariants["runtime_visible_is_local_consumption_not_canonical_truth"])
+        assertEquals(true, invariants["diagnostics_evidence_must_not_claim_canonical_final_truth"])
+        assertEquals(true, invariants["outward_facing_layers_consume_only_bounded_or_canonical_outputs"])
         assertEquals(true, invariants["android_does_not_finalize_global_truth"])
         assertEquals(true, invariants["android_does_not_own_global_dispatch_authority"])
     }

@@ -173,10 +173,11 @@ This contract explicitly enforces:
 3. `AndroidContinuityIntegration` / `OfflineTaskQueue`: local continuity/recovery/replay handling with canonical uplink obligation.
 4. `GalaxyWebSocketClient`: canonical uplink transport; center remains canonical arbitration/truth/closure authority.
 
-Visibility and uplink boundaries are explicit in the same contract:
+Visibility, diagnostics/evidence, and uplink boundaries are explicit in the same contract:
 
-- local-visible / product-visible / diagnostics-visible stay as local consumption classes;
+- local-visible / runtime-visible / product-visible / diagnostics-visible stay as local consumption classes;
 - `participant_truth_uplink`, `execution_result_uplink`, and `continuity_state_uplink` are canonical-participant uplinks into V2 truth/closure convergence chain;
+- diagnostics/evidence outputs are bounded: local diagnostics are local-facing evidence, while canonical uplink evidence remains participant contribution and never final authority;
 - diagnostics uplink remains diagnostics-only and does not claim canonical closure authority.
 
 ### Truth vs projection boundary (Android-side)
