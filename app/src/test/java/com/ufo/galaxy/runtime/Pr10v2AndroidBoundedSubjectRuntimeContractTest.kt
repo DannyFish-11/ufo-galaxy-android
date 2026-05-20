@@ -227,16 +227,85 @@ class Pr10v2AndroidBoundedSubjectRuntimeContractTest {
         val invariants = AndroidBoundedSubjectRuntimeContract.BOUNDED_SUBJECT_RUNTIME_INVARIANTS
         assertEquals(true, invariants["android_is_not_passive_endpoint"])
         assertEquals(true, invariants["android_is_not_parallel_canonical_center"])
+        assertEquals(true, invariants["android_role_is_non_sovereign_bounded_subject_runtime"])
         assertEquals(true, invariants["android_is_local_ai_consumer_host"])
         assertEquals(true, invariants["local_ai_consumer_flow_is_runtime_bounded_and_center_aligned"])
         assertEquals(
             true,
             invariants["participant_truth_execution_result_continuity_uplinks_feed_canonical_chain"]
         )
+        assertEquals(true, invariants["android_boundary_local_visible_vs_canonical_visible_is_explicit"])
+        assertEquals(
+            true,
+            invariants["android_boundary_continuity_restore_is_local_with_canonical_uplink"]
+        )
+        assertEquals(
+            true,
+            invariants["android_boundary_uplink_ingress_contract_is_participant_only"]
+        )
+        assertEquals(true, invariants["android_boundary_outward_ui_consumption_is_non_authoritative"])
         assertEquals(true, invariants["runtime_visible_is_local_consumption_not_canonical_truth"])
         assertEquals(true, invariants["diagnostics_evidence_must_not_claim_canonical_final_truth"])
         assertEquals(true, invariants["outward_facing_layers_consume_only_bounded_or_canonical_outputs"])
         assertEquals(true, invariants["android_does_not_finalize_global_truth"])
         assertEquals(true, invariants["android_does_not_own_global_dispatch_authority"])
+    }
+
+    @Test
+    fun `formal boundary summary covers required six boundaries and is non-sovereign`() {
+        assertEquals("1.0", AndroidBoundedSubjectRuntimeContract.FORMAL_BOUNDARY_SUMMARY_SCHEMA_VERSION)
+        assertEquals(6, AndroidBoundedSubjectRuntimeContract.FORMAL_BOUNDARY_SUMMARY_ENTRIES.size)
+        assertTrue(AndroidBoundedSubjectRuntimeContract.validateFormalBoundarySummaryCoverage())
+
+        val classes = AndroidBoundedSubjectRuntimeContract.FORMAL_BOUNDARY_SUMMARY_ENTRIES
+            .map { it.summaryClass }
+            .toSet()
+        assertEquals(6, classes.size)
+        assertTrue(
+            classes.contains(
+                AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.ANDROID_BOUNDED_SUBJECT_RUNTIME
+            )
+        )
+        assertTrue(
+            classes.contains(
+                AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.LOCAL_VISIBLE_VS_CANONICAL_VISIBLE
+            )
+        )
+        assertTrue(
+            classes.contains(
+                AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.CONTINUITY_RESTORE
+            )
+        )
+        assertTrue(
+            classes.contains(
+                AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.UPLINK_INGRESS_CONTRACT
+            )
+        )
+        assertTrue(
+            classes.contains(
+                AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.OUTWARD_UI_CONSUMPTION
+            )
+        )
+        assertTrue(
+            classes.contains(
+                AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.NON_SOVEREIGN_ROLE
+            )
+        )
+    }
+
+    @Test
+    fun `formal boundary summary explicitly states Android is non-sovereign and not closure authority`() {
+        val nonSovereignEntry = AndroidBoundedSubjectRuntimeContract.FORMAL_BOUNDARY_SUMMARY_ENTRIES.first {
+            it.summaryClass == AndroidBoundedSubjectRuntimeContract.FormalBoundarySummaryClass.NON_SOVEREIGN_ROLE
+        }
+        assertTrue(nonSovereignEntry.summary.contains("non-sovereign", ignoreCase = true))
+        assertTrue(nonSovereignEntry.summary.contains("canonical truth convergence", ignoreCase = true))
+        assertTrue(nonSovereignEntry.summary.contains("final closure adjudication", ignoreCase = true))
+        assertTrue(nonSovereignEntry.contractAnchors.contains("AndroidBoundedSubjectRuntimeContract.classifyAuthority"))
+        assertTrue(
+            nonSovereignEntry.contractAnchors.contains(
+                "AndroidBoundedSubjectPlatformBoundaryContract.QUASI_PLATFORM_STATE_DEFINITION"
+            )
+        )
     }
 }

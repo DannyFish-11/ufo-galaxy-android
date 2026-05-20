@@ -228,6 +228,24 @@ Android bounded runtime  →(uplink only)→  V2 canonical center  →(consumpti
 4. Observability/diagnostics/evidence boundary is consumption-only.
 5. Outward consumption boundary must anchor through `AndroidFinalSurfaceConvergenceContract`.
 
+#### Formal boundary summary schema (runtime-assertable)
+
+`AndroidBoundedSubjectRuntimeContract.FORMAL_BOUNDARY_SUMMARY_ENTRIES` (`FORMAL_BOUNDARY_SUMMARY_SCHEMA_VERSION=1.0`) fixes six Android-side boundary summaries as long-term reference surfaces and testable runtime assertions:
+
+| Summary class | Fixed boundary meaning |
+|---------------|------------------------|
+| `ANDROID_BOUNDED_SUBJECT_RUNTIME` | Android is bounded relative subject runtime (local host + continuity holder + participant), not canonical center |
+| `LOCAL_VISIBLE_VS_CANONICAL_VISIBLE` | local/runtime/product/diagnostics visibility is local-facing; canonical visibility only through participant uplinks |
+| `CONTINUITY_RESTORE` | continuity/restore/replay are locally handled with canonical continuity uplink obligation |
+| `UPLINK_INGRESS_CONTRACT` | uplink/ingress are participant contracts into V2 canonical governance/truth/closure chain |
+| `OUTWARD_UI_CONSUMPTION` | outward/UI/operator/product/diagnostics layers are consumption-only |
+| `NON_SOVEREIGN_ROLE` | Android is explicitly non-sovereign: no canonical truth convergence, no final closure adjudication, no platform sovereignty |
+
+Validation helpers and tests:
+
+- `AndroidBoundedSubjectRuntimeContract.validateFormalBoundarySummaryCoverage()`
+- `Pr10v2AndroidBoundedSubjectRuntimeContractTest` (`formal boundary summary...` assertions)
+
 ### Truth vs projection boundary (Android-side)
 
 Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:
