@@ -121,6 +121,49 @@ Both chains use the same on-device execution engine (`EdgeExecutor`). Only the e
 
 `GalaxyWebSocketClient` is the **sole cross-device uplink**. All outbound cross-device messages — device registration, capability reports, heartbeats, task results, goal results, cancel results — flow through this class. Use `GatewayClient` (the thin wrapper) for task-submit calls.
 
+### Formal Android bounded-subject runtime boundary
+
+`AndroidBoundedSubjectRuntimeContract` (`app/src/main/java/com/ufo/galaxy/runtime/AndroidBoundedSubjectRuntimeContract.kt`) is the canonical role-boundary declaration for Android in dual-repo governance.
+
+Android is formally fixed as:
+
+- bounded relative subject runtime
+- local runtime host
+- local continuity holder
+- local execution policy participant
+- local AI consumer host
+- distributed participant
+
+This contract explicitly enforces:
+
+- Android is **not** a passive endpoint/UI shell.
+- Android is **not** a parallel canonical center.
+- Android may decide local runtime mode/continuity/AI-consumption execution, but cannot finalize global truth/dispatch/closure.
+
+#### Unified cross-repo glossary
+
+| Term | Boundary meaning |
+|------|------------------|
+| center | V2 canonical governance center with final dispatch/truth/closure authority |
+| subject | bounded runtime主体 with local lifecycle and local execution judgment |
+| participant | subject instance enrolled in distributed collaboration |
+| target | routed execution target, not authority owner |
+| truth | Android publishes participant truth; center performs final convergence |
+| dispatch | center-owned final arbitration |
+| continuity | reconnect/replay/recovery/handoff/takeover continuity semantics |
+| closure | Android contributes evidence; center produces canonical closure verdict |
+| bounded authority | Android has local decision scope but no global finalization authority |
+
+#### Android uplink semantic layers
+
+| Layer | Representative uplink message types | Governance interpretation |
+|-------|-------------------------------------|---------------------------|
+| participant truth uplink | `device_register`, `capability_report`, `device_readiness_report`, `device_governance_report`, `device_acceptance_report` | participant identity/readiness/truth contribution |
+| runtime state uplink | `heartbeat`, `heartbeat_ack`, `device_state_snapshot` | runtime liveness/state contribution |
+| execution result uplink | `task_result`, `cancel_result`, `goal_result`, `goal_execution_result`, `device_execution_event` | execution evidence/result contribution |
+| diagnostics uplink | `diagnostics_payload`, `device_audit_report` | diagnostics/audit visibility (non-closure authority) |
+| compat/minimal uplink | `relay` and other minimal-compat channels | explicit compatibility path, not canonical authority path |
+
 ### Truth vs projection boundary (Android-side)
 
 Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:
