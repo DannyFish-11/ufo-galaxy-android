@@ -63,7 +63,7 @@ enum class LocalAiCanonicalVerificationStep(val wireValue: String, val isRequire
     V2_CLOSURE_OUTWARD_COMPILED("v2_closure_outward_compiled", true);
 
     companion object {
-        val REQUIRED_STEPS: Set<LocalAiCanonicalVerificationStep> = entries.filter { it.isRequired }.toSet()
+        val REQUIRED_STEPS: Set<LocalAiCanonicalVerificationStep> = entries.toSet()
     }
 }
 

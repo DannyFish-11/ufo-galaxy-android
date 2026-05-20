@@ -447,7 +447,7 @@ class DualRepoE2EVerificationHarness(
             LocalIntelligenceCapabilityStatus.DISABLED,
             LocalIntelligenceCapabilityStatus.UNAVAILABLE -> ScenarioOutcomeStatus.FAILED
         }
-        val reconciliationStatus = if (ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS.contains(reconciliationSignalKind)) {
+        val reconciliationStatus = if (reconciliationSignalKind in ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS) {
             v2TruthReconciliationStatus
         } else {
             ScenarioOutcomeStatus.FAILED
