@@ -1067,6 +1067,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("Permissions OK: ${s.accessibilityReady && s.overlayReady}")
             appendLine("Battery optimizations disabled: ${s.batteryOptimizationsDisabled}")
             appendLine()
+            appendLine("-- UI Consumption Boundary --")
+            appendLine(
+                "UI role: ${UnifiedResultPresentation.UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS.wireValue}"
+            )
+            appendLine(
+                "UI authority posture: ${UnifiedResultPresentation.AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY.wireValue}"
+            )
+            appendLine("Control authority source: runtime_controller_and_backend_contract")
+            appendLine()
             // PR-29: Include last execution route so post-release diagnostics can identify
             // which execution path was used for the most recent task.
             appendLine("-- Last Execution Route --")

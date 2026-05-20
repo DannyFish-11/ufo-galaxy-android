@@ -107,6 +107,10 @@ class UnifiedResultPresentationTest {
     fun `local success produces isSuccess true`() {
         val p = UnifiedResultPresentation.fromLocalResult(localSuccess())
         assertTrue(p.isSuccess)
+        assertEquals(
+            UnifiedResultPresentation.AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY,
+            p.authorityBoundaryClass
+        )
     }
 
     @Test
@@ -189,6 +193,10 @@ class UnifiedResultPresentationTest {
     fun `server message produces isSuccess true`() {
         val p = UnifiedResultPresentation.fromServerMessage("Task completed successfully.")
         assertTrue(p.isSuccess)
+        assertEquals(
+            UnifiedResultPresentation.UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS,
+            p.uiConsumptionClass
+        )
     }
 
     @Test
@@ -216,6 +224,10 @@ class UnifiedResultPresentationTest {
     fun `FAILED cause produces isSuccess false`() {
         val p = UnifiedResultPresentation.fromFallbackEvent(takeoverFailure(TakeoverFallbackEvent.Cause.FAILED))
         assertFalse(p.isSuccess)
+        assertEquals(
+            UnifiedResultPresentation.AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY,
+            p.authorityBoundaryClass
+        )
     }
 
     @Test
