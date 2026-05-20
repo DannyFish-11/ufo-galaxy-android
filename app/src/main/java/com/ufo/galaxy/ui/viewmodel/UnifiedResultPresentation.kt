@@ -31,7 +31,9 @@ data class UnifiedResultPresentation(
     val outcome: String,
     val uiConsumptionClass: UiConsumptionClass = UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS,
     val authorityBoundaryClass: AuthorityBoundaryClass =
-        AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY
+        AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY,
+    val finalSurfaceBoundaryClass: FinalSurfaceBoundaryClass =
+        FinalSurfaceBoundaryClass.PRODUCT_FACING_CONSUMPTION_ONLY
 ) {
     enum class UiConsumptionClass(val wireValue: String) {
         UI_VISIBLE_SUMMARY_DIAGNOSTICS("ui_visible_summary_diagnostics_consumption")
@@ -39,6 +41,10 @@ data class UnifiedResultPresentation(
 
     enum class AuthorityBoundaryClass(val wireValue: String) {
         PROJECTION_ONLY_NOT_AUTHORITY("projection_only_not_authority")
+    }
+
+    enum class FinalSurfaceBoundaryClass(val wireValue: String) {
+        PRODUCT_FACING_CONSUMPTION_ONLY("product_facing_consumption_only")
     }
 
     companion object {
