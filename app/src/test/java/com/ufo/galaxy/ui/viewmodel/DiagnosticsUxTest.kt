@@ -130,6 +130,7 @@ class DiagnosticsUxTest {
         assertTrue(text.contains("-- Connection --"))
         assertTrue(text.contains("-- Readiness --"))
         assertTrue(text.contains("-- Health Checklist --"))
+        assertTrue(text.contains("-- UI Consumption Boundary --"))
         assertTrue(text.contains("-- Recent Errors"))
         assertTrue(text.contains("-- Recent Tasks"))
     }
@@ -225,6 +226,15 @@ class DiagnosticsUxTest {
             appendLine("Network OK: ${s.networkOk}")
             appendLine("Permissions OK: ${s.accessibilityReady && s.overlayReady}")
             appendLine("Battery optimizations disabled: ${s.batteryOptimizationsDisabled}")
+            appendLine()
+            appendLine("-- UI Consumption Boundary --")
+            appendLine(
+                "UI role: ${UnifiedResultPresentation.UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS.wireValue}"
+            )
+            appendLine(
+                "UI authority posture: ${UnifiedResultPresentation.AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY.wireValue}"
+            )
+            appendLine("Control authority source: runtime_controller_and_backend_contract")
             appendLine()
             // PR-29
             appendLine("-- Last Execution Route --")

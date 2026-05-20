@@ -22,12 +22,25 @@ import com.ufo.galaxy.runtime.TakeoverFallbackEvent
  * @property isSuccess True when the result represents a successful outcome.
  * @property outcome   Wire-level outcome string used for diagnostics and task-ledger entries
  *                     (e.g. [LocalLoopResult.STATUS_SUCCESS], [TakeoverFallbackEvent.Cause.wireValue]).
+ * @property uiConsumptionClass Declares this payload as UI-visible consumption only.
+ * @property authorityBoundaryClass Declares this payload is projection-only, never authority.
  */
 data class UnifiedResultPresentation(
     val summary: String,
     val isSuccess: Boolean,
-    val outcome: String
+    val outcome: String,
+    val uiConsumptionClass: UiConsumptionClass = UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS,
+    val authorityBoundaryClass: AuthorityBoundaryClass =
+        AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY
 ) {
+    enum class UiConsumptionClass(val wireValue: String) {
+        UI_VISIBLE_SUMMARY_DIAGNOSTICS("ui_visible_summary_diagnostics_consumption")
+    }
+
+    enum class AuthorityBoundaryClass(val wireValue: String) {
+        PROJECTION_ONLY_NOT_AUTHORITY("projection_only_not_authority")
+    }
+
     companion object {
 
         /**
