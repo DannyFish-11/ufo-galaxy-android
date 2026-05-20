@@ -11,7 +11,11 @@ object AndroidFinalSurfaceConvergenceContract {
 
     enum class LayerClass(val wireValue: String) {
         RUNTIME_AUTHORITY_CANONICAL("runtime_authority_canonical"),
+        DISTRIBUTED_SUBJECT_CONTRACT_CANONICAL("distributed_subject_contract_canonical"),
+        CANONICAL_UPLINK_CONTRACT_ONLY("canonical_uplink_contract_only"),
+        LOCAL_FACING_CONSUMPTION_ONLY("local_facing_consumption_only"),
         RUNTIME_VISIBLE_CONSUMPTION_ONLY("runtime_visible_consumption_only"),
+        OPERATOR_FACING_CONSUMPTION_ONLY("operator_facing_consumption_only"),
         DIAGNOSTICS_VISIBLE_CONSUMPTION_ONLY("diagnostics_visible_consumption_only"),
         UI_VISIBLE_CONSUMPTION_ONLY("ui_visible_consumption_only"),
         PRODUCT_FACING_COMPOSITION_ONLY("product_facing_composition_only")
@@ -48,6 +52,45 @@ object AndroidFinalSurfaceConvergenceContract {
             v2AlignmentSurface = "v2 canonical runtime/governance/truth chain"
         ),
         FinalSurfaceBoundaryEntry(
+            surfaceId = "android-distributed-subject-contract-anchor",
+            displayName = "Android Distributed Subject Contract Anchor",
+            layerClass = LayerClass.DISTRIBUTED_SUBJECT_CONTRACT_CANONICAL,
+            canonicalInputs = setOf(
+                "AndroidBoundedSubjectRuntimeContract",
+                "AndroidCrossDeviceDispatchBoundaryContract",
+                "AndroidResultUplinkBoundaryContract",
+                "AndroidCompletionClosureUplinkContract"
+            ),
+            outputContract = "distributed subject contract anchoring without authority relocation",
+            v2AlignmentSurface = "v2 distributed subject contract / governance closure chain"
+        ),
+        FinalSurfaceBoundaryEntry(
+            surfaceId = "android-canonical-uplink-contract",
+            displayName = "Android Canonical Uplink Contract Surface",
+            layerClass = LayerClass.CANONICAL_UPLINK_CONTRACT_ONLY,
+            canonicalInputs = setOf(
+                "AndroidBoundedSubjectRuntimeContract.classifyCanonicalUplink",
+                "GalaxyConnectionService.sendGoalResult",
+                "GalaxyConnectionService.sendDeviceStateSnapshot",
+                "GalaxyWebSocketClient.emitDiagnosticsPayload"
+            ),
+            outputContract = "canonical truth/result/continuity alignment through uplink contract only",
+            v2AlignmentSurface = "v2 canonical truth convergence / result ingress / continuity chain"
+        ),
+        FinalSurfaceBoundaryEntry(
+            surfaceId = "android-local-facing-consumption",
+            displayName = "Android Local-facing Consumption Surface",
+            layerClass = LayerClass.LOCAL_FACING_CONSUMPTION_ONLY,
+            canonicalInputs = setOf(
+                "LocalLoopExecutor",
+                "RuntimeController",
+                "MainViewModel",
+                "AndroidBoundedSubjectRuntimeContract.OBSERVABILITY_BOUNDARY_ENTRIES"
+            ),
+            outputContract = "local-facing runtime consumption without canonical authority override",
+            v2AlignmentSurface = "v2 local participant contribution path"
+        ),
+        FinalSurfaceBoundaryEntry(
             surfaceId = "android-runtime-visible-consumption",
             displayName = "Android Runtime-visible Consumption Surface",
             layerClass = LayerClass.RUNTIME_VISIBLE_CONSUMPTION_ONLY,
@@ -74,6 +117,19 @@ object AndroidFinalSurfaceConvergenceContract {
             ),
             outputContract = "diagnostics-visible consumption without authority override",
             v2AlignmentSurface = "v2 operator/board/diagnostics consumption chain"
+        ),
+        FinalSurfaceBoundaryEntry(
+            surfaceId = "android-operator-facing-consumption",
+            displayName = "Android Operator-facing Consumption Surface",
+            layerClass = LayerClass.OPERATOR_FACING_CONSUMPTION_ONLY,
+            canonicalInputs = setOf(
+                "AndroidToolActionAuthorizationUplinkContract",
+                "AndroidDiagnosticsFailureExplanationUplinkContract",
+                "AndroidRuntimeObservabilityAuditContract",
+                "MainViewModel.buildDiagnosticsText"
+            ),
+            outputContract = "operator-facing projection and diagnostics consumption only",
+            v2AlignmentSurface = "v2 operator_surface / projection surface consumption chain"
         ),
         FinalSurfaceBoundaryEntry(
             surfaceId = "android-ui-visible-consumption",
@@ -107,9 +163,11 @@ object AndroidFinalSurfaceConvergenceContract {
 
     val convergenceInvariants: List<String> = listOf(
         "INVARIANT-1: RuntimeController/GalaxyConnectionService/GalaxyWebSocketClient remain Android runtime authority main-chain modules.",
-        "INVARIANT-2: UI-visible, diagnostics-visible, and product-facing layers consume canonical runtime and contracts only.",
-        "INVARIANT-3: No final surface boundary may re-assemble authority truth/state/dispatch semantics outside runtime authority.",
-        "INVARIANT-4: Android final surface boundaries retain V2-aligned consumption mapping for runtime, diagnostics, and product integration."
+        "INVARIANT-2: Center authority for final truth/dispatch/closure remains outside Android local/product/operator/diagnostics consumers.",
+        "INVARIANT-3: Distributed subject contract and canonical uplink boundaries are anchored explicitly and remain non-authority surfaces.",
+        "INVARIANT-4: Local-facing, runtime-visible, diagnostics-visible, operator-facing, and product-facing layers consume bounded outputs only.",
+        "INVARIANT-5: No final surface boundary may re-assemble authority truth/state/dispatch semantics outside runtime authority.",
+        "INVARIANT-6: Android final surface boundaries retain V2-aligned consumption mapping for runtime, diagnostics, operator, and product integration."
     )
 
     fun forId(surfaceId: String): FinalSurfaceBoundaryEntry? =
@@ -130,5 +188,6 @@ object AndroidFinalSurfaceConvergenceContract {
     const val INTRODUCED_PR: Int = 13
     const val DESCRIPTION: String =
         "Final Android surface convergence contract: runtime authority remains canonical; " +
-            "UI/diagnostics/runtime-visible/product-facing layers are consumption-only."
+            "local/operator/UI/diagnostics/runtime-visible/product-facing layers are consumption-only; " +
+            "distributed subject contract and canonical uplink stay aligned to V2 canonical center."
 }

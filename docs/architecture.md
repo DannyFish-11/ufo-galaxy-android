@@ -180,6 +180,14 @@ Visibility, diagnostics/evidence, and uplink boundaries are explicit in the same
 - diagnostics/evidence outputs are bounded: local diagnostics are local-facing evidence, while canonical uplink evidence remains participant contribution and never final authority;
 - diagnostics uplink remains diagnostics-only and does not claim canonical closure authority.
 
+`AndroidFinalSurfaceConvergenceContract` further locks the final outward composition boundary:
+
+- center authority (final truth/dispatch/closure) remains V2 canonical center authority;
+- Android bounded runtime authority remains local runtime/continuity/execution bounded authority;
+- distributed subject contract anchor remains a canonical contract boundary (not a local-facing authority facade);
+- canonical truth/result/continuity alignment is only via canonical uplink contract surfaces;
+- local-facing / product-facing / operator-facing / diagnostics-facing surfaces are consumption-only and must not reassemble authority truth/state/dispatch.
+
 ### Truth vs projection boundary (Android-side)
 
 Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:

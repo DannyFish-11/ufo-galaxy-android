@@ -56,10 +56,47 @@ class Pr13AndroidFinalSurfaceConvergenceContractTest {
         )
         assertEquals(1, runtimeVisible.size)
 
+        val localFacing = AndroidFinalSurfaceConvergenceContract.byLayerClass(
+            AndroidFinalSurfaceConvergenceContract.LayerClass.LOCAL_FACING_CONSUMPTION_ONLY
+        )
+        assertEquals(1, localFacing.size)
+
+        val operatorFacing = AndroidFinalSurfaceConvergenceContract.byLayerClass(
+            AndroidFinalSurfaceConvergenceContract.LayerClass.OPERATOR_FACING_CONSUMPTION_ONLY
+        )
+        assertEquals(1, operatorFacing.size)
+
         val uiVisible = AndroidFinalSurfaceConvergenceContract.byLayerClass(
             AndroidFinalSurfaceConvergenceContract.LayerClass.UI_VISIBLE_CONSUMPTION_ONLY
         )
         assertEquals(1, uiVisible.size)
+    }
+
+    @Test
+    fun `center authority and canonical uplink boundaries remain explicit`() {
+        val distributedContractEntry = AndroidFinalSurfaceConvergenceContract.forId(
+            "android-distributed-subject-contract-anchor"
+        )
+        assertNotNull(distributedContractEntry)
+        assertEquals(
+            AndroidFinalSurfaceConvergenceContract.LayerClass.DISTRIBUTED_SUBJECT_CONTRACT_CANONICAL,
+            distributedContractEntry!!.layerClass
+        )
+
+        val canonicalUplinkEntry = AndroidFinalSurfaceConvergenceContract.forId(
+            "android-canonical-uplink-contract"
+        )
+        assertNotNull(canonicalUplinkEntry)
+        assertEquals(
+            AndroidFinalSurfaceConvergenceContract.LayerClass.CANONICAL_UPLINK_CONTRACT_ONLY,
+            canonicalUplinkEntry!!.layerClass
+        )
+
+        assertTrue(
+            AndroidFinalSurfaceConvergenceContract.convergenceInvariants.any {
+                it.contains("Center authority", ignoreCase = true)
+            }
+        )
     }
 
     @Test
@@ -69,7 +106,7 @@ class Pr13AndroidFinalSurfaceConvergenceContractTest {
         assertFalse(AndroidFinalSurfaceConvergenceContract.convergenceInvariants.isEmpty())
         assertTrue(
             AndroidFinalSurfaceConvergenceContract.convergenceInvariants.any {
-                it.contains("consume canonical runtime", ignoreCase = true)
+                it.contains("consume bounded outputs", ignoreCase = true)
             }
         )
     }
