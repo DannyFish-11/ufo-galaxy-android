@@ -447,10 +447,7 @@ class DualRepoE2EVerificationHarness(
             LocalIntelligenceCapabilityStatus.DISABLED,
             LocalIntelligenceCapabilityStatus.UNAVAILABLE -> ScenarioOutcomeStatus.FAILED
         }
-        val reconciliationStatus = if (
-            reconciliationSignalKind == ReconciliationSignal.Kind.PARTICIPANT_STATE ||
-            reconciliationSignalKind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
-        ) {
+        val reconciliationStatus = if (ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS.contains(reconciliationSignalKind)) {
             v2TruthReconciliationStatus
         } else {
             ScenarioOutcomeStatus.FAILED
@@ -780,6 +777,11 @@ class DualRepoE2EVerificationHarness(
             ParticipantLifecycleTruthState.RECOVERING,
             ParticipantLifecycleTruthState.RECOVERED,
             ParticipantLifecycleTruthState.CAPABILITY_RE_ALIGNED
+        )
+
+        private val ALLOWED_LOCAL_AI_RECONCILIATION_SIGNAL_KINDS: Set<ReconciliationSignal.Kind> = setOf(
+            ReconciliationSignal.Kind.PARTICIPANT_STATE,
+            ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
         )
     }
 }

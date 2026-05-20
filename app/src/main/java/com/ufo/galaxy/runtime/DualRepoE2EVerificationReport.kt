@@ -418,6 +418,11 @@ data class DualRepoE2EVerificationReport(
             DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE
         )
 
+        /**
+         * Cross-repo contract anchors verified against V2 canonical module names used by prior
+         * Android↔V2 boundary contracts. These are semantic integration anchors, not runtime
+         * file-existence assertions.
+         */
         val CANONICAL_UPLINK_PATH_MAP: Map<String, String> = mapOf(
             "android_result_uplink" to "goal_execution_result/device_execution_event",
             "v2_result_ingress" to "core/unified_result_ingress.py",
