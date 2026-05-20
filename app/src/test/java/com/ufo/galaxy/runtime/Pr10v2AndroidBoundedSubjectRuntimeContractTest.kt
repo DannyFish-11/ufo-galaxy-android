@@ -83,25 +83,23 @@ class Pr10v2AndroidBoundedSubjectRuntimeContractTest {
             }
         )
 
-        assertTrue(
-            AndroidBoundedSubjectRuntimeContract.V2_CANONICAL_GOVERNANCE_PATHS.values.any {
-                it.contains("core/command_router.py")
-            }
+        assertEquals(
+            "core/command_router.py",
+            AndroidBoundedSubjectRuntimeContract.V2_CANONICAL_GOVERNANCE_PATHS["canonical_dispatch_authority"]
         )
-        assertTrue(
-            AndroidBoundedSubjectRuntimeContract.V2_CANONICAL_GOVERNANCE_PATHS.values.any {
-                it.contains("core/unified_runtime_truth_ingress.py")
-            }
+        assertEquals(
+            "core/unified_runtime_truth_ingress.py",
+            AndroidBoundedSubjectRuntimeContract.V2_CANONICAL_GOVERNANCE_PATHS["canonical_truth_ingress"]
         )
     }
 
     @Test
     fun `invariants explicitly prevent passive endpoint and parallel center drift`() {
         val invariants = AndroidBoundedSubjectRuntimeContract.BOUNDED_SUBJECT_RUNTIME_INVARIANTS
-        assertEquals(true, invariants["android_is_not_passive_endpoint"])
-        assertEquals(true, invariants["android_is_not_parallel_canonical_center"])
-        assertEquals(true, invariants["android_is_local_ai_consumer_host"])
-        assertEquals(true, invariants["android_does_not_finalize_global_truth"])
-        assertEquals(true, invariants["android_does_not_own_global_dispatch_authority"])
+        assertTrue(invariants.contains("android_is_not_passive_endpoint"))
+        assertTrue(invariants.contains("android_is_not_parallel_canonical_center"))
+        assertTrue(invariants.contains("android_is_local_ai_consumer_host"))
+        assertTrue(invariants.contains("android_does_not_finalize_global_truth"))
+        assertTrue(invariants.contains("android_does_not_own_global_dispatch_authority"))
     }
 }

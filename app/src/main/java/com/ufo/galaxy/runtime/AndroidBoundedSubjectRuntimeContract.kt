@@ -5,7 +5,7 @@ import com.ufo.galaxy.protocol.MsgType
 /**
  * PR-10v2 (Android) — bounded relative subject runtime contract.
  *
- * 固化 Android 在双仓系统中的正式角色：
+ * This contract fixes Android's formal role in dual-repo governance as:
  * - bounded relative subject runtime
  * - local runtime host
  * - local continuity holder
@@ -13,12 +13,13 @@ import com.ufo.galaxy.protocol.MsgType
  * - local AI consumer host
  * - distributed participant
  *
- * 本合约显式声明 Android 的 bounded authority：Android 具备本地判定与本地执行承接能力，
- * 但不拥有全局 truth finalization、dispatch arbitration、closure authority。
+ * It explicitly enforces bounded authority: Android can make local runtime decisions
+ * and execute local AI consumption paths, but does not own global truth finalization,
+ * dispatch arbitration, or closure authority.
  */
 object AndroidBoundedSubjectRuntimeContract {
 
-    const val INTRODUCED_PR = 110
+    const val INTRODUCED_PR = 10
     const val SCHEMA_VERSION = "1.0"
 
     enum class FormalRole(val wireValue: String) {
@@ -32,14 +33,14 @@ object AndroidBoundedSubjectRuntimeContract {
 
     enum class UnifiedTerm(val wireValue: String, val meaning: String) {
         CENTER("center", "V2 canonical governance center with final dispatch/truth/closure authority."),
-        SUBJECT("subject", "Bounded runtime主体，可拥有本地 lifecycle 与 local execution judgment。"),
-        PARTICIPANT("participant", "被 center 纳入分布式协同链路的 subject 运行实例。"),
-        TARGET("target", "被路由或被分配的执行目标，不等于 authority owner。"),
-        TRUTH("truth", "可验证状态事实；Android 产出 participant truth，center 做 final convergence。"),
-        DISPATCH("dispatch", "任务分发与路由仲裁；center 拥有 final arbitration authority。"),
-        CONTINUITY("continuity", "跨 reconnect/replay/recovery/handoff/takeover 的连续性语义。"),
-        CLOSURE("closure", "执行闭合判定；Android 贡献 evidence，center 做 canonical closure verdict。"),
-        BOUNDED_AUTHORITY("bounded_authority", "Android 可本地决定运行态，但不拥有全局终裁权。")
+        SUBJECT("subject", "Bounded runtime subject with local lifecycle and local execution judgment."),
+        PARTICIPANT("participant", "A subject runtime instance enrolled by the center in distributed collaboration."),
+        TARGET("target", "A routed or assigned execution target, not an authority owner."),
+        TRUTH("truth", "Verifiable state facts; Android publishes participant truth and center performs final convergence."),
+        DISPATCH("dispatch", "Task dispatch and routing arbitration; center owns final arbitration authority."),
+        CONTINUITY("continuity", "Continuity semantics across reconnect/replay/recovery/handoff/takeover paths."),
+        CLOSURE("closure", "Execution closure semantics; Android contributes evidence and center emits canonical closure verdict."),
+        BOUNDED_AUTHORITY("bounded_authority", "Android may decide local runtime behavior but does not own global finalization authority.")
     }
 
     enum class AuthorityTopic {
@@ -143,19 +144,20 @@ object AndroidBoundedSubjectRuntimeContract {
         "canonical_result_acceptance_closure" to "core/unified_result_ingress.py",
         "canonical_continuity_legality" to "core/unified_continuity_legality_authority.py",
         "android_participant_truth_ingress" to "core/android_participant_truth_ingress.py",
-        "operator_governance_surface" to "core/operator_surface.py + core/routes/operator.py"
+        "operator_surface" to "core/operator_surface.py",
+        "operator_route" to "core/routes/operator.py"
     )
 
-    val BOUNDED_SUBJECT_RUNTIME_INVARIANTS: Map<String, Boolean> = mapOf(
-        "android_is_not_passive_endpoint" to true,
-        "android_is_not_parallel_canonical_center" to true,
-        "android_has_local_runtime_authority" to true,
-        "android_has_local_continuity_authority" to true,
-        "android_participates_in_local_execution_policy" to true,
-        "android_is_local_ai_consumer_host" to true,
-        "android_uplink_is_layered_participant_runtime_result_diagnostics_compat" to true,
-        "android_does_not_finalize_global_truth" to true,
-        "android_does_not_own_global_dispatch_authority" to true,
-        "android_does_not_own_global_closure_authority" to true
+    val BOUNDED_SUBJECT_RUNTIME_INVARIANTS: Set<String> = setOf(
+        "android_is_not_passive_endpoint",
+        "android_is_not_parallel_canonical_center",
+        "android_has_local_runtime_authority",
+        "android_has_local_continuity_authority",
+        "android_participates_in_local_execution_policy",
+        "android_is_local_ai_consumer_host",
+        "android_uplink_is_layered_participant_runtime_result_diagnostics_compat",
+        "android_does_not_finalize_global_truth",
+        "android_does_not_own_global_dispatch_authority",
+        "android_does_not_own_global_closure_authority"
     )
 }

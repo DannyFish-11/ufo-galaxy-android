@@ -145,7 +145,7 @@ This contract explicitly enforces:
 | Term | Boundary meaning |
 |------|------------------|
 | center | V2 canonical governance center with final dispatch/truth/closure authority |
-| subject | bounded runtime主体 with local lifecycle and local execution judgment |
+| subject | bounded runtime subject with local lifecycle and local execution judgment |
 | participant | subject instance enrolled in distributed collaboration |
 | target | routed execution target, not authority owner |
 | truth | Android publishes participant truth; center performs final convergence |
