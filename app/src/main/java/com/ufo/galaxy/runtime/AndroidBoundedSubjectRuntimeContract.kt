@@ -157,6 +157,97 @@ object AndroidBoundedSubjectRuntimeContract {
         val canonicalFinalAuthority: Boolean = false
     )
 
+    enum class FormalBoundarySummaryClass(val wireValue: String) {
+        ANDROID_BOUNDED_SUBJECT_RUNTIME("android_bounded_subject_runtime_boundary"),
+        LOCAL_VISIBLE_VS_CANONICAL_VISIBLE("local_visible_vs_canonical_visible_boundary"),
+        CONTINUITY_RESTORE("continuity_restore_boundary"),
+        UPLINK_INGRESS_CONTRACT("uplink_ingress_contract_boundary"),
+        OUTWARD_UI_CONSUMPTION("outward_ui_consumption_boundary"),
+        NON_SOVEREIGN_ROLE("non_sovereign_role_boundary")
+    }
+
+    data class FormalBoundarySummaryEntry(
+        val summaryClass: FormalBoundarySummaryClass,
+        val summary: String,
+        val contractAnchors: Set<String>,
+        val allowsCanonicalTruthConvergence: Boolean = false,
+        val allowsFinalClosureAdjudication: Boolean = false,
+        val allowsPlatformSovereignty: Boolean = false
+    )
+
+    const val FORMAL_BOUNDARY_SUMMARY_SCHEMA_VERSION = "1.0"
+
+    val FORMAL_BOUNDARY_SUMMARY_ENTRIES: List<FormalBoundarySummaryEntry> = listOf(
+        FormalBoundarySummaryEntry(
+            summaryClass = FormalBoundarySummaryClass.ANDROID_BOUNDED_SUBJECT_RUNTIME,
+            summary = "Android is the bounded relative subject runtime: local runtime host, local continuity holder, " +
+                "local execution policy participant, and distributed participant under canonical center governance.",
+            contractAnchors = setOf(
+                "AndroidBoundedSubjectRuntimeContract.FormalRole",
+                "AndroidBoundedSubjectPlatformBoundaryContract.BoundaryClass.BOUNDED_RUNTIME_BOUNDARY"
+            )
+        ),
+        FormalBoundarySummaryEntry(
+            summaryClass = FormalBoundarySummaryClass.LOCAL_VISIBLE_VS_CANONICAL_VISIBLE,
+            summary = "local-visible/runtime-visible/product-visible/diagnostics-visible stay local-facing, while " +
+                "participant truth/execution result/continuity uplinks are canonical-participant uplink surfaces only.",
+            contractAnchors = setOf(
+                "AndroidBoundedSubjectRuntimeContract.classifyLocalSurface",
+                "AndroidBoundedSubjectRuntimeContract.classifyCanonicalUplink",
+                "AndroidBoundedSubjectRuntimeContract.OBSERVABILITY_BOUNDARY_ENTRIES"
+            )
+        ),
+        FormalBoundarySummaryEntry(
+            summaryClass = FormalBoundarySummaryClass.CONTINUITY_RESTORE,
+            summary = "Android owns bounded continuity/restore/replay handling locally and must uplink continuity state " +
+                "to canonical convergence without claiming final authority.",
+            contractAnchors = setOf(
+                "AndroidContinuityIntegration",
+                "OfflineTaskQueue",
+                "AndroidBoundedSubjectRuntimeContract.CanonicalUplinkClass.CONTINUITY_STATE_UPLINK"
+            )
+        ),
+        FormalBoundarySummaryEntry(
+            summaryClass = FormalBoundarySummaryClass.UPLINK_INGRESS_CONTRACT,
+            summary = "uplink and ingress are participant contracts into V2 canonical governance/truth/closure chains, " +
+                "not Android-owned canonical adjudication.",
+            contractAnchors = setOf(
+                "AndroidGovernanceExecutionPolicyIngressContract",
+                "AndroidResultUplinkBoundaryContract",
+                "AndroidDistributedTruthOwnershipUplinkContract",
+                "AndroidCompletionClosureUplinkContract"
+            )
+        ),
+        FormalBoundarySummaryEntry(
+            summaryClass = FormalBoundarySummaryClass.OUTWARD_UI_CONSUMPTION,
+            summary = "outward/UI/operator/diagnostics/product surfaces consume bounded or canonical outputs only and " +
+                "must not re-assemble authority/truth/dispatch/closure.",
+            contractAnchors = setOf(
+                "AndroidFinalSurfaceConvergenceContract",
+                "AndroidBoundedSubjectPlatformBoundaryContract.BoundaryClass.OUTWARD_CONSUMPTION_BOUNDARY"
+            )
+        ),
+        FormalBoundarySummaryEntry(
+            summaryClass = FormalBoundarySummaryClass.NON_SOVEREIGN_ROLE,
+            summary = "Android is non-sovereign in dual-repo governance: it does not perform canonical truth convergence, " +
+                "final closure adjudication, or platform sovereignty.",
+            contractAnchors = setOf(
+                "AndroidBoundedSubjectRuntimeContract.classifyAuthority",
+                "AndroidBoundedSubjectPlatformBoundaryContract.QUASI_PLATFORM_STATE_DEFINITION"
+            )
+        )
+    )
+
+    fun validateFormalBoundarySummaryCoverage(): Boolean =
+        FormalBoundarySummaryClass.values().all { cls ->
+            FORMAL_BOUNDARY_SUMMARY_ENTRIES.any { it.summaryClass == cls }
+        } &&
+            FORMAL_BOUNDARY_SUMMARY_ENTRIES.none {
+                it.allowsCanonicalTruthConvergence ||
+                    it.allowsFinalClosureAdjudication ||
+                    it.allowsPlatformSovereignty
+            }
+
     private val PARTICIPANT_TRUTH_MSG_TYPES = setOf(
         MsgType.DEVICE_REGISTER,
         MsgType.CAPABILITY_REPORT,
@@ -369,16 +460,21 @@ object AndroidBoundedSubjectRuntimeContract {
     val BOUNDED_SUBJECT_RUNTIME_INVARIANTS: Map<String, Boolean> = mapOf(
         "android_is_not_passive_endpoint" to true,
         "android_is_not_parallel_canonical_center" to true,
+        "android_role_is_non_sovereign_bounded_subject_runtime" to true,
         "android_has_local_runtime_authority" to true,
         "android_has_local_continuity_authority" to true,
         "android_participates_in_local_execution_policy" to true,
         "android_is_local_ai_consumer_host" to true,
         "local_ai_consumer_flow_is_runtime_bounded_and_center_aligned" to true,
         "local_visible_product_visible_diagnostics_visible_are_not_canonical_truth" to true,
+        "android_boundary_local_visible_vs_canonical_visible_is_explicit" to true,
         "runtime_visible_is_local_consumption_not_canonical_truth" to true,
         "participant_truth_execution_result_continuity_uplinks_feed_canonical_chain" to true,
+        "android_boundary_continuity_restore_is_local_with_canonical_uplink" to true,
+        "android_boundary_uplink_ingress_contract_is_participant_only" to true,
         "diagnostics_evidence_must_not_claim_canonical_final_truth" to true,
         "outward_facing_layers_consume_only_bounded_or_canonical_outputs" to true,
+        "android_boundary_outward_ui_consumption_is_non_authoritative" to true,
         "android_uplink_is_layered_participant_runtime_result_diagnostics_compat" to true,
         "android_does_not_finalize_global_truth" to true,
         "android_does_not_own_global_dispatch_authority" to true,
