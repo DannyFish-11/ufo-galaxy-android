@@ -209,7 +209,7 @@ object UnifiedReplayRecoveryContract {
      * Message types whose replay can affect canonical result/closure authority and therefore
      * must not be replayed when the message has no durable session tag.
      */
-    val AUTHORITY_SENSITIVE_REPLAY_TYPES: Set<String> = setOf(
+    val authoritySensitiveReplayTypes: Set<String> = setOf(
         "goal_execution_result",
         "delegated_execution_signal",
         "device_execution_event"
@@ -239,7 +239,7 @@ object UnifiedReplayRecoveryContract {
     ): MessageAuthorityDecision {
         val tag = message.sessionTag
         return when {
-            tag == null && message.type in AUTHORITY_SENSITIVE_REPLAY_TYPES ->
+            tag == null && message.type in authoritySensitiveReplayTypes ->
                 MessageAuthorityDecision.NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED
             tag == null -> MessageAuthorityDecision.NO_SESSION_TAG_FORWARDED
             currentDurableSessionId == null -> MessageAuthorityDecision.NO_CURRENT_AUTHORITY_BLOCKED
@@ -285,7 +285,7 @@ object UnifiedReplayRecoveryContract {
         "required_send_gate" to REQUIRED_SEND_GATE,
         "canonical_phase_sequence" to canonicalPhaseSequence.map { it.wireValue },
         "authority_filter_decisions" to MessageAuthorityDecision.entries.map { it.wireValue },
-        "authority_sensitive_replay_types" to AUTHORITY_SENSITIVE_REPLAY_TYPES.toList(),
+        "authority_sensitive_replay_types" to authoritySensitiveReplayTypes.toList(),
         // Contract assertions — all true in the closed PR-74 implementation:
         "session_tag_set_at_enqueue" to true,
         "replay_uses_unified_gate" to true,

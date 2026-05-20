@@ -99,10 +99,10 @@ class OfflineTaskQueue(
      *                   is compared against the current active session during drain to detect
      *                   stale authority.  Messages tagged with a session that has since
      *                   changed are discarded by [discardForDifferentSession] before flush.
-      *                   Null for messages enqueued without session tracking (pre-PR-66
-      *                   callers). Authority-sensitive null-tag replay is blocked by
-      *                   [classifyForReplay] to avoid promoting historical canonical outputs
-      *                   into new authority events during restore/replay.
+     *                   Null for messages enqueued without session tracking (pre-PR-66
+     *                   callers). Authority-sensitive null-tag replay is blocked by
+     *                   [classifyForReplay] to avoid promoting historical canonical outputs
+     *                   into new authority events during restore/replay.
      */
     data class QueuedMessage(
         val type: String,
