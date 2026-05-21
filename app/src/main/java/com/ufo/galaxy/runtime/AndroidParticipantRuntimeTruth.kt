@@ -76,6 +76,10 @@ package com.ufo.galaxy.runtime
  * @property readinessState          Current [ParticipantReadinessState] for dispatch selection.
  * @property activeTaskId            Identifier of the currently executing task; null if idle.
  * @property activeTaskStatus        Current [ActiveTaskStatus] for the in-flight task; null if idle.
+ * @property inflightContinuityState Android-local continuity classification for any prior
+ *                                   in-flight execution interrupted by restart/recovery.
+ * @property inflightContinuityTaskId Task identifier referenced by [inflightContinuityState], when any.
+ * @property inflightContinuityObservedAtMs Timestamp when Android produced the local continuity classification.
  * @property reportedAtMs            Epoch-millisecond timestamp when this snapshot was created.
  * @property reconciliationEpoch     Monotonically increasing snapshot epoch for V2 staleness detection.
  */
@@ -94,6 +98,10 @@ data class AndroidParticipantRuntimeTruth(
     val readinessState: ParticipantReadinessState,
     val activeTaskId: String?,
     val activeTaskStatus: ActiveTaskStatus?,
+    val inflightContinuityState: String? = null,
+    val inflightContinuityTaskId: String? = null,
+    val inflightContinuitySource: String? = null,
+    val inflightContinuityObservedAtMs: Long? = null,
     val authoritativeParticipationState: String = defaultAuthoritativeParticipationState(
         sourceRuntimePosture = sourceRuntimePosture,
         sessionState = sessionState,
@@ -157,7 +165,9 @@ data class AndroidParticipantRuntimeTruth(
      *
      * Always-present keys: all identity, participation, health, readiness, and
      * reconciliation fields.  Conditional keys: [KEY_SESSION_ID], [KEY_SESSION_STATE],
-     * [KEY_ACTIVE_TASK_ID], [KEY_ACTIVE_TASK_STATUS] — omitted when null.
+     * [KEY_ACTIVE_TASK_ID], [KEY_ACTIVE_TASK_STATUS], [KEY_INFLIGHT_CONTINUITY_STATE],
+     * [KEY_INFLIGHT_CONTINUITY_TASK_ID], [KEY_INFLIGHT_CONTINUITY_SOURCE],
+     * [KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS] — omitted when null.
      */
     fun toMap(): Map<String, Any> = buildMap {
         put(KEY_PARTICIPANT_ID, participantId)
@@ -174,6 +184,10 @@ data class AndroidParticipantRuntimeTruth(
         put(KEY_READINESS_STATE, readinessState.wireValue)
         activeTaskId?.let { put(KEY_ACTIVE_TASK_ID, it) }
         activeTaskStatus?.let { put(KEY_ACTIVE_TASK_STATUS, it.wireValue) }
+        inflightContinuityState?.let { put(KEY_INFLIGHT_CONTINUITY_STATE, it) }
+        inflightContinuityTaskId?.let { put(KEY_INFLIGHT_CONTINUITY_TASK_ID, it) }
+        inflightContinuitySource?.let { put(KEY_INFLIGHT_CONTINUITY_SOURCE, it) }
+        inflightContinuityObservedAtMs?.let { put(KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS, it) }
         put(KEY_AUTHORITATIVE_PARTICIPATION_STATE, authoritativeParticipationState)
         authoritativeParticipationTransitionSequence?.let {
             put(KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_SEQUENCE, it)
@@ -241,6 +255,18 @@ data class AndroidParticipantRuntimeTruth(
         /** Wire key for [activeTaskStatus] ([ActiveTaskStatus.wireValue]); absent when null. */
         const val KEY_ACTIVE_TASK_STATUS = "active_task_status"
 
+        /** Wire key for [inflightContinuityState]; absent when null. */
+        const val KEY_INFLIGHT_CONTINUITY_STATE = "inflight_continuity_state"
+
+        /** Wire key for [inflightContinuityTaskId]; absent when null. */
+        const val KEY_INFLIGHT_CONTINUITY_TASK_ID = "inflight_continuity_task_id"
+
+        /** Wire key for [inflightContinuitySource]; absent when null. */
+        const val KEY_INFLIGHT_CONTINUITY_SOURCE = "inflight_continuity_source"
+
+        /** Wire key for [inflightContinuityObservedAtMs]; absent when null. */
+        const val KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS = "inflight_continuity_observed_at_ms"
+
         /** Wire key for [authoritativeParticipationState]. */
         const val KEY_AUTHORITATIVE_PARTICIPATION_STATE = "authoritative_participation_state"
 
@@ -294,6 +320,10 @@ data class AndroidParticipantRuntimeTruth(
             readinessState: ParticipantReadinessState = ParticipantReadinessState.UNKNOWN,
             activeTaskId: String? = null,
             activeTaskStatus: ActiveTaskStatus? = null,
+            inflightContinuityState: String? = null,
+            inflightContinuityTaskId: String? = null,
+            inflightContinuitySource: String? = null,
+            inflightContinuityObservedAtMs: Long? = null,
             carrierForegroundVisible: Boolean? = null,
             authoritativeParticipationState: String? = null,
             authoritativeParticipationTransitionSequence: Long? = null,
@@ -344,6 +374,10 @@ data class AndroidParticipantRuntimeTruth(
                 readinessState = readinessState,
                 activeTaskId = activeTaskId,
                 activeTaskStatus = activeTaskStatus,
+                inflightContinuityState = inflightContinuityState,
+                inflightContinuityTaskId = inflightContinuityTaskId,
+                inflightContinuitySource = inflightContinuitySource,
+                inflightContinuityObservedAtMs = inflightContinuityObservedAtMs,
                 authoritativeParticipationState = derivedParticipationState,
                 runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
                     descriptor = descriptor,
