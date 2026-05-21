@@ -711,6 +711,20 @@ class RuntimeController(
      */
     val activeTaskStatus: ActiveTaskStatus? get() = _activeTaskStatus
 
+    /**
+     * Android-local in-flight continuity recovery classification for the most recently observed
+     * restart / restore / rebind boundary.
+     *
+     * Starts as [InflightContinuityDisposition.RESUMED_CLEANLY]. When a persisted in-flight
+     * artifact is encountered after process recreation or service/runtime restart, this flow
+     * records whether Android recovered the local in-flight state, lost it, or must wait for
+     * V2 reconciliation.
+     */
+    private val _inflightContinuityRecovery =
+        MutableStateFlow(InflightContinuityRecoverySnapshot.resumedCleanly("runtime_controller_init"))
+    val inflightContinuityRecovery: StateFlow<InflightContinuityRecoverySnapshot> =
+        _inflightContinuityRecovery.asStateFlow()
+
 
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -1039,6 +1053,16 @@ class RuntimeController(
         val crossDeviceOn = settings.crossDeviceEnabled
         Log.d(TAG, "[RUNTIME] connectIfEnabled: crossDevice=$crossDeviceOn state=${_state.value}")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_connect_if_enabled", "cross_device" to crossDeviceOn))
+        if (crossDeviceOn) {
+            classifyPersistedInflightContinuityIfNeeded(source = "connect_if_enabled")
+        } else if (settings.inflightContinuityRecoveryArtifact.isNotBlank()) {
+            classifyPersistedInflightContinuityIfNeeded(source = "connect_if_enabled_local_only")
+        } else if (_inflightContinuityRecovery.value.disposition != InflightContinuityDisposition.LOST_INFLIGHT) {
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+                source = "connect_if_enabled_local_only"
+            )
+        }
 
         // PR-G: Pre-generate runtime_attachment_session_id before connecting so the initial
         // handshake on background restore already carries a stable attachment identity.
@@ -1110,6 +1134,9 @@ class RuntimeController(
      * 4. Transitions to [RuntimeState.LocalOnly].
      */
     fun stop() {
+        if (_activeTaskId != null || settings.inflightContinuityRecoveryArtifact.isNotBlank()) {
+            markInflightContinuityLost(source = "runtime_stop")
+        }
         Log.i(TAG, "[RUNTIME] Stopping cross-device runtime")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_stop"))
         settings.crossDeviceEnabled = false
@@ -1146,6 +1173,7 @@ class RuntimeController(
         // closeAttachedSession (above) does not auto-emit TASK_FAILED, so the active task
         // state must be cleared here.  Any in-flight task is considered abandoned; V2 must
         // apply its own timeout/retry policy.
+        clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(_activeTaskId, finishedWith = "runtime_stopped")
         // PR-37: Use transitionState() so the transition event is observable and any
         // unexpected prior state is surfaced as a diagnostic event.
@@ -1364,7 +1392,13 @@ class RuntimeController(
                 ActiveTaskStatus.FAILING
         }
         // PR-62: Clear active task state after setting the terminal status transition.
+        clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = cause.wireValue)
+        _isRemoteExecutionActive.value = false
+        publishInflightContinuityRecovery(
+            disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+            source = "takeover_failed"
+        )
         currentParticipantId()?.let { pid ->
             val signal = if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
                 ReconciliationSignal.taskCancelled(
@@ -1420,6 +1454,118 @@ class RuntimeController(
     /** Returns the current reconnect epoch for reconciliation signals. */
     private fun currentSessionContinuityEpoch(): Int? =
         _durableSessionContinuityRecord.value?.sessionContinuityEpoch
+
+    private fun persistInflightRecoveryArtifact(taskId: String, status: ActiveTaskStatus) {
+        settings.inflightContinuityRecoveryArtifact = InflightContinuityRecoveryArtifact(
+            taskId = taskId,
+            activeTaskStatus = status.wireValue,
+            durableSessionId = currentDurableSessionId(),
+            sessionContinuityEpoch = currentSessionContinuityEpoch(),
+            runtimeAttachmentSessionId = runtimeAttachmentSessionId,
+            attachedSessionId = _attachedSession.value?.sessionId
+        ).toJson()
+    }
+
+    private fun clearPersistedInflightRecoveryArtifact() {
+        settings.inflightContinuityRecoveryArtifact = ""
+    }
+
+    private fun consumePersistedInflightRecoveryArtifact(): InflightContinuityRecoveryArtifact? {
+        val artifact = InflightContinuityRecoveryArtifact.fromJson(
+            settings.inflightContinuityRecoveryArtifact
+        )
+        if (artifact != null) {
+            settings.inflightContinuityRecoveryArtifact = ""
+        }
+        return artifact
+    }
+
+    private fun publishInflightContinuityRecovery(
+        disposition: InflightContinuityDisposition,
+        source: String,
+        artifact: InflightContinuityRecoveryArtifact? = null
+    ) {
+        val snapshot = InflightContinuityRecoverySnapshot(
+            disposition = disposition,
+            artifact = artifact,
+            source = source
+        )
+        _inflightContinuityRecovery.value = snapshot
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_LIVE_EXECUTION,
+            snapshot.toMetadataMap() + mapOf("event" to "inflight_continuity_classified")
+        )
+    }
+
+    private fun classifyPersistedInflightContinuityIfNeeded(source: String) {
+        val artifact = consumePersistedInflightRecoveryArtifact()
+        if (artifact == null) {
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+                source = source
+            )
+            return
+        }
+
+        val liveTaskRecovered = _activeTaskId != null &&
+            _activeTaskId == artifact.taskId &&
+            _activeTaskStatus != null
+        if (liveTaskRecovered) {
+            persistInflightRecoveryArtifact(
+                taskId = artifact.taskId,
+                status = _activeTaskStatus ?: ActiveTaskStatus.RUNNING
+            )
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.RECOVERED_INFLIGHT,
+                source = source,
+                artifact = artifact
+            )
+            return
+        }
+
+        clearActiveTaskState(
+            taskId = artifact.taskId,
+            finishedWith = "recovery_reclassified"
+        )
+        _isRemoteExecutionActive.value = false
+        publishInflightContinuityRecovery(
+            disposition = if (settings.crossDeviceEnabled) {
+                InflightContinuityDisposition.REQUIRES_RECONCILIATION
+            } else {
+                InflightContinuityDisposition.LOST_INFLIGHT
+            },
+            source = source,
+            artifact = artifact
+        )
+    }
+
+    private fun markInflightContinuityLost(source: String) {
+        val artifact = InflightContinuityRecoveryArtifact.fromJson(
+            settings.inflightContinuityRecoveryArtifact
+        ) ?: _activeTaskId?.let { taskId ->
+            InflightContinuityRecoveryArtifact(
+                taskId = taskId,
+                activeTaskStatus = (_activeTaskStatus ?: ActiveTaskStatus.RUNNING).wireValue,
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                runtimeAttachmentSessionId = runtimeAttachmentSessionId,
+                attachedSessionId = _attachedSession.value?.sessionId
+            )
+        }
+        clearPersistedInflightRecoveryArtifact()
+        if (artifact != null) {
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.LOST_INFLIGHT,
+                source = source,
+                artifact = artifact
+            )
+        } else {
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+                source = source
+            )
+        }
+    }
 
     /**
      * PR-62 — Clears the active task state ([_activeTaskId] and [_activeTaskStatus]).
@@ -1679,6 +1825,9 @@ class RuntimeController(
      * [openAttachedSession] call will start a fresh durable era.
      */
     fun invalidateSession() {
+        if (_activeTaskId != null || settings.inflightContinuityRecoveryArtifact.isNotBlank()) {
+            markInflightContinuityLost(source = "session_invalidated")
+        }
         Log.i(TAG, "[RUNTIME] Invalidating attached runtime session")
         GalaxyLogger.log(TAG, mapOf("event" to "runtime_session_invalidated"))
         closeAttachedSession(AttachedRuntimeSession.DetachCause.INVALIDATION)
@@ -1890,6 +2039,12 @@ class RuntimeController(
         // rather than silently losing the task from participant truth.
         _activeTaskId = taskId
         _activeTaskStatus = ActiveTaskStatus.RUNNING
+        _isRemoteExecutionActive.value = true
+        persistInflightRecoveryArtifact(taskId, ActiveTaskStatus.RUNNING)
+        publishInflightContinuityRecovery(
+            disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+            source = "task_accepted"
+        )
         GalaxyLogger.log(
             GalaxyLogger.TAG_LIVE_EXECUTION,
             mapOf(
@@ -1930,7 +2085,13 @@ class RuntimeController(
         correlationId: String? = null
     ) {
         // PR-62: Clear active task state on successful completion.
+        clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "result")
+        _isRemoteExecutionActive.value = false
+        publishInflightContinuityRecovery(
+            disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+            source = "task_result"
+        )
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskResult: no hostDescriptor — skipping signal")
             return
@@ -1974,7 +2135,13 @@ class RuntimeController(
             _activeTaskStatus = ActiveTaskStatus.CANCELLING
         }
         // PR-62: Clear active task state after setting the cancelling status.
+        clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "cancelled")
+        _isRemoteExecutionActive.value = false
+        publishInflightContinuityRecovery(
+            disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+            source = "task_cancelled"
+        )
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskCancelled: no hostDescriptor — skipping signal")
             return
@@ -2022,6 +2189,9 @@ class RuntimeController(
         correlationId: String? = null,
         progressDetail: String? = null
     ) {
+        if (_activeTaskId == taskId) {
+            persistInflightRecoveryArtifact(taskId, _activeTaskStatus ?: ActiveTaskStatus.RUNNING)
+        }
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskStatusUpdate: no hostDescriptor — skipping signal")
             return
@@ -2079,6 +2249,7 @@ class RuntimeController(
             readinessSatisfied = readinessState == ParticipantReadinessState.READY,
             distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
         )
+        val inflightRecovery = inflightContinuityRecovery.value
         val truth = AndroidParticipantRuntimeTruth.from(
             descriptor = descriptor,
             sessionSnapshot = currentHostSessionSnapshot(),
@@ -2086,6 +2257,10 @@ class RuntimeController(
             readinessState = readinessState,
             activeTaskId = activeTaskId,
             activeTaskStatus = activeTaskStatus,
+            inflightContinuityState = inflightRecovery.disposition.wireValue,
+            inflightContinuityTaskId = inflightRecovery.taskId,
+            inflightContinuitySource = inflightRecovery.source,
+            inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
             carrierForegroundVisible = appForegroundVisible.value,
             authoritativeParticipationState = participationSnapshot.state.wireValue,
             authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
@@ -2295,6 +2470,7 @@ class RuntimeController(
                     readinessSatisfied = false,
                     distributedRuntimeActivity = false
                 )
+                val inflightRecovery = inflightContinuityRecovery.value
                 val idleTruth = AndroidParticipantRuntimeTruth.from(
                     descriptor = descriptor,
                     sessionSnapshot = currentHostSessionSnapshot(),
@@ -2302,6 +2478,10 @@ class RuntimeController(
                     readinessState = ParticipantReadinessState.UNKNOWN,
                     activeTaskId = null,
                     activeTaskStatus = null,
+                    inflightContinuityState = inflightRecovery.disposition.wireValue,
+                    inflightContinuityTaskId = inflightRecovery.taskId,
+                    inflightContinuitySource = inflightRecovery.source,
+                    inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
                     carrierForegroundVisible = appForegroundVisible.value,
                     authoritativeParticipationState = participationSnapshot.state.wireValue,
                     authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
@@ -2368,6 +2548,7 @@ class RuntimeController(
             )
             // Set FAILING status before clearing to reflect the interruption transition.
             _activeTaskStatus = ActiveTaskStatus.FAILING
+            clearPersistedInflightRecoveryArtifact()
             clearActiveTaskState(interruptedTaskId, finishedWith = "interrupted_${cause.wireValue}")
             currentParticipantId()?.let { pid ->
                 emitReconciliationSignal(

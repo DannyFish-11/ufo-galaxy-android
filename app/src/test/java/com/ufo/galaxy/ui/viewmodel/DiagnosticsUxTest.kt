@@ -2,6 +2,7 @@ package com.ufo.galaxy.ui.viewmodel
 
 import com.ufo.galaxy.runtime.CrossDeviceSetupError
 import com.ufo.galaxy.runtime.ExecutionRouteTag
+import com.ufo.galaxy.runtime.InflightContinuityDisposition
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -131,6 +132,7 @@ class DiagnosticsUxTest {
         assertTrue(text.contains("-- Readiness --"))
         assertTrue(text.contains("-- Health Checklist --"))
         assertTrue(text.contains("-- UI Consumption Boundary --"))
+        assertTrue(text.contains("-- In-flight Continuity --"))
         assertTrue(text.contains("-- Recent Errors"))
         assertTrue(text.contains("-- Recent Tasks"))
     }
@@ -175,6 +177,17 @@ class DiagnosticsUxTest {
         val stateNotOk = MainUiState(batteryOptimizationsDisabled = false)
         assertTrue(buildDiagnosticsTextFromState(stateOk).contains("Battery optimizations disabled: true"))
         assertTrue(buildDiagnosticsTextFromState(stateNotOk).contains("Battery optimizations disabled: false"))
+    }
+
+    @Test
+    fun `buildDiagnosticsText surfaces lost inflight explicitly`() {
+        val state = MainUiState(
+            inflightContinuityState = InflightContinuityDisposition.LOST_INFLIGHT,
+            inflightContinuityTaskId = "task-lost"
+        )
+        val text = buildDiagnosticsTextFromState(state)
+        assertTrue(text.contains("State: lost-inflight"))
+        assertTrue(text.contains("Task: task-lost"))
     }
 
     // ── MainUiState defaults ──────────────────────────────────────────────────
@@ -239,6 +252,10 @@ class DiagnosticsUxTest {
             // PR-29
             appendLine("-- Last Execution Route --")
             appendLine("Route: ${s.lastExecutionRoute?.wireValue ?: "none"}")
+            appendLine()
+            appendLine("-- In-flight Continuity --")
+            appendLine("State: ${s.inflightContinuityState.wireValue}")
+            appendLine("Task: ${s.inflightContinuityTaskId ?: "none"}")
             appendLine()
             // PR-30
             appendLine("-- Execution Routes (this session) --")

@@ -17,6 +17,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.runtime.CrossDeviceSetupError
 import com.ufo.galaxy.runtime.ExecutionRouteTag
+import com.ufo.galaxy.runtime.InflightContinuityDisposition
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
@@ -192,7 +193,16 @@ data class MainUiState(
      *  - [com.ufo.galaxy.runtime.ReconnectRecoveryState.FAILED] — show "Reconnect" CTA.
      */
     val reconnectRecoveryState: com.ufo.galaxy.runtime.ReconnectRecoveryState =
-        com.ufo.galaxy.runtime.ReconnectRecoveryState.IDLE
+        com.ufo.galaxy.runtime.ReconnectRecoveryState.IDLE,
+    /**
+     * Android-local classification for any previously in-flight delegated task after a restart
+     * or recovery boundary. This lets the UI show "lost" / "requires reconciliation" instead
+     * of implying the prior execution is still running.
+     */
+    val inflightContinuityState: InflightContinuityDisposition =
+        InflightContinuityDisposition.RESUMED_CLEANLY,
+    /** Task id referenced by [inflightContinuityState], when Android has one. */
+    val inflightContinuityTaskId: String? = null
 )
 
 /**
@@ -420,6 +430,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .onEach { recoveryState ->
                 Log.d(TAG, "Reconnect recovery state: ${recoveryState.wireValue}")
                 _uiState.update { it.copy(reconnectRecoveryState = recoveryState) }
+            }
+            .launchIn(viewModelScope)
+        UFOGalaxyApplication.runtimeController.inflightContinuityRecovery
+            .onEach { recovery ->
+                Log.d(
+                    TAG,
+                    "Inflight continuity recovery: state=${recovery.disposition.wireValue} " +
+                        "task=${recovery.taskId ?: "none"} source=${recovery.source}"
+                )
+                _uiState.update {
+                    it.copy(
+                        inflightContinuityState = recovery.disposition,
+                        inflightContinuityTaskId = recovery.taskId,
+                        isLoading = if (
+                            recovery.disposition == InflightContinuityDisposition.LOST_INFLIGHT ||
+                            recovery.disposition == InflightContinuityDisposition.REQUIRES_RECONCILIATION
+                        ) {
+                            false
+                        } else {
+                            it.isLoading
+                        }
+                    )
+                }
             }
             .launchIn(viewModelScope)
     }
@@ -1080,6 +1113,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // which execution path was used for the most recent task.
             appendLine("-- Last Execution Route --")
             appendLine("Route: ${s.lastExecutionRoute?.wireValue ?: "none"}")
+            appendLine()
+            appendLine("-- In-flight Continuity --")
+            appendLine("State: ${s.inflightContinuityState.wireValue}")
+            appendLine("Task: ${s.inflightContinuityTaskId ?: "none"}")
             appendLine()
             // PR-30: Per-route execution counts for operator-facing rollout diagnostics.
             appendLine("-- Execution Routes (this session) --")

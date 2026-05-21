@@ -197,6 +197,19 @@ interface AppSettings {
      */
     var durableParticipantId: String
 
+    /**
+     * Minimal durable Android-local recovery artifact for a delegated execution that was
+     * in flight when the current process or runtime state was interrupted.
+     *
+     * Android persists this artifact so a later process recreation or service/runtime restart
+     * can deterministically report `recovered-inflight`, `lost-inflight`, or
+     * `requires-reconciliation` instead of silently timing out on stale local memory.
+     *
+     * Authority boundary: the artifact is Android-local evidence only.  V2 still decides
+     * canonical continuity and closure semantics.
+     */
+    var inflightContinuityRecoveryArtifact: String
+
     // ── Local-chain execution settings (planner / grounding) ─────────────────
 
     /**
@@ -480,6 +493,7 @@ class InMemoryAppSettings(
     override var gatewayToken: String = "",
     override var lastDurableSessionId: String = "",
     override var durableParticipantId: String = "",
+    override var inflightContinuityRecoveryArtifact: String = "",
     // Local-chain execution settings
     override var plannerMaxTokens: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS,
     override var plannerTemperature: Double = SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE,
@@ -647,6 +661,10 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         }
         set(value) { prefs.edit().putString(KEY_DURABLE_PARTICIPANT_ID, value).apply() }
 
+    override var inflightContinuityRecoveryArtifact: String
+        get() = prefs.getString(KEY_INFLIGHT_CONTINUITY_RECOVERY_ARTIFACT, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_INFLIGHT_CONTINUITY_RECOVERY_ARTIFACT, value).apply() }
+
     // ── Local-chain execution settings ───────────────────────────────────────
 
     override var plannerMaxTokens: Int
@@ -705,6 +723,9 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
         // PR-8Android: Stable per-installation participant ID key
         const val KEY_DURABLE_PARTICIPANT_ID = "durable_participant_id"
+
+        // Durable recovery artifact for interrupted local in-flight execution continuity.
+        const val KEY_INFLIGHT_CONTINUITY_RECOVERY_ARTIFACT = "inflight_continuity_recovery_artifact"
 
         // Local-chain execution keys
         const val KEY_PLANNER_MAX_TOKENS = "planner_max_tokens"
