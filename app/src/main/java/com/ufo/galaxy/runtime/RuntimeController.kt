@@ -557,6 +557,47 @@ class RuntimeController(
         _reconciliationSignals.asSharedFlow()
 
     /**
+     * PR-118 — Backing flow for [continuityDiagnosticsEvents].
+     *
+     * Buffered to accommodate bursts of continuity diagnostic events (e.g. reconnect +
+     * recovery artifact + reconciliation signal) without dropping events when the
+     * service-layer consumer is briefly slow to drain.
+     */
+    private val _continuityDiagnosticsEvents =
+        MutableSharedFlow<AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent>(
+            extraBufferCapacity = CONTINUITY_DIAGNOSTICS_BUFFER_CAPACITY
+        )
+
+    /**
+     * PR-118 — Service-visible continuity diagnostics event stream.
+     *
+     * Emits a [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent] for every
+     * key Android continuity runtime decision so service/test consumers can observe
+     * continuity correctness without relying on logcat.
+     *
+     * Covered decision points:
+     *  - [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome]
+     *    — every [ReconnectRecoveryState] transition in the WS permanent listener
+     *  - [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent]
+     *    — when [recordOfflineReplayQueued] or [recordOfflineReplayFlushed] is called
+     *  - [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.RecoveryArtifactResolved]
+     *    — every [publishInflightContinuityRecovery] call (including RESUMED_CLEANLY)
+     *  - [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconciliationSignalDiagnostic]
+     *    — every [emitReconciliationSignal] call with its actual emit outcome
+     *
+     * All events carry [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.durableSessionId]
+     * from the decision point so consumers can detect cross-session contamination.
+     *
+     * Backed by a buffer of [CONTINUITY_DIAGNOSTICS_BUFFER_CAPACITY] entries.
+     * Observers should drain promptly to avoid event loss.
+     *
+     * **Consumption boundary**: these events are diagnostics-visible evidence only and
+     * MUST NOT be promoted to canonical continuity truth.
+     */
+    val continuityDiagnosticsEvents: SharedFlow<AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent> =
+        _continuityDiagnosticsEvents.asSharedFlow()
+
+    /**
      * PR-1 — Observable durable session continuity record for this Android runtime.
      *
      * Tracks the **durable session identity** that persists across WS reconnects within a
@@ -801,6 +842,18 @@ class RuntimeController(
                         )
                     )
                     Log.i(TAG, "[RUNTIME] Reconnect recovery: $transitionLabel$watchdogNote")
+                    // PR-118: emit service-visible reconnect classification diagnostics.
+                    val durSessId = currentDurableSessionId()
+                    emitContinuityDiagnostics(
+                        AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome(
+                            fromState = prevRecoveryState.wireValue,
+                            toState = ReconnectRecoveryState.RECOVERED.wireValue,
+                            trigger = "ws_reconnected_active",
+                            sessionEpochHint = buildSessionEpochHint(durSessId, currentSessionContinuityEpoch()),
+                            durableSessionId = durSessId,
+                            observedAtMs = System.currentTimeMillis()
+                        )
+                    )
                     // PR-2: Emit a ParticipantRejoined formation rebalance event so formation
                     // observers know this participant is back and formation can re-evaluate.
                     emitFormationRebalanceForRecovery(
@@ -830,6 +883,18 @@ class RuntimeController(
                     )
                 )
                 Log.i(TAG, "[RUNTIME] Reconnect recovery: IDLE → RECOVERING")
+                // PR-118: emit service-visible reconnect classification diagnostics.
+                val durSessId = currentDurableSessionId()
+                emitContinuityDiagnostics(
+                    AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome(
+                        fromState = ReconnectRecoveryState.IDLE.wireValue,
+                        toState = ReconnectRecoveryState.RECOVERING.wireValue,
+                        trigger = "ws_disconnect_active",
+                        sessionEpochHint = buildSessionEpochHint(durSessId, currentSessionContinuityEpoch()),
+                        durableSessionId = durSessId,
+                        observedAtMs = System.currentTimeMillis()
+                    )
+                )
                 // PR-2: Emit a ReadinessChanged formation rebalance event so formation
                 // observers know this participant is temporarily unavailable.
                 emitFormationRebalanceForRecovery(
@@ -859,6 +924,18 @@ class RuntimeController(
                     )
                 )
                 Log.w(TAG, "[RUNTIME] Reconnect recovery: RECOVERING → FAILED (error=$error) — watchdog scheduled to re-enter RECOVERING")
+                // PR-118: emit service-visible reconnect classification diagnostics.
+                val durSessId = currentDurableSessionId()
+                emitContinuityDiagnostics(
+                    AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome(
+                        fromState = ReconnectRecoveryState.RECOVERING.wireValue,
+                        toState = ReconnectRecoveryState.FAILED.wireValue,
+                        trigger = "ws_error",
+                        sessionEpochHint = buildSessionEpochHint(durSessId, currentSessionContinuityEpoch()),
+                        durableSessionId = durSessId,
+                        observedAtMs = System.currentTimeMillis()
+                    )
+                )
                 // PR-2: Emit a ReadinessChanged formation rebalance event so formation
                 // observers know this participant has been withdrawn from formation.
                 emitFormationRebalanceForRecovery(
@@ -885,6 +962,18 @@ class RuntimeController(
                             )
                         )
                         Log.i(TAG, "[RUNTIME] Watchdog recovery: FAILED → RECOVERING (next cycle)")
+                        // PR-118: emit service-visible reconnect classification diagnostics.
+                        val watchdogDurSessId = currentDurableSessionId()
+                        emitContinuityDiagnostics(
+                            AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome(
+                                fromState = ReconnectRecoveryState.FAILED.wireValue,
+                                toState = ReconnectRecoveryState.RECOVERING.wireValue,
+                                trigger = "watchdog_reentry",
+                                sessionEpochHint = buildSessionEpochHint(watchdogDurSessId, currentSessionContinuityEpoch()),
+                                durableSessionId = watchdogDurSessId,
+                                observedAtMs = System.currentTimeMillis()
+                            )
+                        )
                         emitFormationRebalanceForRecovery(
                             previousRecoveryState = ReconnectRecoveryState.FAILED,
                             newRecoveryState = ReconnectRecoveryState.RECOVERING
@@ -1495,6 +1584,19 @@ class RuntimeController(
             GalaxyLogger.TAG_LIVE_EXECUTION,
             snapshot.toMetadataMap() + mapOf("event" to "inflight_continuity_classified")
         )
+        // PR-118: emit service-visible diagnostics event for recovery artifact resolution.
+        val durSessId = currentDurableSessionId()
+        emitContinuityDiagnostics(
+            AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.RecoveryArtifactResolved(
+                disposition = disposition.wireValue,
+                source = source,
+                taskId = artifact?.taskId,
+                artifactSessionId = artifact?.durableSessionId,
+                sessionEpochHint = buildSessionEpochHint(durSessId, currentSessionContinuityEpoch()),
+                durableSessionId = durSessId,
+                observedAtMs = System.currentTimeMillis()
+            )
+        )
     }
 
     private fun classifyPersistedInflightContinuityIfNeeded(source: String) {
@@ -1666,6 +1768,111 @@ class RuntimeController(
                 "session_continuity_epoch" to (signal.sessionContinuityEpoch ?: -1),
                 "emitted_immediately" to emittedImmediately,
                 "retry_scheduled" to retryScheduled
+            )
+        )
+        // PR-118: emit service-visible diagnostics event for this reconciliation signal.
+        val emitOutcome = when {
+            emittedImmediately ->
+                AndroidContinuityDiagnosticsContract.ReconciliationEmitOutcome.EMITTED_IMMEDIATELY
+            retryScheduled ->
+                AndroidContinuityDiagnosticsContract.ReconciliationEmitOutcome.BUFFER_FULL_RETRY_SCHEDULED
+            else ->
+                AndroidContinuityDiagnosticsContract.ReconciliationEmitOutcome.BUFFER_FULL_DROPPED
+        }
+        emitContinuityDiagnostics(
+            AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconciliationSignalDiagnostic(
+                signalKind = signal.kind.wireValue,
+                signalId = signal.signalId,
+                taskId = signal.taskId,
+                emitOutcome = emitOutcome.wireValue,
+                sessionEpochHint = buildSessionEpochHint(signal.durableSessionId, signal.sessionContinuityEpoch),
+                durableSessionId = signal.durableSessionId,
+                observedAtMs = System.currentTimeMillis()
+            )
+        )
+    }
+
+    /**
+     * PR-118 — Emits a [ContinuityDiagnosticsEvent] on [_continuityDiagnosticsEvents].
+     *
+     * Uses [MutableSharedFlow.tryEmit] (non-suspend) so callers do not need to be in a
+     * coroutine.  Drops silently when the buffer is full — diagnostics events are
+     * best-effort and must not block runtime execution.
+     */
+    private fun emitContinuityDiagnostics(
+        event: AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent
+    ) {
+        _continuityDiagnosticsEvents.tryEmit(event)
+    }
+
+    /**
+     * PR-118 — Builds a best-effort session epoch hint string for diagnostics events.
+     *
+     * Format: `"<durableSessionId>:<epoch>"` when both are available,
+     * `"<durableSessionId>:none"` when epoch is unknown,
+     * `"no_session"` when no durable session is open.
+     *
+     * @param durableSessionId  Durable session ID at the time of the event.
+     * @param sessionContinuityEpoch  Continuity epoch at the time of the event.
+     */
+    private fun buildSessionEpochHint(
+        durableSessionId: String?,
+        sessionContinuityEpoch: Int?
+    ): String {
+        if (durableSessionId == null) return "no_session"
+        val epochStr = sessionContinuityEpoch?.toString() ?: "none"
+        return "$durableSessionId:$epochStr"
+    }
+
+    /**
+     * PR-118 — Records that messages were appended to the offline queue.
+     *
+     * Called by [com.ufo.galaxy.service.GalaxyConnectionService] when the offline
+     * task queue receives new messages during a WS disconnect.  Emits an
+     * [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent]
+     * with kind [AndroidContinuityDiagnosticsContract.OfflineReplayEventKind.QUEUED] on
+     * [continuityDiagnosticsEvents] so service/test consumers can observe offline buffering
+     * without relying on logcat.
+     *
+     * @param queueDepth  Current depth of the offline queue after the enqueue.
+     * @param sessionTag  Durable session tag attached to the queued messages, or `null`.
+     */
+    fun recordOfflineReplayQueued(queueDepth: Int, sessionTag: String?) {
+        val durSessId = currentDurableSessionId()
+        emitContinuityDiagnostics(
+            AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent(
+                kind = AndroidContinuityDiagnosticsContract.OfflineReplayEventKind.QUEUED.wireValue,
+                queueDepth = queueDepth,
+                sessionTag = sessionTag,
+                sessionEpochHint = buildSessionEpochHint(durSessId, currentSessionContinuityEpoch()),
+                durableSessionId = durSessId,
+                observedAtMs = System.currentTimeMillis()
+            )
+        )
+    }
+
+    /**
+     * PR-118 — Records that the offline queue was flushed after reconnect.
+     *
+     * Called by [com.ufo.galaxy.service.GalaxyConnectionService] when the offline
+     * queue replay completes after a WS reconnect.  Emits an
+     * [AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent]
+     * with kind [AndroidContinuityDiagnosticsContract.OfflineReplayEventKind.FLUSHED] on
+     * [continuityDiagnosticsEvents].
+     *
+     * @param queueDepth  Depth of the offline queue at flush time (may be 0 after flush).
+     * @param sessionTag  Durable session tag of the flushed messages, or `null`.
+     */
+    fun recordOfflineReplayFlushed(queueDepth: Int, sessionTag: String?) {
+        val durSessId = currentDurableSessionId()
+        emitContinuityDiagnostics(
+            AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent(
+                kind = AndroidContinuityDiagnosticsContract.OfflineReplayEventKind.FLUSHED.wireValue,
+                queueDepth = queueDepth,
+                sessionTag = sessionTag,
+                sessionEpochHint = buildSessionEpochHint(durSessId, currentSessionContinuityEpoch()),
+                durableSessionId = durSessId,
+                observedAtMs = System.currentTimeMillis()
             )
         )
     }
@@ -3390,5 +3597,14 @@ class RuntimeController(
         // Terminal reconciliation retry should remain short-lived: long enough to survive
         // brief collector backpressure, but bounded to avoid hanging retry coroutines.
         private const val RECONCILIATION_SIGNAL_RETRY_TIMEOUT_MS = 2_000L
+
+        /**
+         * PR-118 — Buffer capacity for [_continuityDiagnosticsEvents].
+         *
+         * Sized to accommodate a burst of continuity events across a reconnect cycle
+         * (classification + recovery artifact + reconciliation signals) without dropping
+         * events when the service consumer is briefly slow to drain.
+         */
+        private const val CONTINUITY_DIAGNOSTICS_BUFFER_CAPACITY = 32
     }
 }

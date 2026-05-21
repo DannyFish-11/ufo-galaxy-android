@@ -2611,6 +2611,36 @@ object StabilizationBaseline {
                 "toWireMap() 提供 uplink 嵌入用的最小 wire map。" +
                 "Test: Pr116AndroidContinuityRecoveryStateModelTest.",
             introducedPr = 116
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-continuity-diagnostics-contract",
+            displayName = "AndroidContinuityDiagnosticsContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidContinuityDiagnosticsContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-118 — Android continuity runtime 最小可观测诊断面。" +
+                "把关键 continuity 决策——reconnect classification、offline replay、" +
+                "recovery artifact 决策、reconciliation flush——从"内部日志可见"推进到" +
+                ""service/runtime-visible diagnostics 可见"。" +
+                "引入 ContinuityDiagnosticsEvent sealed class（4 子类型）：" +
+                "ReconnectClassificationOutcome（WS 状态转换分类）、" +
+                "OfflineReplayEvent（QUEUED/FLUSHED）、" +
+                "RecoveryArtifactResolved（disposition/source/taskId/artifactSessionId）、" +
+                "ReconciliationSignalDiagnostic（signalKind/signalId/emitOutcome）。" +
+                "RuntimeController 新增 continuityDiagnosticsEvents: SharedFlow，" +
+                "在真实 runtime decision point 发射事件（非从日志重建）：" +
+                "permanentWsListener 每次 ReconnectRecoveryState 转换发射 ReconnectClassificationOutcome；" +
+                "publishInflightContinuityRecovery 每次调用发射 RecoveryArtifactResolved；" +
+                "emitReconciliationSignal 每次调用发射 ReconciliationSignalDiagnostic；" +
+                "recordOfflineReplayQueued/recordOfflineReplayFlushed 发射 OfflineReplayEvent。" +
+                "每个事件携带 durableSessionId（emission 时刻的 session ID），" +
+                "消费方可对比自身当前 session 检测跨 session 污染。" +
+                "DIAGNOSTICS_INVARIANTS（8 条）防止：事件在日志中重建而非来源于真实决策、" +
+                "零转换 session 误发事件、diagnostics 被误晋升为 canonical truth。" +
+                "V2_CONSUMPTION_PATH_MAP 声明四类事件对应的 V2 消费路径。" +
+                "Test: Pr118AndroidContinuityDiagnosticsContractTest.",
+            introducedPr = 118
         )
     )
 
