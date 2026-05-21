@@ -442,8 +442,8 @@ class Pr11StabilizationBaselineTest {
     // 12. Tier and guidance counts
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `CANONICAL_STABLE count is 138`() {
-        assertEquals(138, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
+    @Test fun `CANONICAL_STABLE count is 139`() {
+        assertEquals(139, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test fun `CANONICAL_FROZEN count is 1`() {
@@ -458,12 +458,12 @@ class Pr11StabilizationBaselineTest {
         assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 144`() {
-        assertEquals(144, StabilizationBaseline.entries.size)
+    @Test fun `total entry count is 145`() {
+        assertEquals(145, StabilizationBaseline.entries.size)
     }
 
-    @Test fun `EXTEND guidance count is 138`() {
-        assertEquals(138, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
+    @Test fun `EXTEND guidance count is 139`() {
+        assertEquals(139, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
     }
 
     @Test fun `CONVERGE guidance count is 3`() {
