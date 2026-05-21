@@ -3205,11 +3205,7 @@ class GalaxyConnectionService : Service() {
         val resultRecoverySource = result.continuity_recovery_source ?: resultInflightRecovery.source
         val resultLineage = AndroidUplinkLineageMetadataContract.derive(
             executionIdentity = result.task_id,
-            emissionIdentity = listOf(
-                result.task_id,
-                normalizedLifecycleStatus,
-                result.result_summary ?: result.result ?: result.error ?: "none"
-            ).joinToString(":"),
+            emissionIdentity = buildResultLineageEmissionIdentity(result, normalizedLifecycleStatus),
             durableSessionId = resultDurableRecord?.durableSessionId,
             sessionContinuityEpoch = resultDurableRecord?.sessionContinuityEpoch,
             recoveryBasis = "$resultRecoveryPhase:${resultRecoverySource.ifBlank { "none" }}"
@@ -3475,6 +3471,18 @@ class GalaxyConnectionService : Service() {
         val runtimeSession = UFOGalaxyApplication.runtimeSessionId
         val nonce = java.util.UUID.randomUUID().toString()
         return "$runtimeSession:${type.value}:$taskId:${traceId ?: "no_trace"}:$nonce"
+    }
+
+    private fun buildResultLineageEmissionIdentity(
+        result: GoalResultPayload,
+        normalizedLifecycleStatus: String
+    ): String {
+        val summary = result.result_summary
+            ?.takeIf { it.isNotBlank() }
+            ?: result.result?.takeIf { it.isNotBlank() }
+            ?: result.error?.takeIf { it.isNotBlank() }
+            ?: "none"
+        return listOf(result.task_id, normalizedLifecycleStatus, summary).joinToString(":")
     }
 
     private fun emitRuntimeDiagnostics(

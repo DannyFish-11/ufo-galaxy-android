@@ -1058,13 +1058,15 @@ class GalaxyWebSocketClient(
         null
     }
 
-    private fun extractReplayDedupeKey(json: String): String? =
-        tryExtractField(json, "idempotency_key")
-            ?: tryExtractFieldNested(
-                json,
-                "payload",
-                AndroidUplinkLineageMetadataContract.KEY_DEDUPE_KEY
-            )
+    private fun extractReplayDedupeKey(json: String): String? = try {
+        val root = gson.fromJson(json, JsonObject::class.java)
+        root?.get("idempotency_key")?.asString
+            ?: root?.getAsJsonObject("payload")
+                ?.get(AndroidUplinkLineageMetadataContract.KEY_DEDUPE_KEY)
+                ?.asString
+    } catch (_: Exception) {
+        null
+    }
 
     private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
         val lineageSessionEpoch = tryExtractIntFieldNested(
