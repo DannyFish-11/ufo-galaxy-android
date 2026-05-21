@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.UnifiedReplayRecoveryContract
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,8 +30,8 @@ import java.util.ArrayDeque
  * not survive process restart — document this limitation in the README.
  *
  * **Types that are queued**: Only messages whose JSON `type` field is listed in
- * [QUEUEABLE_TYPES] ("task_result", "goal_result", "goal_execution_result",
- * "delegated_execution_signal", "device_execution_event") are candidates
+     * [QUEUEABLE_TYPES] ("task_result", "goal_result", "goal_execution_result",
+     * "delegated_execution_signal", "device_execution_event", "reconciliation_signal") are candidates
  * for queuing.  Heartbeats, handshakes, and diagnostics are never queued.
  *
  * **JVM / unit-test compatible**: no Android framework references other than
@@ -74,6 +75,10 @@ class OfflineTaskQueue(
          * It must be queueable so start/progress/retry/interruption/terminal evidence
          * can be replayed on reconnect instead of being silently dropped.
          *
+         * "reconciliation_signal" carries continuity-repair / state-reconciliation truth.
+         * It must be queueable so continuity repair survives transient transport failures
+         * instead of silently degrading into best-effort logging.
+         *
          * "task_result" and "goal_result" are retained for backward-compatibility with legacy
          * paths and REST-fallback callers.
          */
@@ -84,7 +89,8 @@ class OfflineTaskQueue(
             "delegated_execution_signal",
             "device_execution_event",
             "device_state_snapshot",
-            "device_acceptance_report"
+            "device_acceptance_report",
+            MsgType.RECONCILIATION_SIGNAL.value
         )
     }
 
@@ -108,7 +114,9 @@ class OfflineTaskQueue(
         val type: String,
         val json: String,
         val queuedAt: Long = System.currentTimeMillis(),
-        val sessionTag: String? = null
+        val sessionTag: String? = null,
+        val sessionEpoch: Int? = null,
+        val dedupeKey: String? = null
     )
 
     private val queue = ArrayDeque<QueuedMessage>()
@@ -141,17 +149,37 @@ class OfflineTaskQueue(
      *                   (or equivalent) so that [discardForDifferentSession] can purge this
      *                   message if the session has changed before the queue is drained.
      *                   Omit (default `null`) if the caller does not need session tracking.
+     * @param sessionEpoch Optional continuity epoch within [sessionTag].  Used by
+     *                     [discardReconciliationSignalsForDifferentEpoch] to block replay of
+     *                     stale reconciliation signals after reconnect.
+     * @param dedupeKey Optional stable delivery key. When present, duplicate detection prefers
+     *                  `(type, sessionTag, sessionEpoch, dedupeKey)` over raw JSON equality so
+     *                  retries and re-emits of the same logical reconciliation event collapse.
      */
-    fun enqueue(type: String, json: String, sessionTag: String? = null) {
+    fun enqueue(
+        type: String,
+        json: String,
+        sessionTag: String? = null,
+        sessionEpoch: Int? = null,
+        dedupeKey: String? = null
+    ) {
         val newSize = synchronized(lock) {
             val duplicate = queue.any {
-                it.type == type && it.json == json && it.sessionTag == sessionTag
+                if (dedupeKey != null && it.dedupeKey != null) {
+                    it.type == type &&
+                        it.sessionTag == sessionTag &&
+                        it.sessionEpoch == sessionEpoch &&
+                        it.dedupeKey == dedupeKey
+                } else {
+                    it.type == type && it.json == json && it.sessionTag == sessionTag
+                }
             }
             if (duplicate) {
                 Log.i(
                     TAG,
                     "[WS:OfflineQueue] Suppressed duplicate queued message " +
-                        "type=$type session_tag=${sessionTag ?: "none"}"
+                        "type=$type session_tag=${sessionTag ?: "none"} " +
+                        "session_epoch=${sessionEpoch ?: "none"} dedupe_key=${dedupeKey ?: "none"}"
                 )
                 return@synchronized queue.size
             }
@@ -163,7 +191,15 @@ class OfflineTaskQueue(
                         "type=${dropped?.type} queuedAt=${dropped?.queuedAt}"
                 )
             }
-            queue.add(QueuedMessage(type, json, sessionTag = sessionTag))
+            queue.add(
+                QueuedMessage(
+                    type = type,
+                    json = json,
+                    sessionTag = sessionTag,
+                    sessionEpoch = sessionEpoch,
+                    dedupeKey = dedupeKey
+                )
+            )
             Log.d(TAG, "[WS:OfflineQueue] Enqueued type=$type queue_size=${queue.size}")
             saveToPrefsLocked()
             queue.size
@@ -331,6 +367,45 @@ class OfflineTaskQueue(
                     TAG,
                     "[WS:OfflineQueue] Discarded $discarded session-tagged message(s) " +
                         "because current session authority is unavailable"
+                )
+            }
+            Pair(discarded, newSize)
+        }
+        _sizeFlow.value = result.second
+        return result.first
+    }
+
+    /**
+     * Removes queued reconciliation signals whose bounded continuity epoch does not match the
+     * current authority epoch.
+     *
+     * This prevents a reconciliation signal emitted under an older reconnect epoch from being
+     * replayed after Android has already advanced to a newer continuity era within the same
+     * durable session.
+     */
+    fun discardReconciliationSignalsForDifferentEpoch(currentEpoch: Int?): Int {
+        val result = synchronized(lock) {
+            val before = queue.size
+            val iter = queue.iterator()
+            while (iter.hasNext()) {
+                val msg = iter.next()
+                if (msg.type != MsgType.RECONCILIATION_SIGNAL.value) continue
+                val stale =
+                    msg.sessionEpoch == null ||
+                        currentEpoch == null ||
+                        msg.sessionEpoch != currentEpoch
+                if (stale) {
+                    iter.remove()
+                }
+            }
+            val discarded = before - queue.size
+            val newSize = queue.size
+            if (discarded > 0) {
+                saveToPrefsLocked()
+                Log.i(
+                    TAG,
+                    "[WS:OfflineQueue] Discarded $discarded stale reconciliation_signal message(s) " +
+                        "(currentEpoch=${currentEpoch ?: "none"})"
                 )
             }
             Pair(discarded, newSize)

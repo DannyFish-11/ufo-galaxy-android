@@ -1,5 +1,7 @@
 package com.ufo.galaxy.runtime
 
+import java.security.MessageDigest
+
 /**
  * PR-51 — Android Reconciliation Signal.
  *
@@ -225,6 +227,27 @@ data class ReconciliationSignal(
     val participantExecSignalClass: ParticipantExecutionSignalContract.ExecSignalClass
         get() = ParticipantExecutionSignalContract.classifyReconciliation(kind)
 
+    /**
+     * Stable delivery / dedupe key for reliable reconciliation uplink.
+     *
+     * Unlike [signalId], this key is derived from continuity-bound task/session context so
+     * retries, offline replay, and duplicate local emissions for the same logical reconciliation
+     * event converge on one idempotent identity.
+     */
+    val stableDedupeKey: String
+        get() = buildStableDedupeKey(
+            kind = kind.wireValue,
+            participantId = participantId,
+            taskId = taskId,
+            correlationId = correlationId,
+            status = status,
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch,
+            payload = payload,
+            runtimeTruth = runtimeTruth?.toMap()
+        )
+
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
@@ -304,6 +327,9 @@ data class ReconciliationSignal(
         /** Wire key for [sessionContinuityEpoch]. */
         const val KEY_SESSION_CONTINUITY_EPOCH =
             DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH
+
+        /** Payload key for [stableDedupeKey]. */
+        const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
 
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
@@ -416,6 +442,53 @@ data class ReconciliationSignal(
                 KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION to
                     AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
             )
+        }
+
+        private fun buildStableDedupeKey(
+            kind: String,
+            participantId: String,
+            taskId: String?,
+            correlationId: String?,
+            status: String,
+            reconciliationEpoch: Int,
+            durableSessionId: String?,
+            sessionContinuityEpoch: Int?,
+            payload: Map<String, Any?>,
+            runtimeTruth: Map<String, Any>?
+        ): String {
+            val canonical = listOf(
+                "reconciliation_signal",
+                kind,
+                participantId,
+                taskId ?: "no_task",
+                correlationId ?: "no_correlation",
+                status,
+                durableSessionId ?: "no_durable_session",
+                sessionContinuityEpoch?.toString() ?: "no_session_epoch",
+                reconciliationEpoch.toString(),
+                canonicalizeForDedupe(payload),
+                canonicalizeForDedupe(runtimeTruth)
+            ).joinToString(":")
+            val digest = MessageDigest.getInstance("SHA-256")
+            val hash = digest.digest(canonical.toByteArray())
+                .joinToString(separator = "") { byte -> "%02x".format(byte) }
+            return "reconciliation_signal:$hash"
+        }
+
+        private fun canonicalizeForDedupe(value: Any?): String = when (value) {
+            null -> "null"
+            is Map<*, *> -> value.entries
+                .sortedBy { it.key?.toString().orEmpty() }
+                .joinToString(prefix = "{", postfix = "}") { entry ->
+                    "${entry.key}=${canonicalizeForDedupe(entry.value)}"
+                }
+            is Iterable<*> -> value.joinToString(prefix = "[", postfix = "]") {
+                canonicalizeForDedupe(it)
+            }
+            is Array<*> -> value.joinToString(prefix = "[", postfix = "]") {
+                canonicalizeForDedupe(it)
+            }
+            else -> value.toString()
         }
 
         // ── Factories ─────────────────────────────────────────────────────────
