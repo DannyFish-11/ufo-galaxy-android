@@ -1057,11 +1057,16 @@ class RuntimeController(
             classifyPersistedInflightContinuityIfNeeded(source = "connect_if_enabled")
         } else if (settings.inflightContinuityRecoveryArtifact.isNotBlank()) {
             classifyPersistedInflightContinuityIfNeeded(source = "connect_if_enabled_local_only")
-        } else if (_inflightContinuityRecovery.value.disposition != InflightContinuityDisposition.LOST_INFLIGHT) {
-            publishInflightContinuityRecovery(
-                disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
-                source = "connect_if_enabled_local_only"
-            )
+        } else {
+            when (_inflightContinuityRecovery.value.disposition) {
+                InflightContinuityDisposition.RESUMED_CLEANLY,
+                InflightContinuityDisposition.RECOVERED_INFLIGHT -> publishInflightContinuityRecovery(
+                    disposition = InflightContinuityDisposition.RESUMED_CLEANLY,
+                    source = "connect_if_enabled_local_only"
+                )
+                InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+                InflightContinuityDisposition.LOST_INFLIGHT -> Unit
+            }
         }
 
         // PR-G: Pre-generate runtime_attachment_session_id before connecting so the initial
@@ -1513,7 +1518,7 @@ class RuntimeController(
         if (liveTaskRecovered) {
             persistInflightRecoveryArtifact(
                 taskId = artifact.taskId,
-                status = _activeTaskStatus ?: ActiveTaskStatus.RUNNING
+                status = _activeTaskStatus!!
             )
             publishInflightContinuityRecovery(
                 disposition = InflightContinuityDisposition.RECOVERED_INFLIGHT,
