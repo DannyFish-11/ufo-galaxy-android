@@ -2555,6 +2555,30 @@ object StabilizationBaseline {
                 "明确 Android 仍是 bounded participant runtime，不越权成为 canonical truth authority。" +
                 "Test: Pr14AndroidV2ContractVersionGateTest.",
             introducedPr = 104
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-formal-boundary-summary-output",
+            displayName = "AndroidFormalBoundarySummaryOutputContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidFormalBoundarySummaryOutputContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-25Android — Android 正式边界总结输出合约。" +
+                "把 Android bounded relative subject runtime 的正式系统角色、六类不重叠边界总结、" +
+                "restore/replay/uplink/outward/local-continuity 边界、" +
+                "显式 is/is-not 声明、九条不漂移 invariant 与 V2 对齐 map " +
+                "固化为可长期引用、可被测试和运行时断言支撑的单一稳定输出合约。" +
+                "SYSTEM_ROLE_DECLARATIONS（6 角色）、IS_VS_IS_NOT_BOUNDARIES（6 条）、" +
+                "BOUNDARY_SUMMARY_OUTPUT_ENTRIES（6 类）、" +
+                "RESTORE_REPLAY_BOUNDARY_SUMMARIES（4 子边界）、" +
+                "ANTI_DRIFT_INVARIANTS（9 条）、V2_BOUNDARY_NARRATIVE_ALIGNMENT_MAP（6 路径）。" +
+                "validateCompleteFormalBoundarySummary() / validateAllSystemRolesActive() / " +
+                "validateAllIsNotStatementsNonBlank() / validateAntiDriftInvariantCoverage() " +
+                "四个验证助手支持 CI 断言。" +
+                "明确 Android 不是 parallel canonical center / fully sovereign distributed authority node，" +
+                "防止后续 PR Android 侧 authority drift。" +
+                "Test: Pr25AndroidFormalBoundarySummaryOutputContractTest.",
+            introducedPr = 115
         )
     )
 

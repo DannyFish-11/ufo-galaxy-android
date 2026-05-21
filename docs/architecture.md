@@ -246,6 +246,70 @@ Validation helpers and tests:
 - `AndroidBoundedSubjectRuntimeContract.validateFormalBoundarySummaryCoverage()`
 - `Pr10v2AndroidBoundedSubjectRuntimeContractTest` (`formal boundary summary...` assertions)
 
+### Formal boundary summary output (PR-25Android)
+
+`AndroidFormalBoundarySummaryOutputContract` (`app/src/main/java/com/ufo/galaxy/runtime/AndroidFormalBoundarySummaryOutputContract.kt`) is the canonical, long-term-referenceable formal boundary summary output for the Android bounded relative subject runtime.  It consolidates role declarations, is/is-not statements, boundary summaries, restore/replay sub-boundaries, anti-drift invariants, and V2 alignment into a single stable, testable surface.
+
+#### Android system role (what Android IS)
+
+| Role class | Wire value | Canonical anchor |
+|---|---|---|
+| bounded relative subject runtime | `bounded_relative_subject_runtime` | `AndroidBoundedSubjectRuntimeContract.FormalRole.BOUNDED_RELATIVE_SUBJECT_RUNTIME` |
+| local runtime host | `local_runtime_host` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_RUNTIME_HOST` |
+| local continuity holder | `local_continuity_holder` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_CONTINUITY_HOLDER` |
+| local execution policy participant | `local_execution_policy_participant` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_EXECUTION_POLICY_PARTICIPANT` |
+| local AI consumer host | `local_ai_consumer_host` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_AI_CONSUMER_HOST` |
+| distributed participant | `distributed_participant` | `AndroidBoundedSubjectRuntimeContract.FormalRole.DISTRIBUTED_PARTICIPANT` |
+
+#### What Android is NOT
+
+| Non-role | Authority that IS held |
+|---|---|
+| parallel canonical center | V2 canonical center |
+| fully sovereign distributed authority node | bounded local scope only |
+| final closure adjudicator | V2 canonical center |
+| canonical truth finalizer | V2 canonical center |
+| dispatch arbitrator | V2 canonical center |
+| platform sovereign | V2-governed quasi-platform state |
+
+#### Six boundary summary classes (consolidated output)
+
+| `BoundarySummaryClass` | Wire value | Module anchors |
+|---|---|---|
+| `ANDROID_BOUNDED_SUBJECT_RUNTIME` | `android_bounded_subject_runtime_boundary` | `AndroidBoundedSubjectRuntimeContract`, `RuntimeController`, `GalaxyConnectionService` |
+| `LOCAL_VISIBLE_VS_CANONICAL_VISIBLE` | `local_visible_vs_canonical_visible_boundary` | `AndroidBoundedSubjectRuntimeContract.LocalVisibleClass`, `OBSERVABILITY_BOUNDARY_ENTRIES` |
+| `CONTINUITY_RESTORE_REPLAY` | `continuity_restore_replay_boundary` | `AndroidContinuityIntegration`, `UnifiedReplayRecoveryContract`, `OfflineQueueReplayPolicy` |
+| `UPLINK_INGRESS_CONTRACT` | `uplink_ingress_contract_boundary` | `AndroidGovernanceExecutionPolicyIngressContract`, result/ownership/closure/tool/diagnostics uplink contracts |
+| `OUTWARD_UI_CONSUMPTION` | `outward_ui_consumption_boundary` | `AndroidFinalSurfaceConvergenceContract`, `MainUiState`, `MainViewModel` |
+| `NON_SOVEREIGN_ROLE` | `non_sovereign_role_boundary` | `AndroidBoundedSubjectPlatformBoundaryContract.QUASI_PLATFORM_STATE_DEFINITION` |
+
+#### restore / replay sub-boundary summaries
+
+| Sub-boundary | Android owns | V2 canonical authority |
+|---|---|---|
+| `offline-queue-replay` | ✓ — bounded local replay | ✗ |
+| `continuity-restore` | ✓ — bounded local state restore | ✗ |
+| `lifecycle-recovery` | ✓ — bounded local recovery decision | ✗ |
+| `continuity-state-uplink` | ✗ | ✓ — V2 canonical continuity legality |
+
+#### Anti-drift invariants (9)
+
+Nine machine-assertable invariants in `ANTI_DRIFT_INVARIANTS` prevent future Android-side authority drift.  Key invariants:
+
+- No boundary summary output entry may set `allowsCanonicalTruthConvergence`, `allowsFinalClosureAdjudication`, or `allowsPlatformSovereignty` to `true`.
+- `CONTINUITY_RESTORE_REPLAY` must anchor `AndroidContinuityIntegration` or `UnifiedReplayRecoveryContract`.
+- `UPLINK_INGRESS_CONTRACT` must anchor `AndroidGovernanceExecutionPolicyIngressContract` and at least one uplink contract.
+- `OUTWARD_UI_CONSUMPTION` must anchor `AndroidFinalSurfaceConvergenceContract`.
+- `NON_SOVEREIGN_ROLE` must anchor `QUASI_PLATFORM_STATE_DEFINITION`.
+
+#### Validation helpers and tests
+
+- `AndroidFormalBoundarySummaryOutputContract.validateCompleteFormalBoundarySummary()`
+- `AndroidFormalBoundarySummaryOutputContract.validateAllSystemRolesActive()`
+- `AndroidFormalBoundarySummaryOutputContract.validateAllIsNotStatementsNonBlank()`
+- `AndroidFormalBoundarySummaryOutputContract.validateAntiDriftInvariantCoverage()`
+- `Pr25AndroidFormalBoundarySummaryOutputContractTest`
+
 ### Truth vs projection boundary (Android-side)
 
 Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:
