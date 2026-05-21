@@ -414,6 +414,41 @@ class OfflineTaskQueue(
         return result.first
     }
 
+    /**
+     * Removes queued lineage-bound messages whose recorded epoch does not match [currentEpoch].
+     *
+     * Applies to all queued messages that carry a non-null [QueuedMessage.sessionEpoch], not only
+     * reconciliation signals. This blocks replay of old-epoch artifacts for result/completion/event/
+     * snapshot uplinks after continuity advances.
+     */
+    fun discardLineageBoundMessagesForDifferentEpoch(currentEpoch: Int?): Int {
+        val result = synchronized(lock) {
+            val before = queue.size
+            val iter = queue.iterator()
+            while (iter.hasNext()) {
+                val msg = iter.next()
+                val messageEpoch = msg.sessionEpoch ?: continue
+                val stale = currentEpoch == null || messageEpoch != currentEpoch
+                if (stale) {
+                    iter.remove()
+                }
+            }
+            val discarded = before - queue.size
+            val newSize = queue.size
+            if (discarded > 0) {
+                saveToPrefsLocked()
+                Log.i(
+                    TAG,
+                    "[WS:OfflineQueue] Discarded $discarded stale lineage-bound message(s) " +
+                        "(currentEpoch=${currentEpoch ?: "none"})"
+                )
+            }
+            Pair(discarded, newSize)
+        }
+        _sizeFlow.value = result.second
+        return result.first
+    }
+
     // ── Persistence ───────────────────────────────────────────────────────────
 
     /** Must be called while holding [lock]. */

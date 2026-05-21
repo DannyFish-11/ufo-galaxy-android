@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import okhttp3.Request
 import okhttp3.WebSocket
@@ -73,6 +74,13 @@ class ReconciliationSignalReliableReplayTest {
     )
 
     private fun toEnvelopeJson(signal: ReconciliationSignal): String {
+        val lineage = AndroidUplinkLineageMetadataContract.derive(
+            executionIdentity = signal.taskId ?: signal.kind.wireValue,
+            emissionIdentity = signal.signalId,
+            durableSessionId = signal.durableSessionId,
+            sessionContinuityEpoch = signal.sessionContinuityEpoch,
+            recoveryBasis = "test_reconciliation_path"
+        )
         val payload = ReconciliationSignalPayload(
             signal_id = signal.signalId,
             kind = signal.kind.wireValue,
@@ -88,7 +96,12 @@ class ReconciliationSignalReliableReplayTest {
             payload = signal.payload + mapOf(
                 ReconciliationSignal.KEY_STABLE_DEDUPE_KEY to signal.stableDedupeKey
             ),
-            runtime_truth = signal.runtimeTruth?.toMap()
+            runtime_truth = signal.runtimeTruth?.toMap(),
+            uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
+            uplink_lineage_execution_id = lineage.executionIdentity,
+            uplink_lineage_emission_id = lineage.emissionIdentity,
+            uplink_lineage_dedupe_key = lineage.dedupeKey,
+            uplink_lineage_recovery_basis = lineage.recoveryBasis
         )
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,
@@ -163,6 +176,11 @@ class ReconciliationSignalReliableReplayTest {
                 .get(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY)
                 .asString
         )
+        assertTrue(payload.has("uplink_lineage_schema_version"))
+        assertTrue(payload.has("uplink_lineage_execution_id"))
+        assertTrue(payload.has("uplink_lineage_emission_id"))
+        assertTrue(payload.has("uplink_lineage_dedupe_key"))
+        assertTrue(payload.has("uplink_lineage_recovery_basis"))
     }
 
     @Test
@@ -186,6 +204,41 @@ class ReconciliationSignalReliableReplayTest {
         client.sendJson(toEnvelopeJson(second))
 
         assertEquals(1, client.offlineQueue.size)
+    }
+
+    @Test
+    fun `goal_result replay dedupes by lineage key when idempotency differs`() {
+        val client = buildClient(durableSessionId = "durable-lineage", sessionEpoch = 4)
+        val first = """
+            {
+              "type":"goal_execution_result",
+              "idempotency_key":"nonce-a",
+              "payload":{
+                "task_id":"task-lineage",
+                "session_continuity_epoch":4,
+                "uplink_lineage_dedupe_key":"lineage-stable-4"
+              }
+            }
+        """.trimIndent()
+        val second = """
+            {
+              "type":"goal_execution_result",
+              "idempotency_key":"nonce-b",
+              "payload":{
+                "task_id":"task-lineage",
+                "session_continuity_epoch":4,
+                "uplink_lineage_dedupe_key":"lineage-stable-4"
+              }
+            }
+        """.trimIndent()
+
+        assertFalse(client.sendJson(first))
+        assertFalse(client.sendJson(second))
+
+        assertEquals(1, client.offlineQueue.size)
+        val queued = client.offlineQueue.drainAll().single()
+        assertEquals("lineage-stable-4", queued.dedupeKey)
+        assertEquals(4, queued.sessionEpoch)
     }
 
     @Test
