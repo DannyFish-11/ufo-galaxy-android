@@ -1523,8 +1523,10 @@ class RuntimeController(
             return
         }
 
-        _activeTaskId = null
-        _activeTaskStatus = null
+        clearActiveTaskState(
+            taskId = artifact.taskId,
+            finishedWith = "recovery_reclassified"
+        )
         _isRemoteExecutionActive.value = false
         publishInflightContinuityRecovery(
             disposition = if (settings.crossDeviceEnabled) {

@@ -10,9 +10,16 @@ import org.json.JSONObject
  * execution knowledge after process recreation, runtime restart, or service rebind.
  */
 enum class InflightContinuityDisposition(val wireValue: String) {
+    /** Android still has the live active-task state after a local service/runtime restore. */
     RECOVERED_INFLIGHT("recovered-inflight"),
+
+    /** Android knows a previously in-flight task was dropped locally and is no longer running. */
     LOST_INFLIGHT("lost-inflight"),
+
+    /** Android recovered only the durable artifact and must wait for V2 to reconcile truth. */
     REQUIRES_RECONCILIATION("requires-reconciliation"),
+
+    /** No interrupted in-flight state is pending; local execution truth is already clean. */
     RESUMED_CLEANLY("resumed-cleanly");
 
     companion object {
