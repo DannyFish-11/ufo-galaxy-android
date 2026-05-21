@@ -1255,6 +1255,8 @@ data class GoalResultPayload(
     val session_continuity_class: String? = null,
     val device_posture_signal_class: String? = null,
     val distributed_truth_ownership_uplink_schema_version: String? = null,
+    val durable_session_id: String? = null,
+    val session_continuity_epoch: Int? = null,
 
     // ── PR-116: Android unified continuity recovery state fields ─────────────────────────
     //
@@ -1280,7 +1282,12 @@ data class GoalResultPayload(
     //   Taken from AndroidContinuityRecoveryStateModel.SCHEMA_VERSION.
     val continuity_recovery_state: String? = null,
     val continuity_recovery_source: String? = null,
-    val continuity_recovery_schema_version: String? = null
+    val continuity_recovery_schema_version: String? = null,
+    val uplink_lineage_schema_version: String? = null,
+    val uplink_lineage_execution_id: String? = null,
+    val uplink_lineage_emission_id: String? = null,
+    val uplink_lineage_dedupe_key: String? = null,
+    val uplink_lineage_recovery_basis: String? = null
 )
 
 /**
@@ -1751,7 +1758,12 @@ data class ReconciliationSignalPayload(
     val ingress_boundary_class: String? = null,
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
-    val ingress_schema_version: String? = null
+    val ingress_schema_version: String? = null,
+    val uplink_lineage_schema_version: String? = null,
+    val uplink_lineage_execution_id: String? = null,
+    val uplink_lineage_emission_id: String? = null,
+    val uplink_lineage_dedupe_key: String? = null,
+    val uplink_lineage_recovery_basis: String? = null
 )
 
 // ── PR-H: HandoffEnvelopeV2 native consumption result payload ─────────────────────────────
@@ -3020,7 +3032,12 @@ data class DeviceStateSnapshotPayload(
     //   Taken from AndroidContinuityRecoveryStateModel.SCHEMA_VERSION.
     val continuity_recovery_state: String? = null,
     val continuity_recovery_source: String? = null,
-    val continuity_recovery_schema_version: String? = null
+    val continuity_recovery_schema_version: String? = null,
+    val uplink_lineage_schema_version: String? = null,
+    val uplink_lineage_execution_id: String? = null,
+    val uplink_lineage_emission_id: String? = null,
+    val uplink_lineage_dedupe_key: String? = null,
+    val uplink_lineage_recovery_basis: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────
@@ -3444,7 +3461,12 @@ data class DeviceExecutionEventPayload(
     val ownership_uplink_class: String? = null,
     val session_continuity_class: String? = null,
     val device_posture_signal_class: String? = null,
-    val distributed_truth_ownership_uplink_schema_version: String? = null
+    val distributed_truth_ownership_uplink_schema_version: String? = null,
+    val uplink_lineage_schema_version: String? = null,
+    val uplink_lineage_execution_id: String? = null,
+    val uplink_lineage_emission_id: String? = null,
+    val uplink_lineage_dedupe_key: String? = null,
+    val uplink_lineage_recovery_basis: String? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

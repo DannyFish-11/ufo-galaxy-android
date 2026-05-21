@@ -16,6 +16,7 @@ import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
+import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.SourceRuntimePosture
@@ -1050,17 +1051,39 @@ class GalaxyWebSocketClient(
         null
     }
 
+    private fun tryExtractIntFieldNested(json: String, outerField: String, innerField: String): Int? = try {
+        gson.fromJson(json, JsonObject::class.java)
+            ?.getAsJsonObject(outerField)?.get(innerField)?.asInt
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun extractReplayDedupeKey(json: String): String? = try {
+        val root = gson.fromJson(json, JsonObject::class.java)
+        root?.get("idempotency_key")?.asString
+            ?: root?.getAsJsonObject("payload")
+                ?.get(AndroidUplinkLineageMetadataContract.KEY_DEDUPE_KEY)
+                ?.asString
+    } catch (_: Exception) {
+        null
+    }
+
     private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
+        val lineageSessionEpoch = tryExtractIntFieldNested(
+            json,
+            "payload",
+            "session_continuity_epoch"
+        )
         offlineQueue.enqueue(
             type = msgType,
             json = json,
             sessionTag = durableSessionId,
-            sessionEpoch = if (msgType == MsgType.RECONCILIATION_SIGNAL.value) {
-                sessionContinuityEpoch
-            } else {
-                null
+            sessionEpoch = when {
+                lineageSessionEpoch != null -> lineageSessionEpoch
+                msgType == MsgType.RECONCILIATION_SIGNAL.value -> sessionContinuityEpoch
+                else -> null
             },
-            dedupeKey = tryExtractField(json, "idempotency_key")
+            dedupeKey = extractReplayDedupeKey(json)
         )
         Log.i(
             TAG,
@@ -1968,6 +1991,15 @@ class GalaxyWebSocketClient(
             Log.i(
                 TAG,
                 "[WS:OfflineQueue] Discarded $staleEpochDiscarded stale reconciliation signal(s) " +
+                    "before flush (epoch=${sessionContinuityEpoch ?: "none"})"
+            )
+        }
+        val staleLineageEpochDiscarded =
+            offlineQueue.discardLineageBoundMessagesForDifferentEpoch(sessionContinuityEpoch)
+        if (staleLineageEpochDiscarded > 0) {
+            Log.i(
+                TAG,
+                "[WS:OfflineQueue] Discarded $staleLineageEpochDiscarded stale lineage-bound message(s) " +
                     "before flush (epoch=${sessionContinuityEpoch ?: "none"})"
             )
         }

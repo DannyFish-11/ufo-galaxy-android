@@ -42,6 +42,26 @@ class OfflineQueueTest {
     }
 
     @Test
+    fun `lineage dedupe key suppresses duplicate replay artifacts`() {
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","idempotency_key":"nonce-a"}""",
+            sessionTag = "durable-1",
+            sessionEpoch = 2,
+            dedupeKey = "lineage-dedupe-1"
+        )
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","idempotency_key":"nonce-b"}""",
+            sessionTag = "durable-1",
+            sessionEpoch = 2,
+            dedupeKey = "lineage-dedupe-1"
+        )
+
+        assertEquals("Same lineage dedupe key must collapse duplicate artifacts", 1, queue.size)
+    }
+
+    @Test
     fun `drainAll returns messages in FIFO order`() {
         queue.enqueue("task_result", """{"id":1}""")
         queue.enqueue("goal_result",  """{"id":2}""")
@@ -202,6 +222,31 @@ class OfflineQueueTest {
     @Test
     fun `drainAll on empty queue returns empty list`() {
         assertTrue(queue.drainAll().isEmpty())
+    }
+
+    @Test
+    fun `discardLineageBoundMessagesForDifferentEpoch removes stale lineage artifacts`() {
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"old"}}""",
+            sessionTag = "durable-1",
+            sessionEpoch = 1,
+            dedupeKey = "lineage-old"
+        )
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"current"}}""",
+            sessionTag = "durable-1",
+            sessionEpoch = 2,
+            dedupeKey = "lineage-current"
+        )
+
+        val discarded = queue.discardLineageBoundMessagesForDifferentEpoch(currentEpoch = 2)
+
+        assertEquals(1, discarded)
+        val remaining = queue.drainAll()
+        assertEquals(1, remaining.size)
+        assertEquals("lineage-current", remaining.single().dedupeKey)
     }
 
     // ── Preserve type in QueuedMessage ────────────────────────────────────────
