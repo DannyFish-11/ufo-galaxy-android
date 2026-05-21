@@ -2533,6 +2533,28 @@ object StabilizationBaseline {
                 "V2 alignment map 对齐 v2 canonical truth convergence / governance / closure chain。" +
                 "Test: Pr13AndroidBoundedSubjectPlatformBoundaryContractTest.",
             introducedPr = 103
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-v2-contract-version-gate",
+            displayName = "AndroidV2ContractVersionGate",
+            packagePath = "com.ufo.galaxy.runtime.AndroidV2ContractVersionGate",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-14Android — 最小必要 Android ↔ V2 契约 schema / version gate。" +
+                "集中固化四类最关键 Android ↔ V2 cross-repo 契约边界的版本标识与一致性断言：" +
+                "1) AIP_MSG_TYPE_SCHEMA — MsgType 枚举数量锚点（EXPECTED_MSG_TYPE_COUNT=54）、" +
+                "AIP 协议版本（AIP/1.0）与 AIP spec 版本（3.0）；" +
+                "2) RUNTIME_TRUTH_UPLINK — AndroidDistributedTruthOwnershipUplinkContract SCHEMA_VERSION；" +
+                "3) COMPLETION_CLOSURE_UPLINK — AndroidCompletionClosureUplinkContract SCHEMA_VERSION；" +
+                "4) PARTICIPANT_TRUTH_SNAPSHOT — AndroidResultUplinkBoundaryContract + " +
+                "AndroidParticipationSemanticNormalizationContract SCHEMA_VERSION。" +
+                "GATE_SCHEMA_VERSION（\"1\"）随任何关键契约版本变更递增，确保 V2_EXPECTED_VERSIONS 同步更新。" +
+                "validate() 返回 GateValidationResult，CI 断言 == PASSED 即可形成机器可验证门禁。" +
+                "GATE_INVARIANTS（8 条）防止 Android 侧 AIP uplink / truth / completion 在无声漂移后仍能合并。" +
+                "明确 Android 仍是 bounded participant runtime，不越权成为 canonical truth authority。" +
+                "Test: Pr14AndroidV2ContractVersionGateTest.",
+            introducedPr = 104
         )
     )
 
