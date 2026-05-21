@@ -3732,8 +3732,12 @@ class GalaxyConnectionService : Service() {
         try {
             val runtimeTruth = signal.runtimeTruth?.toMap()
             val sessionId = UFOGalaxyApplication.runtimeSessionId
+            val stableDedupeKey = signal.stableDedupeKey
             val ingress = AndroidGovernanceExecutionPolicyIngressContract
                 .classifyReconciliation(signal.kind)
+            val reliablePayload = signal.payload.toMutableMap().apply {
+                put(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY, stableDedupeKey)
+            }
             val payload = ReconciliationSignalPayload(
                 signal_id = signal.signalId,
                 kind = signal.kind.wireValue,
@@ -3747,7 +3751,7 @@ class GalaxyConnectionService : Service() {
                 session_id = sessionId,
                 durable_session_id = signal.durableSessionId,
                 session_continuity_epoch = signal.sessionContinuityEpoch,
-                payload = signal.payload,
+                payload = reliablePayload,
                 runtime_truth = runtimeTruth,
                 ingress_boundary_class = ingress.boundaryClass.wireValue,
                 ingress_consumption_kind = ingress.consumptionKind.wireValue,
@@ -3759,21 +3763,27 @@ class GalaxyConnectionService : Service() {
                 payload = payload,
                 device_id = localDeviceId,
                 correlation_id = signal.taskId,
-                idempotency_key = signal.signalId,
+                idempotency_key = stableDedupeKey,
                 runtime_session_id = sessionId
             )
             val sent = webSocketClient.sendJson(gson.toJson(envelope))
             if (sent) {
-                Log.d(TAG, "[RECONCILIATION_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
+                Log.d(
+                    TAG,
+                    "[RECONCILIATION_SIGNAL] sent signal_id=${signal.signalId} dedupe_key=$stableDedupeKey " +
+                        "kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                )
             } else {
                 Log.w(
                     TAG,
-                    "[RECONCILIATION_SIGNAL] send failed signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                    "[RECONCILIATION_SIGNAL] send failed signal_id=${signal.signalId} dedupe_key=$stableDedupeKey " +
+                        "kind=${signal.kind.wireValue} task_id=${signal.taskId}"
                 )
                 GalaxyLogger.log(
                     TAG, mapOf(
                         "event" to "reconciliation_signal_send_failed",
                         "signal_id" to signal.signalId,
+                        "dedupe_key" to stableDedupeKey,
                         "signal_kind" to signal.kind.wireValue,
                         "task_id" to (signal.taskId ?: ""),
                         "participant_id" to signal.participantId,
@@ -3787,6 +3797,7 @@ class GalaxyConnectionService : Service() {
                 TAG, mapOf(
                     "event" to "reconciliation_signal_send_error",
                     "signal_id" to signal.signalId,
+                    "dedupe_key" to signal.stableDedupeKey,
                     "signal_kind" to signal.kind.wireValue,
                     "task_id" to (signal.taskId ?: ""),
                     "error" to (e.message ?: "unknown")

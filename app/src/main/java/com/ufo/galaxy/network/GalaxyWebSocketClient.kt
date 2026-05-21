@@ -969,10 +969,11 @@ class GalaxyWebSocketClient(
      * Used for AIP v3 protocol messages ([com.ufo.galaxy.protocol.AipMessage]) that
      * use the strong-typed model classes rather than the legacy [AIPMessage] envelope.
      *
-     * **Offline queuing**: if the socket is currently disconnected and the message
+     * **Offline queuing**: if the socket is currently disconnected, or an immediate
+     * transport send attempt returns `false`, and the message
      * `type` field belongs to [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
      * "goal_result" / "goal_execution_result" / "delegated_execution_signal" /
-     * "device_execution_event"), the payload is enqueued in
+     * "device_execution_event" / "reconciliation_signal"), the payload is enqueued in
      * [offlineQueue] for delivery on the
      * next successful reconnect.  The method returns `false` in this case (the message
      * was not sent *now*) but will not be lost.
@@ -981,11 +982,11 @@ class GalaxyWebSocketClient(
      *         (queued or dropped depending on type).
      */
     override fun sendJson(json: String): Boolean {
+        val msgType = tryExtractType(json)
         // Hard constraint: cross-device switch OFF must block ALL outbound WS sends,
         // even if a stale connection is somehow still open.
         if (!crossDeviceEnabled) {
             val traceId = java.util.UUID.randomUUID().toString()
-            val msgType = tryExtractType(json)
             Log.w(TAG, "[WS:BLOCKED] sendJson rejected: cross_device=off trace_id=$traceId type=$msgType reason=cross_device_disabled")
             GalaxyLogger.log(TAG, mapOf(
                 "event" to "send_blocked",
@@ -996,21 +997,18 @@ class GalaxyWebSocketClient(
             return false
         }
         if (!isConnected) {
-            // Attempt to queue queueable message types for later delivery.
-            // Tag each queued message with the current durableSessionId so that
-            // flushOfflineQueue's authority filter (discardForDifferentSession) can
-            // block stale-session messages if the session changes before reconnect.
-            val msgType = tryExtractType(json)
             if (msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
-                offlineQueue.enqueue(msgType, json, sessionTag = durableSessionId)
-                Log.i(TAG, "[WS:OfflineQueue] Queued offline message type=$msgType queue_size=${offlineQueue.size}")
+                enqueueForReliableReplay(
+                    msgType = msgType,
+                    json = json,
+                    reason = "disconnected"
+                )
             } else {
                 Log.w(TAG, "Not connected and message type not queueable (type=$msgType); dropping")
             }
             return false
         }
         // Log key fields for full-chain traceability
-        val msgType = tryExtractType(json)
         if (msgType in listOf("task_submit", "task_result", "goal_result", "cancel_result")) {
             val correlationId = tryExtractField(json, "correlation_id")
             val taskId = tryExtractField(json, "task_id") ?: tryExtractFieldNested(json, "payload", "task_id")
@@ -1019,7 +1017,15 @@ class GalaxyWebSocketClient(
         } else {
             Log.d(TAG, "发送 JSON: ${json.take(100)}...")
         }
-        return webSocket?.send(json) ?: false
+        val sent = webSocket?.send(json) ?: false
+        if (!sent && msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
+            enqueueForReliableReplay(
+                msgType = msgType,
+                json = json,
+                reason = "transport_send_failed"
+            )
+        }
+        return sent
     }
 
     /** Extracts the `type` field from a JSON string without full deserialization. Returns null on error. */
@@ -1042,6 +1048,26 @@ class GalaxyWebSocketClient(
             ?.getAsJsonObject(outerField)?.get(innerField)?.asString
     } catch (_: Exception) {
         null
+    }
+
+    private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
+        offlineQueue.enqueue(
+            type = msgType,
+            json = json,
+            sessionTag = durableSessionId,
+            sessionEpoch = if (msgType == MsgType.RECONCILIATION_SIGNAL.value) {
+                sessionContinuityEpoch
+            } else {
+                null
+            },
+            dedupeKey = tryExtractField(json, "idempotency_key")
+        )
+        Log.i(
+            TAG,
+            "[WS:OfflineQueue] Queued reliable replay message type=$msgType reason=$reason " +
+                "queue_size=${offlineQueue.size} session_tag=${durableSessionId ?: "none"} " +
+                "session_epoch=${sessionContinuityEpoch ?: "none"}"
+        )
     }
 
     /**
@@ -1915,8 +1941,12 @@ class GalaxyWebSocketClient(
      * other runtime send constraints are uniformly enforced during replay — the flush
      * path does not bypass the gate.
      *
-     * Messages that fail to send are logged (with count) but not re-enqueued;
-     * the flush is best-effort since re-enqueue on flush failure could cause infinite retry loops.
+     * Reconciliation signals are additionally bounded by [sessionContinuityEpoch] so a signal
+     * from an older reconnect epoch is discarded instead of being replayed into the current
+     * continuity era.
+     *
+     * Messages that fail to send are re-enqueued through [sendJson] using the same offline queue,
+     * so reconnect/flush remains retryable without bypassing the canonical transport path.
      */
     private fun flushOfflineQueue() {
         // Purge messages enqueued under a different durable session before replaying.
@@ -1932,6 +1962,15 @@ class GalaxyWebSocketClient(
                 Log.i(TAG, "[WS:OfflineQueue] Discarded $discarded tagged message(s) before flush because session authority is unavailable")
             }
         }
+        val staleEpochDiscarded =
+            offlineQueue.discardReconciliationSignalsForDifferentEpoch(sessionContinuityEpoch)
+        if (staleEpochDiscarded > 0) {
+            Log.i(
+                TAG,
+                "[WS:OfflineQueue] Discarded $staleEpochDiscarded stale reconciliation signal(s) " +
+                    "before flush (epoch=${sessionContinuityEpoch ?: "none"})"
+            )
+        }
 
         val messages = offlineQueue.drainAll()
         if (messages.isEmpty()) return
@@ -1945,14 +1984,18 @@ class GalaxyWebSocketClient(
             val ok = sendJson(msg.json)
             if (!ok) {
                 lost++
-                Log.w(TAG, "[WS:OfflineQueue] Flush failed for type=${msg.type}; message lost (total lost: $lost)")
+                Log.w(
+                    TAG,
+                    "[WS:OfflineQueue] Flush failed for type=${msg.type}; message re-queued if queueable " +
+                        "(total failures: $lost)"
+                )
             } else {
                 sent++
                 Log.d(TAG, "[WS:OfflineQueue] Flushed type=${msg.type}")
             }
         }
         if (lost > 0) {
-            Log.w(TAG, "[WS:OfflineQueue] Flush complete: sent=$sent lost=$lost")
+            Log.w(TAG, "[WS:OfflineQueue] Flush complete: sent=$sent failed=$lost")
         } else {
             Log.i(TAG, "[WS:OfflineQueue] Flush complete: all $sent message(s) sent")
         }
