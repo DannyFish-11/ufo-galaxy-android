@@ -2579,6 +2579,38 @@ object StabilizationBaseline {
                 "防止后续 PR Android 侧 authority drift。" +
                 "Test: Pr25AndroidFormalBoundarySummaryOutputContractTest.",
             introducedPr = 115
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-continuity-recovery-state-model",
+            displayName = "AndroidContinuityRecoveryStateModel",
+            packagePath = "com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-116 — Android 侧统一 continuity recovery state model。" +
+                "把此前分散在 process rebuild、runtime restart、reconnect、reconciliation signal、" +
+                "offline queue 中的恢复语义收敛成统一、可上报、可持久、可测试的 recovery state 模型。" +
+                "引入 RecoveryPhase（7 值枚举：RESUMED_CLEANLY/RECOVERING/RECOVERED_INFLIGHT/" +
+                "LOST_INFLIGHT/REQUIRES_RECONCILIATION/STALE_RECOVERY_ARTIFACT/RECOVERY_FAILED），" +
+                "每个阶段具有稳定 wireValue，与 ReconnectRecoveryState + InflightContinuityDisposition 对齐。" +
+                "InflightContinuityDisposition 新增 STALE_RECOVERY_ARTIFACT 值，防止旧 session artifact " +
+                "在新 session 中伪装当前 continuity。" +
+                "derive() 方法按 7 级优先级从两个权威来源（ReconnectRecoveryState/InflightContinuityDisposition）" +
+                "唯一推导 RecoveryPhase，无需消费方字段组合推断。" +
+                "KEY_CONTINUITY_RECOVERY_STATE/SOURCE/SCHEMA_VERSION 三个 wire key 统一接入：" +
+                "GoalResultPayload（结果上行）、DeviceStateSnapshotPayload（状态快照上行）、" +
+                "ReconciliationSignal RUNTIME_TRUTH_SNAPSHOT payload（reconciliation 上行）。" +
+                "GalaxyConnectionService.sendGoalResult 与 sendDeviceStateSnapshot 在唯一发送层强制填充。" +
+                "ReconciliationSignal.runtimeTruthSnapshot 工厂在 payload 中显式携带恢复状态键，" +
+                "V2 无需读取嵌套 runtimeTruth 字段即可消费 recovery evidence。" +
+                "RECOVERY_STATE_INVARIANTS（8 条）防止：仅在 UI 层表达恢复状态、" +
+                "STALE_RECOVERY_ARTIFACT 被误用为当前 continuity 证据、" +
+                "Android 把本地恢复状态误包装为 canonical final truth、" +
+                "引入新的平行离线传输栈。" +
+                "V2_CONSUMPTION_PATH_MAP 声明七个 RecoveryPhase 对应的 V2 消费路径。" +
+                "toWireMap() 提供 uplink 嵌入用的最小 wire map。" +
+                "Test: Pr116AndroidContinuityRecoveryStateModelTest.",
+            introducedPr = 116
         )
     )
 

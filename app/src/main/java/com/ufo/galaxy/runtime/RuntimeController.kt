@@ -1507,6 +1507,27 @@ class RuntimeController(
             return
         }
 
+        // PR-116: stale artifact guard — if the artifact's durable session ID is set and
+        // doesn't match the current session, this artifact belongs to a prior session era.
+        // MUST NOT treat it as evidence of current continuity (INV-REC-07).
+        // Uses the live session ID when available; falls back to lastDurableSessionId from
+        // settings so the guard also fires immediately after process recreate (before a new
+        // session is opened and _durableSessionContinuityRecord is populated).
+        val currentSessionId = currentDurableSessionId()
+            ?: settings.lastDurableSessionId.takeIf { it.isNotBlank() }
+        val artifactSessionId = artifact.durableSessionId
+        val isStaleSession = artifactSessionId != null &&
+            currentSessionId != null &&
+            artifactSessionId != currentSessionId
+        if (isStaleSession) {
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.STALE_RECOVERY_ARTIFACT,
+                source = source,
+                artifact = artifact
+            )
+            return
+        }
+
         val liveTaskRecovered = _activeTaskId != null &&
             _activeTaskId == artifact.taskId &&
             _activeTaskStatus != null

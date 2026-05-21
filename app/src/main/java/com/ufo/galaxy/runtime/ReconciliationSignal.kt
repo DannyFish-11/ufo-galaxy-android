@@ -331,6 +331,31 @@ data class ReconciliationSignal(
         /** Payload key for [stableDedupeKey]. */
         const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
 
+        // ── PR-116: Continuity recovery state payload key constants ──────────────────────
+
+        /**
+         * Payload key for the unified Android-side continuity recovery phase.
+         *
+         * Value: one of [AndroidContinuityRecoveryStateModel.RecoveryPhase.wireValue] strings.
+         * Populated in [runtimeTruthSnapshot] from the runtimeTruth's inflight continuity state.
+         */
+        const val KEY_CONTINUITY_RECOVERY_STATE =
+            AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE
+
+        /**
+         * Payload key for the source label of the recovery phase observation.
+         *
+         * Echoes [InflightContinuityRecoverySnapshot.source] for RUNTIME_TRUTH_SNAPSHOT signals.
+         */
+        const val KEY_CONTINUITY_RECOVERY_SOURCE =
+            AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_SOURCE
+
+        /**
+         * Payload key for [AndroidContinuityRecoveryStateModel.SCHEMA_VERSION].
+         */
+        const val KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION =
+            AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION
+
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
         /**
@@ -766,6 +791,10 @@ data class ReconciliationSignal(
         /**
          * Creates a [Kind.RUNTIME_TRUTH_SNAPSHOT] signal carrying a full participant truth snapshot.
          *
+         * The payload explicitly includes the unified continuity recovery state derived from
+         * [AndroidParticipantRuntimeTruth.inflightContinuityState] so V2 can consume
+         * recovery evidence directly from the payload without reading nested truth fields.
+         *
          * @param truth         The [AndroidParticipantRuntimeTruth] snapshot to publish.
          * @param signalId      Unique signal identifier for deduplication.
          * @param durableSessionId Stable activation-era session identifier, when available.
@@ -777,24 +806,39 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             durableSessionId: String? = null,
             sessionContinuityEpoch: Int? = null
-        ): ReconciliationSignal = ReconciliationSignal(
-            kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
-            participantId = truth.participantId,
-            taskId = truth.activeTaskId,
-            correlationId = null,
-            status = STATUS_SNAPSHOT,
-            payload = closureSemanticsPayload(
+        ): ReconciliationSignal {
+            // Promote inflight continuity state into explicit payload keys so V2 can consume
+            // recovery evidence directly from the reconciliation signal payload without having
+            // to read nested runtimeTruth fields (INV-REC-04).
+            val recoveryPayload = closureSemanticsPayload(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false
-            ),
-            runtimeTruth = truth,
-            signalId = signalId,
-            emittedAtMs = System.currentTimeMillis(),
-            reconciliationEpoch = truth.reconciliationEpoch,
-            durableSessionId = durableSessionId,
-            sessionContinuityEpoch = sessionContinuityEpoch
-        )
+            ).toMutableMap<String, Any?>().apply {
+                truth.inflightContinuityState?.let {
+                    put(KEY_CONTINUITY_RECOVERY_STATE, it)
+                }
+                truth.inflightContinuitySource?.let {
+                    put(KEY_CONTINUITY_RECOVERY_SOURCE, it)
+                }
+                put(KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION,
+                    AndroidContinuityRecoveryStateModel.SCHEMA_VERSION)
+            }
+            return ReconciliationSignal(
+                kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
+                participantId = truth.participantId,
+                taskId = truth.activeTaskId,
+                correlationId = null,
+                status = STATUS_SNAPSHOT,
+                payload = recoveryPayload,
+                runtimeTruth = truth,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = truth.reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
+            )
+        }
     }
 }
