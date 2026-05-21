@@ -331,6 +331,9 @@ data class ReconciliationSignal(
         /** Payload key for [stableDedupeKey]. */
         const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
 
+        private val SHA_256_DIGEST: ThreadLocal<MessageDigest> =
+            ThreadLocal.withInitial { MessageDigest.getInstance("SHA-256") }
+
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
         /**
@@ -469,7 +472,8 @@ data class ReconciliationSignal(
                 canonicalizeForDedupe(payload),
                 canonicalizeForDedupe(runtimeTruth)
             ).joinToString(":")
-            val digest = MessageDigest.getInstance("SHA-256")
+            val digest = SHA_256_DIGEST.get()
+            digest.reset()
             val hash = digest.digest(canonical.toByteArray())
                 .joinToString(separator = "") { byte -> "%02x".format(byte) }
             return "reconciliation_signal:$hash"

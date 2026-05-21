@@ -165,6 +165,8 @@ class OfflineTaskQueue(
     ) {
         val newSize = synchronized(lock) {
             val duplicate = queue.any {
+                // Dedupe keys are intentionally scoped by session tag + epoch so a reconciliation
+                // signal from an older authority window is never collapsed into the current one.
                 if (dedupeKey != null && it.dedupeKey != null) {
                     it.type == type &&
                         it.sessionTag == sessionTag &&
