@@ -1254,7 +1254,33 @@ data class GoalResultPayload(
     val ownership_uplink_class: String? = null,
     val session_continuity_class: String? = null,
     val device_posture_signal_class: String? = null,
-    val distributed_truth_ownership_uplink_schema_version: String? = null
+    val distributed_truth_ownership_uplink_schema_version: String? = null,
+
+    // ── PR-116: Android unified continuity recovery state fields ─────────────────────────
+    //
+    // continuity_recovery_state: unified Android-side recovery phase wire value.
+    //   Values from AndroidContinuityRecoveryStateModel.RecoveryPhase.wireValue:
+    //     "resumed-cleanly"          — no interrupted state; clean start
+    //     "recovering"               — WS reconnect in progress
+    //     "recovered-inflight"       — prior in-flight task recovered locally (advisory)
+    //     "lost-inflight"            — prior in-flight task was dropped; V2 must reconcile
+    //     "requires-reconciliation"  — durable artifact found; V2 must resolve truth
+    //     "stale-recovery-artifact"  — artifact belongs to old session; MUST NOT be used
+    //     "recovery-failed"          — all reconnect attempts exhausted
+    //   V2 MUST treat this as advisory Android-local evidence, not canonical final truth.
+    //   Null only as a defensive default; GalaxyConnectionService.sendGoalResult fills this.
+    //
+    // continuity_recovery_source: label of the Android code path that produced the phase.
+    //   Echoes InflightContinuityRecoverySnapshot.source (e.g. "process_recreated",
+    //   "runtime_stop", "reconnect_recovery"). Allows V2 observability to attribute the
+    //   recovery observation to a specific recovery trigger.
+    //   Null only as a defensive default; GalaxyConnectionService.sendGoalResult fills this.
+    //
+    // continuity_recovery_schema_version: schema version of the recovery state contract.
+    //   Taken from AndroidContinuityRecoveryStateModel.SCHEMA_VERSION.
+    val continuity_recovery_state: String? = null,
+    val continuity_recovery_source: String? = null,
+    val continuity_recovery_schema_version: String? = null
 )
 
 /**
@@ -2970,7 +2996,31 @@ data class DeviceStateSnapshotPayload(
     val ownership_uplink_class: String? = null,
     val session_continuity_class: String? = null,
     val device_posture_signal_class: String? = null,
-    val distributed_truth_ownership_uplink_schema_version: String? = null
+    val distributed_truth_ownership_uplink_schema_version: String? = null,
+
+    // ── PR-116: Android unified continuity recovery state fields ─────────────────────────
+    //
+    // continuity_recovery_state: unified Android-side recovery phase wire value.
+    //   Values from AndroidContinuityRecoveryStateModel.RecoveryPhase.wireValue:
+    //     "resumed-cleanly"          — no interrupted state; clean start
+    //     "recovering"               — WS reconnect in progress
+    //     "recovered-inflight"       — prior in-flight task recovered locally (advisory)
+    //     "lost-inflight"            — prior in-flight task was dropped; V2 must reconcile
+    //     "requires-reconciliation"  — durable artifact found; V2 must resolve truth
+    //     "stale-recovery-artifact"  — artifact belongs to old session; MUST NOT be used
+    //     "recovery-failed"          — all reconnect attempts exhausted
+    //   V2 MUST treat this as advisory Android-local evidence, not canonical final truth.
+    //   Populated at sendDeviceStateSnapshot(); null only as defensive default.
+    //
+    // continuity_recovery_source: label of the Android code path that produced the phase.
+    //   Echoes InflightContinuityRecoverySnapshot.source or a reconnect-path label.
+    //   Populated at sendDeviceStateSnapshot(); null only as defensive default.
+    //
+    // continuity_recovery_schema_version: schema version of the recovery state contract.
+    //   Taken from AndroidContinuityRecoveryStateModel.SCHEMA_VERSION.
+    val continuity_recovery_state: String? = null,
+    val continuity_recovery_source: String? = null,
+    val continuity_recovery_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────

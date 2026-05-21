@@ -20,7 +20,19 @@ enum class InflightContinuityDisposition(val wireValue: String) {
     REQUIRES_RECONCILIATION("requires-reconciliation"),
 
     /** No interrupted in-flight state is pending; local execution truth is already clean. */
-    RESUMED_CLEANLY("resumed-cleanly");
+    RESUMED_CLEANLY("resumed-cleanly"),
+
+    /**
+     * A recovery artifact was found but belongs to an old session epoch and must not be
+     * treated as evidence of current continuity.
+     *
+     * This guards against a prior process or runtime restart leaving a durable artifact
+     * whose [InflightContinuityRecoveryArtifact.durableSessionId] or
+     * [InflightContinuityRecoveryArtifact.sessionContinuityEpoch] does not match the
+     * current session.  V2 MUST treat this as evidence that the old artifact cannot
+     * participate in canonical continuity adjudication for the current session.
+     */
+    STALE_RECOVERY_ARTIFACT("stale-recovery-artifact");
 
     companion object {
         fun fromValue(value: String?): InflightContinuityDisposition? =

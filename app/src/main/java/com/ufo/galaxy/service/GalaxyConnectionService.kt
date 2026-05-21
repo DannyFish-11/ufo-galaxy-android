@@ -53,6 +53,7 @@ import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract
+import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
@@ -3260,7 +3261,25 @@ class GalaxyConnectionService : Service() {
             device_posture_signal_class =
                 resultTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
             distributed_truth_ownership_uplink_schema_version =
-                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION,
+            // ── PR-116: unified continuity recovery state (always populated at emission layer) ──
+            // Derives the unified recovery phase from authoritative runtime sources so V2 can
+            // consume Android-side recovery state without combining fields across carriers.
+            continuity_recovery_state = result.continuity_recovery_state
+                ?: run {
+                    val inflightSnap = UFOGalaxyApplication.runtimeController
+                        .inflightContinuityRecovery.value
+                    AndroidContinuityRecoveryStateModel.derive(
+                        reconnectRecoveryState = UFOGalaxyApplication.runtimeController
+                            .reconnectRecoveryState.value,
+                        inflightDisposition = inflightSnap.disposition
+                    ).wireValue
+                },
+            continuity_recovery_source = result.continuity_recovery_source
+                ?: UFOGalaxyApplication.runtimeController
+                    .inflightContinuityRecovery.value.source,
+            continuity_recovery_schema_version = result.continuity_recovery_schema_version
+                ?: AndroidContinuityRecoveryStateModel.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
@@ -4776,7 +4795,23 @@ class GalaxyConnectionService : Service() {
                 device_posture_signal_class =
                     snapshotTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
                 distributed_truth_ownership_uplink_schema_version =
-                    AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
+                    AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION,
+                // ── PR-116: unified continuity recovery state ──────────────────────────────
+                // Derives the unified recovery phase from authoritative runtime sources so V2
+                // can consume Android recovery state without combining fields across carriers.
+                continuity_recovery_state = run {
+                    val inflightSnap = UFOGalaxyApplication.runtimeController
+                        .inflightContinuityRecovery.value
+                    AndroidContinuityRecoveryStateModel.derive(
+                        reconnectRecoveryState = UFOGalaxyApplication.runtimeController
+                            .reconnectRecoveryState.value,
+                        inflightDisposition = inflightSnap.disposition
+                    ).wireValue
+                },
+                continuity_recovery_source = UFOGalaxyApplication.runtimeController
+                    .inflightContinuityRecovery.value.source,
+                continuity_recovery_schema_version =
+                    AndroidContinuityRecoveryStateModel.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
