@@ -131,6 +131,12 @@ class Pr10AndroidMissionCompletionSemanticsHardeningTest {
             closure_finalization_signal_class = "session_finalization_ready",
             operator_done_projection_class = "operator_visible_done_summary",
             completion_closure_uplink_schema_version = "1",
+            local_execution_completed = true,
+            advisory_evidence_sent = true,
+            v2_uplink_acknowledged = false,
+            v2_reconciliation_acknowledged = false,
+            v2_canonical_truth_completed = false,
+            v2_mature_closure_achieved = false,
             local_observation_basis = "cached_state"
         )
 
@@ -146,6 +152,12 @@ class Pr10AndroidMissionCompletionSemanticsHardeningTest {
         assertEquals("session_finalization_ready", json["closure_finalization_signal_class"].asString)
         assertEquals("operator_visible_done_summary", json["operator_done_projection_class"].asString)
         assertEquals("1", json["completion_closure_uplink_schema_version"].asString)
+        assertTrue(json["local_execution_completed"].asBoolean)
+        assertTrue(json["advisory_evidence_sent"].asBoolean)
+        assertFalse(json["v2_uplink_acknowledged"].asBoolean)
+        assertFalse(json["v2_reconciliation_acknowledged"].asBoolean)
+        assertFalse(json["v2_canonical_truth_completed"].asBoolean)
+        assertFalse(json["v2_mature_closure_achieved"].asBoolean)
         assertEquals("cached_state", json["local_observation_basis"].asString)
     }
 

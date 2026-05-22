@@ -21,6 +21,12 @@ object AndroidCompletionClosureUplinkContract {
     const val KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS = "closure_finalization_signal_class"
     const val KEY_OPERATOR_DONE_PROJECTION_CLASS = "operator_done_projection_class"
     const val KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION = "completion_closure_uplink_schema_version"
+    const val KEY_LOCAL_EXECUTION_COMPLETED = "local_execution_completed"
+    const val KEY_ADVISORY_EVIDENCE_SENT = "advisory_evidence_sent"
+    const val KEY_V2_UPLINK_ACKNOWLEDGED = "v2_uplink_acknowledged"
+    const val KEY_V2_RECONCILIATION_ACKNOWLEDGED = "v2_reconciliation_acknowledged"
+    const val KEY_V2_CANONICAL_TRUTH_COMPLETED = "v2_canonical_truth_completed"
+    const val KEY_V2_MATURE_CLOSURE_ACHIEVED = "v2_mature_closure_achieved"
 
     enum class AuthorityRuntimeCompletionSignalClass(val wireValue: String) {
         AUTHORITY_RUNTIME_COMPLETION("authority_runtime_completion"),
@@ -63,6 +69,36 @@ object AndroidCompletionClosureUplinkContract {
             KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION to SCHEMA_VERSION
         )
     }
+
+    data class V2CanonicalBoundarySnapshot(
+        val localExecutionCompleted: Boolean,
+        val advisoryEvidenceSent: Boolean,
+        val v2UplinkAcknowledged: Boolean,
+        val v2ReconciliationAcknowledged: Boolean,
+        val v2CanonicalTruthCompleted: Boolean,
+        val v2MatureClosureAchieved: Boolean
+    ) {
+        fun toWireMap(): Map<String, Boolean> = mapOf(
+            KEY_LOCAL_EXECUTION_COMPLETED to localExecutionCompleted,
+            KEY_ADVISORY_EVIDENCE_SENT to advisoryEvidenceSent,
+            KEY_V2_UPLINK_ACKNOWLEDGED to v2UplinkAcknowledged,
+            KEY_V2_RECONCILIATION_ACKNOWLEDGED to v2ReconciliationAcknowledged,
+            KEY_V2_CANONICAL_TRUTH_COMPLETED to v2CanonicalTruthCompleted,
+            KEY_V2_MATURE_CLOSURE_ACHIEVED to v2MatureClosureAchieved
+        )
+    }
+
+    fun deriveV2CanonicalBoundary(
+        localExecutionCompleted: Boolean,
+        advisoryEvidenceSent: Boolean = true
+    ): V2CanonicalBoundarySnapshot = V2CanonicalBoundarySnapshot(
+        localExecutionCompleted = localExecutionCompleted,
+        advisoryEvidenceSent = advisoryEvidenceSent,
+        v2UplinkAcknowledged = false,
+        v2ReconciliationAcknowledged = false,
+        v2CanonicalTruthCompleted = false,
+        v2MatureClosureAchieved = false
+    )
 
     fun deriveForGoalResult(
         isLifecycleTerminalPhase: Boolean,

@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -133,6 +134,57 @@ class Pr12AndroidCompletionClosureUplinkContractTest {
                 AndroidCompletionClosureUplinkContract.KEY_OPERATOR_DONE_PROJECTION_CLASS
             )
         )
+        val boundaryWire = AndroidCompletionClosureUplinkContract
+            .deriveV2CanonicalBoundary(localExecutionCompleted = false)
+            .toWireMap()
+        assertTrue(
+            boundaryWire.containsKey(
+                AndroidCompletionClosureUplinkContract.KEY_V2_CANONICAL_TRUTH_COMPLETED
+            )
+        )
+        assertTrue(
+            boundaryWire.containsKey(
+                AndroidCompletionClosureUplinkContract.KEY_V2_MATURE_CLOSURE_ACHIEVED
+            )
+        )
+    }
+
+    @Test
+    fun `local execution completion remains non canonical until V2 confirms`() {
+        val boundary = AndroidCompletionClosureUplinkContract.deriveV2CanonicalBoundary(
+            localExecutionCompleted = true,
+            advisoryEvidenceSent = true
+        )
+        assertTrue(boundary.localExecutionCompleted)
+        assertTrue(boundary.advisoryEvidenceSent)
+        assertFalse(boundary.v2UplinkAcknowledged)
+        assertFalse(boundary.v2ReconciliationAcknowledged)
+        assertFalse(boundary.v2CanonicalTruthCompleted)
+        assertFalse(boundary.v2MatureClosureAchieved)
+    }
+
+    @Test
+    fun `reconciliation task result payload keeps V2 canonical fields false`() {
+        val signal = ReconciliationSignal.taskResult("pid-pr12", "task-pr12")
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_LOCAL_EXECUTION_COMPLETED])
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_ADVISORY_EVIDENCE_SENT])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_UPLINK_ACKNOWLEDGED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_RECONCILIATION_ACKNOWLEDGED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED])
+    }
+
+    @Test
+    fun `non terminal reporting payload is explicitly non canonical`() {
+        val signal = ReconciliationSignal.taskStatusUpdate(
+            participantId = "pid-pr12",
+            taskId = "task-pr12",
+            progressDetail = "replay_flush_observed"
+        )
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_LOCAL_EXECUTION_COMPLETED])
+        assertEquals(true, signal.payload[ReconciliationSignal.KEY_ADVISORY_EVIDENCE_SENT])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED])
+        assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED])
     }
 
     @Test

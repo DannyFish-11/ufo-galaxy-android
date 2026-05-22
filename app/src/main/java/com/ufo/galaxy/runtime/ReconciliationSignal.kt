@@ -312,6 +312,30 @@ data class ReconciliationSignal(
         const val KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION =
             AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION
 
+        /** Payload key: Android-local execution completion state. */
+        const val KEY_LOCAL_EXECUTION_COMPLETED =
+            AndroidCompletionClosureUplinkContract.KEY_LOCAL_EXECUTION_COMPLETED
+
+        /** Payload key: Android emitted advisory evidence uplink. */
+        const val KEY_ADVISORY_EVIDENCE_SENT =
+            AndroidCompletionClosureUplinkContract.KEY_ADVISORY_EVIDENCE_SENT
+
+        /** Payload key: V2 uplink acknowledgement state. */
+        const val KEY_V2_UPLINK_ACKNOWLEDGED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_UPLINK_ACKNOWLEDGED
+
+        /** Payload key: V2 reconciliation acknowledgement state. */
+        const val KEY_V2_RECONCILIATION_ACKNOWLEDGED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_RECONCILIATION_ACKNOWLEDGED
+
+        /** Payload key: V2 canonical truth completion state. */
+        const val KEY_V2_CANONICAL_TRUTH_COMPLETED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_CANONICAL_TRUTH_COMPLETED
+
+        /** Payload key: V2 mature closure state. */
+        const val KEY_V2_MATURE_CLOSURE_ACHIEVED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_MATURE_CLOSURE_ACHIEVED
+
         /** Wire key for [signalId]. */
         const val KEY_SIGNAL_ID = "reconciliation_signal_id"
 
@@ -452,6 +476,11 @@ data class ReconciliationSignal(
                     completionSignaled = completionSignaled,
                     closureReadyForAcceptance = closureReadyForAcceptance
                 )
+            val v2Boundary = AndroidCompletionClosureUplinkContract
+                .deriveV2CanonicalBoundary(
+                    localExecutionCompleted = isTerminalSignal && resultReturned && completionSignaled,
+                    advisoryEvidenceSent = true
+                )
             return mapOf(
                 KEY_RESULT_RETURNED to resultReturned,
                 KEY_COMPLETION_SIGNALED to completionSignaled,
@@ -465,7 +494,13 @@ data class ReconciliationSignal(
                 KEY_OPERATOR_DONE_PROJECTION_CLASS to
                     completionClosure.operatorDoneProjectionClass.wireValue,
                 KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION to
-                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                KEY_LOCAL_EXECUTION_COMPLETED to v2Boundary.localExecutionCompleted,
+                KEY_ADVISORY_EVIDENCE_SENT to v2Boundary.advisoryEvidenceSent,
+                KEY_V2_UPLINK_ACKNOWLEDGED to v2Boundary.v2UplinkAcknowledged,
+                KEY_V2_RECONCILIATION_ACKNOWLEDGED to v2Boundary.v2ReconciliationAcknowledged,
+                KEY_V2_CANONICAL_TRUTH_COMPLETED to v2Boundary.v2CanonicalTruthCompleted,
+                KEY_V2_MATURE_CLOSURE_ACHIEVED to v2Boundary.v2MatureClosureAchieved
             )
         }
 

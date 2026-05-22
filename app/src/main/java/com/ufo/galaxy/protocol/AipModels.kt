@@ -1227,6 +1227,12 @@ data class GoalResultPayload(
     val closure_finalization_signal_class: String? = null,
     val operator_done_projection_class: String? = null,
     val completion_closure_uplink_schema_version: String? = null,
+    val local_execution_completed: Boolean? = null,
+    val advisory_evidence_sent: Boolean? = null,
+    val v2_uplink_acknowledged: Boolean? = null,
+    val v2_reconciliation_acknowledged: Boolean? = null,
+    val v2_canonical_truth_completed: Boolean? = null,
+    val v2_mature_closure_achieved: Boolean? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（结果上行）───────────────────────────────
     //
@@ -2976,6 +2982,12 @@ data class DeviceStateSnapshotPayload(
     val closure_finalization_signal_class: String? = null,
     val operator_done_projection_class: String? = null,
     val completion_closure_uplink_schema_version: String? = null,
+    val local_execution_completed: Boolean? = null,
+    val advisory_evidence_sent: Boolean? = null,
+    val v2_uplink_acknowledged: Boolean? = null,
+    val v2_reconciliation_acknowledged: Boolean? = null,
+    val v2_canonical_truth_completed: Boolean? = null,
+    val v2_mature_closure_achieved: Boolean? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段 ────────────────────────────────────────
     //
@@ -3432,6 +3444,12 @@ data class DeviceExecutionEventPayload(
     val closure_finalization_signal_class: String? = null,
     val operator_done_projection_class: String? = null,
     val completion_closure_uplink_schema_version: String? = null,
+    val local_execution_completed: Boolean? = null,
+    val advisory_evidence_sent: Boolean? = null,
+    val v2_uplink_acknowledged: Boolean? = null,
+    val v2_reconciliation_acknowledged: Boolean? = null,
+    val v2_canonical_truth_completed: Boolean? = null,
+    val v2_mature_closure_achieved: Boolean? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）───────────────────────
     //
