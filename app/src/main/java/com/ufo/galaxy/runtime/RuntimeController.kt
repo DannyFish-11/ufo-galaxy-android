@@ -2522,6 +2522,9 @@ class RuntimeController(
         // "recovering" or "recovery-failed" when reconnect state overrides inflight
         // disposition, rather than silently reporting a stale inflight disposition.
         val unifiedPhase = unifiedRecoveryPhase.value
+        // PR-119: compute explicit routing decision so RUNTIME_TRUTH_SNAPSHOT payload
+        // carries structured V2 routing metadata alongside the raw recovery phase value.
+        val routingDecision = AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(unifiedPhase)
         val truth = AndroidParticipantRuntimeTruth.from(
             descriptor = descriptor,
             sessionSnapshot = currentHostSessionSnapshot(),
@@ -2544,7 +2547,8 @@ class RuntimeController(
             ReconciliationSignal.runtimeTruthSnapshot(
                 truth,
                 durableSessionId = currentDurableSessionId(),
-                sessionContinuityEpoch = currentSessionContinuityEpoch()
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                v2RoutingDecision = routingDecision
             )
         )
     }
