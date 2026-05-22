@@ -1146,7 +1146,12 @@ class GalaxyWebSocketClient(
     ): String {
         val root = try {
             gson.fromJson(message.json, JsonObject::class.java)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "[WS:OfflineQueue] Failed to annotate replay metadata; forwarding original payload " +
+                    "type=${message.type} queue_sequence=${message.queueSequence} error=${e.message}"
+            )
             null
         } ?: return message.json
         root.addProperty("replay_semantic_class", "offline_queue_replay")
@@ -1156,12 +1161,8 @@ class GalaxyWebSocketClient(
         root.addProperty("replay_flush_total", replayFlushTotal)
         root.addProperty("replay_queue_sequence", message.queueSequence)
         root.addProperty("replay_queued_at_ms", message.queuedAt)
-        if (!message.sessionTag.isNullOrBlank()) {
-            root.addProperty("replay_session_tag", message.sessionTag)
-        }
-        if (message.sessionEpoch != null) {
-            root.addProperty("replay_session_epoch", message.sessionEpoch)
-        }
+        root.addProperty("replay_session_tag", message.sessionTag ?: "")
+        root.addProperty("replay_session_epoch", message.sessionEpoch ?: -1)
         if (!message.dedupeKey.isNullOrBlank()) {
             root.addProperty("replay_dedupe_key", message.dedupeKey)
         }
