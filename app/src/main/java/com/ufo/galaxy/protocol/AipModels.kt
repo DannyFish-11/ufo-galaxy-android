@@ -1233,6 +1233,7 @@ data class GoalResultPayload(
     val v2_reconciliation_acknowledged: Boolean? = null,
     val v2_canonical_truth_completed: Boolean? = null,
     val v2_mature_closure_achieved: Boolean? = null,
+    val outward_truth_surface_class: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（结果上行）───────────────────────────────
     //
@@ -3010,6 +3011,7 @@ data class DeviceStateSnapshotPayload(
     val v2_reconciliation_acknowledged: Boolean? = null,
     val v2_canonical_truth_completed: Boolean? = null,
     val v2_mature_closure_achieved: Boolean? = null,
+    val outward_truth_surface_class: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段 ────────────────────────────────────────
     //
@@ -3494,6 +3496,7 @@ data class DeviceExecutionEventPayload(
     val v2_reconciliation_acknowledged: Boolean? = null,
     val v2_canonical_truth_completed: Boolean? = null,
     val v2_mature_closure_achieved: Boolean? = null,
+    val outward_truth_surface_class: String? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）───────────────────────
     //
