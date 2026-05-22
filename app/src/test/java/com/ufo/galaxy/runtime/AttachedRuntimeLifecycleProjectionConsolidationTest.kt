@@ -738,10 +738,10 @@ class AttachedRuntimeLifecycleProjectionConsolidationTest {
     // ── No duplicate lifecycle truth — canonical single path ──────────────────
 
     @Test
-    fun `ALWAYS_PRESENT_KEYS contains exactly 8 entries`() {
+    fun `ALWAYS_PRESENT_KEYS contains exactly 12 entries`() {
         assertEquals(
-            "ALWAYS_PRESENT_KEYS must contain exactly 8 entries (all but invalidationReason)",
-            8,
+            "ALWAYS_PRESENT_KEYS must contain exactly 12 entries (host snapshot fields plus explicit outward truth metadata, excluding invalidationReason)",
+            12,
             AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS.size
         )
     }

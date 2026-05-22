@@ -119,6 +119,23 @@ data class AndroidParticipantRuntimeTruth(
     val reconciliationEpoch: Int
 ) {
 
+    val outwardTruthSemantics: AndroidOutwardTruthSurfaceSemantics.SurfaceSemantics
+        get() = AndroidOutwardTruthSurfaceSemantics.runtimeVisibleSnapshot(
+            RuntimeTruthPrecedenceRules.TruthTier.PROJECTION
+        )
+
+    val outwardTruthSurfaceClass: String
+        get() = outwardTruthSemantics.outwardTruthSurfaceClass.wireValue
+
+    val truthTier: String
+        get() = outwardTruthSemantics.truthTier.wireValue
+
+    val sourceAuthorityClass: String
+        get() = outwardTruthSemantics.sourceAuthorityClass
+
+    val isV2ConfirmedCanonicalTruth: Boolean
+        get() = outwardTruthSemantics.isV2ConfirmedCanonicalTruth
+
     // ── Derived helpers ───────────────────────────────────────────────────────
 
     /**
@@ -205,6 +222,10 @@ data class AndroidParticipantRuntimeTruth(
         put(KEY_REPORTED_AT_MS, reportedAtMs)
         put(KEY_RECONCILIATION_EPOCH, reconciliationEpoch)
         put(KEY_IS_FULLY_RECONCILABLE, isFullyReconcilable)
+        put(KEY_OUTWARD_TRUTH_SURFACE_CLASS, outwardTruthSurfaceClass)
+        put(KEY_TRUTH_TIER, truthTier)
+        put(KEY_SOURCE_AUTHORITY_CLASS, sourceAuthorityClass)
+        put(KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH, isV2ConfirmedCanonicalTruth)
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
@@ -233,6 +254,21 @@ data class AndroidParticipantRuntimeTruth(
 
         /** Wire key for [sourceRuntimePosture] ([SourceRuntimePosture] constant). */
         const val KEY_SOURCE_RUNTIME_POSTURE = "source_runtime_posture"
+
+        /** Wire key for [outwardTruthSurfaceClass]. */
+        const val KEY_OUTWARD_TRUTH_SURFACE_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_OUTWARD_TRUTH_SURFACE_CLASS
+
+        /** Wire key for [truthTier]. */
+        const val KEY_TRUTH_TIER = AndroidOutwardTruthSurfaceSemantics.KEY_TRUTH_TIER
+
+        /** Wire key for [sourceAuthorityClass]. */
+        const val KEY_SOURCE_AUTHORITY_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_SOURCE_AUTHORITY_CLASS
+
+        /** Wire key for [isV2ConfirmedCanonicalTruth]. */
+        const val KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH =
+            AndroidOutwardTruthSurfaceSemantics.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH
 
         /** Wire key for [sessionId]; absent when [sessionId] is null. */
         const val KEY_SESSION_ID = "session_id"

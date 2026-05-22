@@ -663,10 +663,10 @@ class Pr1DurableSessionRuntimeFoundationTest {
     }
 
     @Test
-    fun `ALWAYS_PRESENT_KEYS still contains exactly 8 entries after PR-1`() {
+    fun `ALWAYS_PRESENT_KEYS still contains exactly 12 entries after PR-1`() {
         assertEquals(
-            "ALWAYS_PRESENT_KEYS must remain 8 after PR-1 (durable fields are conditional)",
-            8,
+            "ALWAYS_PRESENT_KEYS must remain 12 after PR-1 (durable fields are conditional; outward truth metadata is always present)",
+            12,
             AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS.size
         )
     }

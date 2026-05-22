@@ -27,7 +27,7 @@ package com.ufo.galaxy.runtime
  *  4. (PR-24) Exposing a [selectionOutcome] canonical enum so downstream can act on
  *     SELECTED / REJECTED / FALLBACK semantics without ad-hoc field inference.
  *
- * ## Thirteen canonical fields
+ * ## Canonical readiness fields plus explicit outward truth metadata
  *
  * | Field                    | Wire key                                   | Always present? |
  * |--------------------------|--------------------------------------------|-----------------|
@@ -101,6 +101,23 @@ data class DelegatedTargetReadinessProjection(
     val isSuitableTarget: Boolean,
     val unsuitabilityReason: String?
 ) {
+
+    val outwardTruthSemantics: AndroidOutwardTruthSurfaceSemantics.SurfaceSemantics
+        get() = AndroidOutwardTruthSurfaceSemantics.advisoryProjection(
+            RuntimeTruthPrecedenceRules.TruthTier.PROJECTION
+        )
+
+    val outwardTruthSurfaceClass: String
+        get() = outwardTruthSemantics.outwardTruthSurfaceClass.wireValue
+
+    val truthTier: String
+        get() = outwardTruthSemantics.truthTier.wireValue
+
+    val sourceAuthorityClass: String
+        get() = outwardTruthSemantics.sourceAuthorityClass
+
+    val isV2ConfirmedCanonicalTruth: Boolean
+        get() = outwardTruthSemantics.isV2ConfirmedCanonicalTruth
 
     // ── Convenience accessors (delegate to snapshot) ──────────────────────────
 
@@ -189,6 +206,13 @@ data class DelegatedTargetReadinessProjection(
         unsuitabilityReason?.let { put(KEY_UNSUITABILITY_REASON, it) }
         put(KEY_SELECTION_OUTCOME, selectionOutcome.wireValue)
         selectionOutcomeReason?.let { put(KEY_SELECTION_OUTCOME_REASON, it) }
+        put(
+            KEY_OUTWARD_TRUTH_SURFACE_CLASS,
+            outwardTruthSurfaceClass
+        )
+        put(KEY_TRUTH_TIER, truthTier)
+        put(KEY_SOURCE_AUTHORITY_CLASS, sourceAuthorityClass)
+        put(KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH, isV2ConfirmedCanonicalTruth)
     }
 
     // ── Companion / factory ───────────────────────────────────────────────────
@@ -250,6 +274,21 @@ data class DelegatedTargetReadinessProjection(
          */
         const val KEY_SELECTION_OUTCOME_REASON = "readiness_selection_outcome_reason"
 
+        /** Wire key for [outwardTruthSurfaceClass]. */
+        const val KEY_OUTWARD_TRUTH_SURFACE_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_OUTWARD_TRUTH_SURFACE_CLASS
+
+        /** Wire key for [truthTier]. */
+        const val KEY_TRUTH_TIER = AndroidOutwardTruthSurfaceSemantics.KEY_TRUTH_TIER
+
+        /** Wire key for [sourceAuthorityClass]. */
+        const val KEY_SOURCE_AUTHORITY_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_SOURCE_AUTHORITY_CLASS
+
+        /** Wire key for [isV2ConfirmedCanonicalTruth]. */
+        const val KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH =
+            AndroidOutwardTruthSurfaceSemantics.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH
+
         // ── Unsuitability reason constants ────────────────────────────────────
 
         /**
@@ -285,6 +324,10 @@ data class DelegatedTargetReadinessProjection(
             addAll(AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS)
             add(KEY_IS_SUITABLE_TARGET)
             add(KEY_SELECTION_OUTCOME)
+            add(KEY_OUTWARD_TRUTH_SURFACE_CLASS)
+            add(KEY_TRUTH_TIER)
+            add(KEY_SOURCE_AUTHORITY_CLASS)
+            add(KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)
         }
 
         // ── Factory ───────────────────────────────────────────────────────────

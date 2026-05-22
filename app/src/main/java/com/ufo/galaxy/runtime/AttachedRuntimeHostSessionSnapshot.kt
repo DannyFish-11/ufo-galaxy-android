@@ -19,7 +19,8 @@ package com.ufo.galaxy.runtime
  * semantics are guaranteed not to change between attach / detach / reconnect / invalidate
  * events — only the values change, never the keys.
  *
- * ## Nine canonical fields plus optional durable session continuity fields (PR-1)
+ * ## Nine canonical fields plus explicit outward truth metadata and optional durable
+ * session continuity fields (PR-1)
  *
  * Every snapshot always contains all nine base fields.  [invalidationReason] is the sole
  * conditional field among them — it is non-`null` only when [attachmentState] is
@@ -104,12 +105,29 @@ data class AttachedRuntimeHostSessionSnapshot(
     val sessionContinuityEpoch: Int = 0
 ) {
 
+    val outwardTruthSemantics: AndroidOutwardTruthSurfaceSemantics.SurfaceSemantics
+        get() = AndroidOutwardTruthSurfaceSemantics.runtimeVisibleSnapshot(
+            RuntimeTruthPrecedenceRules.TruthTier.SNAPSHOT
+        )
+
+    val outwardTruthSurfaceClass: String
+        get() = outwardTruthSemantics.outwardTruthSurfaceClass.wireValue
+
+    val truthTier: String
+        get() = outwardTruthSemantics.truthTier.wireValue
+
+    val sourceAuthorityClass: String
+        get() = outwardTruthSemantics.sourceAuthorityClass
+
+    val isV2ConfirmedCanonicalTruth: Boolean
+        get() = outwardTruthSemantics.isV2ConfirmedCanonicalTruth
+
     // ── Serialisation ─────────────────────────────────────────────────────────
 
     /**
      * Builds the canonical wire map for this snapshot.
      *
-     * All eight always-present keys are included in the returned map.
+     * All always-present snapshot and outward-truth keys are included in the returned map.
      * [KEY_INVALIDATION_REASON] is included **only** when [invalidationReason] is non-`null`.
      * When a durable session era is active, [KEY_DURABLE_SESSION_ID] and
      * [KEY_SESSION_CONTINUITY_EPOCH] are also included.
@@ -133,6 +151,7 @@ data class AttachedRuntimeHostSessionSnapshot(
             put(KEY_DURABLE_SESSION_ID, it)
             put(KEY_SESSION_CONTINUITY_EPOCH, sessionContinuityEpoch)
         }
+        putAll(outwardTruthSemantics.toMap())
     }
 
     // ── Companion / factory ───────────────────────────────────────────────────
@@ -171,6 +190,21 @@ data class AttachedRuntimeHostSessionSnapshot(
         /** Wire key for [posture] ([SourceRuntimePosture] string). */
         const val KEY_POSTURE = "snapshot_posture"
 
+        /** Wire key for [outwardTruthSurfaceClass]. */
+        const val KEY_OUTWARD_TRUTH_SURFACE_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_OUTWARD_TRUTH_SURFACE_CLASS
+
+        /** Wire key for [truthTier]. */
+        const val KEY_TRUTH_TIER = AndroidOutwardTruthSurfaceSemantics.KEY_TRUTH_TIER
+
+        /** Wire key for [sourceAuthorityClass]. */
+        const val KEY_SOURCE_AUTHORITY_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_SOURCE_AUTHORITY_CLASS
+
+        /** Wire key for [isV2ConfirmedCanonicalTruth]. */
+        const val KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH =
+            AndroidOutwardTruthSurfaceSemantics.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH
+
         /**
          * Wire key for [durableSessionId] (PR-1 — durable session continuity).
          * Present in [toMap] output **only** when [durableSessionId] is non-`null`.
@@ -189,8 +223,8 @@ data class AttachedRuntimeHostSessionSnapshot(
         // ── All nine required keys — useful in tests ──────────────────────────
 
         /**
-         * The eight keys that are **always** present in [toMap] output, regardless of
-         * session state.  [KEY_INVALIDATION_REASON], [KEY_DURABLE_SESSION_ID], and
+         * The keys that are **always** present in [toMap] output, regardless of
+         * session state. [KEY_INVALIDATION_REASON], [KEY_DURABLE_SESSION_ID], and
          * [KEY_SESSION_CONTINUITY_EPOCH] are excluded because they are conditional.
          */
         val ALWAYS_PRESENT_KEYS: Set<String> = setOf(
@@ -201,7 +235,11 @@ data class AttachedRuntimeHostSessionSnapshot(
             KEY_IS_REUSE_VALID,
             KEY_DELEGATED_EXECUTION_COUNT,
             KEY_HOST_ROLE,
-            KEY_POSTURE
+            KEY_POSTURE,
+            KEY_OUTWARD_TRUTH_SURFACE_CLASS,
+            KEY_TRUTH_TIER,
+            KEY_SOURCE_AUTHORITY_CLASS,
+            KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH
         )
 
         // ── Factory ───────────────────────────────────────────────────────────
