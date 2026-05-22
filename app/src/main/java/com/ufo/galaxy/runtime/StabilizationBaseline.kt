@@ -2641,6 +2641,38 @@ object StabilizationBaseline {
                 "V2_CONSUMPTION_PATH_MAP 声明四类事件对应的 V2 消费路径。" +
                 "Test: Pr118AndroidContinuityDiagnosticsContractTest.",
             introducedPr = 118
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-cross-repo-recovery-state-routing-contract",
+            displayName = "AndroidCrossRepoRecoveryStateRoutingContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-119 — Android 侧跨 repo continuity recovery state routing 合约。" +
+                "把 AndroidContinuityRecoveryStateModel.V2_CONSUMPTION_PATH_MAP 中的字符串路径" +
+                "升级为结构化、机器可消费的 RoutingDecision 对象，" +
+                "确保 V2 能够对每个 RecoveryPhase 获得明确的 V2RoutingCategory（7 值枚举：" +
+                "NO_RECOVERY_ACTION_REQUIRED/PENDING_RECONNECT_VERDICT/ADVISORY_INFLIGHT_EVIDENCE/" +
+                "TASK_CLOSURE_OR_RECONCILIATION_REQUIRED/CANONICAL_RECONCILIATION_PASS/" +
+                "STALE_ARTIFACT_REJECTION/TERMINAL_RECONNECT_FAILURE），" +
+                "以及 requiresV2Action / isAdvisoryOnly / canonicalClosureBlocked 三个布尔标志。" +
+                "routeRecoveryPhase() 是唯一权威的 RecoveryPhase → RoutingDecision 转换点。" +
+                "toWireMap() 输出五个 wire key：" +
+                "recovery_state_v2_routing_category/routing_requires_v2_action/" +
+                "routing_is_advisory_only/routing_canonical_closure_blocked/routing_schema_version。" +
+                "ReconciliationSignal.runtimeTruthSnapshot() 新增可选 v2RoutingDecision 参数，" +
+                "当提供时将 routing wire map 合并入 payload，" +
+                "使 V2 无需自行推断 routing category（INV-ROUTING-05）。" +
+                "RuntimeController.publishRuntimeTruthSnapshot() 自动计算 routing decision " +
+                "并传入 runtimeTruthSnapshot()，确保所有 RUNTIME_TRUTH_SNAPSHOT 信号携带 routing 元数据。" +
+                "V2_ROUTING_INTENT_MAP 预计算所有 phase 的 RoutingDecision 供 V2 按 wireValue 查找。" +
+                "ROUTING_CONTRACT_INVARIANTS（8 条）防止：RECOVERED_INFLIGHT 被当作 canonical closure、" +
+                "REQUIRES_RECONCILIATION 缺少 V2 action、" +
+                "STALE_RECOVERY_ARTIFACT 被当作当前 continuity 证据、" +
+                "RECOVERING 阶段允许 canonical closure。" +
+                "Test: Pr119AndroidCrossRepoRecoveryStateRoutingContractTest.",
+            introducedPr = 119
         )
     )
 

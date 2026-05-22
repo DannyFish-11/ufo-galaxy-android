@@ -107,6 +107,7 @@ import org.junit.Test
  *
  * (Updated by PR-116: CANONICAL_STABLE=140, total=146, EXTEND=140.)
  * (Updated by PR-118: CANONICAL_STABLE=141, total=147, EXTEND=141.)
+ * (Updated by PR-119: CANONICAL_STABLE=142, total=148, EXTEND=142.)
  *
  * ### StabilizationBaseline — data integrity
  *  - all entries have non-blank surfaceId
@@ -445,8 +446,8 @@ class Pr11StabilizationBaselineTest {
     // 12. Tier and guidance counts
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `CANONICAL_STABLE count is 141`() {
-        assertEquals(141, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
+    @Test fun `CANONICAL_STABLE count is 142`() {
+        assertEquals(142, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test fun `CANONICAL_FROZEN count is 1`() {
@@ -461,12 +462,12 @@ class Pr11StabilizationBaselineTest {
         assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 147`() {
-        assertEquals(147, StabilizationBaseline.entries.size)
+    @Test fun `total entry count is 148`() {
+        assertEquals(148, StabilizationBaseline.entries.size)
     }
 
-    @Test fun `EXTEND guidance count is 141`() {
-        assertEquals(141, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
+    @Test fun `EXTEND guidance count is 142`() {
+        assertEquals(142, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
     }
 
     @Test fun `CONVERGE guidance count is 3`() {

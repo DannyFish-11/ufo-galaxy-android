@@ -380,6 +380,49 @@ data class ReconciliationSignal(
         const val KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION =
             AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION
 
+        // ── PR-119: Cross-repo recovery state routing payload key constants ────────
+
+        /**
+         * Payload key for the [AndroidCrossRepoRecoveryStateRoutingContract.V2RoutingCategory.wireValue]
+         * that V2 should use to route the recovery evidence.
+         *
+         * Present in [payload] of [Kind.RUNTIME_TRUTH_SNAPSHOT] signals when a
+         * [AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision] is provided.
+         */
+        const val KEY_V2_ROUTING_CATEGORY =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_V2_ROUTING_CATEGORY
+
+        /**
+         * Payload key indicating whether this recovery phase requires explicit V2 canonical action.
+         *
+         * Value: `"true"` or `"false"`.
+         */
+        const val KEY_ROUTING_REQUIRES_V2_ACTION =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_REQUIRES_V2_ACTION
+
+        /**
+         * Payload key indicating whether this recovery phase carries only advisory evidence.
+         *
+         * Value: `"true"` or `"false"`.
+         */
+        const val KEY_ROUTING_IS_ADVISORY_ONLY =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_IS_ADVISORY_ONLY
+
+        /**
+         * Payload key indicating whether canonical task closure is blocked for this phase.
+         *
+         * Value: `"true"` or `"false"`.  When `"true"`, V2 MUST NOT close the task canonically
+         * based solely on this recovery evidence.
+         */
+        const val KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED
+
+        /**
+         * Payload key for [AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION].
+         */
+        const val KEY_ROUTING_SCHEMA_VERSION =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
+
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
         /**
@@ -830,17 +873,26 @@ data class ReconciliationSignal(
          * [AndroidParticipantRuntimeTruth.inflightContinuityState] so V2 can consume
          * recovery evidence directly from the payload without reading nested truth fields.
          *
-         * @param truth         The [AndroidParticipantRuntimeTruth] snapshot to publish.
-         * @param signalId      Unique signal identifier for deduplication.
-         * @param durableSessionId Stable activation-era session identifier, when available.
+         * When [v2RoutingDecision] is provided, the payload also includes structured routing
+         * metadata from [AndroidCrossRepoRecoveryStateRoutingContract] so V2 can route the
+         * recovery evidence to the correct handling path without re-inferring the category
+         * from the raw phase value (PR-119, INV-ROUTING-05).
+         *
+         * @param truth              The [AndroidParticipantRuntimeTruth] snapshot to publish.
+         * @param signalId           Unique signal identifier for deduplication.
+         * @param durableSessionId   Stable activation-era session identifier, when available.
          * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
          *                               when available.
+         * @param v2RoutingDecision  Optional routing decision from
+         *                           [AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase];
+         *                           when provided its wire map is merged into the payload.
          */
         fun runtimeTruthSnapshot(
             truth: AndroidParticipantRuntimeTruth,
             signalId: String = java.util.UUID.randomUUID().toString(),
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            v2RoutingDecision: AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision? = null
         ): ReconciliationSignal {
             // Promote inflight continuity state into explicit payload keys so V2 can consume
             // recovery evidence directly from the reconciliation signal payload without having
@@ -859,6 +911,11 @@ data class ReconciliationSignal(
                 }
                 put(KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION,
                     AndroidContinuityRecoveryStateModel.SCHEMA_VERSION)
+                // PR-119: include structured routing metadata so V2 can consume routing
+                // intent without re-deriving it from the raw phase value (INV-ROUTING-05).
+                v2RoutingDecision?.let { decision ->
+                    putAll(AndroidCrossRepoRecoveryStateRoutingContract.toWireMap(decision))
+                }
             }
             return ReconciliationSignal(
                 kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
