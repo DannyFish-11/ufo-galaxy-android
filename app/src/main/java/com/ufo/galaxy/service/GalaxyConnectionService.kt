@@ -3364,7 +3364,9 @@ class GalaxyConnectionService : Service() {
                     webSocketClient.offlineQueue.enqueue(
                         type = MsgType.GOAL_EXECUTION_RESULT.value,
                         json = envelopeJson,
-                        sessionTag = durableSessionTag
+                        sessionTag = durableSessionTag,
+                        sessionEpoch = enriched.session_continuity_epoch,
+                        dedupeKey = enriched.uplink_lineage_dedupe_key ?: envelope.idempotency_key
                     )
                 }
                 val queueSucceeded = queueResult.isSuccess

@@ -494,12 +494,14 @@ class CrossDeviceSwitchTest {
         queue.enqueue(
             "goal_execution_result",
             """{"type":"goal_execution_result","payload":{"task_id":"t-old","status":"success"}}""",
-            sessionTag = "session-OLD"
+            sessionTag = "session-OLD",
+            sessionEpoch = 1
         )
         queue.enqueue(
             "goal_execution_result",
             """{"type":"goal_execution_result","payload":{"task_id":"t-current","status":"success"}}""",
-            sessionTag = "session-CURRENT"
+            sessionTag = "session-CURRENT",
+            sessionEpoch = 1
         )
 
         val discarded = queue.discardForDifferentSession("session-CURRENT")
@@ -524,6 +526,22 @@ class CrossDeviceSwitchTest {
         )
         val discarded = queue.discardForDifferentSession("session-NEW")
         assertEquals("Null-tagged authority-sensitive messages must be discarded", 1, discarded)
+        assertEquals(0, queue.size)
+    }
+
+    @Test
+    fun `discardForDifferentSession blocks goal_execution_result missing replay ordering epoch`() {
+        val queue = OfflineTaskQueue(prefs = null)
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-no-epoch"}}""",
+            sessionTag = "session-CURRENT"
+            // sessionEpoch intentionally omitted to verify ordering-governance block
+        )
+
+        val discarded = queue.discardForDifferentSession("session-CURRENT")
+
+        assertEquals(1, discarded)
         assertEquals(0, queue.size)
     }
 }
