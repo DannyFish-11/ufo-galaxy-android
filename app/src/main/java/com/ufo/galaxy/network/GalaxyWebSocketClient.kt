@@ -1149,7 +1149,8 @@ class GalaxyWebSocketClient(
         } catch (e: Exception) {
             Log.w(
                 TAG,
-                "[WS:OfflineQueue] Failed to annotate replay metadata; forwarding original payload " +
+                "[WS:OfflineQueue] Failed to parse replay envelope JSON for metadata annotation; " +
+                    "forwarding original payload " +
                     "type=${message.type} queue_sequence=${message.queueSequence} error=${e.message}"
             )
             null
@@ -2117,7 +2118,9 @@ class GalaxyWebSocketClient(
         if (messages.isEmpty()) return
 
         Log.i(TAG, "[WS:OfflineQueue] Flushing ${messages.size} offline message(s)")
-        val replayFlushId = "flush-${replayFlushIdCounter.incrementAndGet()}"
+        val replayFlushId =
+            "flush-${runtimeSessionId ?: "no_runtime"}-" +
+                "${System.currentTimeMillis()}-${replayFlushIdCounter.incrementAndGet()}"
         GalaxyLogger.log(
             TAG,
             mapOf(
