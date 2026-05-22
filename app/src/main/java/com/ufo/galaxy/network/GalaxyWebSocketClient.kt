@@ -19,6 +19,7 @@ import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import com.ufo.galaxy.protocol.DiagnosticsPayload
 import com.ufo.galaxy.protocol.MeshJoinPayload
@@ -950,19 +951,19 @@ class GalaxyWebSocketClient(
         replaceWith = ReplaceWith("sendJson(json)")
     )
     fun sendAIPMessage(message: AIPMessage): Boolean {
-        if (!crossDeviceEnabled) {
-            Log.w(TAG, "[WS:BLOCKED] sendAIPMessage() rejected: cross_device=off reason=cross_device_disabled")
-            return false
-        }
-        if (!isConnected) {
-            Log.w(TAG, "未连接，无法发送")
-            return false
-        }
-        
         val json = gson.toJson(message)
-        Log.d(TAG, "发送消息: ${json.take(100)}...")
-        
-        return webSocket?.send(json) ?: false
+        Log.w(
+            TAG,
+            "[WS:COMPAT_PATH] sendAIPMessage() invoked; forcing canonical sendJson path"
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "compat_send_redirected_to_canonical_sendJson",
+                "compat_method" to "sendAIPMessage"
+            )
+        )
+        return sendJson(json)
     }
     
     /**
@@ -997,6 +998,11 @@ class GalaxyWebSocketClient(
             ))
             return false
         }
+        if (msgType == MsgType.RECONCILIATION_SIGNAL.value &&
+            !hasCanonicalReconciliationIngress(json)
+        ) {
+            return false
+        }
         if (!isConnected) {
             if (msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
                 enqueueForReliableReplay(
@@ -1027,6 +1033,67 @@ class GalaxyWebSocketClient(
             )
         }
         return sent
+    }
+
+    private fun hasCanonicalReconciliationIngress(json: String): Boolean {
+        val root = try {
+            gson.fromJson(json, JsonObject::class.java)
+        } catch (_: Exception) {
+            null
+        }
+        val payload = root?.getAsJsonObject("payload")
+        val kindWire = payload?.get("kind")?.asString
+        val kind = ReconciliationSignal.Kind.fromValue(kindWire)
+        if (kind == null) {
+            reportNonCanonicalReconciliationIngress(
+                reason = "missing_or_unknown_reconciliation_kind",
+                kind = kindWire
+            )
+            return false
+        }
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract.classifyReconciliation(kind)
+        val boundary = payload.get("ingress_boundary_class")?.asString
+        val consumption = payload.get("ingress_consumption_kind")?.asString
+        val signalClass = payload.get("ingress_signal_class")?.asString
+        val schemaVersion = payload.get("ingress_schema_version")?.asString
+        val matches =
+            boundary == ingress.boundaryClass.wireValue &&
+                consumption == ingress.consumptionKind.wireValue &&
+                signalClass == ingress.signalClass.wireValue &&
+                schemaVersion == ingress.schemaVersion
+        if (!matches) {
+            reportNonCanonicalReconciliationIngress(
+                reason = "reconciliation_ingress_contract_mismatch",
+                kind = kind.wireValue,
+                expectedBoundary = ingress.boundaryClass.wireValue,
+                actualBoundary = boundary
+            )
+            return false
+        }
+        return true
+    }
+
+    private fun reportNonCanonicalReconciliationIngress(
+        reason: String,
+        kind: String?,
+        expectedBoundary: String? = null,
+        actualBoundary: String? = null
+    ) {
+        Log.e(
+            TAG,
+            "[WS:BLOCKED] Rejected non-canonical reconciliation_signal ingress " +
+                "reason=$reason kind=$kind expected_boundary=$expectedBoundary actual_boundary=$actualBoundary"
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "reconciliation_signal_non_canonical_ingress_blocked",
+                "reason" to reason,
+                "signal_kind" to (kind ?: "unknown"),
+                "expected_boundary" to (expectedBoundary ?: ""),
+                "actual_boundary" to (actualBoundary ?: "")
+            )
+        )
     }
 
     /** Extracts the `type` field from a JSON string without full deserialization. Returns null on error. */
