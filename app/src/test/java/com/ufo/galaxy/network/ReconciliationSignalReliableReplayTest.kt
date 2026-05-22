@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import okhttp3.Request
@@ -81,6 +82,8 @@ class ReconciliationSignalReliableReplayTest {
             sessionContinuityEpoch = signal.sessionContinuityEpoch,
             recoveryBasis = "test_reconciliation_path"
         )
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyReconciliation(signal.kind)
         val payload = ReconciliationSignalPayload(
             signal_id = signal.signalId,
             kind = signal.kind.wireValue,
@@ -101,7 +104,11 @@ class ReconciliationSignalReliableReplayTest {
             uplink_lineage_execution_id = lineage.executionIdentity,
             uplink_lineage_emission_id = lineage.emissionIdentity,
             uplink_lineage_dedupe_key = lineage.dedupeKey,
-            uplink_lineage_recovery_basis = lineage.recoveryBasis
+            uplink_lineage_recovery_basis = lineage.recoveryBasis,
+            ingress_boundary_class = ingress.boundaryClass.wireValue,
+            ingress_consumption_kind = ingress.consumptionKind.wireValue,
+            ingress_signal_class = ingress.signalClass.wireValue,
+            ingress_schema_version = ingress.schemaVersion
         )
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,

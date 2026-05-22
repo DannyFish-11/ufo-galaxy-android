@@ -4,6 +4,8 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
+import com.ufo.galaxy.runtime.ReconciliationSignal
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -426,6 +428,58 @@ class CrossDeviceSwitchTest {
         val result = client.sendJson(json)
         assertFalse("goal_execution_result must be blocked when cross-device is OFF", result)
         assertEquals("Queue must be empty — blocked before queuing logic", 0, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson blocks reconciliation_signal replay when canonical ingress metadata is missing`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """
+            {"type":"reconciliation_signal","payload":{"kind":"participant_state"}}
+        """.trimIndent()
+
+        val result = client.sendJson(json)
+
+        assertFalse(result)
+        assertEquals(
+            "non-canonical reconciliation payload must be blocked before queueing",
+            0,
+            testQueue.size
+        )
+    }
+
+    @Test
+    fun `sendJson queues reconciliation_signal replay when canonical ingress metadata matches kind`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyReconciliation(ReconciliationSignal.Kind.PARTICIPANT_STATE)
+        val json = """
+            {
+              "type":"reconciliation_signal",
+              "payload":{
+                "kind":"participant_state",
+                "ingress_boundary_class":"${ingress.boundaryClass.wireValue}",
+                "ingress_consumption_kind":"${ingress.consumptionKind.wireValue}",
+                "ingress_signal_class":"${ingress.signalClass.wireValue}",
+                "ingress_schema_version":"${ingress.schemaVersion}"
+              }
+            }
+        """.trimIndent()
+
+        val result = client.sendJson(json)
+
+        assertFalse(result)
+        assertEquals(1, testQueue.size)
+        assertEquals(MsgType.RECONCILIATION_SIGNAL.value, testQueue.drainAll().single().type)
     }
 
     // ── Offline replay: session-scoped authority bounding ─────────────────────
