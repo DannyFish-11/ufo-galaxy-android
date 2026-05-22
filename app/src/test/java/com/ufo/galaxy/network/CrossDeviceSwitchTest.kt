@@ -482,6 +482,62 @@ class CrossDeviceSwitchTest {
         assertEquals(MsgType.RECONCILIATION_SIGNAL.value, testQueue.drainAll().single().type)
     }
 
+    @Test
+    fun `sendJson blocks reconciliation_signal replay when ingress metadata mismatches kind`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyReconciliation(ReconciliationSignal.Kind.PARTICIPANT_STATE)
+        val json = """
+            {
+              "type":"reconciliation_signal",
+              "payload":{
+                "kind":"runtime_truth_snapshot",
+                "ingress_boundary_class":"${ingress.boundaryClass.wireValue}",
+                "ingress_consumption_kind":"${ingress.consumptionKind.wireValue}",
+                "ingress_signal_class":"${ingress.signalClass.wireValue}",
+                "ingress_schema_version":"${ingress.schemaVersion}"
+              }
+            }
+        """.trimIndent()
+
+        val result = client.sendJson(json)
+
+        assertFalse(result)
+        assertEquals(0, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson blocks reconciliation_signal replay when kind is unknown`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """
+            {
+              "type":"reconciliation_signal",
+              "payload":{
+                "kind":"unknown_kind",
+                "ingress_boundary_class":"canonical_governance_execution_policy",
+                "ingress_consumption_kind":"participant_truth_update",
+                "ingress_signal_class":"reconciliation_signal",
+                "ingress_schema_version":"1"
+              }
+            }
+        """.trimIndent()
+
+        val result = client.sendJson(json)
+
+        assertFalse(result)
+        assertEquals(0, testQueue.size)
+    }
+
     // ── Offline replay: session-scoped authority bounding ─────────────────────
 
     @Test

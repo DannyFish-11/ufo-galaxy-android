@@ -998,6 +998,10 @@ class GalaxyWebSocketClient(
             ))
             return false
         }
+        // Single-ingress enforcement point for reconciliation transport: malformed or
+        // non-canonical reconciliation signals are blocked here (with telemetry emitted by
+        // hasCanonicalReconciliationIngress) so they cannot be sent immediately or queued for
+        // replay on reconnect.
         if (msgType == MsgType.RECONCILIATION_SIGNAL.value &&
             !hasCanonicalReconciliationIngress(json)
         ) {
@@ -1036,53 +1040,67 @@ class GalaxyWebSocketClient(
     }
 
     private fun hasCanonicalReconciliationIngress(json: String): Boolean {
-        val root = try {
-            gson.fromJson(json, JsonObject::class.java)
-        } catch (_: Exception) {
-            null
-        }
-        val payload = root?.getAsJsonObject("payload")
-        val kindWire = payload?.get("kind")?.asString
-        val kind = ReconciliationSignal.Kind.fromValue(kindWire)
-        if (kind == null) {
+        try {
+            val root = gson.fromJson(json, JsonObject::class.java)
+            val payload = root?.getAsJsonObject("payload")
+            val kindWire = payload?.get("kind")?.asString
+            if (kindWire == null) {
+                reportNonCanonicalReconciliationIngress(
+                    reason = "missing_reconciliation_kind",
+                    kind = null
+                )
+                return false
+            }
+            val kind = ReconciliationSignal.Kind.fromValue(kindWire)
+            if (kind == null) {
+                reportNonCanonicalReconciliationIngress(
+                    reason = "unknown_reconciliation_kind",
+                    kind = kindWire
+                )
+                return false
+            }
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract.classifyReconciliation(kind)
+            val boundary = payload.get("ingress_boundary_class")?.asString
+            val consumption = payload.get("ingress_consumption_kind")?.asString
+            val signalClass = payload.get("ingress_signal_class")?.asString
+            val schemaVersion = payload.get("ingress_schema_version")?.asString
+            val matches =
+                boundary == ingress.boundaryClass.wireValue &&
+                    consumption == ingress.consumptionKind.wireValue &&
+                    signalClass == ingress.signalClass.wireValue &&
+                    schemaVersion == ingress.schemaVersion
+            if (!matches) {
+                reportNonCanonicalReconciliationIngress(
+                    reason = "reconciliation_ingress_contract_mismatch",
+                    kind = kind.wireValue,
+                    expectedBoundary = ingress.boundaryClass.wireValue,
+                    actualBoundary = boundary
+                )
+                return false
+            }
+            return true
+        } catch (e: Exception) {
             reportNonCanonicalReconciliationIngress(
-                reason = "missing_or_unknown_reconciliation_kind",
-                kind = kindWire
+                reason = "invalid_reconciliation_envelope_shape",
+                kind = null,
+                errorDetail = e.javaClass.simpleName
             )
             return false
         }
-        val ingress = AndroidGovernanceExecutionPolicyIngressContract.classifyReconciliation(kind)
-        val boundary = payload.get("ingress_boundary_class")?.asString
-        val consumption = payload.get("ingress_consumption_kind")?.asString
-        val signalClass = payload.get("ingress_signal_class")?.asString
-        val schemaVersion = payload.get("ingress_schema_version")?.asString
-        val matches =
-            boundary == ingress.boundaryClass.wireValue &&
-                consumption == ingress.consumptionKind.wireValue &&
-                signalClass == ingress.signalClass.wireValue &&
-                schemaVersion == ingress.schemaVersion
-        if (!matches) {
-            reportNonCanonicalReconciliationIngress(
-                reason = "reconciliation_ingress_contract_mismatch",
-                kind = kind.wireValue,
-                expectedBoundary = ingress.boundaryClass.wireValue,
-                actualBoundary = boundary
-            )
-            return false
-        }
-        return true
     }
 
     private fun reportNonCanonicalReconciliationIngress(
         reason: String,
         kind: String?,
         expectedBoundary: String? = null,
-        actualBoundary: String? = null
+        actualBoundary: String? = null,
+        errorDetail: String? = null
     ) {
         Log.e(
             TAG,
             "[WS:BLOCKED] Rejected non-canonical reconciliation_signal ingress " +
-                "reason=$reason kind=$kind expected_boundary=$expectedBoundary actual_boundary=$actualBoundary"
+                "reason=$reason kind=$kind expected_boundary=$expectedBoundary " +
+                "actual_boundary=$actualBoundary error=$errorDetail"
         )
         GalaxyLogger.log(
             TAG,
@@ -1091,7 +1109,8 @@ class GalaxyWebSocketClient(
                 "reason" to reason,
                 "signal_kind" to (kind ?: "unknown"),
                 "expected_boundary" to (expectedBoundary ?: ""),
-                "actual_boundary" to (actualBoundary ?: "")
+                "actual_boundary" to (actualBoundary ?: ""),
+                "error" to (errorDetail ?: "")
             )
         )
     }
