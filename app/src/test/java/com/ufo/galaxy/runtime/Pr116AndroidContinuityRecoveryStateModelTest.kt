@@ -327,15 +327,21 @@ class Pr116AndroidContinuityRecoveryStateModelTest {
     }
 
     @Test
-    fun `requires-reconciliation is written into RUNTIME_TRUTH_SNAPSHOT payload when crossDevice enabled`() = runBlocking {
+    fun `requires-reconciliation is written into RUNTIME_TRUTH_SNAPSHOT payload after process rebuild with crossDevice enabled`() = runBlocking {
         val settings = InMemoryAppSettings(
             crossDeviceEnabled = true,
             deviceId = "Pixel-116"
         )
+        // First controller — record a task to persist the inflight recovery artifact
+        val firstController = buildController(settings)
+        firstController.setActiveForTest()
+        firstController.recordDelegatedTaskAccepted("task-reconcile-cross-116")
+
+        // New controller simulates process rebuild with crossDevice still enabled
         val controller = buildController(settings)
-        controller.setActiveForTest()
-        controller.recordDelegatedTaskAccepted("task-reconcile-cross-116")
-        controller.stop()  // → REQUIRES_RECONCILIATION (crossDevice enabled, no live task)
+        controller.onAppLifecycleTransition(AndroidAppLifecycleTransition.PROCESS_RECREATED)
+        // After PROCESS_RECREATED with a persisted artifact and crossDevice enabled,
+        // the inflight disposition is REQUIRES_RECONCILIATION
 
         val deferred = async {
             withTimeout(500) {
@@ -352,7 +358,8 @@ class Pr116AndroidContinuityRecoveryStateModelTest {
         val recoveryStateInPayload =
             signal.payload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
         assertEquals(
-            "RUNTIME_TRUTH_SNAPSHOT payload must carry requires-reconciliation for crossDevice runtime stop",
+            "RUNTIME_TRUTH_SNAPSHOT payload must carry requires-reconciliation after process " +
+                "rebuild with crossDevice enabled and unrecovered artifact",
             InflightContinuityDisposition.REQUIRES_RECONCILIATION.wireValue,
             recoveryStateInPayload
         )
@@ -516,5 +523,119 @@ class Pr116AndroidContinuityRecoveryStateModelTest {
         )
         assertEquals(StabilizationBaseline.ExtensionGuidance.EXTEND, entry.extensionGuidance)
         assertEquals(116, entry.introducedPr)
+    }
+
+    // ─── 10. unifiedRecoveryPhase StateFlow on RuntimeController ─────────────
+
+    @Test
+    fun `unifiedRecoveryPhase StateFlow starts as RESUMED_CLEANLY`() {
+        val controller = buildController()
+        assertEquals(
+            "Initial unifiedRecoveryPhase MUST be RESUMED_CLEANLY before any lifecycle event",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY,
+            controller.unifiedRecoveryPhase.value
+        )
+    }
+
+    @Test
+    fun `unifiedRecoveryPhase updates to LOST_INFLIGHT when stop is called with active task`() {
+        val settings = InMemoryAppSettings(deviceId = "Pixel-116")
+        val controller = buildController(settings)
+        controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-unified-116")
+
+        controller.stop()
+
+        assertEquals(
+            "unifiedRecoveryPhase MUST be LOST_INFLIGHT after stop() with an active task",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT,
+            controller.unifiedRecoveryPhase.value
+        )
+    }
+
+    @Test
+    fun `unifiedRecoveryPhase is RECOVERING when reconnect recovery state is RECOVERING`() {
+        val controller = buildController()
+        controller.setActiveForTest()
+
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
+
+        assertEquals(
+            "unifiedRecoveryPhase MUST be RECOVERING when reconnect recovery state is RECOVERING",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+            controller.unifiedRecoveryPhase.value
+        )
+    }
+
+    @Test
+    fun `unifiedRecoveryPhase is RECOVERY_FAILED when reconnect recovery state is FAILED`() {
+        val controller = buildController()
+        controller.setActiveForTest()
+
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.FAILED)
+
+        assertEquals(
+            "unifiedRecoveryPhase MUST be RECOVERY_FAILED when reconnect recovery state is FAILED",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED,
+            controller.unifiedRecoveryPhase.value
+        )
+    }
+
+    // ─── 11. publishRuntimeTruthSnapshot carries unified phase, not raw disposition ─
+
+    @Test
+    fun `RUNTIME_TRUTH_SNAPSHOT carries RECOVERING when reconnect is RECOVERING regardless of inflight disposition`() = runBlocking {
+        val settings = InMemoryAppSettings(
+            crossDeviceEnabled = true,
+            deviceId = "Pixel-116"
+        )
+        val controller = buildController(settings)
+        controller.setActiveForTest()
+        // Set reconnect RECOVERING to simulate mid-reconnect state
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
+        // inflight disposition is RESUMED_CLEANLY (no artifact), but unified phase is RECOVERING
+
+        val deferred = async {
+            withTimeout(500) {
+                controller.reconciliationSignals.first {
+                    it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
+                }
+            }
+        }
+
+        controller.publishRuntimeTruthSnapshot()
+
+        val signal = deferred.await()
+        val recoveryStateInPayload =
+            signal.payload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
+        assertEquals(
+            "RUNTIME_TRUTH_SNAPSHOT MUST carry 'recovering' when reconnect is RECOVERING, " +
+                "not the raw inflight disposition",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING.wireValue,
+            recoveryStateInPayload
+        )
+    }
+
+    @Test
+    fun `unifiedRecoveryPhase returns to clean state after reconnect recovery succeeds`() {
+        val settings = InMemoryAppSettings(deviceId = "Pixel-116")
+        val controller = buildController(settings)
+        controller.setActiveForTest()
+
+        // Simulate reconnect cycle
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
+        assertEquals(
+            "During reconnect, unifiedRecoveryPhase must be RECOVERING",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+            controller.unifiedRecoveryPhase.value
+        )
+
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERED)
+        assertEquals(
+            "After reconnect, unifiedRecoveryPhase must return to RESUMED_CLEANLY " +
+                "(RECOVERED reconnect + RESUMED_CLEANLY inflight = RESUMED_CLEANLY)",
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY,
+            controller.unifiedRecoveryPhase.value
+        )
     }
 }

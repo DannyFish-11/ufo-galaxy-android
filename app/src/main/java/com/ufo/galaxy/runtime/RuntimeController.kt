@@ -766,6 +766,40 @@ class RuntimeController(
     val inflightContinuityRecovery: StateFlow<InflightContinuityRecoverySnapshot> =
         _inflightContinuityRecovery.asStateFlow()
 
+    /**
+     * PR-116 — Unified continuity recovery phase derived from both authoritative sources.
+     *
+     * Combines [reconnectRecoveryState] and [inflightContinuityRecovery] into the single
+     * [AndroidContinuityRecoveryStateModel.RecoveryPhase] value that encapsulates the
+     * current Android-side recovery truth.  Updated atomically whenever either source changes
+     * via [syncUnifiedRecoveryPhase].
+     *
+     * Consumers should observe this flow instead of calling
+     * [AndroidContinuityRecoveryStateModel.derive] themselves — it provides the same derivation
+     * as a stable, subscribable [StateFlow] without requiring field-combination at the call site.
+     *
+     * V2 sees the same value through [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT]
+     * payload key [ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE] (INV-REC-04).
+     */
+    private val _unifiedRecoveryPhase =
+        MutableStateFlow(AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY)
+    val unifiedRecoveryPhase: StateFlow<AndroidContinuityRecoveryStateModel.RecoveryPhase> =
+        _unifiedRecoveryPhase.asStateFlow()
+
+    /**
+     * Re-derives and publishes the [unifiedRecoveryPhase] from the current values of
+     * [_reconnectRecoveryState] and [_inflightContinuityRecovery].
+     *
+     * Must be called after every write to [_reconnectRecoveryState] or
+     * [_inflightContinuityRecovery] so that [unifiedRecoveryPhase] stays in sync with its
+     * two authoritative sources.
+     */
+    private fun syncUnifiedRecoveryPhase() {
+        _unifiedRecoveryPhase.value = AndroidContinuityRecoveryStateModel.derive(
+            reconnectRecoveryState = _reconnectRecoveryState.value,
+            inflightDisposition = _inflightContinuityRecovery.value.disposition
+        )
+    }
 
     private val controllerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -828,6 +862,7 @@ class RuntimeController(
                 if (prevRecoveryState == ReconnectRecoveryState.RECOVERING ||
                     prevRecoveryState == ReconnectRecoveryState.FAILED) {
                     _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERED
+                    syncUnifiedRecoveryPhase()
                     val transitionLabel = "${prevRecoveryState.wireValue}→recovered"
                     val watchdogNote = if (prevRecoveryState == ReconnectRecoveryState.FAILED) {
                         " (watchdog cycle resolved)"
@@ -875,6 +910,7 @@ class RuntimeController(
                 // PR-33: Surface the in-progress reconnect as RECOVERING so the UI can show
                 // a "Recovering…" indicator rather than just clearing the connected flag.
                 _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERING
+                syncUnifiedRecoveryPhase()
                 GalaxyLogger.log(
                     GalaxyLogger.TAG_RECONNECT_RECOVERY,
                     mapOf(
@@ -915,6 +951,7 @@ class RuntimeController(
             // watchdog interval so the recovery state machine tracks the next WS cycle.
             if (_reconnectRecoveryState.value == ReconnectRecoveryState.RECOVERING) {
                 _reconnectRecoveryState.value = ReconnectRecoveryState.FAILED
+                syncUnifiedRecoveryPhase()
                 GalaxyLogger.log(
                     GalaxyLogger.TAG_RECONNECT_RECOVERY,
                     mapOf(
@@ -954,6 +991,7 @@ class RuntimeController(
                     if (_reconnectRecoveryState.value == ReconnectRecoveryState.FAILED &&
                         _state.value == RuntimeState.Active) {
                         _reconnectRecoveryState.value = ReconnectRecoveryState.RECOVERING
+                        syncUnifiedRecoveryPhase()
                         GalaxyLogger.log(
                             GalaxyLogger.TAG_RECONNECT_RECOVERY,
                             mapOf(
@@ -1241,6 +1279,7 @@ class RuntimeController(
         // clean baseline.  Any ongoing "Recovering…" or "Failed" banner should disappear
         // when the user deliberately turns off cross-device or triggers a full reconnect.
         _reconnectRecoveryState.value = ReconnectRecoveryState.IDLE
+        syncUnifiedRecoveryPhase()
         // PR-Block1: Cancel any pending watchdog recovery job so it does not fire after
         // the user has explicitly stopped the runtime.
         watchdogRecoveryJob?.cancel()
@@ -1580,6 +1619,7 @@ class RuntimeController(
             source = source
         )
         _inflightContinuityRecovery.value = snapshot
+        syncUnifiedRecoveryPhase()
         GalaxyLogger.log(
             GalaxyLogger.TAG_LIVE_EXECUTION,
             snapshot.toMetadataMap() + mapOf("event" to "inflight_continuity_classified")
@@ -2478,6 +2518,10 @@ class RuntimeController(
             distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
         )
         val inflightRecovery = inflightContinuityRecovery.value
+        // PR-116: use the unified recovery phase so RUNTIME_TRUTH_SNAPSHOT carries
+        // "recovering" or "recovery-failed" when reconnect state overrides inflight
+        // disposition, rather than silently reporting a stale inflight disposition.
+        val unifiedPhase = unifiedRecoveryPhase.value
         val truth = AndroidParticipantRuntimeTruth.from(
             descriptor = descriptor,
             sessionSnapshot = currentHostSessionSnapshot(),
@@ -2485,7 +2529,7 @@ class RuntimeController(
             readinessState = readinessState,
             activeTaskId = activeTaskId,
             activeTaskStatus = activeTaskStatus,
-            inflightContinuityState = inflightRecovery.disposition.wireValue,
+            inflightContinuityState = unifiedPhase.wireValue,
             inflightContinuityTaskId = inflightRecovery.taskId,
             inflightContinuitySource = inflightRecovery.source,
             inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
@@ -2939,6 +2983,18 @@ class RuntimeController(
         // PR-37: Use transitionState() so test paths also emit lifecycle events.
         transitionState(to = RuntimeState.Active, expectedFrom = null, trigger = "test_activation")
         openAttachedSession(SessionOpenSource.TEST_ONLY)
+    }
+
+    /**
+     * PR-116 — Test-only helper: directly sets [_reconnectRecoveryState] and syncs
+     * [unifiedRecoveryPhase] so tests can exercise the unified phase derivation without
+     * requiring a live WS connection.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun setReconnectRecoveryStateForTest(state: ReconnectRecoveryState) {
+        _reconnectRecoveryState.value = state
+        syncUnifiedRecoveryPhase()
     }
 
     // ── PR-37: Lifecycle hardening helpers ────────────────────────────────────
