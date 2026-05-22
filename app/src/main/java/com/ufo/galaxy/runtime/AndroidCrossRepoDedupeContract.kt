@@ -127,13 +127,13 @@ object AndroidCrossRepoDedupeContract {
                         add("payload.${DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH}")
                     }
                 }
-                val stableKeyMatchesEnvelopeIdempotency =
+                val stableKeyMatchesIdempotency =
                     stableDedupeKey != null && stableDedupeKey == idempotencyKey
                 Assessment(
                     messageType = type,
                     stableKey = stableDedupeKey ?: idempotencyKey,
                     status = when {
-                        stableKeyMatchesEnvelopeIdempotency &&
+                        stableKeyMatchesIdempotency &&
                             lineageKey != null &&
                             missing.isEmpty() -> ContractStatus.CANONICAL
                         stableDedupeKey != null || idempotencyKey != null -> ContractStatus.COMPATIBILITY
@@ -148,7 +148,7 @@ object AndroidCrossRepoDedupeContract {
                     durableSessionId = payload.stringOrNull(DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID),
                     missingFields = missing,
                     reason = when {
-                        stableKeyMatchesEnvelopeIdempotency &&
+                        stableKeyMatchesIdempotency &&
                             lineageKey != null &&
                             missing.isEmpty() ->
                             "reconciliation_stable_dedupe_key_matches_envelope"
@@ -161,14 +161,11 @@ object AndroidCrossRepoDedupeContract {
 
             MsgType.DELEGATED_EXECUTION_SIGNAL.value -> {
                 val signalId = payload.stringOrNull("signal_id")
+                val stableKey = signalId ?: idempotencyKey
                 Assessment(
                     messageType = type,
-                    stableKey = signalId ?: idempotencyKey,
-                    status = when {
-                        signalId != null -> ContractStatus.COMPATIBILITY
-                        idempotencyKey != null -> ContractStatus.COMPATIBILITY
-                        else -> ContractStatus.INVALID
-                    },
+                    stableKey = stableKey,
+                    status = if (stableKey != null) ContractStatus.COMPATIBILITY else ContractStatus.INVALID,
                     stableKeySource = when {
                         signalId != null -> "payload.signal_id"
                         idempotencyKey != null -> "idempotency_key"

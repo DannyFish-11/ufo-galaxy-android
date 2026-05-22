@@ -1,5 +1,6 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.protocol.MsgType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -81,12 +82,12 @@ class AndroidCrossRepoDedupeContractTest {
     @Test
     fun `runtime truth snapshot is authority sensitive and replay epoch bound`() {
         assertTrue(
-            "device_state_snapshot must participate in the canonical replay epoch contract",
-            "device_state_snapshot" in AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES
+            "${MsgType.DEVICE_STATE_SNAPSHOT.value} must participate in the canonical replay epoch contract",
+            MsgType.DEVICE_STATE_SNAPSHOT.value in AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES
         )
         assertTrue(
-            "device_state_snapshot must no longer replay as a null-tagged non-authority artifact",
-            "device_state_snapshot" in AndroidCrossRepoDedupeContract.AUTHORITY_SENSITIVE_REPLAY_TYPES
+            "${MsgType.DEVICE_STATE_SNAPSHOT.value} must no longer replay as a null-tagged non-authority artifact",
+            MsgType.DEVICE_STATE_SNAPSHOT.value in AndroidCrossRepoDedupeContract.AUTHORITY_SENSITIVE_REPLAY_TYPES
         )
     }
 }
