@@ -894,6 +894,17 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             v2RoutingDecision: AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision? = null
         ): ReconciliationSignal {
+            val normalizedRecoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase
+                .fromWireValue(truth.inflightContinuityState)
+            if (v2RoutingDecision != null) {
+                requireNotNull(normalizedRecoveryPhase) {
+                    "v2RoutingDecision requires a valid inflightContinuityState wire value"
+                }
+                require(v2RoutingDecision.phase == normalizedRecoveryPhase) {
+                    "v2RoutingDecision phase (${v2RoutingDecision.phase.wireValue}) must match " +
+                        "truth.inflightContinuityState (${normalizedRecoveryPhase.wireValue})"
+                }
+            }
             // Promote inflight continuity state into explicit payload keys so V2 can consume
             // recovery evidence directly from the reconciliation signal payload without having
             // to read nested runtimeTruth fields (INV-REC-04).
