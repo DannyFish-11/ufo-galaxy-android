@@ -512,6 +512,29 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         assertTrue(map.containsKey(keys.KEY_REPORTED_AT_MS))
         assertTrue(map.containsKey(keys.KEY_RECONCILIATION_EPOCH))
         assertTrue(map.containsKey(keys.KEY_IS_FULLY_RECONCILABLE))
+        assertTrue(map.containsKey(keys.KEY_OUTWARD_TRUTH_SURFACE_CLASS))
+        assertTrue(map.containsKey(keys.KEY_TRUTH_TIER))
+        assertTrue(map.containsKey(keys.KEY_SOURCE_AUTHORITY_CLASS))
+        assertTrue(map.containsKey(keys.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH))
+    }
+
+    @Test
+    fun `participant runtime truth is explicitly Android runtime-visible and non-canonical`() {
+        val truth = fullyReconcilableTruth()
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_RUNTIME_VISIBLE_STATE.wireValue,
+            truth.outwardTruthSurfaceClass
+        )
+        assertEquals(
+            RuntimeTruthPrecedenceRules.TruthTier.PROJECTION.wireValue,
+            truth.truthTier
+        )
+        assertEquals(
+            AndroidOutwardTruthSurfaceSemantics.SOURCE_AUTHORITY_ANDROID_LOCAL_RUNTIME,
+            truth.sourceAuthorityClass
+        )
+        assertFalse(truth.isV2ConfirmedCanonicalTruth)
     }
 
     @Test

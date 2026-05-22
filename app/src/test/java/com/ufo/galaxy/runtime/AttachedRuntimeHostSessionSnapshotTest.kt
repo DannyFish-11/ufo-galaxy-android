@@ -169,6 +169,47 @@ class AttachedRuntimeHostSessionSnapshotTest {
         assertEquals("snapshot_posture", AttachedRuntimeHostSessionSnapshot.KEY_POSTURE)
     }
 
+    @Test
+    fun `host snapshot marks outward surface as Android runtime-visible and non-canonical`() {
+        val snapshot = snapshotFrom(freshSession())
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_RUNTIME_VISIBLE_STATE.wireValue,
+            snapshot.outwardTruthSurfaceClass
+        )
+        assertEquals(
+            RuntimeTruthPrecedenceRules.TruthTier.SNAPSHOT.wireValue,
+            snapshot.truthTier
+        )
+        assertEquals(
+            AndroidOutwardTruthSurfaceSemantics.SOURCE_AUTHORITY_ANDROID_LOCAL_RUNTIME,
+            snapshot.sourceAuthorityClass
+        )
+        assertFalse(snapshot.isV2ConfirmedCanonicalTruth)
+    }
+
+    @Test
+    fun `toMap includes outward truth metadata for host snapshot`() {
+        val map = snapshotFrom(freshSession()).toMap()
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_RUNTIME_VISIBLE_STATE.wireValue,
+            map[AttachedRuntimeHostSessionSnapshot.KEY_OUTWARD_TRUTH_SURFACE_CLASS]
+        )
+        assertEquals(
+            RuntimeTruthPrecedenceRules.TruthTier.SNAPSHOT.wireValue,
+            map[AttachedRuntimeHostSessionSnapshot.KEY_TRUTH_TIER]
+        )
+        assertEquals(
+            AndroidOutwardTruthSurfaceSemantics.SOURCE_AUTHORITY_ANDROID_LOCAL_RUNTIME,
+            map[AttachedRuntimeHostSessionSnapshot.KEY_SOURCE_AUTHORITY_CLASS]
+        )
+        assertEquals(
+            false,
+            map[AttachedRuntimeHostSessionSnapshot.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH]
+        )
+    }
+
     // ── from — attach projection ──────────────────────────────────────────────
 
     @Test
@@ -401,8 +442,8 @@ class AttachedRuntimeHostSessionSnapshotTest {
     // ── ALWAYS_PRESENT_KEYS constant ──────────────────────────────────────────
 
     @Test
-    fun `ALWAYS_PRESENT_KEYS contains exactly 8 entries`() {
-        assertEquals(8, AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS.size)
+    fun `ALWAYS_PRESENT_KEYS contains exactly 12 entries`() {
+        assertEquals(12, AttachedRuntimeHostSessionSnapshot.ALWAYS_PRESENT_KEYS.size)
     }
 
     @Test

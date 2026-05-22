@@ -210,6 +210,47 @@ class DelegatedTargetReadinessProjectionTest {
         )
     }
 
+    @Test
+    fun `readiness projection is explicitly advisory and non-canonical`() {
+        val readiness = readinessFrom(freshSession())
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_ADVISORY_EVIDENCE.wireValue,
+            readiness.outwardTruthSurfaceClass
+        )
+        assertEquals(
+            RuntimeTruthPrecedenceRules.TruthTier.PROJECTION.wireValue,
+            readiness.truthTier
+        )
+        assertEquals(
+            AndroidOutwardTruthSurfaceSemantics.SOURCE_AUTHORITY_ANDROID_LOCAL_RUNTIME,
+            readiness.sourceAuthorityClass
+        )
+        assertFalse(readiness.isV2ConfirmedCanonicalTruth)
+    }
+
+    @Test
+    fun `toMap includes outward truth metadata for readiness projection`() {
+        val map = readinessFrom(freshSession()).toMap()
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_ADVISORY_EVIDENCE.wireValue,
+            map[DelegatedTargetReadinessProjection.KEY_OUTWARD_TRUTH_SURFACE_CLASS]
+        )
+        assertEquals(
+            RuntimeTruthPrecedenceRules.TruthTier.PROJECTION.wireValue,
+            map[DelegatedTargetReadinessProjection.KEY_TRUTH_TIER]
+        )
+        assertEquals(
+            AndroidOutwardTruthSurfaceSemantics.SOURCE_AUTHORITY_ANDROID_LOCAL_RUNTIME,
+            map[DelegatedTargetReadinessProjection.KEY_SOURCE_AUTHORITY_CLASS]
+        )
+        assertEquals(
+            false,
+            map[DelegatedTargetReadinessProjection.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH]
+        )
+    }
+
     // ── from — detach / not-suitable projection ───────────────────────────────
 
     @Test
@@ -439,8 +480,8 @@ class DelegatedTargetReadinessProjectionTest {
     // ── ALWAYS_PRESENT_KEYS constant ──────────────────────────────────────────
 
     @Test
-    fun `ALWAYS_PRESENT_KEYS contains exactly 10 entries`() {
-        assertEquals(10, DelegatedTargetReadinessProjection.ALWAYS_PRESENT_KEYS.size)
+    fun `ALWAYS_PRESENT_KEYS contains exactly 14 entries`() {
+        assertEquals(14, DelegatedTargetReadinessProjection.ALWAYS_PRESENT_KEYS.size)
     }
 
     @Test
