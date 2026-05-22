@@ -26,8 +26,8 @@ object AndroidCrossRepoDedupeContract {
 
     val CANONICAL_REPLAY_TYPES: Set<String> = setOf(
         MsgType.GOAL_EXECUTION_RESULT.value,
-        "device_execution_event",
-        "device_state_snapshot",
+        MsgType.DEVICE_EXECUTION_EVENT.value,
+        MsgType.DEVICE_STATE_SNAPSHOT.value,
         MsgType.RECONCILIATION_SIGNAL.value
     )
 
@@ -64,8 +64,8 @@ object AndroidCrossRepoDedupeContract {
 
         return when (type) {
             MsgType.GOAL_EXECUTION_RESULT.value,
-            "device_execution_event",
-            "device_state_snapshot" -> {
+            MsgType.DEVICE_EXECUTION_EVENT.value,
+            MsgType.DEVICE_STATE_SNAPSHOT.value -> {
                 val missing = buildList {
                     if (payload.stringOrNull(AndroidUplinkLineageMetadataContract.KEY_SCHEMA_VERSION).isNullOrBlank()) {
                         add("payload.${AndroidUplinkLineageMetadataContract.KEY_SCHEMA_VERSION}")
