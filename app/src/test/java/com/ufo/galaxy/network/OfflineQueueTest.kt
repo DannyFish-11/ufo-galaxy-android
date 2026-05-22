@@ -307,13 +307,14 @@ class OfflineQueueTest {
     }
 
     @Test
-    fun `previewReplayGovernance still allows null-tagged non-authority replay`() {
+    fun `previewReplayGovernance blocks null-tagged runtime truth replay without canonical authority`() {
         queue.enqueue("device_state_snapshot", """{"id":4}""")
 
         val decision = queue.previewReplayGovernance(currentTag = "durable-4").single()
 
-        assertEquals("replay", decision.disposition.wireValue)
-        assertTrue(decision.shouldForward)
+        assertEquals("attachment_only_recovery", decision.disposition.wireValue)
+        assertFalse(decision.shouldForward)
+        assertEquals("authority_sensitive_replay_requires_session_tag", decision.reason)
     }
 
     @Test
@@ -330,5 +331,11 @@ class OfflineQueueTest {
         assertEquals("attachment_only_recovery", decision.disposition.wireValue)
         assertFalse(decision.shouldForward)
         assertEquals("replay_order_metadata_missing_session_epoch", decision.reason)
+    }
+
+    @Test
+    fun `ORDERING_METADATA_REQUIRED_TYPES contains device_state_snapshot and reconciliation_signal`() {
+        assertTrue("device_state_snapshot" in OfflineTaskQueue.ORDERING_METADATA_REQUIRED_TYPES)
+        assertTrue("reconciliation_signal" in OfflineTaskQueue.ORDERING_METADATA_REQUIRED_TYPES)
     }
 }
