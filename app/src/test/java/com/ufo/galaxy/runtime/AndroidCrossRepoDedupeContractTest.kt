@@ -72,9 +72,11 @@ class AndroidCrossRepoDedupeContractTest {
         assertEquals(AndroidCrossRepoDedupeContract.ContractStatus.COMPATIBILITY, assessment.status)
         assertEquals("legacy-only", assessment.stableKey)
         assertTrue(
+            "Expected missing canonical lineage dedupe key",
             assessment.missingFields.contains("payload.${AndroidUplinkLineageMetadataContract.KEY_DEDUPE_KEY}")
         )
         assertTrue(
+            "Expected missing canonical session continuity epoch",
             assessment.missingFields.contains("payload.${DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH}")
         )
     }

@@ -31,8 +31,13 @@ object AndroidCrossRepoDedupeContract {
         MsgType.RECONCILIATION_SIGNAL.value
     )
 
-    val REPLAY_EPOCH_REQUIRED_TYPES: Set<String> =
-        CANONICAL_REPLAY_TYPES + MsgType.DELEGATED_EXECUTION_SIGNAL.value
+    val REPLAY_EPOCH_REQUIRED_TYPES: Set<String> = setOf(
+        MsgType.GOAL_EXECUTION_RESULT.value,
+        MsgType.DEVICE_EXECUTION_EVENT.value,
+        MsgType.DEVICE_STATE_SNAPSHOT.value,
+        MsgType.RECONCILIATION_SIGNAL.value,
+        MsgType.DELEGATED_EXECUTION_SIGNAL.value
+    )
 
     val AUTHORITY_SENSITIVE_REPLAY_TYPES: Set<String> = REPLAY_EPOCH_REQUIRED_TYPES
 
