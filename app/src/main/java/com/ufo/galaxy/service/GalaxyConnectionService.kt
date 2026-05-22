@@ -667,7 +667,9 @@ class GalaxyConnectionService : Service() {
                 .deriveV2CanonicalBoundary(
                     localExecutionCompleted = completionVisibility.resultReturned &&
                         completionVisibility.completionSignaled,
-                    advisoryEvidenceSent = true
+                    advisoryEvidenceSent = true,
+                    outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                        .OutwardTruthSurfaceClass.ANDROID_RUNTIME_VISIBLE_STATE
                 )
             val eventHasCanonicalTruthSignal =
                 eventStamp.lifecycleTerminalPhase == true &&
@@ -910,6 +912,7 @@ class GalaxyConnectionService : Service() {
                 v2_reconciliation_acknowledged = eventV2CanonicalBoundary.v2ReconciliationAcknowledged,
                 v2_canonical_truth_completed = eventV2CanonicalBoundary.v2CanonicalTruthCompleted,
                 v2_mature_closure_achieved = eventV2CanonicalBoundary.v2MatureClosureAchieved,
+                outward_truth_surface_class = eventV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）────────────────
                 // 从已预计算的 eventParticipationBoundary 直接读取，使 V2 可无歧义地将执行事件
                 // 路由至正确的分布式运行参与链，无需字段组合推断。
@@ -3174,7 +3177,9 @@ class GalaxyConnectionService : Service() {
         val resultV2CanonicalBoundary = AndroidCompletionClosureUplinkContract
             .deriveV2CanonicalBoundary(
                 localExecutionCompleted = resolvedGoalResultReturned && resolvedGoalCompletionSignaled,
-                advisoryEvidenceSent = true
+                advisoryEvidenceSent = true,
+                outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                    .OutwardTruthSurfaceClass.ANDROID_ADVISORY_EVIDENCE
             )
         val resultTruthOwnershipBoundary = deriveTruthOwnershipBoundary(
             executionBusy = resolvedGoalResultReturned ||
@@ -3309,6 +3314,7 @@ class GalaxyConnectionService : Service() {
             v2_reconciliation_acknowledged = resultV2CanonicalBoundary.v2ReconciliationAcknowledged,
             v2_canonical_truth_completed = resultV2CanonicalBoundary.v2CanonicalTruthCompleted,
             v2_mature_closure_achieved = resultV2CanonicalBoundary.v2MatureClosureAchieved,
+            outward_truth_surface_class = resultV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
             participation_boundary_role = resultParticipationBoundary.participationBoundaryRole.wireValue,
             ownership_posture_class = resultParticipationBoundary.ownershipPostureClass.wireValue,
             remote_local_mode_class = resultParticipationBoundary.remoteLocalModeClass.wireValue,
@@ -4657,7 +4663,9 @@ class GalaxyConnectionService : Service() {
             val snapshotV2CanonicalBoundary = AndroidCompletionClosureUplinkContract
                 .deriveV2CanonicalBoundary(
                     localExecutionCompleted = false,
-                    advisoryEvidenceSent = true
+                    advisoryEvidenceSent = true,
+                    outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                        .OutwardTruthSurfaceClass.ANDROID_DIAGNOSTICS_VISIBLE_STATE
                 )
 
             // ── PR-08v2 (Android): 预先推导分布式运行参与边界快照（在快照发送层唯一计算）────────────
@@ -4943,6 +4951,8 @@ class GalaxyConnectionService : Service() {
                 v2_reconciliation_acknowledged = snapshotV2CanonicalBoundary.v2ReconciliationAcknowledged,
                 v2_canonical_truth_completed = snapshotV2CanonicalBoundary.v2CanonicalTruthCompleted,
                 v2_mature_closure_achieved = snapshotV2CanonicalBoundary.v2MatureClosureAchieved,
+                outward_truth_surface_class =
+                    snapshotV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在快照发送层填充）────────────────────
                 // device_state_snapshot 为诊断性信号，participation_boundary_role 始终为
                 // DIAGNOSTICS_SUMMARY_ONLY，明确声明本快照不参与 distributed runtime 决策，

@@ -137,6 +137,7 @@ class Pr10AndroidMissionCompletionSemanticsHardeningTest {
             v2_reconciliation_acknowledged = false,
             v2_canonical_truth_completed = false,
             v2_mature_closure_achieved = false,
+            outward_truth_surface_class = "android_runtime_visible_state",
             local_observation_basis = "cached_state"
         )
 
@@ -158,6 +159,7 @@ class Pr10AndroidMissionCompletionSemanticsHardeningTest {
         assertFalse(json["v2_reconciliation_acknowledged"].asBoolean)
         assertFalse(json["v2_canonical_truth_completed"].asBoolean)
         assertFalse(json["v2_mature_closure_achieved"].asBoolean)
+        assertEquals("android_runtime_visible_state", json["outward_truth_surface_class"].asString)
         assertEquals("cached_state", json["local_observation_basis"].asString)
     }
 

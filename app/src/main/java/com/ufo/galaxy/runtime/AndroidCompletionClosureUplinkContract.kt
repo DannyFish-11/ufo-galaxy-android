@@ -27,6 +27,7 @@ object AndroidCompletionClosureUplinkContract {
     const val KEY_V2_RECONCILIATION_ACKNOWLEDGED = "v2_reconciliation_acknowledged"
     const val KEY_V2_CANONICAL_TRUTH_COMPLETED = "v2_canonical_truth_completed"
     const val KEY_V2_MATURE_CLOSURE_ACHIEVED = "v2_mature_closure_achieved"
+    const val KEY_OUTWARD_TRUTH_SURFACE_CLASS = "outward_truth_surface_class"
 
     enum class AuthorityRuntimeCompletionSignalClass(val wireValue: String) {
         AUTHORITY_RUNTIME_COMPLETION("authority_runtime_completion"),
@@ -54,6 +55,13 @@ object AndroidCompletionClosureUplinkContract {
         LOCAL_INTERPRETATION("local_interpretation")
     }
 
+    enum class OutwardTruthSurfaceClass(val wireValue: String) {
+        ANDROID_ADVISORY_EVIDENCE("android_advisory_evidence"),
+        ANDROID_RUNTIME_VISIBLE_STATE("android_runtime_visible_state"),
+        ANDROID_DIAGNOSTICS_VISIBLE_STATE("android_diagnostics_visible_state"),
+        V2_CONFIRMED_CANONICAL_TRUTH("v2_confirmed_canonical_truth")
+    }
+
     data class CompletionClosureUplinkSnapshot(
         val authorityRuntimeCompletionSignalClass: AuthorityRuntimeCompletionSignalClass,
         val resultCompletionSignalClass: ResultCompletionSignalClass,
@@ -76,8 +84,24 @@ object AndroidCompletionClosureUplinkContract {
         val v2UplinkAcknowledged: Boolean,
         val v2ReconciliationAcknowledged: Boolean,
         val v2CanonicalTruthCompleted: Boolean,
-        val v2MatureClosureAchieved: Boolean
+        val v2MatureClosureAchieved: Boolean,
+        val outwardTruthSurfaceClass: OutwardTruthSurfaceClass
     ) {
+        init {
+            require(
+                !v2CanonicalTruthCompleted ||
+                    outwardTruthSurfaceClass == OutwardTruthSurfaceClass.V2_CONFIRMED_CANONICAL_TRUTH
+            ) {
+                "Only v2_confirmed_canonical_truth surface may mark v2_canonical_truth_completed=true"
+            }
+            require(
+                !v2MatureClosureAchieved ||
+                    outwardTruthSurfaceClass == OutwardTruthSurfaceClass.V2_CONFIRMED_CANONICAL_TRUTH
+            ) {
+                "Only v2_confirmed_canonical_truth surface may mark v2_mature_closure_achieved=true"
+            }
+        }
+
         fun toWireMap(): Map<String, Boolean> = mapOf(
             KEY_LOCAL_EXECUTION_COMPLETED to localExecutionCompleted,
             KEY_ADVISORY_EVIDENCE_SENT to advisoryEvidenceSent,
@@ -90,14 +114,17 @@ object AndroidCompletionClosureUplinkContract {
 
     fun deriveV2CanonicalBoundary(
         localExecutionCompleted: Boolean,
-        advisoryEvidenceSent: Boolean = true
+        advisoryEvidenceSent: Boolean = true,
+        outwardTruthSurfaceClass: OutwardTruthSurfaceClass =
+            OutwardTruthSurfaceClass.ANDROID_ADVISORY_EVIDENCE
     ): V2CanonicalBoundarySnapshot = V2CanonicalBoundarySnapshot(
         localExecutionCompleted = localExecutionCompleted,
         advisoryEvidenceSent = advisoryEvidenceSent,
         v2UplinkAcknowledged = false,
         v2ReconciliationAcknowledged = false,
         v2CanonicalTruthCompleted = false,
-        v2MatureClosureAchieved = false
+        v2MatureClosureAchieved = false,
+        outwardTruthSurfaceClass = outwardTruthSurfaceClass
     )
 
     fun deriveForGoalResult(

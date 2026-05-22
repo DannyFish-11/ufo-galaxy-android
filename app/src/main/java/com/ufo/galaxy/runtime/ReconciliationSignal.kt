@@ -336,6 +336,10 @@ data class ReconciliationSignal(
         const val KEY_V2_MATURE_CLOSURE_ACHIEVED =
             AndroidCompletionClosureUplinkContract.KEY_V2_MATURE_CLOSURE_ACHIEVED
 
+        /** Payload key: outward truth-surface authority classification. */
+        const val KEY_OUTWARD_TRUTH_SURFACE_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_OUTWARD_TRUTH_SURFACE_CLASS
+
         /** Wire key for [signalId]. */
         const val KEY_SIGNAL_ID = "reconciliation_signal_id"
 
@@ -510,7 +514,10 @@ data class ReconciliationSignal(
             isTerminalSignal: Boolean,
             resultReturned: Boolean,
             completionSignaled: Boolean,
-            closureReadyForAcceptance: Boolean
+            closureReadyForAcceptance: Boolean,
+            outwardTruthSurfaceClass: AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass =
+                AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                    .ANDROID_ADVISORY_EVIDENCE
         ): Map<String, Any?> {
             val completionClosure = AndroidCompletionClosureUplinkContract
                 .deriveForReconciliationSignal(
@@ -522,7 +529,8 @@ data class ReconciliationSignal(
             val v2Boundary = AndroidCompletionClosureUplinkContract
                 .deriveV2CanonicalBoundary(
                     localExecutionCompleted = isTerminalSignal && resultReturned && completionSignaled,
-                    advisoryEvidenceSent = true
+                    advisoryEvidenceSent = true,
+                    outwardTruthSurfaceClass = outwardTruthSurfaceClass
                 )
             return mapOf(
                 KEY_RESULT_RETURNED to resultReturned,
@@ -543,7 +551,8 @@ data class ReconciliationSignal(
                 KEY_V2_UPLINK_ACKNOWLEDGED to v2Boundary.v2UplinkAcknowledged,
                 KEY_V2_RECONCILIATION_ACKNOWLEDGED to v2Boundary.v2ReconciliationAcknowledged,
                 KEY_V2_CANONICAL_TRUTH_COMPLETED to v2Boundary.v2CanonicalTruthCompleted,
-                KEY_V2_MATURE_CLOSURE_ACHIEVED to v2Boundary.v2MatureClosureAchieved
+                KEY_V2_MATURE_CLOSURE_ACHIEVED to v2Boundary.v2MatureClosureAchieved,
+                KEY_OUTWARD_TRUTH_SURFACE_CLASS to v2Boundary.outwardTruthSurfaceClass.wireValue
             )
         }
 
@@ -912,7 +921,9 @@ data class ReconciliationSignal(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
-                closureReadyForAcceptance = false
+                closureReadyForAcceptance = false,
+                outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                    .OutwardTruthSurfaceClass.ANDROID_RUNTIME_VISIBLE_STATE
             ).toMutableMap<String, Any?>().apply {
                 truth.inflightContinuityState?.let {
                     put(KEY_CONTINUITY_RECOVERY_STATE, it)

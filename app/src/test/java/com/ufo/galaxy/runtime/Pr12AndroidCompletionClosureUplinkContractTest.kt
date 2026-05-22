@@ -147,6 +147,13 @@ class Pr12AndroidCompletionClosureUplinkContractTest {
                 AndroidCompletionClosureUplinkContract.KEY_V2_MATURE_CLOSURE_ACHIEVED
             )
         )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_ADVISORY_EVIDENCE,
+            AndroidCompletionClosureUplinkContract
+                .deriveV2CanonicalBoundary(localExecutionCompleted = false)
+                .outwardTruthSurfaceClass
+        )
     }
 
     @Test
@@ -161,6 +168,25 @@ class Pr12AndroidCompletionClosureUplinkContractTest {
         assertFalse(boundary.v2ReconciliationAcknowledged)
         assertFalse(boundary.v2CanonicalTruthCompleted)
         assertFalse(boundary.v2MatureClosureAchieved)
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_ADVISORY_EVIDENCE,
+            boundary.outwardTruthSurfaceClass
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `non canonical outward class cannot self-claim canonical truth completion`() {
+        AndroidCompletionClosureUplinkContract.V2CanonicalBoundarySnapshot(
+            localExecutionCompleted = true,
+            advisoryEvidenceSent = true,
+            v2UplinkAcknowledged = false,
+            v2ReconciliationAcknowledged = false,
+            v2CanonicalTruthCompleted = true,
+            v2MatureClosureAchieved = false,
+            outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                .OutwardTruthSurfaceClass.ANDROID_RUNTIME_VISIBLE_STATE
+        )
     }
 
     @Test
@@ -172,6 +198,11 @@ class Pr12AndroidCompletionClosureUplinkContractTest {
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_RECONCILIATION_ACKNOWLEDGED])
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED])
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED])
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_ADVISORY_EVIDENCE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_OUTWARD_TRUTH_SURFACE_CLASS]
+        )
     }
 
     @Test
@@ -185,6 +216,49 @@ class Pr12AndroidCompletionClosureUplinkContractTest {
         assertEquals(true, signal.payload[ReconciliationSignal.KEY_ADVISORY_EVIDENCE_SENT])
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED])
         assertEquals(false, signal.payload[ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED])
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_ADVISORY_EVIDENCE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_OUTWARD_TRUTH_SURFACE_CLASS]
+        )
+    }
+
+    @Test
+    fun `runtime truth snapshot is marked as runtime-visible not canonical truth`() {
+        val signal = ReconciliationSignal.runtimeTruthSnapshot(
+            truth = AndroidParticipantRuntimeTruth(
+                participantId = "pid-pr12",
+                deviceId = "device-pr12",
+                hostId = "host-pr12",
+                deviceRole = "phone",
+                participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE,
+                coordinationRole = ParticipantCoordinationRole.PARTICIPANT,
+                sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME.wireValue,
+                sessionId = "session-pr12",
+                sessionState = AttachedRuntimeSession.State.ATTACHED,
+                delegatedExecutionCount = 0,
+                healthState = ParticipantHealthState.HEALTHY,
+                readinessState = ParticipantReadinessState.READY,
+                activeTaskId = null,
+                activeTaskStatus = null,
+                inflightContinuityState = AndroidContinuityRecoveryStateModel
+                    .RecoveryPhase.RESUMED_CLEANLY.wireValue,
+                inflightContinuityTaskId = null,
+                inflightContinuitySource = "test",
+                inflightContinuityObservedAtMs = 0L,
+                authoritativeParticipationState = "active",
+                authoritativeParticipationTransitionSequence = 1L,
+                authoritativeParticipationTransitionTrigger = "test",
+                authoritativeParticipationTransitionHistory = listOf("test"),
+                reportedAtMs = 0L,
+                reconciliationEpoch = 1
+            )
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                .ANDROID_RUNTIME_VISIBLE_STATE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_OUTWARD_TRUTH_SURFACE_CLASS]
+        )
     }
 
     @Test
