@@ -173,6 +173,18 @@ class ReconciliationSignalReliableReplayTest {
         assertEquals(0, client.offlineQueue.size)
         val replayed = reconciliationEnvelopes(recordingSocket).single()
         assertEquals(signal.stableDedupeKey, replayed.get("idempotency_key").asString)
+        assertEquals("offline_queue_replay", replayed.get("replay_semantic_class").asString)
+        assertEquals("android_offline_replay_ordering_v1", replayed.get("replay_order_contract_version").asString)
+        assertEquals(1, replayed.get("replay_flush_index").asInt)
+        assertEquals(1, replayed.get("replay_flush_total").asInt)
+        assertTrue(replayed.get("replay_queue_sequence").asLong > 0L)
+        assertTrue(replayed.get("replay_queued_at_ms").asLong > 0L)
+        assertTrue(replayed.get("replay_session_tag_present").asBoolean)
+        assertEquals("durable-reliable", replayed.get("replay_session_tag").asString)
+        assertTrue(replayed.get("replay_session_epoch_present").asBoolean)
+        assertEquals(0, replayed.get("replay_session_epoch").asInt)
+        assertEquals(signal.stableDedupeKey, replayed.get("replay_dedupe_key").asString)
+        assertTrue(replayed.has("replay_flush_id"))
         val payload = replayed.getAsJsonObject("payload")
         assertEquals("task-flush", payload.get("task_id").asString)
         assertEquals("durable-reliable", payload.get("durable_session_id").asString)
@@ -188,6 +200,52 @@ class ReconciliationSignalReliableReplayTest {
         assertTrue(payload.has("uplink_lineage_emission_id"))
         assertTrue(payload.has("uplink_lineage_dedupe_key"))
         assertTrue(payload.has("uplink_lineage_recovery_basis"))
+    }
+
+    @Test
+    fun `reconnect flush preserves replay ordering metadata across multiple items`() {
+        val client = buildClient(durableSessionId = "durable-order", sessionEpoch = 3)
+        val recordingSocket = RecordingWebSocket()
+        val first = buildSignal(
+            taskId = "task-order-1",
+            signalId = "sig-order-1",
+            durableSessionId = "durable-order",
+            sessionEpoch = 3
+        )
+        val second = buildSignal(
+            taskId = "task-order-2",
+            signalId = "sig-order-2",
+            durableSessionId = "durable-order",
+            sessionEpoch = 3
+        )
+
+        assertFalse(client.sendJson(toEnvelopeJson(first)))
+        assertFalse(client.sendJson(toEnvelopeJson(second)))
+        assertEquals(2, client.offlineQueue.size)
+
+        client.installWebSocketForTest(recordingSocket)
+        client.simulateCanonicalReconnectOpenForTest()
+
+        val replayed = reconciliationEnvelopes(recordingSocket)
+        assertEquals(2, replayed.size)
+        assertEquals(
+            "task-order-1",
+            replayed[0].getAsJsonObject("payload").get("task_id").asString
+        )
+        assertEquals(
+            "task-order-2",
+            replayed[1].getAsJsonObject("payload").get("task_id").asString
+        )
+        val flushId = replayed[0].get("replay_flush_id").asString
+        assertEquals(flushId, replayed[1].get("replay_flush_id").asString)
+        assertEquals(1, replayed[0].get("replay_flush_index").asInt)
+        assertEquals(2, replayed[1].get("replay_flush_index").asInt)
+        assertEquals(2, replayed[0].get("replay_flush_total").asInt)
+        assertEquals(2, replayed[1].get("replay_flush_total").asInt)
+        assertTrue(
+            replayed[0].get("replay_queue_sequence").asLong <
+                replayed[1].get("replay_queue_sequence").asLong
+        )
     }
 
     @Test

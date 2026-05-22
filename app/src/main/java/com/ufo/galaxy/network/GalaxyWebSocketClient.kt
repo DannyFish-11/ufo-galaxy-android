@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
@@ -1135,6 +1136,48 @@ class GalaxyWebSocketClient(
         null
     }
 
+    private val replayFlushIdCounter = AtomicLong(0L)
+
+    private fun annotateReplayEnvelopeForFlush(
+        message: OfflineTaskQueue.QueuedMessage,
+        replayFlushId: String,
+        replayFlushIndex: Int,
+        replayFlushTotal: Int
+    ): String {
+        val root = try {
+            gson.fromJson(message.json, JsonObject::class.java)
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "[WS:OfflineQueue] Failed to parse replay envelope JSON for metadata annotation; " +
+                    "forwarding original payload " +
+                    "type=${message.type} queue_sequence=${message.queueSequence} error=${e.message}"
+            )
+            null
+        } ?: return message.json
+        root.addProperty("replay_semantic_class", "offline_queue_replay")
+        root.addProperty("replay_order_contract_version", "android_offline_replay_ordering_v1")
+        root.addProperty("replay_flush_id", replayFlushId)
+        root.addProperty("replay_flush_index", replayFlushIndex)
+        root.addProperty("replay_flush_total", replayFlushTotal)
+        root.addProperty("replay_queue_sequence", message.queueSequence)
+        root.addProperty("replay_queued_at_ms", message.queuedAt)
+        val hasSessionTag = !message.sessionTag.isNullOrBlank()
+        root.addProperty("replay_session_tag_present", hasSessionTag)
+        if (hasSessionTag) {
+            root.addProperty("replay_session_tag", message.sessionTag)
+        }
+        val sessionEpoch = message.sessionEpoch
+        root.addProperty("replay_session_epoch_present", sessionEpoch != null)
+        if (sessionEpoch != null) {
+            root.addProperty("replay_session_epoch", sessionEpoch)
+        }
+        if (!message.dedupeKey.isNullOrBlank()) {
+            root.addProperty("replay_dedupe_key", message.dedupeKey)
+        }
+        return gson.toJson(root)
+    }
+
     private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
         val lineageSessionEpoch = tryExtractIntFieldNested(
             json,
@@ -2075,12 +2118,31 @@ class GalaxyWebSocketClient(
         if (messages.isEmpty()) return
 
         Log.i(TAG, "[WS:OfflineQueue] Flushing ${messages.size} offline message(s)")
+        val replayFlushId =
+            "flush-${runtimeSessionId ?: "no_runtime"}-" +
+                "${System.currentTimeMillis()}-${replayFlushIdCounter.incrementAndGet()}"
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "offline_replay_flush_started",
+                "replay_flush_id" to replayFlushId,
+                "replay_flush_total" to messages.size,
+                "replay_session_tag" to (durableSessionId ?: ""),
+                "replay_session_epoch" to (sessionContinuityEpoch ?: -1)
+            )
+        )
         var sent = 0
         var lost = 0
-        for (msg in messages) {
+        for ((index, msg) in messages.withIndex()) {
+            val replayJson = annotateReplayEnvelopeForFlush(
+                message = msg,
+                replayFlushId = replayFlushId,
+                replayFlushIndex = index + 1,
+                replayFlushTotal = messages.size
+            )
             // Route through sendJson() so that the cross-device gate is uniformly enforced
             // during replay — same constraints as every other outbound message.
-            val ok = sendJson(msg.json)
+            val ok = sendJson(replayJson)
             if (!ok) {
                 lost++
                 Log.w(
@@ -2092,6 +2154,21 @@ class GalaxyWebSocketClient(
                 sent++
                 Log.d(TAG, "[WS:OfflineQueue] Flushed type=${msg.type}")
             }
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "offline_replay_flush_item",
+                    "replay_flush_id" to replayFlushId,
+                    "replay_flush_index" to (index + 1),
+                    "replay_flush_total" to messages.size,
+                    "replay_queue_sequence" to msg.queueSequence,
+                    "replay_type" to msg.type,
+                    "replay_forwarded" to ok,
+                    "replay_session_tag" to (msg.sessionTag ?: ""),
+                    "replay_session_epoch" to (msg.sessionEpoch ?: -1),
+                    "replay_reason" to if (ok) "forwarded" else "send_failed_requeued"
+                )
+            )
         }
         if (lost > 0) {
             Log.w(TAG, "[WS:OfflineQueue] Flush complete: sent=$sent failed=$lost")

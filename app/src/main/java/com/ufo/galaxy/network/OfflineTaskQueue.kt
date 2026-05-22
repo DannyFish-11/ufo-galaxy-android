@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Thread-safe offline task queue for outgoing task result messages.
@@ -92,6 +93,19 @@ class OfflineTaskQueue(
             "device_acceptance_report",
             MsgType.RECONCILIATION_SIGNAL.value
         )
+
+        /**
+         * Queue types that require continuity-epoch metadata to be replay-forwardable.
+         *
+         * These message classes influence canonical result/event continuity and therefore
+         * must not be replayed without explicit ordering scope.
+         */
+        val ORDERING_METADATA_REQUIRED_TYPES: Set<String> = setOf(
+            "goal_execution_result",
+            "delegated_execution_signal",
+            "device_execution_event",
+            MsgType.RECONCILIATION_SIGNAL.value
+        )
     }
 
     /**
@@ -116,11 +130,13 @@ class OfflineTaskQueue(
         val queuedAt: Long = System.currentTimeMillis(),
         val sessionTag: String? = null,
         val sessionEpoch: Int? = null,
-        val dedupeKey: String? = null
+        val dedupeKey: String? = null,
+        val queueSequence: Long = 0L
     )
 
     private val queue = ArrayDeque<QueuedMessage>()
     private val lock = Any()
+    private val queueSequenceCounter = AtomicLong(0L)
 
     private val _sizeFlow = MutableStateFlow(0)
 
@@ -197,7 +213,8 @@ class OfflineTaskQueue(
                     json = json,
                     sessionTag = sessionTag,
                     sessionEpoch = sessionEpoch,
-                    dedupeKey = dedupeKey
+                    dedupeKey = dedupeKey,
+                    queueSequence = queueSequenceCounter.incrementAndGet()
                 )
             )
             Log.d(TAG, "[WS:OfflineQueue] Enqueued type=$type queue_size=${queue.size}")
@@ -242,17 +259,27 @@ class OfflineTaskQueue(
             )
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_FORWARDED,
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED ->
-            ReplayGovernanceDecision(
-                message = message,
-                disposition = AndroidContinuityIntegration.ContinuityDisposition.REPLAY,
-                action = AndroidContinuityIntegration.ContinuityGovernanceAction.ALLOW_REPLAY,
-                shouldForward = true,
-                reason = if (message.sessionTag == null) {
-                    "legacy_queue_entry_without_session_tag"
-                } else {
-                    "durable_session_tag_matches_current_authority"
-                }
-            )
+            if (message.type in ORDERING_METADATA_REQUIRED_TYPES && message.sessionEpoch == null) {
+                ReplayGovernanceDecision(
+                    message = message,
+                    disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                    action = AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                    shouldForward = false,
+                    reason = "replay_order_metadata_missing_session_epoch"
+                )
+            } else {
+                ReplayGovernanceDecision(
+                    message = message,
+                    disposition = AndroidContinuityIntegration.ContinuityDisposition.REPLAY,
+                    action = AndroidContinuityIntegration.ContinuityGovernanceAction.ALLOW_REPLAY,
+                    shouldForward = true,
+                    reason = if (message.sessionTag == null) {
+                        "legacy_queue_entry_without_session_tag"
+                    } else {
+                        "durable_session_tag_matches_current_authority"
+                    }
+                )
+            }
         }
     }
 
@@ -479,6 +506,8 @@ class OfflineTaskQueue(
                         stale++
                     }
                 }
+                val maxLoadedSequence = queue.maxOfOrNull { it.queueSequence } ?: 0L
+                queueSequenceCounter.updateAndGet { current -> maxOf(current, maxLoadedSequence) }
                 queue.size
             }
             _sizeFlow.value = loaded

@@ -73,6 +73,8 @@ class OfflineQueueTest {
         assertEquals("""{"id":1}""", messages[0].json)
         assertEquals("""{"id":2}""", messages[1].json)
         assertEquals("""{"id":3}""", messages[2].json)
+        assertTrue(messages[0].queueSequence < messages[1].queueSequence)
+        assertTrue(messages[1].queueSequence < messages[2].queueSequence)
     }
 
     @Test
@@ -312,5 +314,21 @@ class OfflineQueueTest {
 
         assertEquals("replay", decision.disposition.wireValue)
         assertTrue(decision.shouldForward)
+    }
+
+    @Test
+    fun `previewReplayGovernance blocks authority-sensitive replay missing session epoch`() {
+        queue.enqueue(
+            "goal_execution_result",
+            """{"id":5}""",
+            sessionTag = "durable-5"
+            // sessionEpoch intentionally missing
+        )
+
+        val decision = queue.previewReplayGovernance(currentTag = "durable-5").single()
+
+        assertEquals("attachment_only_recovery", decision.disposition.wireValue)
+        assertFalse(decision.shouldForward)
+        assertEquals("replay_order_metadata_missing_session_epoch", decision.reason)
     }
 }
