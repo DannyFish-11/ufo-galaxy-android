@@ -20,6 +20,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -561,6 +562,94 @@ class Pr119AndroidCrossRepoRecoveryStateRoutingContractTest {
             AndroidCrossRepoRecoveryStateRoutingContract.V2RoutingCategory.ADVISORY_INFLIGHT_EVIDENCE.wireValue,
             signal.payload[ReconciliationSignal.KEY_V2_ROUTING_CATEGORY]
         )
+    }
+
+    @Test
+    fun `runtimeTruthSnapshot rejects routing decision when truth recovery phase does not match`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = RuntimeHostDescriptor(
+                hostId = "host-119-mismatch",
+                deviceId = "Pixel-119",
+                deviceRole = "phone",
+                formationRole = RuntimeHostDescriptor.FormationRole.PRIMARY,
+                participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+            ),
+            sessionSnapshot = null,
+            healthState = ParticipantHealthState.UNKNOWN,
+            readinessState = ParticipantReadinessState.UNKNOWN,
+            activeTaskId = "task-mismatch-119",
+            activeTaskStatus = null,
+            inflightContinuityState = AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING.wireValue,
+            inflightContinuityTaskId = "task-mismatch-119",
+            inflightContinuitySource = "reconnect_recovery",
+            inflightContinuityObservedAtMs = null,
+            carrierForegroundVisible = false,
+            authoritativeParticipationState = "active",
+            authoritativeParticipationTransitionSequence = 3L,
+            authoritativeParticipationTransitionTrigger = "reconnect",
+            authoritativeParticipationTransitionHistory = emptyList(),
+            reconciliationEpoch = 3
+        )
+        val mismatchedDecision = AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT
+        )
+
+        try {
+            ReconciliationSignal.runtimeTruthSnapshot(
+                truth = truth,
+                v2RoutingDecision = mismatchedDecision
+            )
+            fail("Expected IllegalArgumentException for mismatched recovery phase and routing decision")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(
+                "error should mention phase mismatch",
+                expected.message?.contains("must match") == true
+            )
+        }
+    }
+
+    @Test
+    fun `runtimeTruthSnapshot rejects routing decision when truth recovery phase is missing`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = RuntimeHostDescriptor(
+                hostId = "host-119-missing-phase",
+                deviceId = "Pixel-119",
+                deviceRole = "phone",
+                formationRole = RuntimeHostDescriptor.FormationRole.PRIMARY,
+                participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+            ),
+            sessionSnapshot = null,
+            healthState = ParticipantHealthState.UNKNOWN,
+            readinessState = ParticipantReadinessState.UNKNOWN,
+            activeTaskId = "task-missing-phase-119",
+            activeTaskStatus = null,
+            inflightContinuityState = null,
+            inflightContinuityTaskId = null,
+            inflightContinuitySource = "none",
+            inflightContinuityObservedAtMs = null,
+            carrierForegroundVisible = false,
+            authoritativeParticipationState = "active",
+            authoritativeParticipationTransitionSequence = 4L,
+            authoritativeParticipationTransitionTrigger = "init",
+            authoritativeParticipationTransitionHistory = emptyList(),
+            reconciliationEpoch = 4
+        )
+        val decision = AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION
+        )
+
+        try {
+            ReconciliationSignal.runtimeTruthSnapshot(
+                truth = truth,
+                v2RoutingDecision = decision
+            )
+            fail("Expected IllegalArgumentException when routing decision is provided without recovery phase")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(
+                "error should mention valid inflightContinuityState requirement",
+                expected.message?.contains("valid inflightContinuityState") == true
+            )
+        }
     }
 
     @Test

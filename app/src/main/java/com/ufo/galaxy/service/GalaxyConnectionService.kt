@@ -3215,7 +3215,9 @@ class GalaxyConnectionService : Service() {
             .durableSessionContinuityRecord.value
         val runtimeController = UFOGalaxyApplication.runtimeController
         val resultInflightRecovery = runtimeController.inflightContinuityRecovery.value
-        val resultRecoveryPhaseModel = runtimeController.unifiedRecoveryPhase.value
+        val resultRecoveryPhaseModel = result.continuity_recovery_state
+            ?.let(AndroidContinuityRecoveryStateModel.RecoveryPhase::fromWireValue)
+            ?: runtimeController.unifiedRecoveryPhase.value
         val resultRecoveryPhase = resultRecoveryPhaseModel.wireValue
         val resultRecoverySource = result.continuity_recovery_source
             ?.ifBlank { null }
@@ -3325,34 +3327,27 @@ class GalaxyConnectionService : Service() {
             // ── PR-116: unified continuity recovery state (always populated at emission layer) ──
             // Derives the unified recovery phase from authoritative runtime sources so V2 can
             // consume Android-side recovery state without combining fields across carriers.
-            continuity_recovery_state = result.continuity_recovery_state
-                ?: resultRecoveryPhase,
+            continuity_recovery_state = resultRecoveryPhase,
             continuity_recovery_source = resultRecoverySource,
-            continuity_recovery_schema_version = result.continuity_recovery_schema_version
-                ?: AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
-            recovery_state_v2_routing_category = result.recovery_state_v2_routing_category
-                ?: resultRecoveryRoutingWireMap.getValue(
-                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_V2_ROUTING_CATEGORY
-                ),
+            continuity_recovery_schema_version = AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
+            recovery_state_v2_routing_category = resultRecoveryRoutingWireMap.getValue(
+                AndroidCrossRepoRecoveryStateRoutingContract.KEY_V2_ROUTING_CATEGORY
+            ),
             recovery_state_routing_requires_v2_action =
-                result.recovery_state_routing_requires_v2_action
-                    ?: resultRecoveryRoutingWireMap.getValue(
-                        AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_REQUIRES_V2_ACTION
-                    ),
-            recovery_state_routing_is_advisory_only =
-                result.recovery_state_routing_is_advisory_only
-                    ?: resultRecoveryRoutingWireMap.getValue(
-                        AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_IS_ADVISORY_ONLY
-                    ),
-            recovery_state_routing_canonical_closure_blocked =
-                result.recovery_state_routing_canonical_closure_blocked
-                    ?: resultRecoveryRoutingWireMap.getValue(
-                        AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED
-                    ),
-            recovery_state_routing_schema_version = result.recovery_state_routing_schema_version
-                ?: resultRecoveryRoutingWireMap.getValue(
-                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
+                resultRecoveryRoutingWireMap.getValue(
+                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_REQUIRES_V2_ACTION
                 ),
+            recovery_state_routing_is_advisory_only =
+                resultRecoveryRoutingWireMap.getValue(
+                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_IS_ADVISORY_ONLY
+                ),
+            recovery_state_routing_canonical_closure_blocked =
+                resultRecoveryRoutingWireMap.getValue(
+                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED
+                ),
+            recovery_state_routing_schema_version = resultRecoveryRoutingWireMap.getValue(
+                AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
+            ),
             uplink_lineage_schema_version = result.uplink_lineage_schema_version
                 ?: AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
             uplink_lineage_execution_id = result.uplink_lineage_execution_id
