@@ -37,6 +37,9 @@ package com.ufo.galaxy.runtime
  *
  * [KEY_V2_ROUTING_CATEGORY] and companion keys are embedded alongside
  * [AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE] in:
+ *  - [com.ufo.galaxy.protocol.GoalResultPayload] (via `GalaxyConnectionService.sendGoalResult`)
+ *  - [com.ufo.galaxy.protocol.DeviceStateSnapshotPayload]
+ *    (via `GalaxyConnectionService.sendDeviceStateSnapshot`)
  *  - [ReconciliationSignal] payload for [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT]
  *    (via [ReconciliationSignal.runtimeTruthSnapshot])
  *

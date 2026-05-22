@@ -4,6 +4,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.data.InMemoryAppSettings
+import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
+import com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract
 import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidTruthPublicationSemanticsContract
@@ -428,6 +430,9 @@ class AndroidParticipantProtocolGuardTest {
 
     @Test
     fun `device_state_snapshot publishes hardened truth fields for V2`() {
+        val routingDecision = AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION
+        )
         val payload = DeviceStateSnapshotPayload(
             device_id = "guard-truth-snapshot-01",
             llama_cpp_available = false,
@@ -461,6 +466,17 @@ class AndroidParticipantProtocolGuardTest {
                 .SessionContinuityClass.SESSION_RECOVERY_PENDING.wireValue,
             device_posture_signal_class = AndroidDistributedTruthOwnershipUplinkContract
                 .DevicePostureSignalClass.RUNTIME_NODE_RECOVERING.wireValue,
+            continuity_recovery_state = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase.REQUIRES_RECONCILIATION.wireValue,
+            continuity_recovery_source = "process_recreated",
+            continuity_recovery_schema_version = AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
+            recovery_state_v2_routing_category = routingDecision.v2RoutingCategory.wireValue,
+            recovery_state_routing_requires_v2_action = routingDecision.requiresV2Action.toString(),
+            recovery_state_routing_is_advisory_only = routingDecision.isAdvisoryOnly.toString(),
+            recovery_state_routing_canonical_closure_blocked =
+                routingDecision.canonicalClosureBlocked.toString(),
+            recovery_state_routing_schema_version =
+                AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION,
             distributed_truth_ownership_uplink_schema_version =
                 AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
@@ -475,6 +491,14 @@ class AndroidParticipantProtocolGuardTest {
         assertTrue(obj.has("ownership_uplink_class"))
         assertTrue(obj.has("session_continuity_class"))
         assertTrue(obj.has("device_posture_signal_class"))
+        assertTrue(obj.has("continuity_recovery_state"))
+        assertTrue(obj.has("continuity_recovery_source"))
+        assertTrue(obj.has("continuity_recovery_schema_version"))
+        assertTrue(obj.has("recovery_state_v2_routing_category"))
+        assertTrue(obj.has("recovery_state_routing_requires_v2_action"))
+        assertTrue(obj.has("recovery_state_routing_is_advisory_only"))
+        assertTrue(obj.has("recovery_state_routing_canonical_closure_blocked"))
+        assertTrue(obj.has("recovery_state_routing_schema_version"))
         assertTrue(obj.has("distributed_truth_ownership_uplink_schema_version"))
         assertEquals("starting", obj.get("carrier_runtime_state").asString)
         assertEquals("recovering", obj.get("reconnect_recovery_state").asString)
@@ -483,6 +507,15 @@ class AndroidParticipantProtocolGuardTest {
         assertEquals("unknown", obj.get("evidence_presence_kind").asString)
         assertEquals("diagnostics_audit", obj.get("authority_signal_class").asString)
         assertEquals("no_transfer", obj.get("ownership_uplink_class").asString)
+        assertEquals(
+            "canonical_reconciliation_pass",
+            obj.get("recovery_state_v2_routing_category").asString
+        )
+        assertEquals("true", obj.get("recovery_state_routing_requires_v2_action").asString)
+        assertEquals(
+            "true",
+            obj.get("recovery_state_routing_canonical_closure_blocked").asString
+        )
     }
 
     @Test
@@ -552,6 +585,9 @@ class AndroidParticipantProtocolGuardTest {
 
     @Test
     fun `goal_result publishes distributed truth ownership boundary fields for V2`() {
+        val routingDecision = AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT
+        )
         val payload = GoalResultPayload(
             task_id = "guard-goal-result-01",
             status = "success",
@@ -572,6 +608,17 @@ class AndroidParticipantProtocolGuardTest {
             ingress_signal_class = AndroidGovernanceExecutionPolicyIngressContract
                 .IngressSignalClass.RESULT_TRUTH_ARTIFACT.wireValue,
             ingress_schema_version = AndroidGovernanceExecutionPolicyIngressContract.SCHEMA_VERSION,
+            continuity_recovery_state = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase.RECOVERED_INFLIGHT.wireValue,
+            continuity_recovery_source = "reconnect_recovery",
+            continuity_recovery_schema_version = AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
+            recovery_state_v2_routing_category = routingDecision.v2RoutingCategory.wireValue,
+            recovery_state_routing_requires_v2_action = routingDecision.requiresV2Action.toString(),
+            recovery_state_routing_is_advisory_only = routingDecision.isAdvisoryOnly.toString(),
+            recovery_state_routing_canonical_closure_blocked =
+                routingDecision.canonicalClosureBlocked.toString(),
+            recovery_state_routing_schema_version =
+                AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION,
             distributed_truth_ownership_uplink_schema_version =
                 AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
         )
@@ -584,6 +631,13 @@ class AndroidParticipantProtocolGuardTest {
         assertEquals("canonical_governance_execution_policy", obj.get("ingress_boundary_class").asString)
         assertEquals("execution_policy_ingress", obj.get("ingress_consumption_kind").asString)
         assertEquals("result_truth_artifact", obj.get("ingress_signal_class").asString)
+        assertEquals("recovered-inflight", obj.get("continuity_recovery_state").asString)
+        assertEquals("advisory_inflight_evidence", obj.get("recovery_state_v2_routing_category").asString)
+        assertEquals("true", obj.get("recovery_state_routing_is_advisory_only").asString)
+        assertEquals(
+            "true",
+            obj.get("recovery_state_routing_canonical_closure_blocked").asString
+        )
     }
 
     @Test
