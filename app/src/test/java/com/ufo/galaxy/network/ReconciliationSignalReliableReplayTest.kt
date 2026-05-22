@@ -184,6 +184,15 @@ class ReconciliationSignalReliableReplayTest {
         assertTrue(replayed.get("replay_session_epoch_present").asBoolean)
         assertEquals(0, replayed.get("replay_session_epoch").asInt)
         assertEquals(signal.stableDedupeKey, replayed.get("replay_dedupe_key").asString)
+        assertEquals("canonical", replayed.get("replay_dedupe_contract_status").asString)
+        assertEquals(
+            "android_v2_canonical_dedupe_v1",
+            replayed.get("replay_dedupe_contract_version").asString
+        )
+        assertEquals(
+            ReconciliationSignal.KEY_STABLE_DEDUPE_KEY,
+            replayed.get("replay_dedupe_contract_key_source").asString
+        )
         assertTrue(replayed.has("replay_flush_id"))
         val payload = replayed.getAsJsonObject("payload")
         assertEquals("task-flush", payload.get("task_id").asString)
@@ -304,6 +313,30 @@ class ReconciliationSignalReliableReplayTest {
         val queued = client.offlineQueue.drainAll().single()
         assertEquals("lineage-stable-4", queued.dedupeKey)
         assertEquals(4, queued.sessionEpoch)
+    }
+
+    @Test
+    fun `device_state_snapshot replay uses lineage dedupe contract`() {
+        val client = buildClient(durableSessionId = "durable-snapshot", sessionEpoch = 2)
+        val snapshot = """
+            {
+              "type":"device_state_snapshot",
+              "idempotency_key":"snapshot-idem",
+              "payload":{
+                "device_id":"device-1",
+                "durable_session_id":"durable-snapshot",
+                "session_continuity_epoch":2,
+                "uplink_lineage_schema_version":"1",
+                "uplink_lineage_dedupe_key":"snapshot-lineage-2"
+              }
+            }
+        """.trimIndent()
+
+        assertFalse(client.sendJson(snapshot))
+
+        val queued = client.offlineQueue.drainAll().single()
+        assertEquals("snapshot-lineage-2", queued.dedupeKey)
+        assertEquals(2, queued.sessionEpoch)
     }
 
     @Test

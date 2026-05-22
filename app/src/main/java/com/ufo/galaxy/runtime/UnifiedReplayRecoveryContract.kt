@@ -206,14 +206,11 @@ object UnifiedReplayRecoveryContract {
     }
 
     /**
-     * Message types whose replay can affect canonical result/closure authority and therefore
-     * must not be replayed when the message has no durable session tag.
+     * Message types whose replay can affect canonical result, runtime-truth, or reconciliation
+     * authority and therefore must not be replayed when the message has no durable session tag.
      */
-    val authoritySensitiveReplayTypes: Set<String> = setOf(
-        "goal_execution_result",
-        "delegated_execution_signal",
-        "device_execution_event"
-    )
+    val authoritySensitiveReplayTypes: Set<String> =
+        AndroidCrossRepoDedupeContract.AUTHORITY_SENSITIVE_REPLAY_TYPES
 
     // ── evaluateMessageAuthority ──────────────────────────────────────────────
 

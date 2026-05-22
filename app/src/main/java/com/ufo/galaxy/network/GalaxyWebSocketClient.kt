@@ -12,11 +12,11 @@ import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
+import com.ufo.galaxy.runtime.AndroidCrossRepoDedupeContract
 import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
-import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -1119,23 +1119,6 @@ class GalaxyWebSocketClient(
         null
     }
 
-    private fun tryExtractIntFieldNested(json: String, outerField: String, innerField: String): Int? = try {
-        gson.fromJson(json, JsonObject::class.java)
-            ?.getAsJsonObject(outerField)?.get(innerField)?.asInt
-    } catch (_: Exception) {
-        null
-    }
-
-    private fun extractReplayDedupeKey(json: String): String? = try {
-        val root = gson.fromJson(json, JsonObject::class.java)
-        root?.get("idempotency_key")?.asString
-            ?: root?.getAsJsonObject("payload")
-                ?.get(AndroidUplinkLineageMetadataContract.KEY_DEDUPE_KEY)
-                ?.asString
-    } catch (_: Exception) {
-        null
-    }
-
     private val replayFlushIdCounter = AtomicLong(0L)
 
     private fun annotateReplayEnvelopeForFlush(
@@ -1172,6 +1155,18 @@ class GalaxyWebSocketClient(
         if (sessionEpoch != null) {
             root.addProperty("replay_session_epoch", sessionEpoch)
         }
+        val dedupeAssessment = AndroidCrossRepoDedupeContract.assessEnvelopeJson(message.json, gson)
+        root.addProperty("replay_dedupe_contract_version", AndroidCrossRepoDedupeContract.SCHEMA_VERSION)
+        root.addProperty("replay_dedupe_contract_status", dedupeAssessment.status.wireValue)
+        dedupeAssessment.stableKeySource?.let {
+            root.addProperty("replay_dedupe_contract_key_source", it)
+        }
+        if (dedupeAssessment.missingFields.isNotEmpty()) {
+            root.addProperty(
+                "replay_dedupe_contract_missing_fields",
+                dedupeAssessment.missingFields.joinToString(",")
+            )
+        }
         if (!message.dedupeKey.isNullOrBlank()) {
             root.addProperty("replay_dedupe_key", message.dedupeKey)
         }
@@ -1179,27 +1174,38 @@ class GalaxyWebSocketClient(
     }
 
     private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
-        val lineageSessionEpoch = tryExtractIntFieldNested(
-            json,
-            "payload",
-            "session_continuity_epoch"
-        )
+        val dedupeAssessment = AndroidCrossRepoDedupeContract.assessEnvelopeJson(json, gson)
         offlineQueue.enqueue(
             type = msgType,
             json = json,
             sessionTag = durableSessionId,
             sessionEpoch = when {
-                lineageSessionEpoch != null -> lineageSessionEpoch
+                dedupeAssessment.sessionEpoch != null -> dedupeAssessment.sessionEpoch
                 msgType == MsgType.RECONCILIATION_SIGNAL.value -> sessionContinuityEpoch
                 else -> null
             },
-            dedupeKey = extractReplayDedupeKey(json)
+            dedupeKey = dedupeAssessment.stableKey
         )
+        if (msgType in AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES &&
+            !dedupeAssessment.isCanonical
+        ) {
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "replay_dedupe_contract_degraded",
+                    "type" to msgType,
+                    "status" to dedupeAssessment.status.wireValue,
+                    "reason" to dedupeAssessment.reason,
+                    "missing_fields" to dedupeAssessment.missingFields.joinToString(",")
+                )
+            )
+        }
         Log.i(
             TAG,
             "[WS:OfflineQueue] Queued reliable replay message type=$msgType reason=$reason " +
                 "queue_size=${offlineQueue.size} session_tag=${durableSessionId ?: "none"} " +
-                "session_epoch=${sessionContinuityEpoch ?: "none"}"
+                "session_epoch=${sessionContinuityEpoch ?: "none"} " +
+                "dedupe_status=${dedupeAssessment.status.wireValue}"
         )
     }
 

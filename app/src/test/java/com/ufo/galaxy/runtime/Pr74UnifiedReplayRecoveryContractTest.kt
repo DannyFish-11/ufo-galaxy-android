@@ -263,7 +263,7 @@ class Pr74UnifiedReplayRecoveryContractTest {
     }
 
     @Test
-    fun `null sessionTag on non-authority type is forwarded`() {
+    fun `null sessionTag on runtime truth replay is blocked`() {
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "device_state_snapshot",
             json = "{}",
@@ -271,10 +271,10 @@ class Pr74UnifiedReplayRecoveryContractTest {
         )
         val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
         assertEquals(
-            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_FORWARDED,
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_SESSION_TAG_AUTHORITY_REPLAY_BLOCKED,
             decision
         )
-        assertTrue(decision.isReplayAllowed)
+        assertFalse(decision.isReplayAllowed)
     }
 
     @Test
@@ -456,7 +456,7 @@ class Pr74UnifiedReplayRecoveryContractTest {
     }
 
     @Test
-    fun `null-tagged non-authority messages survive stale-session filtering`() {
+    fun `null-tagged runtime truth messages are discarded during stale-session filtering`() {
         val queue = OfflineTaskQueue(prefs = null)
         queue.enqueue(
             "device_state_snapshot",
@@ -465,9 +465,8 @@ class Pr74UnifiedReplayRecoveryContractTest {
 
         val discarded = queue.discardForDifferentSession("session-NEW")
 
-        assertEquals(0, discarded)
-        assertEquals(1, queue.size)
-        assertTrue(queue.drainAll()[0].json.contains("snapshot"))
+        assertEquals(1, discarded)
+        assertEquals(0, queue.size)
     }
 
     // ── Gate enforcement ──────────────────────────────────────────────────────

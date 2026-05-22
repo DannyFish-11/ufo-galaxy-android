@@ -97,15 +97,11 @@ class OfflineTaskQueue(
         /**
          * Queue types that require continuity-epoch metadata to be replay-forwardable.
          *
-         * These message classes influence canonical result/event continuity and therefore
-         * must not be replayed without explicit ordering scope.
+         * These message classes influence canonical result, runtime-truth, or reconciliation
+         * continuity and therefore must not be replayed without explicit ordering scope.
          */
-        val ORDERING_METADATA_REQUIRED_TYPES: Set<String> = setOf(
-            "goal_execution_result",
-            "delegated_execution_signal",
-            "device_execution_event",
-            MsgType.RECONCILIATION_SIGNAL.value
-        )
+        val ORDERING_METADATA_REQUIRED_TYPES: Set<String> =
+            com.ufo.galaxy.runtime.AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES
     }
 
     /**
