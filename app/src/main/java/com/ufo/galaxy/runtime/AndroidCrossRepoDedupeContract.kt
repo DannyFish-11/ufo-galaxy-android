@@ -165,7 +165,7 @@ object AndroidCrossRepoDedupeContract {
                 Assessment(
                     messageType = type,
                     stableKey = stableKey,
-                    status = if (stableKey != null) ContractStatus.COMPATIBILITY else ContractStatus.INVALID,
+                    status = assessCompatibilityStatus(stableKey),
                     stableKeySource = when {
                         signalId != null -> "payload.signal_id"
                         idempotencyKey != null -> "idempotency_key"
@@ -185,11 +185,7 @@ object AndroidCrossRepoDedupeContract {
             else -> Assessment(
                 messageType = type,
                 stableKey = idempotencyKey,
-                status = if (idempotencyKey != null) {
-                    ContractStatus.COMPATIBILITY
-                } else {
-                    ContractStatus.INVALID
-                },
+                status = assessCompatibilityStatus(idempotencyKey),
                 stableKeySource = if (idempotencyKey != null) "idempotency_key" else null,
                 sessionEpoch = payload.intOrNull(DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH),
                 durableSessionId = payload.stringOrNull(DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID),
@@ -217,4 +213,7 @@ object AndroidCrossRepoDedupeContract {
 
     private fun JsonElement?.intOrNull(): Int? =
         this?.takeUnless { it.isJsonNull }?.asInt
+
+    private fun assessCompatibilityStatus(stableKey: String?): ContractStatus =
+        if (stableKey != null) ContractStatus.COMPATIBILITY else ContractStatus.INVALID
 }

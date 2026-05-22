@@ -82,11 +82,9 @@ class AndroidCrossRepoDedupeContractTest {
     @Test
     fun `runtime truth snapshot is authority sensitive and replay epoch bound`() {
         assertTrue(
-            "${MsgType.DEVICE_STATE_SNAPSHOT.value} must participate in the canonical replay epoch contract",
             MsgType.DEVICE_STATE_SNAPSHOT.value in AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES
         )
         assertTrue(
-            "${MsgType.DEVICE_STATE_SNAPSHOT.value} must no longer replay as a null-tagged non-authority artifact",
             MsgType.DEVICE_STATE_SNAPSHOT.value in AndroidCrossRepoDedupeContract.AUTHORITY_SENSITIVE_REPLAY_TYPES
         )
     }
