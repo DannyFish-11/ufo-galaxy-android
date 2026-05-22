@@ -17,6 +17,7 @@ import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
+import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -1494,7 +1495,11 @@ class GalaxyWebSocketClient(
             session_continuity_class = truthOwnershipBoundary.sessionContinuityClass.wireValue,
             device_posture_signal_class = truthOwnershipBoundary.devicePostureSignalClass.wireValue,
             distributed_truth_ownership_uplink_schema_version =
-                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION,
+            // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+            non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                .classify(MsgType.DIAGNOSTICS_PAYLOAD)!!.wireValue,
+            non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
         )
         val envelope = AipMessage(
             type = MsgType.DIAGNOSTICS_PAYLOAD,
