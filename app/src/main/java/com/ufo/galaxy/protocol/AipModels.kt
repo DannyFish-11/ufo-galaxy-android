@@ -1289,6 +1289,28 @@ data class GoalResultPayload(
     val continuity_recovery_state: String? = null,
     val continuity_recovery_source: String? = null,
     val continuity_recovery_schema_version: String? = null,
+    // ── PR-119: explicit recovery routing contract for canonical V2 handling ───────────────
+    //
+    // recovery_state_v2_routing_category: stable V2 routing category for the current
+    //   continuity_recovery_state. V2 MUST consume this explicitly instead of treating
+    //   Android recovery evidence as generic metadata.
+    //
+    // recovery_state_routing_requires_v2_action: "true" when V2 must trigger canonical
+    //   handling (reconciliation, stale rejection, closure review, reconnect verdict).
+    //
+    // recovery_state_routing_is_advisory_only: "true" when the recovery evidence is
+    //   Android-local advisory evidence only and MUST NOT be treated as canonical truth.
+    //
+    // recovery_state_routing_canonical_closure_blocked: "true" when V2 MUST NOT derive
+    //   canonical closure directly from this recovery evidence.
+    //
+    // recovery_state_routing_schema_version: schema version of the routing contract.
+    //   Taken from AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION.
+    val recovery_state_v2_routing_category: String? = null,
+    val recovery_state_routing_requires_v2_action: String? = null,
+    val recovery_state_routing_is_advisory_only: String? = null,
+    val recovery_state_routing_canonical_closure_blocked: String? = null,
+    val recovery_state_routing_schema_version: String? = null,
     val uplink_lineage_schema_version: String? = null,
     val uplink_lineage_execution_id: String? = null,
     val uplink_lineage_emission_id: String? = null,
@@ -3045,6 +3067,28 @@ data class DeviceStateSnapshotPayload(
     val continuity_recovery_state: String? = null,
     val continuity_recovery_source: String? = null,
     val continuity_recovery_schema_version: String? = null,
+    // ── PR-119: explicit recovery routing contract for canonical V2 handling ───────────────
+    //
+    // recovery_state_v2_routing_category: stable V2 routing category for the current
+    //   continuity_recovery_state. V2 MUST consume this explicitly instead of treating
+    //   Android recovery evidence as generic metadata.
+    //
+    // recovery_state_routing_requires_v2_action: "true" when V2 must trigger canonical
+    //   handling (reconciliation, stale rejection, closure review, reconnect verdict).
+    //
+    // recovery_state_routing_is_advisory_only: "true" when the recovery evidence is
+    //   Android-local advisory evidence only and MUST NOT be treated as canonical truth.
+    //
+    // recovery_state_routing_canonical_closure_blocked: "true" when V2 MUST NOT derive
+    //   canonical closure directly from this recovery evidence.
+    //
+    // recovery_state_routing_schema_version: schema version of the routing contract.
+    //   Taken from AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION.
+    val recovery_state_v2_routing_category: String? = null,
+    val recovery_state_routing_requires_v2_action: String? = null,
+    val recovery_state_routing_is_advisory_only: String? = null,
+    val recovery_state_routing_canonical_closure_blocked: String? = null,
+    val recovery_state_routing_schema_version: String? = null,
     val uplink_lineage_schema_version: String? = null,
     val uplink_lineage_execution_id: String? = null,
     val uplink_lineage_emission_id: String? = null,

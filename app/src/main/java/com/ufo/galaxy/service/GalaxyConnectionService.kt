@@ -54,6 +54,7 @@ import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract
 import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
+import com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
@@ -3212,14 +3213,21 @@ class GalaxyConnectionService : Service() {
         )
         val resultDurableRecord = UFOGalaxyApplication.runtimeController
             .durableSessionContinuityRecord.value
-        val resultInflightRecovery = UFOGalaxyApplication.runtimeController
-            .inflightContinuityRecovery.value
-        val resultRecoveryPhase = AndroidContinuityRecoveryStateModel.derive(
-            reconnectRecoveryState = UFOGalaxyApplication.runtimeController
-                .reconnectRecoveryState.value,
-            inflightDisposition = resultInflightRecovery.disposition
-        ).wireValue
-        val resultRecoverySource = result.continuity_recovery_source ?: resultInflightRecovery.source
+        val runtimeController = UFOGalaxyApplication.runtimeController
+        val resultInflightRecovery = runtimeController.inflightContinuityRecovery.value
+        val resultRecoveryPhaseModel = runtimeController.unifiedRecoveryPhase.value
+        val resultRecoveryPhase = resultRecoveryPhaseModel.wireValue
+        val resultRecoverySource = result.continuity_recovery_source
+            ?.ifBlank { null }
+            ?: when (resultRecoveryPhaseModel) {
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED ->
+                    "reconnect_recovery"
+                else ->
+                    resultInflightRecovery.source.ifBlank { "none" }
+            }
+        val resultRecoveryRouting =
+            AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(resultRecoveryPhaseModel)
         val resultLineage = AndroidUplinkLineageMetadataContract.derive(
             executionIdentity = result.task_id,
             emissionIdentity = buildResultLineageEmissionIdentity(result, normalizedLifecycleStatus),
@@ -3326,6 +3334,19 @@ class GalaxyConnectionService : Service() {
             continuity_recovery_source = resultRecoverySource,
             continuity_recovery_schema_version = result.continuity_recovery_schema_version
                 ?: AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
+            recovery_state_v2_routing_category = result.recovery_state_v2_routing_category
+                ?: resultRecoveryRouting.v2RoutingCategory.wireValue,
+            recovery_state_routing_requires_v2_action =
+                result.recovery_state_routing_requires_v2_action
+                    ?: resultRecoveryRouting.requiresV2Action.toString(),
+            recovery_state_routing_is_advisory_only =
+                result.recovery_state_routing_is_advisory_only
+                    ?: resultRecoveryRouting.isAdvisoryOnly.toString(),
+            recovery_state_routing_canonical_closure_blocked =
+                result.recovery_state_routing_canonical_closure_blocked
+                    ?: resultRecoveryRouting.canonicalClosureBlocked.toString(),
+            recovery_state_routing_schema_version = result.recovery_state_routing_schema_version
+                ?: AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION,
             uplink_lineage_schema_version = result.uplink_lineage_schema_version
                 ?: AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
             uplink_lineage_execution_id = result.uplink_lineage_execution_id
@@ -3822,20 +3843,28 @@ class GalaxyConnectionService : Service() {
             val runtimeTruth = signal.runtimeTruth?.toMap()
             val sessionId = UFOGalaxyApplication.runtimeSessionId
             val stableDedupeKey = signal.stableDedupeKey
+            val runtimeController = UFOGalaxyApplication.runtimeController
             val ingress = AndroidGovernanceExecutionPolicyIngressContract
                 .classifyReconciliation(signal.kind)
             val reliablePayload = signal.payload.toMutableMap().apply {
                 put(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY, stableDedupeKey)
             }
+            val fallbackRecoveryPhase = runtimeController.unifiedRecoveryPhase.value
+            val fallbackRecoverySource = when (fallbackRecoveryPhase) {
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED ->
+                    "reconnect_recovery"
+                else ->
+                    runtimeController.inflightContinuityRecovery.value.source.ifBlank { "none" }
+            }
             val recoveryState = reliablePayload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
                 ?.toString()
                 ?.ifBlank { null }
-                ?: UFOGalaxyApplication.runtimeController.inflightContinuityRecovery.value
-                    .disposition.wireValue
+                ?: fallbackRecoveryPhase.wireValue
             val recoverySource = reliablePayload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_SOURCE]
                 ?.toString()
                 ?.ifBlank { null }
-                ?: UFOGalaxyApplication.runtimeController.inflightContinuityRecovery.value.source
+                ?: fallbackRecoverySource
             val lineage = AndroidUplinkLineageMetadataContract.derive(
                 executionIdentity = signal.taskId ?: signal.kind.wireValue,
                 emissionIdentity = signal.signalId,
@@ -4655,12 +4684,20 @@ class GalaxyConnectionService : Service() {
             )
             val snapshotInflightRecovery = UFOGalaxyApplication.runtimeController
                 .inflightContinuityRecovery.value
-            val snapshotRecoveryPhase = AndroidContinuityRecoveryStateModel.derive(
-                reconnectRecoveryState = UFOGalaxyApplication.runtimeController
-                    .reconnectRecoveryState.value,
-                inflightDisposition = snapshotInflightRecovery.disposition
-            ).wireValue
-            val snapshotRecoverySource = snapshotInflightRecovery.source
+            val runtimeController = UFOGalaxyApplication.runtimeController
+            val snapshotRecoveryPhaseModel = runtimeController.unifiedRecoveryPhase.value
+            val snapshotRecoveryPhase = snapshotRecoveryPhaseModel.wireValue
+            val snapshotRecoverySource = when (snapshotRecoveryPhaseModel) {
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED ->
+                    "reconnect_recovery"
+                else ->
+                    snapshotInflightRecovery.source.ifBlank { "none" }
+            }
+            val snapshotRecoveryRouting =
+                AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(
+                    snapshotRecoveryPhaseModel
+                )
             val snapshotLineage = AndroidUplinkLineageMetadataContract.derive(
                 executionIdentity = MsgType.DEVICE_STATE_SNAPSHOT.value,
                 emissionIdentity = "snapshot:${snapshotStamp.snapshotSequence}",
@@ -4920,6 +4957,16 @@ class GalaxyConnectionService : Service() {
                 continuity_recovery_source = snapshotRecoverySource,
                 continuity_recovery_schema_version =
                     AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
+                recovery_state_v2_routing_category =
+                    snapshotRecoveryRouting.v2RoutingCategory.wireValue,
+                recovery_state_routing_requires_v2_action =
+                    snapshotRecoveryRouting.requiresV2Action.toString(),
+                recovery_state_routing_is_advisory_only =
+                    snapshotRecoveryRouting.isAdvisoryOnly.toString(),
+                recovery_state_routing_canonical_closure_blocked =
+                    snapshotRecoveryRouting.canonicalClosureBlocked.toString(),
+                recovery_state_routing_schema_version =
+                    AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION,
                 uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
                 uplink_lineage_execution_id = snapshotLineage.executionIdentity,
                 uplink_lineage_emission_id = snapshotLineage.emissionIdentity,
