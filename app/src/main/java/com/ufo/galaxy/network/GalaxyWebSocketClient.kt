@@ -1161,13 +1161,15 @@ class GalaxyWebSocketClient(
         root.addProperty("replay_flush_total", replayFlushTotal)
         root.addProperty("replay_queue_sequence", message.queueSequence)
         root.addProperty("replay_queued_at_ms", message.queuedAt)
-        root.addProperty("replay_session_tag_present", !message.sessionTag.isNullOrBlank())
-        if (!message.sessionTag.isNullOrBlank()) {
+        val hasSessionTag = !message.sessionTag.isNullOrBlank()
+        root.addProperty("replay_session_tag_present", hasSessionTag)
+        if (hasSessionTag) {
             root.addProperty("replay_session_tag", message.sessionTag)
         }
-        root.addProperty("replay_session_epoch_present", message.sessionEpoch != null)
-        if (message.sessionEpoch != null) {
-            root.addProperty("replay_session_epoch", message.sessionEpoch)
+        val sessionEpoch = message.sessionEpoch
+        root.addProperty("replay_session_epoch_present", sessionEpoch != null)
+        if (sessionEpoch != null) {
+            root.addProperty("replay_session_epoch", sessionEpoch)
         }
         if (!message.dedupeKey.isNullOrBlank()) {
             root.addProperty("replay_dedupe_key", message.dedupeKey)

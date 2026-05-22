@@ -507,7 +507,7 @@ class OfflineTaskQueue(
                     }
                 }
                 val maxLoadedSequence = queue.maxOfOrNull { it.queueSequence } ?: 0L
-                queueSequenceCounter.set(maxLoadedSequence)
+                queueSequenceCounter.updateAndGet { current -> maxOf(current, maxLoadedSequence) }
                 queue.size
             }
             _sizeFlow.value = loaded
