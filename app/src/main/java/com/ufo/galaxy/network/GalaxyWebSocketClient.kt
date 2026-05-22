@@ -1186,9 +1186,7 @@ class GalaxyWebSocketClient(
             },
             dedupeKey = dedupeAssessment.stableKey
         )
-        if (msgType in AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES &&
-            !dedupeAssessment.isCanonical
-        ) {
+        if (shouldLogDegradedCanonicalContract(msgType, dedupeAssessment)) {
             GalaxyLogger.log(
                 TAG,
                 mapOf(
@@ -1208,6 +1206,13 @@ class GalaxyWebSocketClient(
                 "dedupe_status=${dedupeAssessment.status.wireValue}"
         )
     }
+
+    private fun shouldLogDegradedCanonicalContract(
+        msgType: String,
+        assessment: AndroidCrossRepoDedupeContract.Assessment
+    ): Boolean =
+        msgType in AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES &&
+            !assessment.isCanonical
 
     /**
      * Sends the AIP v3.0 capability_report handshake immediately after the WebSocket opens.

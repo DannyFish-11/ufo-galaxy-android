@@ -127,12 +127,15 @@ object AndroidCrossRepoDedupeContract {
                         add("payload.${DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH}")
                     }
                 }
-                val parityOk = stableDedupeKey != null && stableDedupeKey == idempotencyKey
+                val stableKeyMatchesEnvelopeIdempotency =
+                    stableDedupeKey != null && stableDedupeKey == idempotencyKey
                 Assessment(
                     messageType = type,
                     stableKey = stableDedupeKey ?: idempotencyKey,
                     status = when {
-                        parityOk && lineageKey != null && missing.isEmpty() -> ContractStatus.CANONICAL
+                        stableKeyMatchesEnvelopeIdempotency &&
+                            lineageKey != null &&
+                            missing.isEmpty() -> ContractStatus.CANONICAL
                         stableDedupeKey != null || idempotencyKey != null -> ContractStatus.COMPATIBILITY
                         else -> ContractStatus.INVALID
                     },
@@ -145,7 +148,9 @@ object AndroidCrossRepoDedupeContract {
                     durableSessionId = payload.stringOrNull(DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID),
                     missingFields = missing,
                     reason = when {
-                        parityOk && lineageKey != null && missing.isEmpty() ->
+                        stableKeyMatchesEnvelopeIdempotency &&
+                            lineageKey != null &&
+                            missing.isEmpty() ->
                             "reconciliation_stable_dedupe_key_matches_envelope"
                         stableDedupeKey != null || idempotencyKey != null ->
                             "compatibility_identity_missing_canonical_reconciliation_fields"
