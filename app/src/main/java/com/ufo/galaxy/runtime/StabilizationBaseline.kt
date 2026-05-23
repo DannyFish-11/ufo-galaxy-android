@@ -2763,6 +2763,37 @@ object StabilizationBaseline {
                 "COMPLETION_TRUTH_INVARIANTS (10 entries) provides machine-verifiable regression " +
                 "anchors. Test: Pr122AndroidCompletionTruthHardeningTest.",
             introducedPr = 122
+        ),
+
+        // ── PR-123: Android Stage 6 V2 distributed activation compatibility ──
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-v2-distributed-activation-compatibility-contract",
+            displayName = "AndroidV2DistributedActivationCompatibilityContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidV2DistributedActivationCompatibilityContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-123 — Stage 6 Android V2 distributed activation compatibility hardening. " +
+                "Classifies Android task activation identity relative to V2's stricter distributed " +
+                "execution activation path so each ReconciliationSignal task signal carries the " +
+                "strongest available activation correlation anchor. " +
+                "ActivationIdentityClass (4 values: DISPATCH_PLAN_ANCHORED/TASK_IDENTITY_ONLY/" +
+                "SESSION_ANCHORED/UNANCHORED) classifies activation strength from full plan-level " +
+                "correlation down to no stable identity. classify() is the canonical single-call " +
+                "entry point. toWireMap() embeds activation_identity_class, " +
+                "activation_has_dispatch_plan_id, activation_has_task_id, and " +
+                "activation_identity_schema_version wire keys in task-signal payloads. " +
+                "V2_DISTRIBUTED_ACTIVATION_ALIGNMENT_MAP maps each class to the V2-side handling " +
+                "expectation so V2 can route signals to the correct distributed path. " +
+                "DISTRIBUTED_ACTIVATION_INVARIANTS (6 entries) provide machine-verifiable regression " +
+                "anchors. ReconciliationSignal gains dispatchPlanId field, KEY_DISPATCH_PLAN_ID, " +
+                "and withDispatchPlanId() helper for attaching plan IDs to existing signals. " +
+                "RuntimeController adds _activeTaskDispatchPlanId stored at " +
+                "recordDelegatedTaskAccepted() and forwarded to all terminal task signals " +
+                "(TASK_RESULT, TASK_CANCELLED, TASK_FAILED including session-interrupt path). " +
+                "Test: Pr123AndroidV2DistributedActivationCompatibilityContractTest.",
+            introducedPr = 123
         )
     )
 
