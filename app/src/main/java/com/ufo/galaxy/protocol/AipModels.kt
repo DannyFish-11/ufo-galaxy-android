@@ -1227,6 +1227,10 @@ data class GoalResultPayload(
     val closure_finalization_signal_class: String? = null,
     val operator_done_projection_class: String? = null,
     val completion_closure_uplink_schema_version: String? = null,
+    val schema_version: String? = null,
+    val completion_closure_contract_version: String? = null,
+    val completion_emission_id: String? = null,
+    val idempotency_key: String? = null,
     val local_execution_completed: Boolean? = null,
     val advisory_evidence_sent: Boolean? = null,
     val v2_uplink_acknowledged: Boolean? = null,
@@ -1234,6 +1238,7 @@ data class GoalResultPayload(
     val v2_canonical_truth_completed: Boolean? = null,
     val v2_mature_closure_achieved: Boolean? = null,
     val outward_truth_surface_class: String? = null,
+    val is_v2_confirmed_canonical_truth: Boolean? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段（结果上行）───────────────────────────────
     //
@@ -1796,6 +1801,11 @@ data class ReconciliationSignalPayload(
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
     val ingress_schema_version: String? = null,
+    val schema_version: String? = null,
+    val completion_closure_contract_version: String? = null,
+    val completion_emission_id: String? = null,
+    val idempotency_key: String? = null,
+    val is_v2_confirmed_canonical_truth: Boolean? = null,
     val uplink_lineage_schema_version: String? = null,
     val uplink_lineage_execution_id: String? = null,
     val uplink_lineage_emission_id: String? = null,
@@ -3041,6 +3051,10 @@ data class DeviceStateSnapshotPayload(
     val closure_finalization_signal_class: String? = null,
     val operator_done_projection_class: String? = null,
     val completion_closure_uplink_schema_version: String? = null,
+    val schema_version: String? = null,
+    val completion_closure_contract_version: String? = null,
+    val completion_emission_id: String? = null,
+    val idempotency_key: String? = null,
     val local_execution_completed: Boolean? = null,
     val advisory_evidence_sent: Boolean? = null,
     val v2_uplink_acknowledged: Boolean? = null,
@@ -3048,6 +3062,7 @@ data class DeviceStateSnapshotPayload(
     val v2_canonical_truth_completed: Boolean? = null,
     val v2_mature_closure_achieved: Boolean? = null,
     val outward_truth_surface_class: String? = null,
+    val is_v2_confirmed_canonical_truth: Boolean? = null,
 
     // ── PR-08v2 (Android): 分布式运行参与边界收束字段 ────────────────────────────────────────
     //

@@ -14,12 +14,17 @@ object AndroidCompletionClosureUplinkContract {
 
     const val INTRODUCED_PR = 102
     const val SCHEMA_VERSION = "1"
+    const val PAYLOAD_SCHEMA_VERSION = "1"
 
+    const val KEY_SCHEMA_VERSION = "schema_version"
+    const val KEY_COMPLETION_CLOSURE_CONTRACT_VERSION = "completion_closure_contract_version"
     const val KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS =
         "authority_runtime_completion_signal_class"
     const val KEY_RESULT_COMPLETION_SIGNAL_CLASS = "result_completion_signal_class"
     const val KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS = "closure_finalization_signal_class"
     const val KEY_OPERATOR_DONE_PROJECTION_CLASS = "operator_done_projection_class"
+    const val KEY_COMPLETION_EMISSION_ID = "completion_emission_id"
+    const val KEY_IDEMPOTENCY_KEY = "idempotency_key"
     const val KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION = "completion_closure_uplink_schema_version"
     const val KEY_LOCAL_EXECUTION_COMPLETED = "local_execution_completed"
     const val KEY_ADVISORY_EVIDENCE_SENT = "advisory_evidence_sent"
@@ -28,6 +33,7 @@ object AndroidCompletionClosureUplinkContract {
     const val KEY_V2_CANONICAL_TRUTH_COMPLETED = "v2_canonical_truth_completed"
     const val KEY_V2_MATURE_CLOSURE_ACHIEVED = "v2_mature_closure_achieved"
     const val KEY_OUTWARD_TRUTH_SURFACE_CLASS = "outward_truth_surface_class"
+    const val KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH = "is_v2_confirmed_canonical_truth"
 
     enum class AuthorityRuntimeCompletionSignalClass(val wireValue: String) {
         AUTHORITY_RUNTIME_COMPLETION("authority_runtime_completion"),
@@ -69,6 +75,8 @@ object AndroidCompletionClosureUplinkContract {
         val operatorDoneProjectionClass: OperatorDoneProjectionClass
     ) {
         fun toWireMap(): Map<String, String> = mapOf(
+            KEY_SCHEMA_VERSION to PAYLOAD_SCHEMA_VERSION,
+            KEY_COMPLETION_CLOSURE_CONTRACT_VERSION to SCHEMA_VERSION,
             KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS to
                 authorityRuntimeCompletionSignalClass.wireValue,
             KEY_RESULT_COMPLETION_SIGNAL_CLASS to resultCompletionSignalClass.wireValue,

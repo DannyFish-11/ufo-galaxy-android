@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -204,6 +205,27 @@ class ReconciliationSignalReliableReplayTest {
                 .get(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY)
                 .asString
         )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION).asString
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION)
+                .asString
+        )
+        assertEquals(
+            signal.stableDedupeKey,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY).asString
+        )
+        assertEquals(
+            "sig-flush",
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID).asString
+        )
+        assertFalse(
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)
+                .asBoolean
+        )
         assertTrue(payload.has("uplink_lineage_schema_version"))
         assertTrue(payload.has("uplink_lineage_execution_id"))
         assertTrue(payload.has("uplink_lineage_emission_id"))
@@ -313,6 +335,51 @@ class ReconciliationSignalReliableReplayTest {
         val queued = client.offlineQueue.drainAll().single()
         assertEquals("lineage-stable-4", queued.dedupeKey)
         assertEquals(4, queued.sessionEpoch)
+    }
+
+    @Test
+    fun `goal_execution_result missing canonical completion identity fields are backfilled`() {
+        val client = buildClient(durableSessionId = "durable-backfill", sessionEpoch = 5)
+        val raw = """
+            {
+              "type":"goal_execution_result",
+              "payload":{
+                "task_id":"task-backfill",
+                "status":"success",
+                "outward_truth_surface_class":"android_advisory_evidence"
+              }
+            }
+        """.trimIndent()
+
+        assertFalse(client.sendJson(raw))
+        val queued = client.offlineQueue.drainAll().single()
+        val root = JsonParser.parseString(queued.json).asJsonObject
+        val payload = root.getAsJsonObject("payload")
+
+        assertEquals("task-backfill", payload.get("task_id").asString)
+        assertEquals("success", payload.get("status").asString)
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION).asString
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION)
+                .asString
+        )
+        assertTrue(payload.get(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY).asString.isNotBlank())
+        assertEquals(
+            root.get(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY).asString,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY).asString
+        )
+        assertEquals(
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY).asString,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID).asString
+        )
+        assertFalse(
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)
+                .asBoolean
+        )
     }
 
     @Test

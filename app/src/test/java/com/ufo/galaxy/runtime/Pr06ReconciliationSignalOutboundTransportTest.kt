@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -178,6 +179,23 @@ class Pr06ReconciliationSignalOutboundTransportTest {
         val signal = makeTaskResultSignal()
         val json = toEnvelopeJson(signal)
         assertTrue("JSON must contain status field", json.contains("status"))
+    }
+
+    @Test
+    fun `task signal payload includes canonical completion contract version markers`() {
+        val signal = makeTaskResultSignal()
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+            signal.payload[AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION]
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+            signal.payload[AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION]
+        )
+        assertFalse(
+            signal.payload[AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH]
+                as Boolean
+        )
     }
 
     @Test

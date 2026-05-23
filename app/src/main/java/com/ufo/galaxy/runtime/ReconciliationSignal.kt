@@ -533,6 +533,10 @@ data class ReconciliationSignal(
                     outwardTruthSurfaceClass = outwardTruthSurfaceClass
                 )
             return mapOf(
+                AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION to
+                    AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+                AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION to
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
                 KEY_RESULT_RETURNED to resultReturned,
                 KEY_COMPLETION_SIGNALED to completionSignaled,
                 KEY_CLOSURE_READY_FOR_ACCEPTANCE to closureReadyForAcceptance,
@@ -552,7 +556,13 @@ data class ReconciliationSignal(
                 KEY_V2_RECONCILIATION_ACKNOWLEDGED to v2Boundary.v2ReconciliationAcknowledged,
                 KEY_V2_CANONICAL_TRUTH_COMPLETED to v2Boundary.v2CanonicalTruthCompleted,
                 KEY_V2_MATURE_CLOSURE_ACHIEVED to v2Boundary.v2MatureClosureAchieved,
-                KEY_OUTWARD_TRUTH_SURFACE_CLASS to v2Boundary.outwardTruthSurfaceClass.wireValue
+                KEY_OUTWARD_TRUTH_SURFACE_CLASS to v2Boundary.outwardTruthSurfaceClass.wireValue,
+                AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH to
+                    (
+                        v2Boundary.outwardTruthSurfaceClass ==
+                            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                                .V2_CONFIRMED_CANONICAL_TRUTH
+                        )
             )
         }
 

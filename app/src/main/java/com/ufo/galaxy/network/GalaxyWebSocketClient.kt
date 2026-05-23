@@ -18,6 +18,7 @@ import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.atomic.AtomicLong
@@ -987,54 +989,180 @@ class GalaxyWebSocketClient(
      */
     override fun sendJson(json: String): Boolean {
         val msgType = tryExtractType(json)
+        val canonicalJson = canonicalizeCompletionIdentityPayload(json, msgType)
+        val canonicalMsgType = msgType ?: tryExtractType(canonicalJson)
         // Hard constraint: cross-device switch OFF must block ALL outbound WS sends,
         // even if a stale connection is somehow still open.
         if (!crossDeviceEnabled) {
             val traceId = java.util.UUID.randomUUID().toString()
-            Log.w(TAG, "[WS:BLOCKED] sendJson rejected: cross_device=off trace_id=$traceId type=$msgType reason=cross_device_disabled")
+            Log.w(TAG, "[WS:BLOCKED] sendJson rejected: cross_device=off trace_id=$traceId type=$canonicalMsgType reason=cross_device_disabled")
             GalaxyLogger.log(TAG, mapOf(
                 "event" to "send_blocked",
                 "trace_id" to traceId,
-                "type" to (msgType ?: "unknown"),
+                "type" to (canonicalMsgType ?: "unknown"),
                 "reason" to "cross_device_disabled"
             ))
             return false
         }
-        if (msgType == MsgType.RECONCILIATION_SIGNAL.value &&
-            !hasCanonicalReconciliationIngress(json)
+        if (canonicalMsgType == MsgType.RECONCILIATION_SIGNAL.value &&
+            !hasCanonicalReconciliationIngress(canonicalJson)
         ) {
             return false
         }
         if (!isConnected) {
-            if (msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
+            if (canonicalMsgType != null && canonicalMsgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
                 enqueueForReliableReplay(
-                    msgType = msgType,
-                    json = json,
+                    msgType = canonicalMsgType,
+                    json = canonicalJson,
                     reason = "disconnected"
                 )
             } else {
-                Log.w(TAG, "Not connected and message type not queueable (type=$msgType); dropping")
+                Log.w(TAG, "Not connected and message type not queueable (type=$canonicalMsgType); dropping")
             }
             return false
         }
         // Log key fields for full-chain traceability
-        if (msgType in listOf("task_submit", "task_result", "goal_result", "cancel_result")) {
-            val correlationId = tryExtractField(json, "correlation_id")
-            val taskId = tryExtractField(json, "task_id") ?: tryExtractFieldNested(json, "payload", "task_id")
-            val deviceId = tryExtractField(json, "device_id")
-            Log.i(TAG, "[WS:UPLINK] type=$msgType task_id=$taskId correlation_id=$correlationId device_id=$deviceId")
+        if (canonicalMsgType in listOf("task_submit", "task_result", "goal_result", "cancel_result")) {
+            val correlationId = tryExtractField(canonicalJson, "correlation_id")
+            val taskId = tryExtractField(canonicalJson, "task_id") ?: tryExtractFieldNested(canonicalJson, "payload", "task_id")
+            val deviceId = tryExtractField(canonicalJson, "device_id")
+            Log.i(TAG, "[WS:UPLINK] type=$canonicalMsgType task_id=$taskId correlation_id=$correlationId device_id=$deviceId")
         } else {
-            Log.d(TAG, "发送 JSON: ${json.take(100)}...")
+            Log.d(TAG, "发送 JSON: ${canonicalJson.take(100)}...")
         }
-        val sent = webSocket?.send(json) ?: false
-        if (!sent && msgType != null && msgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
+        val sent = webSocket?.send(canonicalJson) ?: false
+        if (!sent && canonicalMsgType != null && canonicalMsgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
             enqueueForReliableReplay(
-                msgType = msgType,
-                json = json,
+                msgType = canonicalMsgType,
+                json = canonicalJson,
                 reason = "transport_send_failed"
             )
         }
         return sent
+    }
+
+    private fun canonicalizeCompletionIdentityPayload(json: String, msgType: String?): String {
+        val supportedTypes = setOf(
+            MsgType.GOAL_EXECUTION_RESULT.value,
+            MsgType.DEVICE_EXECUTION_EVENT.value,
+            MsgType.RECONCILIATION_SIGNAL.value,
+            MsgType.DEVICE_STATE_SNAPSHOT.value
+        )
+        val type = msgType ?: tryExtractType(json)
+        if (type == null || type !in supportedTypes) return json
+        val root = try {
+            gson.fromJson(json, JsonObject::class.java)
+        } catch (_: Exception) {
+            null
+        } ?: return json
+        val payload = root.getAsJsonObject("payload") ?: return json
+        val payloadTaskId = payload.stringOrNull("task_id")
+        val taskId = payloadTaskId ?: root.stringOrNull("correlation_id")
+        if (payloadTaskId == null && taskId != null) {
+            payload.addProperty("task_id", taskId)
+        }
+        if (payload.stringOrNull("status") == null) {
+            val derivedStatus = when (type) {
+                MsgType.DEVICE_EXECUTION_EVENT.value ->
+                    payload.stringOrNull("phase")
+                MsgType.RECONCILIATION_SIGNAL.value ->
+                    payload.stringOrNull("kind")
+                else ->
+                    null
+            }
+            derivedStatus?.let { payload.addProperty("status", it) }
+        }
+        if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION) == null) {
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION,
+                AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION
+            )
+        }
+        if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION) == null) {
+            val contractVersion = payload.stringOrNull(
+                AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION
+            ) ?: AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION,
+                contractVersion
+            )
+        }
+        val existingRootIdempotencyKey = root.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
+        val existingPayloadIdempotencyKey = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
+        val fingerprintSeed = listOfNotNull(
+            type,
+            taskId ?: "no_task",
+            payload.stringOrNull("signal_id"),
+            payload.stringOrNull("event_id"),
+            payload.stringOrNull("uplink_lineage_emission_id"),
+            payload.stringOrNull("timestamp_ms"),
+            root.stringOrNull("timestamp")
+        ).joinToString(":")
+        val canonicalIdempotencyKey = existingRootIdempotencyKey
+            ?: existingPayloadIdempotencyKey
+            ?: buildStableFallbackIdempotencyKey(
+                type = type,
+                taskId = taskId,
+                completionEmissionId = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID)
+                    ?: payload.stringOrNull("uplink_lineage_emission_id")
+                    ?: payload.stringOrNull("event_id")
+                    ?: payload.stringOrNull("signal_id"),
+                payloadFingerprint = sha256Hex(fingerprintSeed).take(16)
+            )
+        if (existingRootIdempotencyKey != canonicalIdempotencyKey) {
+            root.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY,
+                canonicalIdempotencyKey
+            )
+        }
+        if (existingPayloadIdempotencyKey != canonicalIdempotencyKey) {
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY,
+                canonicalIdempotencyKey
+            )
+        }
+        if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID) == null) {
+            val emissionId = payload.stringOrNull("uplink_lineage_emission_id")
+                ?: payload.stringOrNull("event_id")
+                ?: payload.stringOrNull("signal_id")
+                ?: canonicalIdempotencyKey
+            payload.addProperty(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID, emissionId)
+        }
+        if (!payload.has(AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)) {
+            val isV2Confirmed = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_OUTWARD_TRUTH_SURFACE_CLASS) ==
+                AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass.V2_CONFIRMED_CANONICAL_TRUTH.wireValue
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH,
+                isV2Confirmed
+            )
+        }
+        return gson.toJson(root)
+    }
+
+    private fun JsonObject.stringOrNull(key: String): String? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.asString?.takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
+    private fun buildStableFallbackIdempotencyKey(
+        type: String,
+        taskId: String?,
+        completionEmissionId: String?,
+        payloadFingerprint: String
+    ): String {
+        val session = runtimeSessionId ?: "no_runtime_session"
+        val task = taskId ?: "no_task"
+        val emission = completionEmissionId ?: "payload_$payloadFingerprint"
+        return "$session:$type:$task:$emission"
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(value.toByteArray())
+            .joinToString(separator = "") { "%02x".format(it) }
     }
 
     private fun hasCanonicalReconciliationIngress(json: String): Boolean {
