@@ -1143,21 +1143,22 @@ class GalaxyWebSocketClient(
         if (isClosureBearingType) {
             // Strict Stage-1 rule: closure-grade identity comes only from explicit lineage keys.
             // task_id is necessary routing context but is not sufficient lineage identity.
-            val isClosureLineageIncomplete = !AndroidUplinkLineageMetadataContract
-                .isClosureLineageComplete(
-                    executionIdentity = payload.stringOrNull(
-                        AndroidUplinkLineageMetadataContract.KEY_EXECUTION_IDENTITY
-                    ),
-                    emissionIdentity = payload.stringOrNull(
-                        AndroidUplinkLineageMetadataContract.KEY_EMISSION_IDENTITY
-                    ),
-                    durableSessionId = payload.stringOrNull("durable_session_id"),
-                    sessionContinuityEpoch = payload.intOrNull("session_continuity_epoch")
-                )
-            val isTerminalLikeSignal =
-                payload.booleanOrNull("result_returned") == true ||
-                    payload.booleanOrNull("completion_signaled") == true ||
-                    payload.booleanOrNull("lifecycle_terminal_phase") == true
+            val lineageMetadata = AndroidUplinkLineageMetadataContract.derive(
+                executionIdentity = payload.stringOrNull(
+                    AndroidUplinkLineageMetadataContract.KEY_EXECUTION_IDENTITY
+                ),
+                emissionIdentity = payload.stringOrNull(
+                    AndroidUplinkLineageMetadataContract.KEY_EMISSION_IDENTITY
+                ),
+                durableSessionId = payload.stringOrNull("durable_session_id"),
+                sessionContinuityEpoch = payload.intOrNull("session_continuity_epoch"),
+                recoveryBasis = "transport_canonicalization"
+            )
+            val isClosureLineageIncomplete = !lineageMetadata.isClosureLineageComplete
+            val resultReturned = payload.booleanOrNull("result_returned") == true
+            val completionSignaled = payload.booleanOrNull("completion_signaled") == true
+            val lifecycleTerminal = payload.booleanOrNull("lifecycle_terminal_phase") == true
+            val isTerminalLikeSignal = resultReturned || completionSignaled || lifecycleTerminal
             if (isClosureLineageIncomplete && isTerminalLikeSignal) {
                 payload.addProperty(
                     AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS,

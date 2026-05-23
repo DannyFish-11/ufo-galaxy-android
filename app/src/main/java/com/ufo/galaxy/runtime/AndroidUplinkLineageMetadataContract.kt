@@ -86,15 +86,4 @@ object AndroidUplinkLineageMetadataContract {
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
-
-    fun isClosureLineageComplete(
-        executionIdentity: String?,
-        emissionIdentity: String?,
-        durableSessionId: String?,
-        sessionContinuityEpoch: Int?
-    ): Boolean =
-        !executionIdentity.isNullOrBlank() &&
-            !emissionIdentity.isNullOrBlank() &&
-            !durableSessionId.isNullOrBlank() &&
-            sessionContinuityEpoch != null
 }
