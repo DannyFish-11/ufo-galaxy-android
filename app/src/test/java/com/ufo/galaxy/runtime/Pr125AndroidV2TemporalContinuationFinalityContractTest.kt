@@ -931,6 +931,35 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
             )
         }
 
+    @Test
+    fun `publishTaskStatusUpdate with temporalWorkflowRunId emits WORKFLOW_CONTINUATION_ACTIVE`() =
+        runBlocking {
+            val controller = buildController()
+
+            controller.recordDelegatedTaskAccepted(
+                taskId = "task-status-temporal-125",
+                temporalWorkflowRunId = "wf-run-125-status"
+            )
+            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+
+            controller.publishTaskStatusUpdate(
+                taskId = "task-status-temporal-125",
+                progressDetail = "continuing"
+            )
+
+            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            assertNotNull("Expected TASK_STATUS_UPDATE signal", signal)
+            assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
+            assertEquals(
+                "wf-run-125-status",
+                signal.payload[AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID]
+            )
+            assertEquals(
+                AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.WORKFLOW_CONTINUATION_ACTIVE.wireValue,
+                signal.payload[ReconciliationSignal.KEY_TEMPORAL_CONTINUATION_FINALITY_CLASS]
+            )
+        }
+
     // ── 11. StabilizationBaseline registration ────────────────────────────────
 
     @Test
