@@ -38,6 +38,7 @@ data class AndroidCrossRepoRegressionSnapshot(
         "schema_version" to schemaVersion,
         "reported_at_ms" to reportedAtMs,
         "is_dual_runtime_regression_ready" to isDualRuntimeRegressionReady,
+        "key_behavior_evidence_status" to e2eReport.keyBehaviorEvidenceStatus.toWireMap(),
         "flow_outcomes" to flowOutcomes.mapKeys { it.key.wireValue }.mapValues { it.value.wireValue },
         "flow_reasons" to flowReasonByFlow.mapKeys { it.key.wireValue },
         "stage_chain" to buildStageChainWireMap(),

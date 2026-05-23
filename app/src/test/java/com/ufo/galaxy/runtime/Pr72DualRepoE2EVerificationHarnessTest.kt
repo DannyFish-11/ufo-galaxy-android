@@ -1153,6 +1153,10 @@ class Pr72DualRepoE2EVerificationHarnessTest {
         var wire = harness.buildReport().toWireMap()
         assertEquals(true, wire["is_participation_ready_evidence"])
         assertEquals(false, wire["is_runtime_closed_evidence"])
+        @Suppress("UNCHECKED_CAST")
+        var keyBehaviorStatus = wire["key_behavior_evidence_status"] as Map<String, String>
+        assertEquals("partially_run", keyBehaviorStatus["replay_ordering"])
+        assertEquals("not_run", keyBehaviorStatus["closure_completeness"])
 
         harness.recordStageOutcome(
             DualRepoE2EVerificationStage.TASK_RESULT_RETURN,
@@ -1161,6 +1165,10 @@ class Pr72DualRepoE2EVerificationHarnessTest {
         wire = harness.buildReport().toWireMap()
         assertEquals(true, wire["is_participation_ready_evidence"])
         assertEquals(true, wire["is_runtime_closed_evidence"])
+        @Suppress("UNCHECKED_CAST")
+        keyBehaviorStatus = wire["key_behavior_evidence_status"] as Map<String, String>
+        assertEquals("evidenced", keyBehaviorStatus["replay_ordering"])
+        assertEquals("partially_run", keyBehaviorStatus["closure_completeness"])
     }
 
     @Test
@@ -1182,6 +1190,10 @@ class Pr72DualRepoE2EVerificationHarnessTest {
         assertEquals("passed", hookStates["signal_emitted"])
         assertEquals("passed", hookStates["result_feedback"])
         assertEquals("passed", hookStates["state_correlated"])
+        @Suppress("UNCHECKED_CAST")
+        val keyBehaviorStatus = wire["key_behavior_evidence_status"] as Map<String, String>
+        assertEquals("evidenced", keyBehaviorStatus["replay_ordering"])
+        assertEquals("evidenced", keyBehaviorStatus["closure_completeness"])
     }
 
     @Test
@@ -1247,6 +1259,12 @@ class Pr72DualRepoE2EVerificationHarnessTest {
         )
         val report = ciHarness.buildReport()
         assertEquals("e2e_blocked_no_device", report.toWireMap()["artifact_tag"])
+        @Suppress("UNCHECKED_CAST")
+        val keyBehaviorStatus = report.toWireMap()["key_behavior_evidence_status"] as Map<String, String>
+        assertEquals("not_run", keyBehaviorStatus["replay_ordering"])
+        assertEquals("not_run", keyBehaviorStatus["reconnect_continuity"])
+        assertEquals("not_run", keyBehaviorStatus["recovery_behavior"])
+        assertEquals("not_run", keyBehaviorStatus["closure_completeness"])
     }
 
     @Test
