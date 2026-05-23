@@ -2673,6 +2673,62 @@ object StabilizationBaseline {
                 "RECOVERING 阶段允许 canonical closure。" +
                 "Test: Pr119AndroidCrossRepoRecoveryStateRoutingContractTest.",
             introducedPr = 119
+        ),
+
+        // ── PR-120: Android non-closure signal boundary contract ──────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-non-closure-signal-boundary-contract",
+            displayName = "AndroidNonClosureSignalBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-120 — Unified non-closure signal boundary contract for all Android-emitted " +
+                "observability-only, diagnostics-only, advisory-only, and readiness-only payloads. " +
+                "NonClosureSignalClass (5 values: DIAGNOSTICS_ONLY/ADVISORY_RECOVERY_ONLY/" +
+                "READINESS_ONLY/EVALUATOR_ADVISORY_ONLY/CONTINUITY_DIAGNOSTIC_ONLY) classifies " +
+                "every Android payload type that MUST NOT be used by V2 for canonical task closure. " +
+                "All enum values have isClosureEligible=false and isCanonicalResultCapable=false as " +
+                "defining invariants. classify() maps MsgType → NonClosureSignalClass. " +
+                "NON_CLOSURE_MSG_TYPES registers the 6 non-closure MsgTypes. " +
+                "toWireMap() produces non_closure_signal_class/non_closure_schema_version wire fields. " +
+                "V2_NON_CLOSURE_ALIGNMENT_MAP maps each class to its V2 non-closure consumption path. " +
+                "NON_CLOSURE_INVARIANTS (10 items) prevent: diagnostics payloads closing tasks, " +
+                "advisory recovery evidence acting as canonical closure, readiness-only payloads " +
+                "producing task closure, evaluator advisory reports bypassing governance gates, " +
+                "and non-closure semantics being silently upgraded under fallback/degraded scenarios. " +
+                "DiagnosticsPayload/DeviceReadinessReportPayload/DeviceGovernanceReportPayload/" +
+                "DeviceAcceptanceReportPayload/DeviceStrategyReportPayload/DeviceStateSnapshotPayload " +
+                "gain non_closure_signal_class and non_closure_schema_version wire fields. " +
+                "Test: Pr120AndroidNonClosureSignalBoundaryContractTest.",
+            introducedPr = 120
+        ),
+
+        // ── PR-121: Android canonical transport path boundary contract ────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-canonical-transport-path-boundary-contract",
+            displayName = "AndroidCanonicalTransportPathBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCanonicalTransportPathBoundaryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-121 — Formal canonical vs. compatibility transport path boundary contract. " +
+                "TransportPathClass (4 values: CANONICAL_PRODUCTION/COMPAT_LEGACY/" +
+                "DIAGNOSTICS_ONLY_PATH/NOT_APPLICABLE) classifies each Android WebSocket send path " +
+                "by production authority. Only CANONICAL_PRODUCTION (sendJson()) is eligible to " +
+                "carry closure-bearing AUTHORITY_RESULT payloads. COMPAT_LEGACY covers the " +
+                "@Deprecated send()/sendAIPMessage() methods that redirect to sendJson() during " +
+                "migration. classifySendPath() provides a direct gate check. " +
+                "V2_TRANSPORT_PATH_ALIGNMENT_MAP maps each class to the V2 ingress expectation. " +
+                "TRANSPORT_PATH_INVARIANTS (10 items) prevent: compat paths being treated as " +
+                "production-equivalent, closure-bearing payloads travelling via COMPAT_LEGACY, " +
+                "cross-device gate bypass demoting canonical path class, and reconnect behavior " +
+                "silently altering transport path classification. Aligns MAIN_CHAIN transport stage " +
+                "in AndroidMinimalRuntimeAccessChainContract with CANONICAL_PRODUCTION. " +
+                "Test: Pr121AndroidCanonicalTransportPathBoundaryContractTest.",
+            introducedPr = 121
         )
     )
 

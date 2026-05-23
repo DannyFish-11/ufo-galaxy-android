@@ -1396,6 +1396,14 @@ data class DiagnosticsPayload(
     val session_continuity_class: String? = null,
     val device_posture_signal_class: String? = null,
     val distributed_truth_ownership_uplink_schema_version: String? = null,
+    // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+    //
+    // non_closure_signal_class: Explicit non-closure classification for this diagnostics payload.
+    //   Always "diagnostics_only" (AndroidNonClosureSignalBoundaryContract.NonClosureSignalClass.DIAGNOSTICS_ONLY).
+    //   V2 MUST treat a payload carrying this field as non-closure regardless of other fields.
+    //   MUST NOT be used to derive canonical task closure or final truth.
+    val non_closure_signal_class: String? = null,
+    val non_closure_schema_version: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -2050,7 +2058,14 @@ data class DeviceReadinessReportPayload(
     val ingress_boundary_class: String? = null,
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
-    val ingress_schema_version: String? = null
+    val ingress_schema_version: String? = null,
+    // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+    //
+    // non_closure_signal_class: Explicit non-closure classification for this readiness report payload.
+    //   Always "readiness_only" (AndroidNonClosureSignalBoundaryContract.NonClosureSignalClass.READINESS_ONLY).
+    //   V2 MUST NOT use this payload for canonical task closure; only for release-gate assessment.
+    val non_closure_signal_class: String? = null,
+    val non_closure_schema_version: String? = null
 )
 
 // ── PR-4 (Android): Governance / acceptance / strategy report uplink payloads ────────────────
@@ -2112,7 +2127,14 @@ data class DeviceGovernanceReportPayload(
     val ingress_boundary_class: String? = null,
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
-    val ingress_schema_version: String? = null
+    val ingress_schema_version: String? = null,
+    // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+    //
+    // non_closure_signal_class: Explicit non-closure classification for this governance report.
+    //   Always "evaluator_advisory_only" (AndroidNonClosureSignalBoundaryContract.NonClosureSignalClass.EVALUATOR_ADVISORY_ONLY).
+    //   V2 MUST feed this only to governance/graduation gates; MUST NOT produce canonical task closure.
+    val non_closure_signal_class: String? = null,
+    val non_closure_schema_version: String? = null
 )
 
 /**
@@ -2171,7 +2193,14 @@ data class DeviceAcceptanceReportPayload(
     val ingress_boundary_class: String? = null,
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
-    val ingress_schema_version: String? = null
+    val ingress_schema_version: String? = null,
+    // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+    //
+    // non_closure_signal_class: Explicit non-closure classification for this acceptance report.
+    //   Always "evaluator_advisory_only" (AndroidNonClosureSignalBoundaryContract.NonClosureSignalClass.EVALUATOR_ADVISORY_ONLY).
+    //   V2 graduation gate uses this for readiness evidence only; MUST NOT produce canonical task closure.
+    val non_closure_signal_class: String? = null,
+    val non_closure_schema_version: String? = null
 )
 
 /**
@@ -2230,7 +2259,14 @@ data class DeviceStrategyReportPayload(
     val ingress_boundary_class: String? = null,
     val ingress_consumption_kind: String? = null,
     val ingress_signal_class: String? = null,
-    val ingress_schema_version: String? = null
+    val ingress_schema_version: String? = null,
+    // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+    //
+    // non_closure_signal_class: Explicit non-closure classification for this strategy report.
+    //   Always "evaluator_advisory_only" (AndroidNonClosureSignalBoundaryContract.NonClosureSignalClass.EVALUATOR_ADVISORY_ONLY).
+    //   V2 MUST feed this only to strategy/evolution gates; MUST NOT produce canonical task closure.
+    val non_closure_signal_class: String? = null,
+    val non_closure_schema_version: String? = null
 )
 
 /**
@@ -3095,7 +3131,15 @@ data class DeviceStateSnapshotPayload(
     val uplink_lineage_execution_id: String? = null,
     val uplink_lineage_emission_id: String? = null,
     val uplink_lineage_dedupe_key: String? = null,
-    val uplink_lineage_recovery_basis: String? = null
+    val uplink_lineage_recovery_basis: String? = null,
+    // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+    //
+    // non_closure_signal_class: Explicit non-closure classification for device state snapshots.
+    //   Always "diagnostics_only" (AndroidNonClosureSignalBoundaryContract.NonClosureSignalClass.DIAGNOSTICS_ONLY).
+    //   Complements result_signal_class="diagnostics_informational" and acceptance_candidate_class="closure_not_applicable".
+    //   V2 MUST store snapshots for observability only and MUST NOT derive canonical task closure.
+    val non_closure_signal_class: String? = null,
+    val non_closure_schema_version: String? = null
 )
 
 // ── PR-2 (Android): Device execution-event uplink payload ────────────────────────────────

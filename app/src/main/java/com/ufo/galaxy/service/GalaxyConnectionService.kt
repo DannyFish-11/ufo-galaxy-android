@@ -55,6 +55,7 @@ import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract
 import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract
+import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
@@ -4019,7 +4020,11 @@ class GalaxyConnectionService : Service() {
                 ingress_boundary_class = ingress.boundaryClass.wireValue,
                 ingress_consumption_kind = ingress.consumptionKind.wireValue,
                 ingress_signal_class = ingress.signalClass.wireValue,
-                ingress_schema_version = ingress.schemaVersion
+                ingress_schema_version = ingress.schemaVersion,
+                // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_READINESS_REPORT)!!.wireValue,
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
@@ -5001,7 +5006,14 @@ class GalaxyConnectionService : Service() {
                 uplink_lineage_execution_id = snapshotLineage.executionIdentity,
                 uplink_lineage_emission_id = snapshotLineage.emissionIdentity,
                 uplink_lineage_dedupe_key = snapshotLineage.dedupeKey,
-                uplink_lineage_recovery_basis = snapshotLineage.recoveryBasis
+                uplink_lineage_recovery_basis = snapshotLineage.recoveryBasis,
+                // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+                // Complements result_signal_class=DIAGNOSTICS_INFORMATIONAL and
+                // acceptance_candidate_class=CLOSURE_NOT_APPLICABLE with an explicit
+                // non-closure boundary class that V2 can gate on directly.
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_STATE_SNAPSHOT)!!.wireValue,
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
@@ -5116,7 +5128,11 @@ class GalaxyConnectionService : Service() {
                 ingress_boundary_class = ingress.boundaryClass.wireValue,
                 ingress_consumption_kind = ingress.consumptionKind.wireValue,
                 ingress_signal_class = ingress.signalClass.wireValue,
-                ingress_schema_version = ingress.schemaVersion
+                ingress_schema_version = ingress.schemaVersion,
+                // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_GOVERNANCE_REPORT)!!.wireValue,
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
@@ -5202,7 +5218,11 @@ class GalaxyConnectionService : Service() {
                 ingress_boundary_class = ingress.boundaryClass.wireValue,
                 ingress_consumption_kind = ingress.consumptionKind.wireValue,
                 ingress_signal_class = ingress.signalClass.wireValue,
-                ingress_schema_version = ingress.schemaVersion
+                ingress_schema_version = ingress.schemaVersion,
+                // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_ACCEPTANCE_REPORT)!!.wireValue,
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
@@ -5288,7 +5308,11 @@ class GalaxyConnectionService : Service() {
                 ingress_boundary_class = ingress.boundaryClass.wireValue,
                 ingress_consumption_kind = ingress.consumptionKind.wireValue,
                 ingress_signal_class = ingress.signalClass.wireValue,
-                ingress_schema_version = ingress.schemaVersion
+                ingress_schema_version = ingress.schemaVersion,
+                // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_STRATEGY_REPORT)!!.wireValue,
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
