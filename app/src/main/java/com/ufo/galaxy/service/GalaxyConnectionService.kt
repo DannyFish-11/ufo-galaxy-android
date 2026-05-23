@@ -907,6 +907,9 @@ class GalaxyConnectionService : Service() {
                     .operatorDoneProjectionClass.wireValue,
                 completion_closure_uplink_schema_version =
                     AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+                completion_closure_contract_version =
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
                 local_execution_completed = eventV2CanonicalBoundary.localExecutionCompleted,
                 advisory_evidence_sent = eventV2CanonicalBoundary.advisoryEvidenceSent,
                 v2_uplink_acknowledged = eventV2CanonicalBoundary.v2UplinkAcknowledged,
@@ -914,6 +917,10 @@ class GalaxyConnectionService : Service() {
                 v2_canonical_truth_completed = eventV2CanonicalBoundary.v2CanonicalTruthCompleted,
                 v2_mature_closure_achieved = eventV2CanonicalBoundary.v2MatureClosureAchieved,
                 outward_truth_surface_class = eventV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
+                is_v2_confirmed_canonical_truth =
+                    eventV2CanonicalBoundary.outwardTruthSurfaceClass ==
+                        AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                            .V2_CONFIRMED_CANONICAL_TRUTH,
                 // ── PR-08v2 (Android): 分布式运行参与边界收束字段（在执行事件发射层填充）────────────────
                 // 从已预计算的 eventParticipationBoundary 直接读取，使 V2 可无歧义地将执行事件
                 // 路由至正确的分布式运行参与链，无需字段组合推断。
@@ -933,8 +940,10 @@ class GalaxyConnectionService : Service() {
                 uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
                 uplink_lineage_execution_id = eventLineage.executionIdentity,
                 uplink_lineage_emission_id = eventLineage.emissionIdentity,
+                completion_emission_id = eventLineage.emissionIdentity,
                 uplink_lineage_dedupe_key = eventLineage.dedupeKey,
-                uplink_lineage_recovery_basis = eventLineage.recoveryBasis
+                uplink_lineage_recovery_basis = eventLineage.recoveryBasis,
+                idempotency_key = eventLineage.dedupeKey
             )
             val closedLoopPayload =
                 AndroidClosedLoopGovernanceContract.canonicalizeExecutionEvent(enrichedPayload)
@@ -3309,6 +3318,9 @@ class GalaxyConnectionService : Service() {
                 .operatorDoneProjectionClass.wireValue,
             completion_closure_uplink_schema_version =
                 AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+            schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+            completion_closure_contract_version =
+                AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
             local_execution_completed = resultV2CanonicalBoundary.localExecutionCompleted,
             advisory_evidence_sent = resultV2CanonicalBoundary.advisoryEvidenceSent,
             v2_uplink_acknowledged = resultV2CanonicalBoundary.v2UplinkAcknowledged,
@@ -3316,6 +3328,10 @@ class GalaxyConnectionService : Service() {
             v2_canonical_truth_completed = resultV2CanonicalBoundary.v2CanonicalTruthCompleted,
             v2_mature_closure_achieved = resultV2CanonicalBoundary.v2MatureClosureAchieved,
             outward_truth_surface_class = resultV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
+            is_v2_confirmed_canonical_truth =
+                resultV2CanonicalBoundary.outwardTruthSurfaceClass ==
+                    AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                        .V2_CONFIRMED_CANONICAL_TRUTH,
             participation_boundary_role = resultParticipationBoundary.participationBoundaryRole.wireValue,
             ownership_posture_class = resultParticipationBoundary.ownershipPostureClass.wireValue,
             remote_local_mode_class = resultParticipationBoundary.remoteLocalModeClass.wireValue,
@@ -3361,24 +3377,31 @@ class GalaxyConnectionService : Service() {
                 ?: resultLineage.executionIdentity,
             uplink_lineage_emission_id = result.uplink_lineage_emission_id
                 ?: resultLineage.emissionIdentity,
+            completion_emission_id = result.completion_emission_id
+                ?: result.uplink_lineage_emission_id
+                ?: resultLineage.emissionIdentity,
             uplink_lineage_dedupe_key = result.uplink_lineage_dedupe_key
                 ?: resultLineage.dedupeKey,
             uplink_lineage_recovery_basis = result.uplink_lineage_recovery_basis
-                ?: resultLineage.recoveryBasis
+                ?: resultLineage.recoveryBasis,
+            idempotency_key = result.idempotency_key
         )
+        val goalResultIdempotencyKey = enriched.idempotency_key
+            ?: buildIdempotencyKey(enriched.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId)
+        val envelopeReadyPayload = enriched.copy(idempotency_key = goalResultIdempotencyKey)
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
-            payload = enriched,
-            correlation_id = enriched.correlation_id ?: enriched.task_id,
-            device_id = enriched.device_id.ifEmpty { localDeviceId },
+            payload = envelopeReadyPayload,
+            correlation_id = envelopeReadyPayload.correlation_id ?: envelopeReadyPayload.task_id,
+            device_id = envelopeReadyPayload.device_id.ifEmpty { localDeviceId },
             trace_id = traceId,
             route_mode = routeMode,
             runtime_session_id = runtimeSession,
-            idempotency_key = buildIdempotencyKey(enriched.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId),
+            idempotency_key = goalResultIdempotencyKey,
             // Propagate trace/posture fields from the result payload into the envelope so
             // V2 observability and posture routing see consistent values at both layers.
-            dispatch_trace_id = enriched.dispatch_trace_id,
-            source_runtime_posture = enriched.source_runtime_posture
+            dispatch_trace_id = envelopeReadyPayload.dispatch_trace_id,
+            source_runtime_posture = envelopeReadyPayload.source_runtime_posture
         )
         val envelopeJson = gson.toJson(envelope)
         val connectedAtSendAttempt = webSocketClient.isConnected()
@@ -3394,8 +3417,9 @@ class GalaxyConnectionService : Service() {
                         type = MsgType.GOAL_EXECUTION_RESULT.value,
                         json = envelopeJson,
                         sessionTag = durableSessionTag,
-                        sessionEpoch = enriched.session_continuity_epoch,
-                        dedupeKey = enriched.uplink_lineage_dedupe_key ?: envelope.idempotency_key
+                        sessionEpoch = envelopeReadyPayload.session_continuity_epoch,
+                        dedupeKey =
+                            envelopeReadyPayload.uplink_lineage_dedupe_key ?: envelope.idempotency_key
                     )
                 }
                 val queueSucceeded = queueResult.isSuccess
@@ -3404,7 +3428,7 @@ class GalaxyConnectionService : Service() {
                 } else {
                     Log.e(
                         TAG,
-                        "goal_execution_result enqueue failed task_id=${enriched.task_id} " +
+                        "goal_execution_result enqueue failed task_id=${envelopeReadyPayload.task_id} " +
                             "trace_id=${traceId ?: ""} error=${queueResult.exceptionOrNull()?.message}",
                         queueResult.exceptionOrNull()
                     )
@@ -3413,12 +3437,12 @@ class GalaxyConnectionService : Service() {
             }
         }
         updateAcceptanceEvidenceFromResult(
-            result = enriched,
+            result = envelopeReadyPayload,
             deliveryDisposition = deliveryDisposition
         )
         sendDeviceAcceptanceReport()
         crossRepoRegressionHooks.recordGoalResultFeedback(
-            taskId = enriched.task_id,
+            taskId = envelopeReadyPayload.task_id,
             traceId = traceId,
             runtimeSessionId = runtimeSession,
             status = if (deliveryDisposition == ResultDeliveryDisposition.SEND_FAILED) {
@@ -3436,7 +3460,7 @@ class GalaxyConnectionService : Service() {
             TAG,
             mapOf(
                 "event" to "goal_result_delivery_disposition",
-                "task_id" to enriched.task_id,
+                "task_id" to envelopeReadyPayload.task_id,
                 "trace_id" to (traceId ?: ""),
                 "delivery_disposition" to deliveryDisposition.name.lowercase(),
                 "connected_at_send_attempt" to connectedAtSendAttempt
@@ -3873,6 +3897,22 @@ class GalaxyConnectionService : Service() {
                 .classifyReconciliation(signal.kind)
             val reliablePayload = signal.payload.toMutableMap().apply {
                 put(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY, stableDedupeKey)
+                put(
+                    AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION,
+                    AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION
+                )
+                put(
+                    AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION,
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+                )
+                signal.taskId?.let { put("task_id", it) }
+                put("status", signal.status)
+                put(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY, stableDedupeKey)
+                put(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID, signal.signalId)
+                put(
+                    AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH,
+                    false
+                )
             }
             val fallbackRecoveryPhase = runtimeController.unifiedRecoveryPhase.value
             val fallbackRecoverySource = deriveRecoverySource(
@@ -3909,6 +3949,11 @@ class GalaxyConnectionService : Service() {
                 session_continuity_epoch = signal.sessionContinuityEpoch,
                 payload = reliablePayload,
                 runtime_truth = runtimeTruth,
+                schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+                completion_closure_contract_version = AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                completion_emission_id = signal.signalId,
+                idempotency_key = stableDedupeKey,
+                is_v2_confirmed_canonical_truth = false,
                 ingress_boundary_class = ingress.boundaryClass.wireValue,
                 ingress_consumption_kind = ingress.consumptionKind.wireValue,
                 ingress_signal_class = ingress.signalClass.wireValue,

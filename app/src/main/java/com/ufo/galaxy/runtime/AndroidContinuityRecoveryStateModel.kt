@@ -81,6 +81,9 @@ object AndroidContinuityRecoveryStateModel {
      * Wire key for this contract's [SCHEMA_VERSION].
      */
     const val KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION = "continuity_recovery_schema_version"
+    const val KEY_SCHEMA_VERSION = AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION
+    const val KEY_COMPLETION_CLOSURE_CONTRACT_VERSION =
+        AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION
 
     // ── Recovery phase enum ────────────────────────────────────────────────────
 
@@ -207,7 +210,9 @@ object AndroidContinuityRecoveryStateModel {
     fun toWireMap(phase: RecoveryPhase, source: String): Map<String, String> = mapOf(
         KEY_CONTINUITY_RECOVERY_STATE to phase.wireValue,
         KEY_CONTINUITY_RECOVERY_SOURCE to source,
-        KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION to SCHEMA_VERSION
+        KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION to SCHEMA_VERSION,
+        KEY_SCHEMA_VERSION to AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+        KEY_COMPLETION_CLOSURE_CONTRACT_VERSION to AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
     )
 
     // ── Invariants ─────────────────────────────────────────────────────────────
