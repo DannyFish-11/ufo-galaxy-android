@@ -57,6 +57,9 @@ import org.junit.Test
  */
 class Pr14AndroidV2ContractVersionGateTest {
 
+    private fun Set<MsgType>.toWireValueSet(): Set<String> =
+        mapTo(mutableSetOf()) { it.value }
+
     // ── 1. Gate schema version stability ─────────────────────────────────────
 
     @Test
@@ -149,6 +152,36 @@ class Pr14AndroidV2ContractVersionGateTest {
         )
     }
 
+    @Test
+    fun `EXPECTED_NON_CLOSURE_SCHEMA_VERSION matches contract`() {
+        assertEquals(
+            "AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION drift — " +
+                "bump GATE_SCHEMA_VERSION and align V2 non-closure ingress guards",
+            AndroidV2ContractVersionGate.EXPECTED_NON_CLOSURE_SCHEMA_VERSION,
+            AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
+        )
+    }
+
+    @Test
+    fun `EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION matches contract`() {
+        assertEquals(
+            "AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION drift — " +
+                "bump GATE_SCHEMA_VERSION and align V2 recovery routing ingress",
+            AndroidV2ContractVersionGate.EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION,
+            AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION
+        )
+    }
+
+    @Test
+    fun `EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION matches contract`() {
+        assertEquals(
+            "AndroidCrossRepoDedupeContract.SCHEMA_VERSION drift — " +
+                "bump GATE_SCHEMA_VERSION and align V2 replay/dedupe ingress",
+            AndroidV2ContractVersionGate.EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION,
+            AndroidCrossRepoDedupeContract.SCHEMA_VERSION
+        )
+    }
+
     // ── 5. Wire key stability ─────────────────────────────────────────────────
 
     @Test
@@ -212,6 +245,22 @@ class Pr14AndroidV2ContractVersionGateTest {
         assertEquals(
             AndroidParticipationSemanticNormalizationContract.KEY_SCHEMA_VERSION,
             AndroidV2ContractVersionGate.KEY_PARTICIPATION_SEMANTIC_SCHEMA_VERSION
+        )
+    }
+
+    @Test
+    fun `KEY_NON_CLOSURE_SCHEMA_VERSION matches source contract`() {
+        assertEquals(
+            AndroidNonClosureSignalBoundaryContract.KEY_NON_CLOSURE_SCHEMA_VERSION,
+            AndroidV2ContractVersionGate.KEY_NON_CLOSURE_SCHEMA_VERSION
+        )
+    }
+
+    @Test
+    fun `KEY_RECOVERY_ROUTING_SCHEMA_VERSION matches source contract`() {
+        assertEquals(
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION,
+            AndroidV2ContractVersionGate.KEY_RECOVERY_ROUTING_SCHEMA_VERSION
         )
     }
 
@@ -315,6 +364,69 @@ class Pr14AndroidV2ContractVersionGateTest {
         assertEquals(
             AndroidV2ContractVersionGate.GATE_SCHEMA_VERSION,
             AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+    }
+
+    @Test
+    fun `V2_EXPECTED_VERSIONS contains non-closure schema version key`() {
+        val key = AndroidV2ContractVersionGate.KEY_NON_CLOSURE_SCHEMA_VERSION
+        assertNotNull(
+            "V2_EXPECTED_VERSIONS missing non-closure schema version key $key",
+            AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+        assertEquals(
+            AndroidV2ContractVersionGate.EXPECTED_NON_CLOSURE_SCHEMA_VERSION,
+            AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+    }
+
+    @Test
+    fun `V2_EXPECTED_VERSIONS contains recovery routing schema version key`() {
+        val key = AndroidV2ContractVersionGate.KEY_RECOVERY_ROUTING_SCHEMA_VERSION
+        assertNotNull(
+            "V2_EXPECTED_VERSIONS missing recovery routing schema version key $key",
+            AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+        assertEquals(
+            AndroidV2ContractVersionGate.EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION,
+            AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+    }
+
+    @Test
+    fun `V2_EXPECTED_VERSIONS contains cross-repo dedupe schema version key`() {
+        val key = AndroidV2ContractVersionGate.KEY_CROSS_REPO_DEDUPE_SCHEMA_VERSION
+        assertNotNull(
+            "V2_EXPECTED_VERSIONS missing dedupe schema version key $key",
+            AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+        assertEquals(
+            AndroidV2ContractVersionGate.EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION,
+            AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
+        )
+    }
+
+    @Test
+    fun `REQUIRED_NON_CLOSURE_MSG_TYPES matches contract`() {
+        assertEquals(
+            AndroidV2ContractVersionGate.REQUIRED_NON_CLOSURE_MSG_TYPES,
+            AndroidNonClosureSignalBoundaryContract.NON_CLOSURE_MSG_TYPES
+        )
+    }
+
+    @Test
+    fun `REQUIRED_CANONICAL_REPLAY_MSG_TYPES matches contract`() {
+        assertEquals(
+            AndroidV2ContractVersionGate.REQUIRED_CANONICAL_REPLAY_MSG_TYPES.toWireValueSet(),
+            AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES
+        )
+    }
+
+    @Test
+    fun `REQUIRED_REPLAY_EPOCH_MSG_TYPES matches contract`() {
+        assertEquals(
+            AndroidV2ContractVersionGate.REQUIRED_REPLAY_EPOCH_MSG_TYPES.toWireValueSet(),
+            AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES
         )
     }
 
