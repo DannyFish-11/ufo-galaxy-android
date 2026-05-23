@@ -46,11 +46,11 @@ object AndroidUplinkLineageMetadataContract {
         val safeRecoveryBasis = recoveryBasis.ifBlank { "none" }
         val identitySeed = sha256(
             listOf(safeSession, safeEpoch, safeRecoveryBasis).joinToString("|")
-        ).take(32)
+        )
         val safeExecutionIdentity = executionIdentity?.ifBlank { null }
             ?: "synthetic_execution_$identitySeed"
         val safeEmissionIdentity = emissionIdentity?.ifBlank { null }
-            ?: "synthetic_emission_${sha256("$safeExecutionIdentity|$safeRecoveryBasis").take(32)}"
+            ?: "synthetic_emission_${sha256("$safeExecutionIdentity|$safeRecoveryBasis")}"
         val lineageStrengthClass = when {
             !hasExecutionIdentity ->
                 LineageStrengthClass.DEGRADED_MISSING_EXECUTION_IDENTITY
@@ -61,8 +61,12 @@ object AndroidUplinkLineageMetadataContract {
             else ->
                 LineageStrengthClass.CLOSURE_GRADE
         }
-        val isClosureLineageComplete =
-            lineageStrengthClass == LineageStrengthClass.CLOSURE_GRADE
+        val isClosureLineageComplete = isClosureLineageComplete(
+            executionIdentity = executionIdentity,
+            emissionIdentity = emissionIdentity,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
+        )
         val dedupeKey = sha256(
             listOf(
                 safeSession,
@@ -86,4 +90,15 @@ object AndroidUplinkLineageMetadataContract {
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
+
+    fun isClosureLineageComplete(
+        executionIdentity: String?,
+        emissionIdentity: String?,
+        durableSessionId: String?,
+        sessionContinuityEpoch: Int?
+    ): Boolean =
+        !executionIdentity.isNullOrBlank() &&
+            !emissionIdentity.isNullOrBlank() &&
+            !durableSessionId.isNullOrBlank() &&
+            sessionContinuityEpoch != null
 }
