@@ -3,8 +3,15 @@ name: Android CI
 on:
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*", "release-*" ]
   pull_request:
     branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      protected_release:
+        description: "Run protected release enforcement gate (blocks on unresolved critical continuity/replay/schema/evidence/closure gaps)"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -389,71 +396,202 @@ jobs:
           E2E_RESULT: ${{ needs.e2e-verification-gate.result }}
           UNIT_RESULT: ${{ needs.all-unit-tests.result }}
           LINT_RESULT: ${{ needs.lint.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
+          FORCE_PROTECTED_RELEASE: ${{ github.event.inputs.protected_release }}
         run: |
           mkdir -p app/build/e2e-verification
+          python3 - <<'PY'
+          import json
+          import os
 
-          protected_execution_state="evidenced"
-          if [[ "$BUILD_RESULT" != "success" ]]; then
-            protected_execution_state="not_run"
-          elif [[ "$PROTOCOL_RESULT" != "success" || "$RUNTIME_RESULT" != "success" || "$COMPAT_RESULT" != "success" || "$E2E_RESULT" != "success" || "$UNIT_RESULT" != "success" || "$LINT_RESULT" != "success" ]]; then
-            if [[ "$E2E_RESULT" == "skipped" || "$COMPAT_RESULT" == "skipped" || "$UNIT_RESULT" == "skipped" || "$LINT_RESULT" == "skipped" ]]; then
-              protected_execution_state="partially_run"
-            else
-              protected_execution_state="failed"
-            fi
-          fi
+          build = os.getenv("BUILD_RESULT", "unknown")
+          protocol = os.getenv("PROTOCOL_RESULT", "unknown")
+          runtime = os.getenv("RUNTIME_RESULT", "unknown")
+          compat = os.getenv("COMPAT_RESULT", "unknown")
+          e2e = os.getenv("E2E_RESULT", "unknown")
+          unit = os.getenv("UNIT_RESULT", "unknown")
+          lint = os.getenv("LINT_RESULT", "unknown")
+          event_name = os.getenv("EVENT_NAME", "")
+          github_ref = os.getenv("GITHUB_REF_VALUE", "")
+          force_protected_release = os.getenv("FORCE_PROTECTED_RELEASE", "false").lower() == "true"
 
-          replay_ordering_state="not_run"
-          reconnect_continuity_state="not_run"
-          recovery_behavior_state="not_run"
-          closure_completeness_state="not_run"
-          real_device_e2e_state="not_run"
-          evidence_visibility_reason="e2e_gate_not_run"
+          protected_execution_state = "evidenced"
+          if build != "success":
+              protected_execution_state = "not_run"
+          elif any(v != "success" for v in [protocol, runtime, compat, e2e, unit, lint]):
+              if any(v == "skipped" for v in [e2e, compat, unit, lint]):
+                  protected_execution_state = "partially_run"
+              else:
+                  protected_execution_state = "failed"
 
-          if [[ "$E2E_RESULT" == "success" ]]; then
-            replay_ordering_state="partially_run"
-            reconnect_continuity_state="not_run"
-            recovery_behavior_state="not_run"
-            closure_completeness_state="partially_run"
-            real_device_e2e_state="not_run"
-            evidence_visibility_reason="ci_no_physical_device_harness_contracts_verified"
-          elif [[ "$E2E_RESULT" == "failure" || "$E2E_RESULT" == "cancelled" ]]; then
-            replay_ordering_state="failed"
-            reconnect_continuity_state="failed"
-            recovery_behavior_state="failed"
-            closure_completeness_state="failed"
-            real_device_e2e_state="failed"
-            evidence_visibility_reason="e2e_harness_gate_failed"
-          elif [[ "$E2E_RESULT" == "skipped" ]]; then
-            evidence_visibility_reason="e2e_harness_gate_skipped"
-          fi
+          replay_ordering_state = "not_run"
+          reconnect_continuity_state = "not_run"
+          recovery_behavior_state = "not_run"
+          closure_completeness_state = "not_run"
+          real_device_e2e_state = "not_run"
+          evidence_visibility_reason = "e2e_gate_not_run"
 
-          cat > app/build/e2e-verification/cross-repo-evidence-status.json <<EOFSTATUS
-          {
-            "schema_version": "1.0",
-            "source": "android-ci",
-            "state_vocabulary": ["not_run", "partially_run", "failed", "evidenced"],
-            "protected_execution_state": "${protected_execution_state}",
-            "real_device_e2e_state": "${real_device_e2e_state}",
-            "key_behavior_evidence_status": {
-              "replay_ordering": "${replay_ordering_state}",
-              "reconnect_continuity": "${reconnect_continuity_state}",
-              "recovery_behavior": "${recovery_behavior_state}",
-              "closure_completeness": "${closure_completeness_state}"
-            },
-            "gate_results": {
-              "build": "${BUILD_RESULT}",
-              "protocol_contract_guard": "${PROTOCOL_RESULT}",
-              "runtime_regression": "${RUNTIME_RESULT}",
-              "cross_repo_compatibility_guard": "${COMPAT_RESULT}",
-              "e2e_verification_gate": "${E2E_RESULT}",
-              "all_unit_tests": "${UNIT_RESULT}",
-              "lint": "${LINT_RESULT}"
-            },
-            "evidence_visibility_reason": "${evidence_visibility_reason}",
-            "no_device_default_artifact_tag": "e2e_blocked_no_device"
+          if e2e == "success":
+              replay_ordering_state = "partially_run"
+              reconnect_continuity_state = "not_run"
+              recovery_behavior_state = "not_run"
+              closure_completeness_state = "partially_run"
+              real_device_e2e_state = "not_run"
+              evidence_visibility_reason = "ci_no_physical_device_harness_contracts_verified"
+          elif e2e in {"failure", "cancelled"}:
+              replay_ordering_state = "failed"
+              reconnect_continuity_state = "failed"
+              recovery_behavior_state = "failed"
+              closure_completeness_state = "failed"
+              real_device_e2e_state = "failed"
+              evidence_visibility_reason = "e2e_harness_gate_failed"
+          elif e2e == "skipped":
+              evidence_visibility_reason = "e2e_harness_gate_skipped"
+
+          is_release_tag = github_ref.startswith("refs/tags/v") or github_ref.startswith("refs/tags/release-")
+          is_release_branch = github_ref.startswith("refs/heads/release/")
+          is_dispatch_protected = event_name == "workflow_dispatch" and force_protected_release
+          is_protected_release_path = bool(is_release_tag or is_release_branch or is_dispatch_protected)
+
+          release_path_class = "protected_release" if is_protected_release_path else "development_or_pr"
+
+          conditions = [
+              {
+                  "condition_id": "schema_contract_compatibility",
+                  "condition_class": "schema_drift",
+                  "severity": "high",
+                  "invariant": "android_v2_contract_compatibility_guard",
+                  "source_gate": "cross_repo_compatibility_guard",
+                  "status": "unresolved" if compat != "success" else "satisfied",
+                  "failure_reason": "cross_repo_compatibility_guard_not_success" if compat != "success" else "none",
+                  "actual_value": compat,
+                  "expected_value": "success",
+                  "action_hint": "Run Android↔V2 compatibility tests and align schema/version/message-contract surfaces before protected release."
+              },
+              {
+                  "condition_id": "replay_evidence",
+                  "condition_class": "replay_risk",
+                  "severity": "high",
+                  "invariant": "replay_ordering_evidence_state",
+                  "source_gate": "e2e_verification_gate",
+                  "status": "unresolved" if replay_ordering_state in {"not_run", "failed"} else "satisfied",
+                  "failure_reason": f"replay_ordering_{replay_ordering_state}",
+                  "actual_value": replay_ordering_state,
+                  "expected_value": "partially_run_or_evidenced",
+                  "action_hint": "Ensure replay-ordering evidence is at least partially_run and not failed for protected release."
+              },
+              {
+                  "condition_id": "continuity_evidence",
+                  "condition_class": "continuity_risk",
+                  "severity": "high",
+                  "invariant": "reconnect_continuity_evidence_state",
+                  "source_gate": "e2e_verification_gate",
+                  "status": "unresolved" if reconnect_continuity_state in {"not_run", "failed"} else "satisfied",
+                  "failure_reason": f"reconnect_continuity_{reconnect_continuity_state}",
+                  "actual_value": reconnect_continuity_state,
+                  "expected_value": "partially_run_or_evidenced",
+                  "action_hint": "Provide reconnect continuity verification evidence for protected release."
+              },
+              {
+                  "condition_id": "recovery_evidence",
+                  "condition_class": "recovery_risk",
+                  "severity": "high",
+                  "invariant": "recovery_behavior_evidence_state",
+                  "source_gate": "e2e_verification_gate",
+                  "status": "unresolved" if recovery_behavior_state in {"not_run", "failed"} else "satisfied",
+                  "failure_reason": f"recovery_behavior_{recovery_behavior_state}",
+                  "actual_value": recovery_behavior_state,
+                  "expected_value": "partially_run_or_evidenced",
+                  "action_hint": "Provide recovery-behavior evidence instead of relying on advisory-only status."
+              },
+              {
+                  "condition_id": "closure_quality_evidence",
+                  "condition_class": "closure_quality_gap",
+                  "severity": "high",
+                  "invariant": "closure_completeness_evidence_state",
+                  "source_gate": "e2e_verification_gate",
+                  "status": "unresolved" if closure_completeness_state in {"not_run", "failed"} else "satisfied",
+                  "failure_reason": f"closure_completeness_{closure_completeness_state}",
+                  "actual_value": closure_completeness_state,
+                  "expected_value": "partially_run_or_evidenced",
+                  "action_hint": "Ensure closure completeness evidence is available for protected release movement."
+              },
+              {
+                  "condition_id": "real_device_e2e_evidence",
+                  "condition_class": "evidence_absence",
+                  "severity": "high",
+                  "invariant": "real_device_e2e_state",
+                  "source_gate": "e2e_verification_gate",
+                  "status": "unresolved" if real_device_e2e_state != "evidenced" else "satisfied",
+                  "failure_reason": f"real_device_e2e_{real_device_e2e_state}",
+                  "actual_value": real_device_e2e_state,
+                  "expected_value": "evidenced",
+                  "action_hint": "Protected release requires real-device E2E evidence; no-device CI artifact is visibility-only."
+              }
+          ]
+
+          blocking_conditions = [c for c in conditions if c["status"] == "unresolved"]
+          release_blocked = is_protected_release_path and len(blocking_conditions) > 0
+
+          payload = {
+              "schema_version": "1.1",
+              "source": "android-ci",
+              "state_vocabulary": ["not_run", "partially_run", "failed", "evidenced"],
+              "protected_execution_state": protected_execution_state,
+              "real_device_e2e_state": real_device_e2e_state,
+              "key_behavior_evidence_status": {
+                  "replay_ordering": replay_ordering_state,
+                  "reconnect_continuity": reconnect_continuity_state,
+                  "recovery_behavior": recovery_behavior_state,
+                  "closure_completeness": closure_completeness_state
+              },
+              "gate_results": {
+                  "build": build,
+                  "protocol_contract_guard": protocol,
+                  "runtime_regression": runtime,
+                  "cross_repo_compatibility_guard": compat,
+                  "e2e_verification_gate": e2e,
+                  "all_unit_tests": unit,
+                  "lint": lint
+              },
+              "release_path_class": release_path_class,
+              "is_protected_release_path": is_protected_release_path,
+              "release_blocked": release_blocked,
+              "blocking_condition_count": len(blocking_conditions),
+              "release_blocking_conditions": conditions,
+              "evidence_visibility_reason": evidence_visibility_reason,
+              "no_device_default_artifact_tag": "e2e_blocked_no_device"
           }
-          EOFSTATUS
+
+          out_path = "app/build/e2e-verification/cross-repo-evidence-status.json"
+          with open(out_path, "w", encoding="utf-8") as f:
+              json.dump(payload, f, indent=2, ensure_ascii=False)
+          print(f"Wrote structured cross-repo evidence artifact to {out_path}")
+          PY
+
+      - name: Validate structured cross-repo evidence artifact shape
+        run: |
+          python3 - <<'PY'
+          import json
+          path = "app/build/e2e-verification/cross-repo-evidence-status.json"
+          data = json.load(open(path, "r", encoding="utf-8"))
+          required_top = [
+              "schema_version",
+              "is_protected_release_path",
+              "release_blocked",
+              "blocking_condition_count",
+              "release_blocking_conditions",
+              "key_behavior_evidence_status",
+              "gate_results",
+          ]
+          missing = [k for k in required_top if k not in data]
+          if missing:
+              raise SystemExit(f"Missing required top-level keys: {missing}")
+          if not isinstance(data["release_blocking_conditions"], list):
+              raise SystemExit("release_blocking_conditions must be a list")
+          print("Structured cross-repo evidence artifact shape is valid.")
+          PY
 
       - name: Upload cross-repo evidence status artifact
         if: always()
@@ -468,10 +606,54 @@ jobs:
   # protection to require "CI Gate" to pass before merging.  Because all
   # upstream jobs are listed in `needs`, GitHub marks this job as failed if
   # any upstream job fails, which blocks the PR.
+  protected-release-enforcement-gate:
+    name: "Protected Release Enforcement Gate"
+    runs-on: ubuntu-latest
+    needs: [cross-repo-evidence-status]
+    if: always()
+
+    steps:
+      - name: Download cross-repo evidence status artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cross-repo-evidence-status
+          path: app/build/e2e-verification
+
+      - name: Enforce structured blocking conditions on protected release paths
+        run: |
+          python3 - <<'PY'
+          import json
+          path = "app/build/e2e-verification/cross-repo-evidence-status.json"
+          data = json.load(open(path, "r", encoding="utf-8"))
+          is_protected = bool(data.get("is_protected_release_path", False))
+          is_blocked = bool(data.get("release_blocked", False))
+          conditions = data.get("release_blocking_conditions", [])
+          unresolved = [c for c in conditions if c.get("status") == "unresolved"]
+          print(f"Protected path: {is_protected}")
+          print(f"Release blocked : {is_blocked}")
+          print(f"Unresolved conditions: {len(unresolved)}")
+          if unresolved:
+              print("Blocking condition details:")
+              for c in unresolved:
+                  print(
+                      f"- [{c.get('condition_class')}] {c.get('condition_id')} "
+                      f"(invariant={c.get('invariant')}, gate={c.get('source_gate')}, "
+                      f"actual={c.get('actual_value')}, expected={c.get('expected_value')}, "
+                      f"reason={c.get('failure_reason')})"
+                  )
+                  print(f"  action: {c.get('action_hint')}")
+          if is_protected and is_blocked:
+              raise SystemExit(
+                  "Protected release path is blocked by unresolved cross-repo continuity/replay/schema/evidence/closure conditions."
+              )
+          if not is_protected and unresolved:
+              print("Non-protected path: unresolved conditions are surfaced as structured evidence only.")
+          PY
+
   ci-gate:
     name: "CI Gate (all blocking gates must pass)"
     runs-on: ubuntu-latest
-    needs: [all-unit-tests, lint, cross-repo-compatibility-guard, cross-repo-evidence-status]
+    needs: [all-unit-tests, lint, cross-repo-compatibility-guard, cross-repo-evidence-status, protected-release-enforcement-gate]
     if: always()
 
     steps:
@@ -481,10 +663,12 @@ jobs:
           echo "  all-unit-tests        : ${{ needs.all-unit-tests.result }}"
           echo "  cross-repo-compat     : ${{ needs.cross-repo-compatibility-guard.result }}"
           echo "  cross-repo-evidence   : ${{ needs.cross-repo-evidence-status.result }}"
+          echo "  protected-release     : ${{ needs.protected-release-enforcement-gate.result }}"
           echo "  lint                  : ${{ needs.lint.result }}"
           if [[ "${{ needs.all-unit-tests.result }}" != "success" || \
                 "${{ needs.cross-repo-compatibility-guard.result }}" != "success" || \
                 "${{ needs.cross-repo-evidence-status.result }}" != "success" || \
+                "${{ needs.protected-release-enforcement-gate.result }}" != "success" || \
                 "${{ needs.lint.result }}" != "success" ]]; then
             echo "::error::One or more CI blocking gates failed. PR merge is blocked."
             exit 1
