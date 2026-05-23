@@ -127,6 +127,26 @@ class Pr122AndroidRuntimeEmissionTruthSemanticsTest {
     }
 
     @Test
+    fun `degraded recovery phase is not downgraded to resumed by continuation hints`() {
+        val truth = AndroidRuntimeEmissionTruthSemantics.derive(
+            recoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED,
+            isContinuation = true,
+            interruptionReason = "reconnect_exhausted",
+            isTerminal = true,
+            deliveryDisposition = AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT
+        )
+
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.DEGRADED_CONTINUITY,
+            truth.executionContinuityClass
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.TerminalEmissionClass.DEGRADED_TERMINAL_OUTPUT,
+            truth.terminalEmissionClass
+        )
+    }
+
+    @Test
     fun `non terminal emission remains active in progress`() {
         val truth = AndroidRuntimeEmissionTruthSemantics.derive(
             recoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
