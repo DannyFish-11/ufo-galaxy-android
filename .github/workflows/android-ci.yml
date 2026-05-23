@@ -762,6 +762,7 @@ jobs:
               "durable_session_id_key",
               "session_continuity_epoch_key",
               "recovery_phase_key",
+              "recovery_phase_source_key",
               "recovery_phase_schema_key",
               "recovery_routing_category_key",
               "recovery_routing_schema_key",
