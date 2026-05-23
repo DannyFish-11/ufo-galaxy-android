@@ -1573,7 +1573,7 @@ class RuntimeController(
                         isTerminal = true,
                         resultConvergenceDecision =
                             AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
-                    )
+                    ) + buildFailureRecoveryPayload(terminalOutcomeKind)
                 )
             }
             emitReconciliationSignal(signal.withDispatchPlanId(planId))
@@ -2602,6 +2602,22 @@ class RuntimeController(
         )
 
     /**
+     * PR-124 — Builds the failure recovery payload map for a [ReconciliationSignal.Kind.TASK_FAILED]
+     * signal using [AndroidV2FailureRecoveryCompatibilityContract].
+     *
+     * This payload enables V2 to route the failure to the correct distributed recovery path
+     * without needing to infer failure kind from loosely coupled string fields.
+     */
+    private fun buildFailureRecoveryPayload(
+        terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind
+    ): Map<String, Any?> {
+        val failureRecoveryClass = AndroidV2FailureRecoveryCompatibilityContract.classify(
+            terminalOutcomeKind = terminalOutcomeKind
+        )
+        return AndroidV2FailureRecoveryCompatibilityContract.toWireMap(failureRecoveryClass)
+    }
+
+    /**
      * PR-52 — Builds and emits a [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT] signal
      * carrying the current full [AndroidParticipantRuntimeTruth] snapshot.
      *
@@ -2963,6 +2979,8 @@ class RuntimeController(
                             isTerminal = true,
                             resultConvergenceDecision =
                                 AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
+                        ) + buildFailureRecoveryPayload(
+                            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION
                         )
                     ).withDispatchPlanId(interruptedTaskPlanId)
                 )
