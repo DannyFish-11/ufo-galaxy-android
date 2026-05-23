@@ -731,6 +731,21 @@ class RuntimeController(
     private var _activeTaskDispatchPlanId: String? = null
 
     /**
+     * PR-125 — Tracks the V2-issued Temporal workflow run ID for the currently executing task.
+     *
+     * Set by [recordDelegatedTaskAccepted] when the inbound dispatch envelope carries a
+     * Temporal workflow run identifier.  Cleared alongside [_activeTaskId] by
+     * [clearActiveTaskState] so terminal signals carry the correct temporal anchor when it
+     * exists.  Non-null values indicate this task participates in a Temporal-backed execution
+     * path; the finality class is classified via
+     * [AndroidV2TemporalContinuationFinalityContract.classify] and embedded in each signal.
+     *
+     * `null` when no task is executing or when the current task has no Temporal workflow run ID.
+     */
+    @Volatile
+    private var _activeTaskTemporalWorkflowRunId: String? = null
+
+    /**
      * PR-62 — Tracks the [ActiveTaskStatus] of any currently executing delegated task.
      *
      * Updated atomically with [_activeTaskId].  Cleared alongside [_activeTaskId] by
@@ -1530,6 +1545,8 @@ class RuntimeController(
         // so any observer of activeTaskStatus sees the transitional state before it is cleared.
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
+        // PR-125: Capture Temporal workflow run ID before clearing active task state.
+        val temporalRunId = _activeTaskTemporalWorkflowRunId
         val terminalOutcomeKind = classifyTakeoverTerminalOutcome(cause = cause, reason = reason)
         if (_activeTaskId == taskId) {
             _activeTaskStatus = if (cause == TakeoverFallbackEvent.Cause.CANCELLED)
@@ -1558,7 +1575,7 @@ class RuntimeController(
                         isTerminal = true,
                         resultConvergenceDecision =
                             AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
-                    )
+                    ) + buildTemporalContinuationFinalityPayload(terminalOutcomeKind, temporalRunId)
                 )
             } else {
                 ReconciliationSignal.taskFailed(
@@ -1573,10 +1590,14 @@ class RuntimeController(
                         isTerminal = true,
                         resultConvergenceDecision =
                             AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
-                    ) + buildFailureRecoveryPayload(terminalOutcomeKind)
+                    ) + buildFailureRecoveryPayload(terminalOutcomeKind) +
+                        buildTemporalContinuationFinalityPayload(terminalOutcomeKind, temporalRunId)
                 )
             }
-            emitReconciliationSignal(signal.withDispatchPlanId(planId))
+            emitReconciliationSignal(
+                signal.withDispatchPlanId(planId)
+                    .withTemporalWorkflowRunId(temporalRunId)
+            )
         }
     }
 
@@ -1779,6 +1800,7 @@ class RuntimeController(
         _activeTaskId = null
         _activeTaskStatus = null
         _activeTaskDispatchPlanId = null
+        _activeTaskTemporalWorkflowRunId = null
         if (previous != null) {
             GalaxyLogger.log(
                 GalaxyLogger.TAG_LIVE_EXECUTION,
@@ -2325,17 +2347,23 @@ class RuntimeController(
      * may continue to call [recordDelegatedExecutionAccepted] directly.  New callers with
      * task identity should prefer this method.
      *
-     * @param taskId         Task identifier from the inbound dispatch envelope.
-     * @param correlationId  Optional correlation identifier echoed from the originating request.
-     * @param dispatchPlanId PR-123: Optional V2-issued distributed dispatch plan identifier.
-     *                       When non-null, forwarded to all subsequent task signals for this
-     *                       activation so V2 can classify the activation as
-     *                       [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.DISPATCH_PLAN_ANCHORED].
+     * @param taskId                  Task identifier from the inbound dispatch envelope.
+     * @param correlationId           Optional correlation identifier echoed from the originating request.
+     * @param dispatchPlanId          PR-123: Optional V2-issued distributed dispatch plan identifier.
+     *                                When non-null, forwarded to all subsequent task signals for this
+     *                                activation so V2 can classify the activation as
+     *                                [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.DISPATCH_PLAN_ANCHORED].
+     * @param temporalWorkflowRunId   PR-125: Optional V2-issued Temporal workflow run identifier.
+     *                                When non-null, forwarded to all subsequent task signals for this
+     *                                activation so V2 can apply stricter Temporal-backed execution
+     *                                and completion semantics.  Non-null values indicate this task
+     *                                participates in a Temporal-backed execution path.
      */
     fun recordDelegatedTaskAccepted(
         taskId: String,
         correlationId: String? = null,
-        dispatchPlanId: String? = null
+        dispatchPlanId: String? = null,
+        temporalWorkflowRunId: String? = null
     ) {
         recordDelegatedExecutionAccepted()
         // PR-62: Set active task state so the live execution surface tracks the in-flight task.
@@ -2345,6 +2373,8 @@ class RuntimeController(
         _activeTaskStatus = ActiveTaskStatus.RUNNING
         // PR-123: Store dispatch plan ID so terminal signals carry the plan anchor.
         _activeTaskDispatchPlanId = dispatchPlanId
+        // PR-125: Store Temporal workflow run ID so terminal signals carry the temporal anchor.
+        _activeTaskTemporalWorkflowRunId = temporalWorkflowRunId
         _isRemoteExecutionActive.value = true
         persistInflightRecoveryArtifact(taskId, ActiveTaskStatus.RUNNING)
         publishInflightContinuityRecovery(
@@ -2375,8 +2405,13 @@ class RuntimeController(
                     isTerminal = false,
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_PARTIAL_FOR_FLOW
+                ) + buildTemporalContinuationFinalityPayload(
+                    terminalOutcomeKind =
+                        AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.NON_TERMINAL,
+                    temporalWorkflowRunId = temporalWorkflowRunId
                 )
             ).withDispatchPlanId(dispatchPlanId)
+                .withTemporalWorkflowRunId(temporalWorkflowRunId)
         )
     }
 
@@ -2397,6 +2432,8 @@ class RuntimeController(
     ) {
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
+        // PR-125: Capture Temporal workflow run ID before clearing active task state.
+        val temporalRunId = _activeTaskTemporalWorkflowRunId
         val terminalOutcomeKind = classifyTaskResultTerminalOutcome(unifiedRecoveryPhase.value)
         // PR-62: Clear active task state on successful completion.
         clearPersistedInflightRecoveryArtifact()
@@ -2423,8 +2460,9 @@ class RuntimeController(
                     isTerminal = true,
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
-                )
+                ) + buildTemporalContinuationFinalityPayload(terminalOutcomeKind, temporalRunId)
             ).withDispatchPlanId(planId)
+                .withTemporalWorkflowRunId(temporalRunId)
         )
     }
 
@@ -2451,6 +2489,8 @@ class RuntimeController(
     ) {
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
+        // PR-125: Capture Temporal workflow run ID before clearing active task state.
+        val temporalRunId = _activeTaskTemporalWorkflowRunId
         // PR-62: Transition to CANCELLING state before emitting the signal so the
         // live execution surface reflects the in-progress cancellation.
         if (_activeTaskId == taskId) {
@@ -2468,13 +2508,13 @@ class RuntimeController(
             Log.d(TAG, "[RUNTIME] publishTaskCancelled: no hostDescriptor — skipping signal")
             return
         }
+        val cancelOutcome = AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABORT
         emitReconciliationSignal(
             ReconciliationSignal.taskCancelled(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
-                terminalOutcomeKind =
-                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABORT,
+                terminalOutcomeKind = cancelOutcome,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -2482,8 +2522,9 @@ class RuntimeController(
                     isTerminal = true,
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
-                )
+                ) + buildTemporalContinuationFinalityPayload(cancelOutcome, temporalRunId)
             ).withDispatchPlanId(planId)
+                .withTemporalWorkflowRunId(temporalRunId)
         )
     }
 
@@ -2615,6 +2656,36 @@ class RuntimeController(
             terminalOutcomeKind = terminalOutcomeKind
         )
         return AndroidV2FailureRecoveryCompatibilityContract.toWireMap(failureRecoveryClass)
+    }
+
+    /**
+     * PR-125 — Builds the Temporal continuation finality payload map for task signals using
+     * [AndroidV2TemporalContinuationFinalityContract].
+     *
+     * This payload enables V2's Temporal-backed execution path to determine whether it can
+     * safely close an associated Temporal workflow run, or whether it must hold the workflow
+     * open to await a resume or continuation signal.
+     *
+     * When [temporalWorkflowRunId] is null, the finality class is
+     * [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.NOT_TEMPORAL_WORKFLOW_PATH]
+     * and V2 should skip Temporal workflow routing for this signal.
+     *
+     * @param terminalOutcomeKind   The terminal outcome kind already classified for the signal.
+     * @param temporalWorkflowRunId The V2-issued Temporal workflow run ID for this task;
+     *                              null if the task is not part of a Temporal-backed path.
+     */
+    private fun buildTemporalContinuationFinalityPayload(
+        terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind,
+        temporalWorkflowRunId: String?
+    ): Map<String, String> {
+        val continuationFinalityClass = AndroidV2TemporalContinuationFinalityContract.classify(
+            terminalOutcomeKind = terminalOutcomeKind,
+            isTemporalWorkflowParticipant = temporalWorkflowRunId != null
+        )
+        return AndroidV2TemporalContinuationFinalityContract.toWireMap(
+            continuationFinalityClass = continuationFinalityClass,
+            temporalWorkflowRunId = temporalWorkflowRunId
+        )
     }
 
     /**
@@ -2942,6 +3013,8 @@ class RuntimeController(
         val interruptedTaskId = _activeTaskId
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val interruptedTaskPlanId = _activeTaskDispatchPlanId
+        // PR-125: Capture Temporal workflow run ID before clearing active task state.
+        val interruptedTaskTemporalRunId = _activeTaskTemporalWorkflowRunId
         if (interruptedTaskId != null &&
             (cause == AttachedRuntimeSession.DetachCause.DISCONNECT ||
                 cause == AttachedRuntimeSession.DetachCause.INVALIDATION)
@@ -2964,13 +3037,14 @@ class RuntimeController(
             _activeTaskStatus = ActiveTaskStatus.FAILING
             clearPersistedInflightRecoveryArtifact()
             clearActiveTaskState(interruptedTaskId, finishedWith = "interrupted_${cause.wireValue}")
+            val interruptOutcome =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION
             currentParticipantId()?.let { pid ->
                 emitReconciliationSignal(
                     ReconciliationSignal.taskFailed(
                         participantId = pid,
                         taskId = interruptedTaskId,
-                        terminalOutcomeKind =
-                            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION,
+                        terminalOutcomeKind = interruptOutcome,
                         errorDetail = "session_interrupted: ${cause.wireValue}",
                         reconciliationEpoch = nextReconciliationEpoch(),
                         durableSessionId = currentDurableSessionId(),
@@ -2979,10 +3053,13 @@ class RuntimeController(
                             isTerminal = true,
                             resultConvergenceDecision =
                                 AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
-                        ) + buildFailureRecoveryPayload(
-                            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION
-                        )
+                        ) + buildFailureRecoveryPayload(interruptOutcome) +
+                            buildTemporalContinuationFinalityPayload(
+                                interruptOutcome,
+                                interruptedTaskTemporalRunId
+                            )
                     ).withDispatchPlanId(interruptedTaskPlanId)
+                        .withTemporalWorkflowRunId(interruptedTaskTemporalRunId)
                 )
             }
         }

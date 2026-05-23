@@ -80,6 +80,13 @@ import java.security.MessageDigest
  *                           enable V2 to classify this activation as
  *                           [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.DISPATCH_PLAN_ANCHORED]
  *                           for stricter distributed execution verification.
+ * @property temporalWorkflowRunId V2-issued Temporal workflow run identifier, when available.
+ *                                  Populated by [RuntimeController.recordDelegatedTaskAccepted]
+ *                                  when the originating dispatch envelope carries a Temporal
+ *                                  workflow run ID.  Non-null values indicate this signal
+ *                                  participates in a Temporal-backed execution path and enable
+ *                                  V2 to correlate signals back to the correct Temporal workflow
+ *                                  run for stricter workflow-backed completion semantics.
  */
 data class ReconciliationSignal(
     val kind: Kind,
@@ -94,7 +101,8 @@ data class ReconciliationSignal(
     val reconciliationEpoch: Int,
     val durableSessionId: String? = null,
     val sessionContinuityEpoch: Int? = null,
-    val dispatchPlanId: String? = null
+    val dispatchPlanId: String? = null,
+    val temporalWorkflowRunId: String? = null
 ) {
 
     /**
@@ -277,6 +285,29 @@ data class ReconciliationSignal(
         return copy(dispatchPlanId = planId, payload = updatedPayload)
     }
 
+    /**
+     * PR-125 — Returns a copy of this signal with [temporalWorkflowRunId] set to [runId].
+     *
+     * Use this helper to attach a V2-issued Temporal workflow run identifier to a signal
+     * that was created before the run ID was known.  Callers that already have the run ID at
+     * signal construction time should prefer passing [temporalWorkflowRunId] directly to the
+     * factory methods ([taskAccepted], [taskResult], [taskCancelled], [taskFailed]) instead.
+     *
+     * When [runId] is non-null, the corresponding payload entry
+     * [AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID] is also
+     * updated so the wire map stays consistent with the [temporalWorkflowRunId] field.
+     *
+     * @param runId  V2-issued Temporal workflow run identifier; null clears any previously set value.
+     */
+    fun withTemporalWorkflowRunId(runId: String?): ReconciliationSignal {
+        val updatedPayload = if (runId != null) {
+            payload + (AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID to runId)
+        } else {
+            payload - AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID
+        }
+        return copy(temporalWorkflowRunId = runId, payload = updatedPayload)
+    }
+
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
@@ -411,6 +442,20 @@ data class ReconciliationSignal(
          */
         const val KEY_DISPATCH_PLAN_ID = "dispatch_plan_id"
 
+        /**
+         * Wire key for [temporalWorkflowRunId].
+         *
+         * Present in task-bearing [ReconciliationSignal] payloads when the Android-side
+         * activation was initiated under a V2-issued Temporal workflow run.  Absence means
+         * this activation does not participate in a Temporal-backed execution path;
+         * V2 SHOULD classify the signal as
+         * [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.NOT_TEMPORAL_WORKFLOW_PATH].
+         * Presence enables V2 to enforce stricter workflow-backed execution and completion
+         * semantics by correlating signals back to the correct Temporal workflow run.
+         */
+        const val KEY_TEMPORAL_WORKFLOW_RUN_ID =
+            AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID
+
         /** Payload key for [stableDedupeKey]. */
         const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
 
@@ -532,6 +577,45 @@ data class ReconciliationSignal(
          */
         const val KEY_FAILURE_RECOVERY_SCHEMA_VERSION =
             AndroidV2FailureRecoveryCompatibilityContract.KEY_FAILURE_RECOVERY_SCHEMA_VERSION
+
+        // ── PR-125: Temporal continuation finality payload key constants ────────
+
+        /**
+         * Payload key for the [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.wireValue]
+         * that V2 should use to determine whether its Temporal workflow can close for this signal.
+         *
+         * Present in [payload] of task-bearing signals when [temporalWorkflowRunId] is non-null.
+         * When absent, V2 SHOULD classify the signal as
+         * [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.NOT_TEMPORAL_WORKFLOW_PATH]
+         * for backward compatibility with pre-PR-125 signals.
+         */
+        const val KEY_TEMPORAL_CONTINUATION_FINALITY_CLASS =
+            AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_CONTINUATION_FINALITY_CLASS
+
+        /**
+         * Payload key indicating whether V2's Temporal workflow can safely close for this signal.
+         *
+         * Value: `"true"` or `"false"`.  When `"false"`, V2 MUST NOT close the associated
+         * Temporal workflow based solely on this signal.
+         */
+        const val KEY_IS_TEMPORAL_WORKFLOW_FINAL =
+            AndroidV2TemporalContinuationFinalityContract.KEY_IS_TEMPORAL_WORKFLOW_FINAL
+
+        /**
+         * Payload key indicating whether a pending Temporal workflow resume is possible.
+         *
+         * Value: `"true"` or `"false"`.  When `"true"`, V2 MUST hold the Temporal workflow
+         * open and await a follow-up signal.
+         */
+        const val KEY_HAS_PENDING_TEMPORAL_RESUME =
+            AndroidV2TemporalContinuationFinalityContract.KEY_HAS_PENDING_TEMPORAL_RESUME
+
+        /**
+         * Payload key for [AndroidV2TemporalContinuationFinalityContract.SCHEMA_VERSION].
+         */
+        const val KEY_TEMPORAL_CONTINUATION_FINALITY_SCHEMA_VERSION =
+            AndroidV2TemporalContinuationFinalityContract
+                .KEY_TEMPORAL_CONTINUATION_FINALITY_SCHEMA_VERSION
 
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
