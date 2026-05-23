@@ -656,7 +656,7 @@ jobs:
                       "state": behavior.get("recovery_behavior", "not_run"),
                       "source_gate": "e2e_verification_gate",
                   },
-                  "continuity": {
+                  "reconnect_continuity": {
                       "signal_id": "reconnect_continuity",
                       "state": behavior.get("reconnect_continuity", "not_run"),
                       "source_gate": "e2e_verification_gate",
@@ -699,7 +699,7 @@ jobs:
           if missing_top:
               raise SystemExit(f"Missing top-level keys in canonical evidence_json: {missing_top}")
 
-          required_signals = ["runtime", "lifecycle", "closure", "replay", "recovery", "continuity", "evaluator"]
+          required_signals = ["runtime", "lifecycle", "closure", "replay", "recovery", "reconnect_continuity", "evaluator"]
           signals = data.get("android_signals", {})
           missing_signals = [k for k in required_signals if k not in signals]
           if missing_signals:
@@ -763,6 +763,8 @@ jobs:
               )
 
           evidence = json.loads(Path("app/build/e2e-verification/evidence_json.json").read_text(encoding="utf-8"))
+          target_repository = "DannyFish-11/ufo-galaxy-realization-v2"
+
           payload = {
               "event_type": "android_canonical_evidence_bundle",
               "client_payload": {
@@ -778,7 +780,7 @@ jobs:
           request_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
           req = Request(
-              "https://api.github.com/repos/DannyFish-11/ufo-galaxy-realization-v2/dispatches",
+              f"https://api.github.com/repos/{target_repository}/dispatches",
               data=json.dumps(payload).encode("utf-8"),
               headers={
                   "Accept": "application/vnd.github+json",
@@ -803,7 +805,7 @@ jobs:
           except URLError as exc:
               raise SystemExit(f"repository_dispatch failed with network error: {exc}") from exc
 
-          if status not in (200, 201, 202, 204):
+          if status != 204:
               raise SystemExit(
                   f"repository_dispatch failed with unexpected status {status}; "
                   f"headers={response_headers}; body={response_body}"
@@ -815,7 +817,7 @@ jobs:
                   {
                       "status": status,
                       "accepted": True,
-                      "target_repository": "DannyFish-11/ufo-galaxy-realization-v2",
+                      "target_repository": target_repository,
                       "event_type": payload["event_type"],
                   },
                   indent=2,
