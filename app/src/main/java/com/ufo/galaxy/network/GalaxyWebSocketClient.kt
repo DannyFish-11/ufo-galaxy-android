@@ -19,6 +19,7 @@ import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
+import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -1136,6 +1137,31 @@ class GalaxyWebSocketClient(
                 isV2Confirmed
             )
         }
+        val closureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
+            type == MsgType.DEVICE_EXECUTION_EVENT.value
+        if (closureBearingType) {
+            val hasExecutionLineage =
+                payload.stringOrNull(AndroidUplinkLineageMetadataContract.KEY_EXECUTION_IDENTITY) != null
+            val hasEmissionLineage =
+                payload.stringOrNull(AndroidUplinkLineageMetadataContract.KEY_EMISSION_IDENTITY) != null
+            val hasSessionLineage =
+                payload.stringOrNull("durable_session_id") != null &&
+                    payload.intOrNull("session_continuity_epoch") != null
+            val missingClosureLineage = !hasExecutionLineage || !hasEmissionLineage || !hasSessionLineage
+            val terminalLikeSignal =
+                payload.booleanOrNull("result_returned") == true ||
+                    payload.booleanOrNull("completion_signaled") == true ||
+                    payload.booleanOrNull("lifecycle_terminal_phase") == true
+            if (missingClosureLineage && terminalLikeSignal) {
+                payload.addProperty("result_signal_class", "acceptance_closure_signal")
+                payload.addProperty("acceptance_candidate_class", "acceptance_blocked")
+                payload.addProperty(
+                    AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS,
+                    AndroidCompletionClosureUplinkContract
+                        .ClosureFinalizationSignalClass.SESSION_FINALIZATION_BLOCKED.wireValue
+                )
+            }
+        }
         return gson.toJson(root)
     }
 
@@ -1144,6 +1170,22 @@ class GalaxyWebSocketClient(
             null
         } else {
             get(key)?.asString?.takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
+    private fun JsonObject.booleanOrNull(key: String): Boolean? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.takeUnless { it.isJsonNull }?.asBoolean
+        }
+    }.getOrNull()
+
+    private fun JsonObject.intOrNull(key: String): Int? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.takeUnless { it.isJsonNull }?.asInt
         }
     }.getOrNull()
 

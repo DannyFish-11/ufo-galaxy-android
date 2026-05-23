@@ -147,6 +147,38 @@ class CrossDeviceSwitchTest {
     }
 
     @Test
+    fun `sendJson downgrades terminal closure semantics when lineage-critical identity is missing`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """
+            {
+              "type":"goal_execution_result",
+              "payload":{
+                "task_id":"task-weak-lineage",
+                "status":"success",
+                "result_returned":true,
+                "completion_signaled":true,
+                "closure_ready_for_acceptance":true
+              }
+            }
+        """.trimIndent()
+
+        assertFalse(client.sendJson(json))
+        val queued = testQueue.drainAll().first()
+        val payload = JsonParser.parseString(queued.json)
+            .asJsonObject
+            .getAsJsonObject("payload")
+
+        assertEquals("acceptance_closure_signal", payload.get("result_signal_class").asString)
+        assertEquals("acceptance_blocked", payload.get("acceptance_candidate_class").asString)
+        assertEquals("session_finalization_blocked", payload.get("closure_finalization_signal_class").asString)
+    }
+
+    @Test
     fun `queueSize StateFlow reflects offlineQueue depth`() {
         val testQueue = OfflineTaskQueue(prefs = null)
         val client = GalaxyWebSocketClient(
