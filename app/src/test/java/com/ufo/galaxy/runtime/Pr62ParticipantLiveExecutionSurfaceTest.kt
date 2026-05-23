@@ -643,6 +643,27 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     }
 
     @Test
+    fun `publishTaskResult in recovery failed state reports degraded terminal semantics`() = runBlocking {
+        val (controller, _) = buildController(buildDescriptor())
+        controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-result-recovery-failed")
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.FAILED)
+        controller.publishTaskResult("task-result-recovery-failed")
+        val signal = withTimeoutOrNull(200) {
+            controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_RESULT }
+        }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.DEGRADED_CONTINUITY.wireValue,
+            signal!!.payload[ReconciliationSignal.KEY_EXECUTION_CONTINUITY_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.TerminalEmissionClass.DEGRADED_TERMINAL_OUTPUT.wireValue,
+            signal.payload[ReconciliationSignal.KEY_TERMINAL_EMISSION_CLASS]
+        )
+    }
+
+    @Test
     fun `publishTaskStatusUpdate emitted signal payload does not contain progress_detail when omitted`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()

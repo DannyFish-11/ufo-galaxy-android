@@ -147,16 +147,16 @@ object AndroidRuntimeEmissionTruthSemantics {
             recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT ->
                 ExecutionContinuityClass.RECOVERED_EXECUTION
             recoveryPhase in setOf(
-                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
-                AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION
-            ) || isContinuation || !interruptionReason.isNullOrBlank() ->
-                ExecutionContinuityClass.RESUMED_EXECUTION
-            recoveryPhase in setOf(
                 AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT,
                 AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT,
                 AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED
             ) ->
                 ExecutionContinuityClass.DEGRADED_CONTINUITY
+            recoveryPhase in setOf(
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+                AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION
+            ) || isContinuation || !interruptionReason.isNullOrBlank() ->
+                ExecutionContinuityClass.RESUMED_EXECUTION
             else ->
                 ExecutionContinuityClass.FRESH_EXECUTION
         }
