@@ -566,6 +566,15 @@ class GalaxyConnectionService : Service() {
                 isExecutionBusy = eventStamp.executionBusy == true,
                 isHold = false
             )
+            val eventLineage = AndroidUplinkLineageMetadataContract.derive(
+                executionIdentity = payload.task_id.ifBlank { payload.flow_id },
+                emissionIdentity = payload.event_id,
+                durableSessionId = payload.durable_session_id,
+                sessionContinuityEpoch = payload.session_continuity_epoch,
+                recoveryBasis = "${reconnectState}:${eventSemanticProjection.degradedConditionClass.wireValue}"
+            )
+            val eventLineageConstrained =
+                eventStamp.lifecycleTerminalPhase == true && !eventLineage.isClosureLineageComplete
             // ── PR-3Android: 执行事件参与语义规范化（预计算，避免 copy() 中三次重复 derive() 调用）──
             // localCapabilityStateWire 从 LocalCapabilityState.derive() 在事件发射时计算，
             // 确保降级/不可用路径在执行事件的参与模式分类中同样被正确检测，
@@ -641,7 +650,7 @@ class GalaxyConnectionService : Service() {
                     completionSignaled = completionVisibility.completionSignaled,
                     closureReadyForAcceptance = completionVisibility.closureReadyForAcceptance,
                     isGovernanceBlocked = governanceTruth.governance_blocked == true,
-                    isRuntimeConstrained = false,
+                    isRuntimeConstrained = eventConstraintSem.isConstraint || eventLineageConstrained,
                     isHoldState = false
                 )
             )
@@ -716,13 +725,6 @@ class GalaxyConnectionService : Service() {
             } catch (e: Exception) {
                 null
             }
-            val eventLineage = AndroidUplinkLineageMetadataContract.derive(
-                executionIdentity = payload.task_id.ifBlank { payload.flow_id },
-                emissionIdentity = payload.event_id,
-                durableSessionId = payload.durable_session_id,
-                sessionContinuityEpoch = payload.session_continuity_epoch,
-                recoveryBasis = "${reconnectState}:${eventSemanticProjection.degradedConditionClass.wireValue}"
-            )
             val enrichedPayload = payload.copy(
                 timestamp_ms = eventStamp.timestampMs,
                 execution_event_sequence = eventStamp.eventSequence,
@@ -3145,6 +3147,28 @@ class GalaxyConnectionService : Service() {
                 participationKind = participationKind,
                 taskSucceeded = normalizedLifecycleStatus == EdgeExecutor.STATUS_SUCCESS
             ).wireValue
+        val runtimeController = UFOGalaxyApplication.runtimeController
+        val resultDurableRecord = runtimeController.durableSessionContinuityRecord.value
+        val resultInflightRecovery = runtimeController.inflightContinuityRecovery.value
+        val resultRecoveryPhaseModel = result.continuity_recovery_state
+            ?.let(AndroidContinuityRecoveryStateModel.RecoveryPhase::fromWireValue)
+            ?: runtimeController.unifiedRecoveryPhase.value
+        val resultRecoveryPhase = resultRecoveryPhaseModel.wireValue
+        val resultRecoverySource = result.continuity_recovery_source
+            ?.ifBlank { null }
+            ?: deriveRecoverySource(
+                phase = resultRecoveryPhaseModel,
+                inflightSource = resultInflightRecovery.source
+            )
+        val resultRecoveryRoutingWireMap = deriveRecoveryRoutingWireMap(resultRecoveryPhaseModel)
+        val resultLineage = AndroidUplinkLineageMetadataContract.derive(
+            executionIdentity = result.task_id,
+            emissionIdentity = buildResultLineageEmissionIdentity(result, normalizedLifecycleStatus),
+            durableSessionId = resultDurableRecord?.durableSessionId,
+            sessionContinuityEpoch = resultDurableRecord?.sessionContinuityEpoch,
+            recoveryBasis = "$resultRecoveryPhase:${resultRecoverySource.ifBlank { "none" }}"
+        )
+        val resultLineageConstrained = !resultLineage.isClosureLineageComplete
         // ── PR-05v2 (Android): 预先推导结果上行闭环边界快照 ─────────────────────────────────────
         // 在 result.copy() 前唯一计算，使 V2 可无歧义地将 goal_execution_result 路由至
         // truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
@@ -3156,7 +3180,7 @@ class GalaxyConnectionService : Service() {
                 closureReadyForAcceptance = result.closure_ready_for_acceptance
                     ?: goalResultCompletionVisibility.closureReadyForAcceptance,
                 isGovernanceBlocked = (result.governance_blocked ?: governanceTruth.governance_blocked) == true,
-                isRuntimeConstrained = constraintSem.isConstraint,
+                isRuntimeConstrained = constraintSem.isConstraint || resultLineageConstrained,
                 isHoldState = resolvedIsHoldState
             )
         )
@@ -3226,28 +3250,6 @@ class GalaxyConnectionService : Service() {
                 isDiagnosticsSignal = false
             )
         )
-        val resultDurableRecord = UFOGalaxyApplication.runtimeController
-            .durableSessionContinuityRecord.value
-        val runtimeController = UFOGalaxyApplication.runtimeController
-        val resultInflightRecovery = runtimeController.inflightContinuityRecovery.value
-        val resultRecoveryPhaseModel = result.continuity_recovery_state
-            ?.let(AndroidContinuityRecoveryStateModel.RecoveryPhase::fromWireValue)
-            ?: runtimeController.unifiedRecoveryPhase.value
-        val resultRecoveryPhase = resultRecoveryPhaseModel.wireValue
-        val resultRecoverySource = result.continuity_recovery_source
-            ?.ifBlank { null }
-            ?: deriveRecoverySource(
-                phase = resultRecoveryPhaseModel,
-                inflightSource = resultInflightRecovery.source
-            )
-        val resultRecoveryRoutingWireMap = deriveRecoveryRoutingWireMap(resultRecoveryPhaseModel)
-        val resultLineage = AndroidUplinkLineageMetadataContract.derive(
-            executionIdentity = result.task_id,
-            emissionIdentity = buildResultLineageEmissionIdentity(result, normalizedLifecycleStatus),
-            durableSessionId = resultDurableRecord?.durableSessionId,
-            sessionContinuityEpoch = resultDurableRecord?.sessionContinuityEpoch,
-            recoveryBasis = "$resultRecoveryPhase:${resultRecoverySource.ifBlank { "none" }}"
-        )
         val enriched = result.copy(
             normalized_status = canonicalResultKind(result.status),
             runtime_session_id = runtimeSession,
@@ -3275,7 +3277,8 @@ class GalaxyConnectionService : Service() {
             local_mode_active = result.local_mode_active
                 ?: (resolvedModeState ==
                     LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
-            runtime_constrained = result.runtime_constrained ?: constraintSem.isConstraint,
+            runtime_constrained = result.runtime_constrained
+                ?: (constraintSem.isConstraint || resultLineageConstrained),
             runtime_deferred = result.runtime_deferred ?: constraintSem.isDeferred,
             governance_state = result.governance_state ?: governanceTruth.governance_state,
             governance_blocked = result.governance_blocked ?: governanceTruth.governance_blocked,
