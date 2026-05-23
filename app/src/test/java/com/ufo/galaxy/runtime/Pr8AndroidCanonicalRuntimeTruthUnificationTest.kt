@@ -31,7 +31,7 @@ import org.junit.Test
  * 8. [StabilizationBaseline] registration for the new contract surface.
  * 9. Gson round-trip stability for all new wire fields.
  *
- * ## Test matrix (117 tests)
+ * ## Test matrix (119 tests)
  *
  * ### ReportedStateSemanticClass — enum coverage
  *  - has exactly 5 values
@@ -51,9 +51,9 @@ import org.junit.Test
  *  - NOMINAL, DELAYED, RECOVERED all have impliesReducedCapability=false
  *
  * ### ResultUplinkSemanticClass — enum coverage
- *  - has exactly 4 values
+ *  - has exactly 5 values
  *  - all wire values are stable
- *  - AUTHORITATIVE_TERMINAL and AUTHORITATIVE_RECOVERY have isTerminal=true
+ *  - AUTHORITATIVE_TERMINAL, AUTHORITATIVE_RECOVERY, and AUTHORITATIVE_DEGRADED_TERMINAL have isTerminal=true
  *  - AUTHORITATIVE_INTERRUPTION and INFORMATIONAL have isTerminal=false
  *  - each value has a non-empty v2Action
  *
@@ -297,20 +297,20 @@ class Pr8AndroidCanonicalRuntimeTruthUnificationTest {
     // ── ResultUplinkSemanticClass — enum coverage ─────────────────────────────
 
     @Test
-    fun `ResultUplinkSemanticClass has exactly 4 values`() {
-        assertEquals(4, AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.entries.size)
+    fun `ResultUplinkSemanticClass has exactly 5 values`() {
+        assertEquals(5, AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.entries.size)
     }
 
     @Test
-    fun `ResultUplinkSemanticClass ALL_WIRE_VALUES has size 4`() {
-        assertEquals(4, AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.ALL_WIRE_VALUES.size)
+    fun `ResultUplinkSemanticClass ALL_WIRE_VALUES has size 5`() {
+        assertEquals(5, AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.ALL_WIRE_VALUES.size)
     }
 
     @Test
     fun `ResultUplinkSemanticClass wire values match expected set`() {
         val expected = setOf(
             "authoritative_terminal", "authoritative_interruption",
-            "authoritative_recovery", "informational"
+            "authoritative_recovery", "authoritative_degraded_terminal", "informational"
         )
         assertEquals(expected, AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.ALL_WIRE_VALUES)
     }
@@ -323,6 +323,11 @@ class Pr8AndroidCanonicalRuntimeTruthUnificationTest {
     @Test
     fun `AUTHORITATIVE_RECOVERY isTerminal is true`() {
         assertTrue(AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_RECOVERY.isTerminal)
+    }
+
+    @Test
+    fun `AUTHORITATIVE_DEGRADED_TERMINAL isTerminal is true`() {
+        assertTrue(AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_DEGRADED_TERMINAL.isTerminal)
     }
 
     @Test

@@ -2729,6 +2729,40 @@ object StabilizationBaseline {
                 "in AndroidMinimalRuntimeAccessChainContract with CANONICAL_PRODUCTION. " +
                 "Test: Pr121AndroidCanonicalTransportPathBoundaryContractTest.",
             introducedPr = 121
+        ),
+
+        // ── PR-122: Android Stage 5 completion truth hardening ───────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-completion-truth-hardening",
+            displayName = "AndroidCompletionTruthHardeningContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidCompletionTruthHardeningContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-122 — Stage 5 Android-side completion truth hardening. Tightens weak success " +
+                "and weak completion signaling so downstream V2 interpretation is less likely to " +
+                "over-credit structural presence, weak output, or incomplete runtime state. " +
+                "(1) Adds ResultUplinkSemanticClass.AUTHORITATIVE_DEGRADED_TERMINAL (5th class, " +
+                "isTerminal=true) to AndroidCanonicalRuntimeTruthContract so PARTIAL_COMPLETION " +
+                "and FALLBACK terminal outcomes are no longer classified identically to clean " +
+                "AUTHORITATIVE_TERMINAL completion. Updates CLOSURE_INVARIANTS to assert " +
+                "5-class vocabulary and 3 terminal classes. " +
+                "(2) Reclassifies PARTIAL_COMPLETION and FALLBACK TerminalOutcomeKinds in " +
+                "AndroidMissionCompletionSemanticsContract.classifyReportedResultSemantic() from " +
+                "AUTHORITATIVE_TERMINAL to AUTHORITATIVE_DEGRADED_TERMINAL. " +
+                "(3) Adds optional terminalOutcomeKind parameter to deriveExecutionCompletionVisibility(); " +
+                "PARTIAL_COMPLETION, FALLBACK, and RECOVERY outcomes now suppress " +
+                "closureReadyForAcceptance=false so premature closure acceptance is blocked. " +
+                "(4) Removes bare isLifecycleTerminalPhase path from AndroidCompletionClosureUplinkContract " +
+                "derive() RUNTIME_COMPLETION_EVIDENCE condition; actual resultReturned or completionSignaled " +
+                "is now required. Lifecycle terminal phase alone falls to NOT_RUNTIME_COMPLETION. " +
+                "(5) Introduces AndroidCompletionTruthHardeningContract with CompletionTruthGrade enum " +
+                "(4 values: VERIFIED_COMPLETE/DEGRADED_COMPLETE/TERMINAL_INCOMPLETE/NON_TERMINAL) and " +
+                "classifyCompletionTruthGrade() for single-call completion truth grading. " +
+                "COMPLETION_TRUTH_INVARIANTS (10 entries) provides machine-verifiable regression " +
+                "anchors. Test: Pr122AndroidCompletionTruthHardeningTest.",
+            introducedPr = 122
         )
     )
 

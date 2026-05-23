@@ -436,6 +436,27 @@ object AndroidCanonicalRuntimeTruthContract {
         ),
 
         /**
+         * The result uplink is a **degraded terminal** report: execution reached a terminal
+         * state through a degraded, partial, or fallback path rather than a clean authoritative
+         * completion.
+         *
+         * V2 MUST close the execution flow but MUST NOT treat this as equivalent to a clean
+         * [AUTHORITATIVE_TERMINAL] outcome.  The degraded path must be surfaced to downstream
+         * interpretation so that partial or fallback completion is not over-credited as full
+         * authoritative completion.
+         *
+         * Applies to: PARTIAL_COMPLETION, FALLBACK terminal outcomes where execution ended
+         * but full authoritative result fidelity was not achieved.
+         */
+        AUTHORITATIVE_DEGRADED_TERMINAL(
+            wireValue = "authoritative_degraded_terminal",
+            displayName = "Authoritative Degraded Terminal",
+            description = "Execution ended via a degraded/partial/fallback path; V2 closes the flow but must not over-credit as full completion.",
+            isTerminal = true,
+            v2Action = "close_execution_apply_degraded_terminal_policy"
+        ),
+
+        /**
          * The result uplink is **informational**: a progress update that does not
          * require a terminal or interruption-handling action from V2.
          *
@@ -816,9 +837,9 @@ object AndroidCanonicalRuntimeTruthContract {
         "degraded_condition_class_has_7_values" to
             (DegradedConditionClass.ALL_WIRE_VALUES.size == 7),
 
-        // ResultUplinkSemanticClass wire values cover the expected 4-class vocabulary
-        "result_uplink_semantic_class_has_4_values" to
-            (ResultUplinkSemanticClass.ALL_WIRE_VALUES.size == 4),
+        // ResultUplinkSemanticClass wire values cover the expected 5-class vocabulary
+        "result_uplink_semantic_class_has_5_values" to
+            (ResultUplinkSemanticClass.ALL_WIRE_VALUES.size == 5),
 
         // LocalObservationBasis wire values cover the expected 4-value vocabulary
         "local_observation_basis_has_4_values" to
@@ -829,9 +850,9 @@ object AndroidCanonicalRuntimeTruthContract {
             (DegradedConditionClass.entries.count { it.isNominal } == 1 &&
                 DegradedConditionClass.NOMINAL.isNominal),
 
-        // AUTHORITATIVE_TERMINAL and AUTHORITATIVE_RECOVERY are the terminal result classes
-        "terminal_result_uplink_classes_count_is_2" to
-            (ResultUplinkSemanticClass.entries.count { it.isTerminal } == 2),
+        // AUTHORITATIVE_TERMINAL, AUTHORITATIVE_RECOVERY, and AUTHORITATIVE_DEGRADED_TERMINAL are terminal
+        "terminal_result_uplink_classes_count_is_3" to
+            (ResultUplinkSemanticClass.entries.count { it.isTerminal } == 3),
 
         // classifyResultUplink returns INFORMATIONAL for CAPABILITY_IDLE
         "classify_result_uplink_capability_idle_is_informational" to

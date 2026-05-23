@@ -226,7 +226,7 @@ object AndroidCompletionClosureUplinkContract {
             isLifecycleTerminalPhase &&
                 resultSignalClass == AndroidResultUplinkBoundaryContract.ResultSignalClass.AUTHORITY_RESULT ->
                 AuthorityRuntimeCompletionSignalClass.AUTHORITY_RUNTIME_COMPLETION
-            isLifecycleTerminalPhase || resultReturned || completionSignaled ->
+            resultReturned || completionSignaled ->
                 AuthorityRuntimeCompletionSignalClass.RUNTIME_COMPLETION_EVIDENCE
             else ->
                 AuthorityRuntimeCompletionSignalClass.NOT_RUNTIME_COMPLETION
