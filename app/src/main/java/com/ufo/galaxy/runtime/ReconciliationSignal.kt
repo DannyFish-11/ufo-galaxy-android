@@ -298,6 +298,21 @@ data class ReconciliationSignal(
         /** Wire key for [status]. */
         const val KEY_STATUS = "reconciliation_status"
 
+        /** Payload key for the terminal outcome classification carried on terminal task signals. */
+        const val KEY_TERMINAL_OUTCOME_KIND = "terminal_outcome_kind"
+
+        /**
+         * Payload key for the center-facing result semantic class derived from
+         * [KEY_TERMINAL_OUTCOME_KIND].
+         */
+        const val KEY_RESULT_UPLINK_SEMANTIC_CLASS = "result_uplink_semantic_class"
+
+        /**
+         * Payload key for the Stage 5/7 completion-truth grade derived from the terminal
+         * outcome and result semantic.
+         */
+        const val KEY_COMPLETION_TRUTH_GRADE = "completion_truth_grade"
+
         /**
          * Payload key: whether Android has produced a terminal result for this task.
          *
@@ -570,6 +585,7 @@ data class ReconciliationSignal(
             resultReturned: Boolean,
             completionSignaled: Boolean,
             closureReadyForAcceptance: Boolean,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind? = null,
             additionalPayload: Map<String, Any?> = emptyMap(),
             outwardTruthSurfaceClass: AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass =
                 AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
@@ -584,10 +600,41 @@ data class ReconciliationSignal(
                 )
             val v2Boundary = AndroidCompletionClosureUplinkContract
                 .deriveV2CanonicalBoundary(
-                    localExecutionCompleted = isTerminalSignal && resultReturned && completionSignaled,
+                    localExecutionCompleted =
+                        terminalOutcomeKind?.let { outcome ->
+                            val resultSemanticClass =
+                                AndroidMissionCompletionSemanticsContract
+                                    .classifyReportedResultSemantic(outcome)
+                            val completionTruthGrade =
+                                AndroidCompletionTruthHardeningContract
+                                    .classifyCompletionTruthGrade(
+                                        resultUplinkSemanticClass = resultSemanticClass,
+                                        terminalOutcomeKind = outcome
+                                    )
+                            completionTruthGrade == AndroidCompletionTruthHardeningContract
+                                .CompletionTruthGrade.VERIFIED_COMPLETE ||
+                                completionTruthGrade == AndroidCompletionTruthHardeningContract
+                                    .CompletionTruthGrade.DEGRADED_COMPLETE
+                        } ?: (isTerminalSignal && resultReturned && completionSignaled),
                     advisoryEvidenceSent = true,
                     outwardTruthSurfaceClass = outwardTruthSurfaceClass
                 )
+            val terminalOutcomePayload = terminalOutcomeKind?.let { outcome ->
+                val resultSemanticClass =
+                    AndroidMissionCompletionSemanticsContract
+                        .classifyReportedResultSemantic(outcome)
+                val completionTruthGrade =
+                    AndroidCompletionTruthHardeningContract
+                        .classifyCompletionTruthGrade(
+                            resultUplinkSemanticClass = resultSemanticClass,
+                            terminalOutcomeKind = outcome
+                        )
+                mapOf(
+                    KEY_TERMINAL_OUTCOME_KIND to outcome.wireValue,
+                    KEY_RESULT_UPLINK_SEMANTIC_CLASS to resultSemanticClass.wireValue,
+                    KEY_COMPLETION_TRUTH_GRADE to completionTruthGrade.wireValue
+                )
+            }.orEmpty()
             return mapOf(
                 AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION to
                     AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
@@ -619,7 +666,7 @@ data class ReconciliationSignal(
                             AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
                                 .V2_CONFIRMED_CANONICAL_TRUTH
                         )
-            ) + additionalPayload
+            ) + terminalOutcomePayload + additionalPayload
         }
 
         private fun buildStableDedupeKey(
@@ -728,6 +775,8 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABORT,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
@@ -744,6 +793,7 @@ data class ReconciliationSignal(
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
+                terminalOutcomeKind = terminalOutcomeKind,
                 additionalPayload = additionalPayload
             ),
             signalId = signalId,
@@ -770,6 +820,8 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.FAILURE,
             errorDetail: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
@@ -782,6 +834,7 @@ data class ReconciliationSignal(
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
+                terminalOutcomeKind = terminalOutcomeKind,
                 additionalPayload = additionalPayload
             ).toMutableMap().apply {
                 errorDetail?.let { put("error_detail", it) }
@@ -817,6 +870,8 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
@@ -833,6 +888,7 @@ data class ReconciliationSignal(
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
+                terminalOutcomeKind = terminalOutcomeKind,
                 additionalPayload = additionalPayload
             ),
             signalId = signalId,
