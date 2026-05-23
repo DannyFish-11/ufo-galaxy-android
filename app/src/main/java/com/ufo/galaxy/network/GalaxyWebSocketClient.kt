@@ -1138,9 +1138,9 @@ class GalaxyWebSocketClient(
                 isV2Confirmed
             )
         }
-        val closureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
+        val isClosureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
             type == MsgType.DEVICE_EXECUTION_EVENT.value
-        if (closureBearingType) {
+        if (isClosureBearingType) {
             val hasExecutionLineage =
                 payload.stringOrNull(AndroidUplinkLineageMetadataContract.KEY_EXECUTION_IDENTITY) != null
             val hasEmissionLineage =
@@ -1148,12 +1148,13 @@ class GalaxyWebSocketClient(
             val hasSessionLineage =
                 payload.stringOrNull("durable_session_id") != null &&
                     payload.intOrNull("session_continuity_epoch") != null
-            val missingClosureLineage = !hasExecutionLineage || !hasEmissionLineage || !hasSessionLineage
-            val terminalLikeSignal =
+            val isClosureLineageIncomplete =
+                !hasExecutionLineage || !hasEmissionLineage || !hasSessionLineage
+            val isTerminalLikeSignal =
                 payload.booleanOrNull("result_returned") == true ||
                     payload.booleanOrNull("completion_signaled") == true ||
                     payload.booleanOrNull("lifecycle_terminal_phase") == true
-            if (missingClosureLineage && terminalLikeSignal) {
+            if (isClosureLineageIncomplete && isTerminalLikeSignal) {
                 payload.addProperty(
                     AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS,
                     AndroidResultUplinkBoundaryContract
