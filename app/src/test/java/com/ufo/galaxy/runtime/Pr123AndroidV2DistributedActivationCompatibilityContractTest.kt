@@ -293,7 +293,7 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
     // ══════════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `KEY_DISPATCH_PLAN_ID_IN_RECONCILIATION aliases ReconciliationSignal KEY_DISPATCH_PLAN_ID`() {
+    fun `KEY_DISPATCH_PLAN_ID_IN_RECONCILIATION matches ReconciliationSignal constant`() {
         assertEquals(
             ReconciliationSignal.KEY_DISPATCH_PLAN_ID,
             AndroidV2DistributedActivationCompatibilityContract.KEY_DISPATCH_PLAN_ID_IN_RECONCILIATION
@@ -407,7 +407,7 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
     // ══════════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `android-v2-distributed-activation-compatibility-contract is registered in StabilizationBaseline`() {
+    fun `android-v2-distributed-activation-compatibility-contract registered correctly`() {
         val entry = StabilizationBaseline.forId("android-v2-distributed-activation-compatibility-contract")
         assertNotNull(entry)
         assertEquals(
