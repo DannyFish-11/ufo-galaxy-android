@@ -2794,6 +2794,35 @@ object StabilizationBaseline {
                 "(TASK_RESULT, TASK_CANCELLED, TASK_FAILED including session-interrupt path). " +
                 "Test: Pr123AndroidV2DistributedActivationCompatibilityContractTest.",
             introducedPr = 123
+        ),
+
+        // ── PR-124: Android Stage 8 V2 failure recovery compatibility ──────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-v2-failure-recovery-compatibility-contract",
+            displayName = "AndroidV2FailureRecoveryCompatibilityContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidV2FailureRecoveryCompatibilityContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-124 — Stage 8 Android V2 failure recovery compatibility hardening. " +
+                "Classifies Android-side failure and interrupted execution conditions into " +
+                "machine-actionable FailureRecoveryClass values so V2 can apply stricter " +
+                "distributed recovery semantics without over-reading ambiguous failure output. " +
+                "FailureRecoveryClass (5 values: CLEAN_TIMEOUT/SESSION_INTERRUPTED/" +
+                "PARTIAL_THEN_INTERRUPTED/EXECUTION_FAILED/NOT_A_FAILURE) classifies failure " +
+                "kind from clean timeout through session interruption to internal failure. " +
+                "classify() maps TerminalOutcomeKind + hadPartialProgress to the correct class. " +
+                "toWireMap() embeds failure_recovery_class, failure_had_partial_progress, " +
+                "failure_is_retry_eligible, and failure_recovery_schema_version wire keys. " +
+                "V2_FAILURE_RECOVERY_ALIGNMENT_MAP maps each class to the V2-side recovery path. " +
+                "FAILURE_RECOVERY_INVARIANTS (15 entries) provide machine-verifiable regression " +
+                "anchors. RuntimeController.buildFailureRecoveryPayload() populates these keys in " +
+                "all TASK_FAILED signals (session-interrupt path and notifyTakeoverFailed path). " +
+                "ReconciliationSignal gains KEY_FAILURE_RECOVERY_CLASS, KEY_FAILURE_HAD_PARTIAL_PROGRESS, " +
+                "KEY_FAILURE_IS_RETRY_ELIGIBLE, and KEY_FAILURE_RECOVERY_SCHEMA_VERSION payload key constants. " +
+                "Test: Pr124AndroidV2FailureRecoveryCompatibilityContractTest.",
+            introducedPr = 124
         )
     )
 

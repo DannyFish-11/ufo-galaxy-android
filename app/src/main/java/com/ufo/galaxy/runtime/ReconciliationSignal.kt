@@ -497,6 +497,42 @@ data class ReconciliationSignal(
         const val KEY_ROUTING_SCHEMA_VERSION =
             AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
 
+        // ── PR-124: Failure recovery compatibility payload key constants ────────
+
+        /**
+         * Payload key for the [AndroidV2FailureRecoveryCompatibilityContract.FailureRecoveryClass.wireValue]
+         * that V2 should use to route failure signals to the correct distributed recovery path.
+         *
+         * Present in [payload] of [Kind.TASK_FAILED] signals.  When absent, V2 SHOULD treat the
+         * failure as [AndroidV2FailureRecoveryCompatibilityContract.FailureRecoveryClass.EXECUTION_FAILED]
+         * for backward compatibility with pre-PR-124 signals.
+         */
+        const val KEY_FAILURE_RECOVERY_CLASS =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_FAILURE_RECOVERY_CLASS
+
+        /**
+         * Payload key indicating whether this failure involved prior partial execution output.
+         *
+         * Value: `"true"` or `"false"`.  When `"true"`, V2 MUST reconcile partial state before
+         * closing or retrying the task.
+         */
+        const val KEY_FAILURE_HAD_PARTIAL_PROGRESS =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_HAD_PARTIAL_PROGRESS
+
+        /**
+         * Payload key indicating whether V2 retry is structurally safe for this failure class.
+         *
+         * Value: `"true"` or `"false"`.
+         */
+        const val KEY_FAILURE_IS_RETRY_ELIGIBLE =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_IS_RETRY_ELIGIBLE
+
+        /**
+         * Payload key for [AndroidV2FailureRecoveryCompatibilityContract.SCHEMA_VERSION].
+         */
+        const val KEY_FAILURE_RECOVERY_SCHEMA_VERSION =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_FAILURE_RECOVERY_SCHEMA_VERSION
+
         // ── PR-63 progress / checkpoint / subtask payload key constants ────────
 
         /**
