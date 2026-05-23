@@ -43,7 +43,8 @@ object AndroidRuntimeEmissionTruthSemantics {
         DIRECT_SENT("direct_sent"),
         OFFLINE_QUEUED("offline_queued"),
         SEND_FAILED("send_failed"),
-        REPLAYED_FORWARDED("replayed_forwarded")
+        REPLAYED_FORWARDED("replayed_forwarded"),
+        DUPLICATE_SUPPRESSED("duplicate_suppressed")
     }
 
     data class TruthSnapshot(
@@ -102,7 +103,8 @@ object AndroidRuntimeEmissionTruthSemantics {
                 TerminalEmissionClass.RESUMED_TERMINAL_COMPLETION
             continuityClass == ExecutionContinuityClass.DEGRADED_CONTINUITY ||
                 deliveryDisposition == DeliveryDisposition.OFFLINE_QUEUED ||
-                deliveryDisposition == DeliveryDisposition.SEND_FAILED ->
+                deliveryDisposition == DeliveryDisposition.SEND_FAILED ||
+                deliveryDisposition == DeliveryDisposition.DUPLICATE_SUPPRESSED ->
                 TerminalEmissionClass.DEGRADED_TERMINAL_OUTPUT
             else ->
                 TerminalEmissionClass.TERMINAL_COMPLETION

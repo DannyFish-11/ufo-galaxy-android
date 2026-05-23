@@ -3284,6 +3284,16 @@ class GalaxyConnectionService : Service() {
             )
         )
         if (convergenceDecision is FlowAwareResultConvergenceDecision.SuppressDuplicateResultEmit) {
+            val suppressedTruth = AndroidRuntimeEmissionTruthSemantics.derive(
+                recoveryPhase = resultRecoveryPhaseModel,
+                isContinuation = result.is_continuation == true,
+                interruptionReason = result.interruption_reason,
+                isTerminal = !isHoldStatus,
+                deliveryDisposition = AndroidRuntimeEmissionTruthSemantics
+                    .DeliveryDisposition
+                    .DUPLICATE_SUPPRESSED,
+                resultConvergenceDecision = convergenceDecision.semanticTag
+            )
             delegatedRuntimeAcceptanceEvaluator.markDimensionGap(
                 DelegatedRuntimeAcceptanceDimension.RESULT_CONVERGENCE_EVIDENCE,
                 "duplicate_terminal_result_suppressed"
@@ -3303,7 +3313,11 @@ class GalaxyConnectionService : Service() {
                     "task_id" to result.task_id,
                     "trace_id" to (traceId ?: ""),
                     "delivery_disposition" to ResultDeliveryDisposition.DUPLICATE_SUPPRESSED.name.lowercase(),
-                    "result_key" to stableResultKey
+                    "result_key" to stableResultKey,
+                    AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS to
+                        suppressedTruth.executionContinuityClass.wireValue,
+                    AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS to
+                        suppressedTruth.terminalEmissionClass.wireValue
                 )
             )
             emitCrossRepoRegressionSnapshot("cross_repo_goal_result_return")
@@ -3482,13 +3496,9 @@ class GalaxyConnectionService : Service() {
             .durableSessionContinuityRecord.value
             ?.durableSessionId
 
-        var envelopeReadyPayload: GoalResultPayload
-        val deliveryDisposition = when {
-            sent -> {
-                envelopeReadyPayload = directPayload
-                ResultDeliveryDisposition.DIRECT_SENT
-            }
-            else -> {
+        val (envelopeReadyPayload, deliveryDisposition) = if (sent) {
+            directPayload to ResultDeliveryDisposition.DIRECT_SENT
+        } else {
                 val queuedPayload = buildEnrichedPayload(
                     AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
                 )
@@ -3503,26 +3513,22 @@ class GalaxyConnectionService : Service() {
                     )
                 }
                 if (queueResult.isSuccess) {
-                    envelopeReadyPayload = queuedPayload
-                    ResultDeliveryDisposition.OFFLINE_QUEUED
+                    queuedPayload to ResultDeliveryDisposition.OFFLINE_QUEUED
                 } else {
-                    envelopeReadyPayload = buildEnrichedPayload(
+                    val failedPayload = buildEnrichedPayload(
                         AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
                     )
                     Log.e(
                         TAG,
-                        "goal_execution_result enqueue failed task_id=${envelopeReadyPayload.task_id} " +
+                        "goal_execution_result enqueue failed task_id=${failedPayload.task_id} " +
                             "trace_id=${traceId ?: ""} error=${queueResult.exceptionOrNull()?.message}",
                         queueResult.exceptionOrNull()
                     )
-                    ResultDeliveryDisposition.SEND_FAILED
+                    failedPayload to ResultDeliveryDisposition.SEND_FAILED
                 }
-            }
         }
 
-        if (deliveryDisposition != ResultDeliveryDisposition.SEND_FAILED &&
-            convergenceDecision !is FlowAwareResultConvergenceDecision.EmitPartialForFlow
-        ) {
+        if (shouldMarkResultFlowFinal(deliveryDisposition, convergenceDecision)) {
             resultConvergenceParticipant.markFlowFinal(scopedResultFlowId, stableResultKey)
         }
         if (deliveryDisposition != ResultDeliveryDisposition.SEND_FAILED) {
@@ -3606,6 +3612,13 @@ class GalaxyConnectionService : Service() {
         else ->
             AndroidFlowAwareResultConvergenceParticipant.FlowResultKind.FAILURE_TERMINAL
     }
+
+    private fun shouldMarkResultFlowFinal(
+        deliveryDisposition: ResultDeliveryDisposition,
+        convergenceDecision: FlowAwareResultConvergenceDecision
+    ): Boolean =
+        deliveryDisposition != ResultDeliveryDisposition.SEND_FAILED &&
+            convergenceDecision !is FlowAwareResultConvergenceDecision.EmitPartialForFlow
 
     /**
      * Sends an error [GoalResultPayload] as [MsgType.GOAL_EXECUTION_RESULT] when payload
