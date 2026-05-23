@@ -123,25 +123,32 @@ object AndroidMissionCompletionSemanticsContract {
                 AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_INTERRUPTION
             TerminalOutcomeKind.RECOVERY ->
                 AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_RECOVERY
-            TerminalOutcomeKind.COMPLETION,
             TerminalOutcomeKind.PARTIAL_COMPLETION,
+            TerminalOutcomeKind.FALLBACK ->
+                AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_DEGRADED_TERMINAL
+            TerminalOutcomeKind.COMPLETION,
             TerminalOutcomeKind.FAILURE,
             TerminalOutcomeKind.ABORT,
-            TerminalOutcomeKind.TIMEOUT,
-            TerminalOutcomeKind.FALLBACK ->
+            TerminalOutcomeKind.TIMEOUT ->
                 AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL
         }
 
     fun deriveExecutionCompletionVisibility(
         phase: String,
-        lifecycleTerminalPhase: Boolean?
+        lifecycleTerminalPhase: Boolean?,
+        terminalOutcomeKind: TerminalOutcomeKind? = null
     ): CompletionVisibility {
         val terminalByPhase = TERMINAL_EXECUTION_PHASES.contains(phase)
         val isTerminal = lifecycleTerminalPhase == true || terminalByPhase
+        val isDegradedOutcome = terminalOutcomeKind in setOf(
+            TerminalOutcomeKind.PARTIAL_COMPLETION,
+            TerminalOutcomeKind.FALLBACK,
+            TerminalOutcomeKind.RECOVERY
+        )
         return CompletionVisibility(
             resultReturned = isTerminal,
             completionSignaled = isTerminal,
-            closureReadyForAcceptance = isTerminal
+            closureReadyForAcceptance = isTerminal && !isDegradedOutcome
         )
     }
 }
