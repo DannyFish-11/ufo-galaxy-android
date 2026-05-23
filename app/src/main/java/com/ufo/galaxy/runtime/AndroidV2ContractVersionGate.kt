@@ -242,6 +242,12 @@ object AndroidV2ContractVersionGate {
         "recovery_state_routing_schema_version"
 
     /**
+     * Stable key used in V2 expected-version metadata for dedupe schema alignment.
+     */
+    const val KEY_CROSS_REPO_DEDUPE_SCHEMA_VERSION: String =
+        "android_cross_repo_dedupe_schema_version"
+
+    /**
      * Required non-closure message classes that must remain guarded as non-closure.
      */
     val REQUIRED_NON_CLOSURE_MSG_TYPES: Set<MsgType> = setOf(
@@ -256,22 +262,22 @@ object AndroidV2ContractVersionGate {
     /**
      * Required replay-bearing classes that must remain dedupe-governed.
      */
-    val REQUIRED_CANONICAL_REPLAY_TYPES: Set<String> = setOf(
-        MsgType.GOAL_EXECUTION_RESULT.value,
-        MsgType.DEVICE_EXECUTION_EVENT.value,
-        MsgType.DEVICE_STATE_SNAPSHOT.value,
-        MsgType.RECONCILIATION_SIGNAL.value
+    val REQUIRED_CANONICAL_REPLAY_MSG_TYPES: Set<MsgType> = setOf(
+        MsgType.GOAL_EXECUTION_RESULT,
+        MsgType.DEVICE_EXECUTION_EVENT,
+        MsgType.DEVICE_STATE_SNAPSHOT,
+        MsgType.RECONCILIATION_SIGNAL
     )
 
     /**
      * Required replay classes that must carry continuity epoch metadata.
      */
-    val REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES: Set<String> = setOf(
-        MsgType.GOAL_EXECUTION_RESULT.value,
-        MsgType.DEVICE_EXECUTION_EVENT.value,
-        MsgType.DEVICE_STATE_SNAPSHOT.value,
-        MsgType.RECONCILIATION_SIGNAL.value,
-        MsgType.DELEGATED_EXECUTION_SIGNAL.value
+    val REQUIRED_REPLAY_EPOCH_MSG_TYPES: Set<MsgType> = setOf(
+        MsgType.GOAL_EXECUTION_RESULT,
+        MsgType.DEVICE_EXECUTION_EVENT,
+        MsgType.DEVICE_STATE_SNAPSHOT,
+        MsgType.RECONCILIATION_SIGNAL,
+        MsgType.DELEGATED_EXECUTION_SIGNAL
     )
 
     // ── Gate boundary categories ──────────────────────────────────────────────
@@ -414,7 +420,7 @@ object AndroidV2ContractVersionGate {
             EXPECTED_NON_CLOSURE_SCHEMA_VERSION,
         KEY_RECOVERY_ROUTING_SCHEMA_VERSION to
             EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION,
-        "android_cross_repo_dedupe_schema_version" to
+        KEY_CROSS_REPO_DEDUPE_SCHEMA_VERSION to
             EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION,
         V2_GATE_VERSION_KEY to GATE_SCHEMA_VERSION
     )
@@ -444,6 +450,9 @@ object AndroidV2ContractVersionGate {
         val status: GateValidationStatus,
         val violations: List<GateValidationViolation>
     )
+
+    private fun Set<MsgType>.toWireValueSet(): Set<String> =
+        mapTo(mutableSetOf()) { it.value }
 
     /**
      * Validates that all gated contract constants are internally consistent.
@@ -651,35 +660,37 @@ object AndroidV2ContractVersionGate {
         }
 
         // ── 10. Required non-closure and dedupe/replay classes ───────────────
-        if (AndroidNonClosureSignalBoundaryContract.NON_CLOSURE_MSG_TYPES !=
-            REQUIRED_NON_CLOSURE_MSG_TYPES) {
+        val requiredNonClosureMsgTypeValues = REQUIRED_NON_CLOSURE_MSG_TYPES.toWireValueSet()
+        val actualNonClosureMsgTypeValues =
+            AndroidNonClosureSignalBoundaryContract.NON_CLOSURE_MSG_TYPES.toWireValueSet()
+        if (actualNonClosureMsgTypeValues != requiredNonClosureMsgTypeValues) {
             violations += GateValidationViolation(
                 boundary = GateBoundaryCategory.PARTICIPANT_TRUTH_SNAPSHOT.wireValue,
                 description = "NON_CLOSURE_MSG_TYPES drift detected: update REQUIRED_NON_CLOSURE_MSG_TYPES " +
                     "and align V2 non-closure ingress guard set",
-                expected = REQUIRED_NON_CLOSURE_MSG_TYPES.joinToString(",") { it.value },
-                actual = AndroidNonClosureSignalBoundaryContract.NON_CLOSURE_MSG_TYPES
-                    .joinToString(",") { it.value }
+                expected = requiredNonClosureMsgTypeValues.joinToString(","),
+                actual = actualNonClosureMsgTypeValues.joinToString(",")
             )
         }
 
-        if (AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES != REQUIRED_CANONICAL_REPLAY_TYPES) {
+        val requiredCanonicalReplayTypes = REQUIRED_CANONICAL_REPLAY_MSG_TYPES.toWireValueSet()
+        if (AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES != requiredCanonicalReplayTypes) {
             violations += GateValidationViolation(
                 boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
-                description = "CANONICAL_REPLAY_TYPES drift detected: update REQUIRED_CANONICAL_REPLAY_TYPES " +
+                description = "CANONICAL_REPLAY_TYPES drift detected: update REQUIRED_CANONICAL_REPLAY_MSG_TYPES " +
                     "and align V2 replay/dedupe canonical type routing",
-                expected = REQUIRED_CANONICAL_REPLAY_TYPES.joinToString(","),
+                expected = requiredCanonicalReplayTypes.joinToString(","),
                 actual = AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES.joinToString(",")
             )
         }
 
-        if (AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES !=
-            REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES) {
+        val requiredReplayEpochTypes = REQUIRED_REPLAY_EPOCH_MSG_TYPES.toWireValueSet()
+        if (AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES != requiredReplayEpochTypes) {
             violations += GateValidationViolation(
                 boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
-                description = "REPLAY_EPOCH_REQUIRED_TYPES drift detected: update REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES " +
+                description = "REPLAY_EPOCH_REQUIRED_TYPES drift detected: update REQUIRED_REPLAY_EPOCH_MSG_TYPES " +
                     "and align V2 replay epoch enforcement",
-                expected = REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES.joinToString(","),
+                expected = requiredReplayEpochTypes.joinToString(","),
                 actual = AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES.joinToString(",")
             )
         }

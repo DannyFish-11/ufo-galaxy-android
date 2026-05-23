@@ -10,13 +10,12 @@ permissions:
   contents: read
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job dependency graph (all jobs are blocking — failure prevents merge):
-#
-#   build ──┬── protocol-contract-guard ───────────┐
-#           ├── runtime-regression                  ├── all-unit-tests ──┐
-#           ├── cross-repo-compatibility-guard ────┘                    ├── ci-gate
-#           ├── e2e-verification-gate ───────────────────────────────────┤
-#           └── lint ─────────────────────────────────────────────────────┘
+# Job dependencies (all jobs are blocking — failure prevents merge):
+# - build is required by protocol-contract-guard, runtime-regression,
+#   cross-repo-compatibility-guard, e2e-verification-gate, and lint.
+# - all-unit-tests requires protocol-contract-guard + runtime-regression +
+#   cross-repo-compatibility-guard + e2e-verification-gate.
+# - ci-gate requires all-unit-tests + lint + cross-repo-compatibility-guard.
 #
 # protocol-contract-guard: AIP v3 device_register / capability_report /
 #   task_result / reconnect protocol contracts.  Failure = protocol regression.
@@ -165,7 +164,7 @@ jobs:
   # surfaces for schema versions, replay/dedupe classes, recovery routing, and
   # non-closure signal classification. Failures are expected to be actionable.
   cross-repo-compatibility-guard:
-    name: "Cross-Repo Compatibility Guard [gate 4/7]"
+    name: "Cross-Repo Compatibility Guard [parallel gate 4/7]"
     runs-on: ubuntu-latest
     needs: build
 
@@ -185,6 +184,11 @@ jobs:
 
       - name: Run cross-repo compatibility contract tests
         run: |
+          # Gate coverage:
+          # - Pr14AndroidV2ContractVersionGateTest: schema/version + required type-set anchors
+          # - Pr119AndroidCrossRepoRecoveryStateRoutingContractTest: recovery routing semantics
+          # - Pr120AndroidNonClosureSignalBoundaryContractTest: non-closure negative-proof boundary
+          # - AndroidCrossRepoDedupeContractTest: replay/dedupe required-field/type semantics
           ./gradlew :app:test \
             --tests "com.ufo.galaxy.runtime.Pr14AndroidV2ContractVersionGateTest" \
             --tests "com.ufo.galaxy.runtime.Pr119AndroidCrossRepoRecoveryStateRoutingContractTest" \

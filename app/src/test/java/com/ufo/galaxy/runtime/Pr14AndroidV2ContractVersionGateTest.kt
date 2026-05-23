@@ -57,6 +57,9 @@ import org.junit.Test
  */
 class Pr14AndroidV2ContractVersionGateTest {
 
+    private fun Set<MsgType>.toWireValueSet(): Set<String> =
+        mapTo(mutableSetOf()) { it.value }
+
     // ── 1. Gate schema version stability ─────────────────────────────────────
 
     @Test
@@ -392,7 +395,7 @@ class Pr14AndroidV2ContractVersionGateTest {
 
     @Test
     fun `V2_EXPECTED_VERSIONS contains cross-repo dedupe schema version key`() {
-        val key = "android_cross_repo_dedupe_schema_version"
+        val key = AndroidV2ContractVersionGate.KEY_CROSS_REPO_DEDUPE_SCHEMA_VERSION
         assertNotNull(
             "V2_EXPECTED_VERSIONS missing dedupe schema version key $key",
             AndroidV2ContractVersionGate.V2_EXPECTED_VERSIONS[key]
@@ -412,17 +415,17 @@ class Pr14AndroidV2ContractVersionGateTest {
     }
 
     @Test
-    fun `REQUIRED_CANONICAL_REPLAY_TYPES matches contract`() {
+    fun `REQUIRED_CANONICAL_REPLAY_MSG_TYPES matches contract`() {
         assertEquals(
-            AndroidV2ContractVersionGate.REQUIRED_CANONICAL_REPLAY_TYPES,
+            AndroidV2ContractVersionGate.REQUIRED_CANONICAL_REPLAY_MSG_TYPES.toWireValueSet(),
             AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES
         )
     }
 
     @Test
-    fun `REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES matches contract`() {
+    fun `REQUIRED_REPLAY_EPOCH_MSG_TYPES matches contract`() {
         assertEquals(
-            AndroidV2ContractVersionGate.REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES,
+            AndroidV2ContractVersionGate.REQUIRED_REPLAY_EPOCH_MSG_TYPES.toWireValueSet(),
             AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES
         )
     }
