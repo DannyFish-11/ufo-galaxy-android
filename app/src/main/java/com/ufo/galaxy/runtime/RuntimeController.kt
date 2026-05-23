@@ -2747,6 +2747,9 @@ class RuntimeController(
                     distributedRuntimeActivity = false
                 )
                 val inflightRecovery = inflightContinuityRecovery.value
+                val unifiedPhase = unifiedRecoveryPhase.value
+                val routingDecision =
+                    AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(unifiedPhase)
                 val idleTruth = AndroidParticipantRuntimeTruth.from(
                     descriptor = descriptor,
                     sessionSnapshot = currentHostSessionSnapshot(),
@@ -2754,7 +2757,7 @@ class RuntimeController(
                     readinessState = ParticipantReadinessState.UNKNOWN,
                     activeTaskId = null,
                     activeTaskStatus = null,
-                    inflightContinuityState = inflightRecovery.disposition.wireValue,
+                    inflightContinuityState = unifiedPhase.wireValue,
                     inflightContinuityTaskId = inflightRecovery.taskId,
                     inflightContinuitySource = inflightRecovery.source,
                     inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
@@ -2769,7 +2772,8 @@ class RuntimeController(
                     ReconciliationSignal.runtimeTruthSnapshot(
                         idleTruth,
                         durableSessionId = currentDurableSessionId(),
-                        sessionContinuityEpoch = currentSessionContinuityEpoch()
+                        sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                        v2RoutingDecision = routingDecision
                     )
                 )
                 GalaxyLogger.log(
