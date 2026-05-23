@@ -1295,6 +1295,32 @@ data class GoalResultPayload(
     val continuity_recovery_state: String? = null,
     val continuity_recovery_source: String? = null,
     val continuity_recovery_schema_version: String? = null,
+    // ── Stage 2: Android runtime emission truth semantics ───────────────────────────────
+    //
+    // execution_continuity_class:
+    //   Explicitly distinguishes fresh, resumed, recovered, replayed, and degraded execution
+    //   continuity semantics so resumed/recovered output does not appear fresh by default.
+    //
+    // terminal_emission_class:
+    //   Distinguishes active/in-progress state from canonical terminal completion,
+    //   resumed/recovered terminal completion, replayed terminal delivery, and degraded
+    //   terminal-like output.
+    //
+    // terminal_delivery_disposition:
+    //   Records whether Android emitted only a local signal, sent directly, queued offline,
+    //   failed to send, or later replay-forwarded the terminal payload.
+    //
+    // result_convergence_decision:
+    //   Stable Android-side convergence decision semantic tag (for example
+    //   "emit_final_for_flow" or "emit_partial_for_flow") from the result convergence layer.
+    //
+    // runtime_emission_truth_schema_version:
+    //   Schema version for the Stage 2 runtime emission truth fields.
+    val execution_continuity_class: String? = null,
+    val terminal_emission_class: String? = null,
+    val terminal_delivery_disposition: String? = null,
+    val result_convergence_decision: String? = null,
+    val runtime_emission_truth_schema_version: String? = null,
     // ── PR-119: explicit recovery routing contract for canonical V2 handling ───────────────
     //
     // recovery_state_v2_routing_category: stable V2 routing category for the current

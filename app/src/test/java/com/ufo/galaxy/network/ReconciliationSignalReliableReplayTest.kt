@@ -6,7 +6,9 @@ import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
+import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
+import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import okhttp3.Request
@@ -379,6 +381,51 @@ class ReconciliationSignalReliableReplayTest {
         assertFalse(
             payload.get(AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)
                 .asBoolean
+        )
+    }
+
+    @Test
+    fun `goal_execution_result replay is annotated as replayed terminal delivery`() {
+        val client = buildClient(durableSessionId = "durable-replay", sessionEpoch = 6)
+        val recordingSocket = RecordingWebSocket()
+        val raw = """
+            {
+              "type":"goal_execution_result",
+              "idempotency_key":"goal-replay-1",
+              "payload":{
+                "task_id":"task-replay",
+                "status":"success",
+                "is_continuation":true,
+                "continuity_recovery_state":"recovering",
+                "uplink_lineage_dedupe_key":"goal-replay-lineage"
+              }
+            }
+        """.trimIndent()
+
+        assertFalse(client.sendJson(raw))
+        client.installWebSocketForTest(recordingSocket)
+        client.simulateCanonicalReconnectOpenForTest()
+
+        val replayed = recordingSocket.textMessages
+            .map { JsonParser.parseString(it).asJsonObject }
+            .single { it.get("type").asString == MsgType.GOAL_EXECUTION_RESULT.value }
+        val payload = replayed.getAsJsonObject("payload")
+
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.REPLAYED_DELIVERY.wireValue,
+            payload.get(AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS).asString
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.TerminalEmissionClass.REPLAYED_TERMINAL_COMPLETION.wireValue,
+            payload.get(AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS).asString
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.REPLAYED_FORWARDED.wireValue,
+            payload.get(AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION).asString
+        )
+        assertEquals(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING.wireValue,
+            payload.get(AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE).asString
         )
     }
 

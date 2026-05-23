@@ -20,7 +20,9 @@ import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
+import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
+import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -1358,8 +1360,57 @@ class GalaxyWebSocketClient(
         if (!message.dedupeKey.isNullOrBlank()) {
             root.addProperty("replay_dedupe_key", message.dedupeKey)
         }
+        if (message.type == MsgType.GOAL_EXECUTION_RESULT.value) {
+            root.objectOrNull("payload")?.let { payload ->
+                val emissionTruth = AndroidRuntimeEmissionTruthSemantics.derive(
+                    recoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase.fromWireValue(
+                        payload.stringOrNull(AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE)
+                    ),
+                    isContinuation = payload.booleanOrNull("is_continuation") == true,
+                    interruptionReason = payload.stringOrNull("interruption_reason"),
+                    isTerminal = true,
+                    deliveryDisposition = AndroidRuntimeEmissionTruthSemantics
+                        .DeliveryDisposition
+                        .REPLAYED_FORWARDED,
+                    resultConvergenceDecision = payload.stringOrNull(
+                        AndroidRuntimeEmissionTruthSemantics.KEY_RESULT_CONVERGENCE_DECISION
+                    )
+                )
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS,
+                    emissionTruth.executionContinuityClass.wireValue
+                )
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS,
+                    emissionTruth.terminalEmissionClass.wireValue
+                )
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION,
+                    emissionTruth.deliveryDisposition.wireValue
+                )
+                emissionTruth.resultConvergenceDecision?.let {
+                    payload.addProperty(
+                        AndroidRuntimeEmissionTruthSemantics.KEY_RESULT_CONVERGENCE_DECISION,
+                        it
+                    )
+                }
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION,
+                    AndroidRuntimeEmissionTruthSemantics.SCHEMA_VERSION
+                )
+            }
+        }
         return gson.toJson(root)
     }
+
+    private fun JsonObject.objectOrNull(key: String): JsonObject? =
+        runCatching { getAsJsonObject(key) }.getOrNull()
+
+    private fun JsonObject.stringOrNull(key: String): String? =
+        get(key)?.takeUnless { it.isJsonNull }?.asString?.ifBlank { null }
+
+    private fun JsonObject.booleanOrNull(key: String): Boolean? =
+        get(key)?.takeUnless { it.isJsonNull }?.asBoolean
 
     private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
         val dedupeAssessment = AndroidCrossRepoDedupeContract.assessEnvelopeJson(json, gson)

@@ -384,6 +384,21 @@ data class ReconciliationSignal(
         const val KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION =
             AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION
 
+        const val KEY_EXECUTION_CONTINUITY_CLASS =
+            AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS
+
+        const val KEY_TERMINAL_EMISSION_CLASS =
+            AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS
+
+        const val KEY_TERMINAL_DELIVERY_DISPOSITION =
+            AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION
+
+        const val KEY_RESULT_CONVERGENCE_DECISION =
+            AndroidRuntimeEmissionTruthSemantics.KEY_RESULT_CONVERGENCE_DECISION
+
+        const val KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION =
+            AndroidRuntimeEmissionTruthSemantics.KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION
+
         // ── PR-119: Cross-repo recovery state routing payload key constants ────────
 
         /**
@@ -515,6 +530,7 @@ data class ReconciliationSignal(
             resultReturned: Boolean,
             completionSignaled: Boolean,
             closureReadyForAcceptance: Boolean,
+            additionalPayload: Map<String, Any?> = emptyMap(),
             outwardTruthSurfaceClass: AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass =
                 AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
                     .ANDROID_ADVISORY_EVIDENCE
@@ -563,7 +579,7 @@ data class ReconciliationSignal(
                             AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
                                 .V2_CONFIRMED_CANONICAL_TRUTH
                         )
-            )
+            ) + additionalPayload
         }
 
         private fun buildStableDedupeKey(
@@ -634,7 +650,8 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.TASK_ACCEPTED,
             participantId = participantId,
@@ -645,7 +662,8 @@ data class ReconciliationSignal(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
-                closureReadyForAcceptance = false
+                closureReadyForAcceptance = false,
+                additionalPayload = additionalPayload
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -673,7 +691,8 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.TASK_CANCELLED,
             participantId = participantId,
@@ -684,7 +703,8 @@ data class ReconciliationSignal(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
-                closureReadyForAcceptance = false
+                closureReadyForAcceptance = false,
+                additionalPayload = additionalPayload
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -714,13 +734,15 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
             val payload = closureSemanticsPayload(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
-                closureReadyForAcceptance = false
+                closureReadyForAcceptance = false,
+                additionalPayload = additionalPayload
             ).toMutableMap().apply {
                 errorDetail?.let { put("error_detail", it) }
             }
@@ -758,7 +780,8 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal = ReconciliationSignal(
             kind = Kind.TASK_RESULT,
             participantId = participantId,
@@ -769,7 +792,8 @@ data class ReconciliationSignal(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
-                closureReadyForAcceptance = false
+                closureReadyForAcceptance = false,
+                additionalPayload = additionalPayload
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -802,13 +826,15 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
             val payload = closureSemanticsPayload(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
-                closureReadyForAcceptance = false
+                closureReadyForAcceptance = false,
+                additionalPayload = additionalPayload
             ).toMutableMap().apply {
                 progressDetail?.let { put("progress_detail", it) }
             }
@@ -911,7 +937,8 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             durableSessionId: String? = null,
             sessionContinuityEpoch: Int? = null,
-            v2RoutingDecision: AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision? = null
+            v2RoutingDecision: AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
             val normalizedRecoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase
                 .fromWireValue(truth.inflightContinuityState)
@@ -948,6 +975,7 @@ data class ReconciliationSignal(
                 v2RoutingDecision?.let { decision ->
                     putAll(AndroidCrossRepoRecoveryStateRoutingContract.toWireMap(decision))
                 }
+                putAll(additionalPayload)
             }
             return ReconciliationSignal(
                 kind = Kind.RUNTIME_TRUTH_SNAPSHOT,

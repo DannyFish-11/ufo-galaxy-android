@@ -28,6 +28,7 @@ import com.ufo.galaxy.agent.TakeoverHandlingResult
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.AndroidClosedLoopGovernanceContract
 import com.ufo.galaxy.runtime.AndroidExecutionGovernanceContract
+import com.ufo.galaxy.runtime.AndroidFlowAwareResultConvergenceParticipant
 import com.ufo.galaxy.runtime.AndroidCanonicalRuntimeTruthContract
 import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidMissionCompletionSemanticsContract
@@ -55,6 +56,7 @@ import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidToolActionAuthorizationUplinkContract
 import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract
+import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
@@ -73,6 +75,7 @@ import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceSnapshot
 import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceDimension
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
+import com.ufo.galaxy.runtime.FlowAwareResultConvergenceDecision
 import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
 import com.ufo.galaxy.runtime.PolicyRoutingContext
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -258,6 +261,7 @@ class GalaxyConnectionService : Service() {
 
     /** Tracks active goal_execution / parallel_subtask coroutine jobs for cancel support. */
     private val taskCancelRegistry = TaskCancelRegistry()
+    private val resultConvergenceParticipant = AndroidFlowAwareResultConvergenceParticipant()
     @Volatile
     private var hasObservedWsConnection = false
 
@@ -1519,6 +1523,9 @@ class GalaxyConnectionService : Service() {
         UFOGalaxyApplication.edgeExecutor.setPerceptionEmissionSink(null)
         webSocketClient.removeListener(wsListener)
         webSocketClient.disconnect()
+        resultConvergenceParticipant.clearAllConvergenceGates()
+        resultConvergenceParticipant.clearAllEmittedResults()
+        resultConvergenceParticipant.clearAllFinalizedFlows()
         unloadModels()
         serviceScope.cancel()
     }
@@ -3003,7 +3010,8 @@ class GalaxyConnectionService : Service() {
     private enum class ResultDeliveryDisposition {
         DIRECT_SENT,
         OFFLINE_QUEUED,
-        SEND_FAILED
+        SEND_FAILED,
+        DUPLICATE_SUPPRESSED
     }
 
     private fun sendGoalResult(
@@ -3169,6 +3177,31 @@ class GalaxyConnectionService : Service() {
             recoveryBasis = "$resultRecoveryPhase:${resultRecoverySource.ifBlank { "none" }}"
         )
         val resultLineageConstrained = !resultLineage.isClosureLineageComplete
+        val goalResultIdempotencyKey = result.idempotency_key
+            ?: buildIdempotencyKey(result.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId)
+        val scopedResultFlowId = buildScopedResultFlowId(
+            taskId = result.task_id,
+            durableSessionId = resultDurableRecord?.durableSessionId,
+            sessionContinuityEpoch = resultDurableRecord?.sessionContinuityEpoch
+        )
+        val stableResultKey = result.uplink_lineage_dedupe_key
+            ?: resultLineage.dedupeKey
+            ?: goalResultIdempotencyKey
+        val resultKind = classifyGoalResultFlowResultKind(
+            normalizedLifecycleStatus = normalizedLifecycleStatus,
+            isHoldStatus = isHoldStatus
+        )
+        val convergenceDecision = resultConvergenceParticipant.evaluateResultEmit(
+            AndroidFlowAwareResultConvergenceParticipant.ResultEmitContext(
+                flowId = scopedResultFlowId,
+                resultKind = resultKind,
+                resultKey = stableResultKey,
+                groupId = result.group_id,
+                subtaskIndex = result.subtask_index,
+                parentFlowId = result.group_id,
+                reason = "$resultRecoveryPhase:${resultRecoverySource.ifBlank { "none" }}"
+            )
+        )
         // ── PR-05v2 (Android): 预先推导结果上行闭环边界快照 ─────────────────────────────────────
         // 在 result.copy() 前唯一计算，使 V2 可无歧义地将 goal_execution_result 路由至
         // truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
@@ -3250,194 +3283,256 @@ class GalaxyConnectionService : Service() {
                 isDiagnosticsSignal = false
             )
         )
-        val enriched = result.copy(
-            normalized_status = canonicalResultKind(result.status),
-            runtime_session_id = runtimeSession,
-            // Populate result_summary from result when not already set, so all result payloads
-            // carry a consistent human-readable summary field regardless of the caller path.
-            result_summary = result.result_summary ?: result.result,
-            // participation_tier is guaranteed non-null (INV-UTU-01): defaults to pre_attach.
-            participation_tier = resolvedParticipationTier,
-            execution_mode_state = resolvedModeState,
-            cross_device_eligibility = resolvedCrossDeviceElig,
-            local_mode_gate_deferred = resolvedIsHoldState,
-            local_inference_available = resolvedLocalInference,
-            // ── 统一真相上行合约布尔字段（在单一发送层强制填充）──
-            dispatch_eligible = result.dispatch_eligible
-                ?: (resolvedParticipationTier ==
-                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISPATCH_ELIGIBLE.wireValue ||
-                    resolvedParticipationTier ==
-                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT.wireValue),
-            distributed_participant = result.distributed_participant
-                ?: (resolvedParticipationTier ==
-                    AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT.wireValue),
-            session_attached = result.session_attached
-                ?: (resolvedParticipationTier !=
-                    AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue),
-            local_mode_active = result.local_mode_active
-                ?: (resolvedModeState ==
-                    LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
-            runtime_constrained = result.runtime_constrained
-                ?: (constraintSem.isConstraint || resultLineageConstrained),
-            runtime_deferred = result.runtime_deferred ?: constraintSem.isDeferred,
-            governance_state = result.governance_state ?: governanceTruth.governance_state,
-            governance_blocked = result.governance_blocked ?: governanceTruth.governance_blocked,
-            delegated_execution_active = result.delegated_execution_active
-                ?: governanceTruth.delegated_execution_active,
-            takeover_state = result.takeover_state ?: governanceTruth.takeover_state,
-            local_llm_ready = localLlmReady,
-            accessibility_ready = accessibilityReady,
-            local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable,
-            ingress_boundary_class = result.ingress_boundary_class ?: resultIngress.boundaryClass.wireValue,
-            ingress_consumption_kind = result.ingress_consumption_kind ?: resultIngress.consumptionKind.wireValue,
-            ingress_signal_class = result.ingress_signal_class ?: resultIngress.signalClass.wireValue,
-            ingress_schema_version = result.ingress_schema_version ?: resultIngress.schemaVersion,
-            result_returned = resolvedGoalResultReturned,
-            completion_signaled = resolvedGoalCompletionSignaled,
-            closure_ready_for_acceptance = resolvedGoalClosureReady,
-            unified_lifecycle_phase = result.unified_lifecycle_phase ?: resultUnifiedLifecyclePhase,
-            unified_lifecycle_schema_version = result.unified_lifecycle_schema_version
-                ?: AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
-            execution_spine_participation_kind = resolvedSpineParticipation,
-            problem_solving_closure_class = resolvedProblemClosureClass,
-            // ── PR-05v2 (Android): 结果上行闭环边界字段（在单一发送层强制填充）────────────────────────
-            // 从已预计算的 resultUplinkBoundary 直接读取，使 V2 可无歧义地将 goal_execution_result
-            // 路由至 truth closure 链、acceptance adjudication 或诊断存储，无需字段组合推断。
-            result_signal_class = resultUplinkBoundary.resultSignalClass.wireValue,
-            acceptance_candidate_class = resultUplinkBoundary.acceptanceCandidateClass.wireValue,
-            result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
-            uplink_semantic_boundary_class =
-                resultSemanticBoundary.uplinkSemanticBoundaryClass.wireValue,
-            operator_projection_class = resultSemanticBoundary.operatorProjectionClass.wireValue,
-            diagnostics_failure_explanation_schema_version =
-                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
-            authority_runtime_completion_signal_class = resultCompletionClosureBoundary
-                .authorityRuntimeCompletionSignalClass.wireValue,
-            result_completion_signal_class = resultCompletionClosureBoundary
-                .resultCompletionSignalClass.wireValue,
-            closure_finalization_signal_class = resultCompletionClosureBoundary
-                .closureFinalizationSignalClass.wireValue,
-            operator_done_projection_class = resultCompletionClosureBoundary
-                .operatorDoneProjectionClass.wireValue,
-            completion_closure_uplink_schema_version =
-                AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
-            schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
-            completion_closure_contract_version =
-                AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
-            local_execution_completed = resultV2CanonicalBoundary.localExecutionCompleted,
-            advisory_evidence_sent = resultV2CanonicalBoundary.advisoryEvidenceSent,
-            v2_uplink_acknowledged = resultV2CanonicalBoundary.v2UplinkAcknowledged,
-            v2_reconciliation_acknowledged = resultV2CanonicalBoundary.v2ReconciliationAcknowledged,
-            v2_canonical_truth_completed = resultV2CanonicalBoundary.v2CanonicalTruthCompleted,
-            v2_mature_closure_achieved = resultV2CanonicalBoundary.v2MatureClosureAchieved,
-            outward_truth_surface_class = resultV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
-            is_v2_confirmed_canonical_truth =
-                resultV2CanonicalBoundary.outwardTruthSurfaceClass ==
-                    AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
-                        .V2_CONFIRMED_CANONICAL_TRUTH,
-            participation_boundary_role = resultParticipationBoundary.participationBoundaryRole.wireValue,
-            ownership_posture_class = resultParticipationBoundary.ownershipPostureClass.wireValue,
-            remote_local_mode_class = resultParticipationBoundary.remoteLocalModeClass.wireValue,
-            participation_boundary_schema_version =
-                AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION,
-            authority_signal_class = resultTruthOwnershipBoundary.authoritySignalClass.wireValue,
-            ownership_uplink_class = resultTruthOwnershipBoundary.ownershipUplinkClass.wireValue,
-            session_continuity_class = resultTruthOwnershipBoundary.sessionContinuityClass.wireValue,
-            device_posture_signal_class =
-                resultTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
-            distributed_truth_ownership_uplink_schema_version =
-                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION,
-            durable_session_id = result.durable_session_id ?: resultDurableRecord?.durableSessionId,
-            session_continuity_epoch =
-                result.session_continuity_epoch ?: resultDurableRecord?.sessionContinuityEpoch,
-            // ── PR-116: unified continuity recovery state (always populated at emission layer) ──
-            // Derives the unified recovery phase from authoritative runtime sources so V2 can
-            // consume Android-side recovery state without combining fields across carriers.
-            continuity_recovery_state = resultRecoveryPhase,
-            continuity_recovery_source = resultRecoverySource,
-            continuity_recovery_schema_version = AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
-            recovery_state_v2_routing_category = resultRecoveryRoutingWireMap.getValue(
-                AndroidCrossRepoRecoveryStateRoutingContract.KEY_V2_ROUTING_CATEGORY
-            ),
-            recovery_state_routing_requires_v2_action =
-                resultRecoveryRoutingWireMap.getValue(
-                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_REQUIRES_V2_ACTION
+        if (convergenceDecision is FlowAwareResultConvergenceDecision.SuppressDuplicateResultEmit) {
+            val suppressedTruth = AndroidRuntimeEmissionTruthSemantics.derive(
+                recoveryPhase = resultRecoveryPhaseModel,
+                isContinuation = result.is_continuation == true,
+                interruptionReason = result.interruption_reason,
+                isTerminal = !isHoldStatus,
+                deliveryDisposition = AndroidRuntimeEmissionTruthSemantics
+                    .DeliveryDisposition
+                    .DUPLICATE_SUPPRESSED,
+                resultConvergenceDecision = convergenceDecision.semanticTag
+            )
+            delegatedRuntimeAcceptanceEvaluator.markDimensionGap(
+                DelegatedRuntimeAcceptanceDimension.RESULT_CONVERGENCE_EVIDENCE,
+                "duplicate_terminal_result_suppressed"
+            )
+            sendDeviceAcceptanceReport()
+            crossRepoRegressionHooks.recordGoalResultFeedback(
+                taskId = result.task_id,
+                traceId = traceId,
+                runtimeSessionId = runtimeSession,
+                status = ScenarioOutcomeStatus.PASSED,
+                reason = "goal_execution_result_duplicate_suppressed"
+            )
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "goal_result_delivery_disposition",
+                    "task_id" to result.task_id,
+                    "trace_id" to (traceId ?: ""),
+                    "delivery_disposition" to ResultDeliveryDisposition.DUPLICATE_SUPPRESSED.name.lowercase(),
+                    "result_key" to stableResultKey,
+                    AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS to
+                        suppressedTruth.executionContinuityClass.wireValue,
+                    AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS to
+                        suppressedTruth.terminalEmissionClass.wireValue
+                )
+            )
+            emitCrossRepoRegressionSnapshot("cross_repo_goal_result_return")
+            return ResultDeliveryDisposition.DUPLICATE_SUPPRESSED
+        }
+
+        val convergenceDecisionTag = convergenceDecision.semanticTag
+
+        fun buildEnrichedPayload(
+            deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+        ): GoalResultPayload {
+            val emissionTruth = AndroidRuntimeEmissionTruthSemantics.derive(
+                recoveryPhase = resultRecoveryPhaseModel,
+                isContinuation = result.is_continuation == true,
+                interruptionReason = result.interruption_reason,
+                isTerminal = !isHoldStatus,
+                deliveryDisposition = deliveryDisposition,
+                resultConvergenceDecision = convergenceDecisionTag
+            )
+            return result.copy(
+                normalized_status = canonicalResultKind(result.status),
+                runtime_session_id = runtimeSession,
+                result_summary = result.result_summary ?: result.result,
+                participation_tier = resolvedParticipationTier,
+                execution_mode_state = resolvedModeState,
+                cross_device_eligibility = resolvedCrossDeviceElig,
+                local_mode_gate_deferred = resolvedIsHoldState,
+                local_inference_available = resolvedLocalInference,
+                dispatch_eligible = result.dispatch_eligible
+                    ?: (resolvedParticipationTier ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISPATCH_ELIGIBLE.wireValue ||
+                        resolvedParticipationTier ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT.wireValue),
+                distributed_participant = result.distributed_participant
+                    ?: (resolvedParticipationTier ==
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.DISTRIBUTED_PARTICIPANT.wireValue),
+                session_attached = result.session_attached
+                    ?: (resolvedParticipationTier !=
+                        AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue),
+                local_mode_active = result.local_mode_active
+                    ?: (resolvedModeState ==
+                        LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY.wireValue),
+                runtime_constrained = result.runtime_constrained
+                    ?: (constraintSem.isConstraint || resultLineageConstrained),
+                runtime_deferred = result.runtime_deferred ?: constraintSem.isDeferred,
+                governance_state = result.governance_state ?: governanceTruth.governance_state,
+                governance_blocked = result.governance_blocked ?: governanceTruth.governance_blocked,
+                delegated_execution_active = result.delegated_execution_active
+                    ?: governanceTruth.delegated_execution_active,
+                takeover_state = result.takeover_state ?: governanceTruth.takeover_state,
+                local_llm_ready = localLlmReady,
+                accessibility_ready = accessibilityReady,
+                local_mode_capable = result.local_mode_capable ?: localCapState.isLocalModeCapable,
+                ingress_boundary_class = result.ingress_boundary_class ?: resultIngress.boundaryClass.wireValue,
+                ingress_consumption_kind = result.ingress_consumption_kind ?: resultIngress.consumptionKind.wireValue,
+                ingress_signal_class = result.ingress_signal_class ?: resultIngress.signalClass.wireValue,
+                ingress_schema_version = result.ingress_schema_version ?: resultIngress.schemaVersion,
+                result_returned = resolvedGoalResultReturned,
+                completion_signaled = resolvedGoalCompletionSignaled,
+                closure_ready_for_acceptance = resolvedGoalClosureReady,
+                unified_lifecycle_phase = result.unified_lifecycle_phase ?: resultUnifiedLifecyclePhase,
+                unified_lifecycle_schema_version = result.unified_lifecycle_schema_version
+                    ?: AndroidUnifiedParticipantLifecyclePhase.SCHEMA_VERSION,
+                execution_spine_participation_kind = resolvedSpineParticipation,
+                problem_solving_closure_class = resolvedProblemClosureClass,
+                result_signal_class = resultUplinkBoundary.resultSignalClass.wireValue,
+                acceptance_candidate_class = resultUplinkBoundary.acceptanceCandidateClass.wireValue,
+                result_uplink_boundary_schema_version = AndroidResultUplinkBoundaryContract.SCHEMA_VERSION,
+                uplink_semantic_boundary_class =
+                    resultSemanticBoundary.uplinkSemanticBoundaryClass.wireValue,
+                operator_projection_class = resultSemanticBoundary.operatorProjectionClass.wireValue,
+                diagnostics_failure_explanation_schema_version =
+                    AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
+                authority_runtime_completion_signal_class = resultCompletionClosureBoundary
+                    .authorityRuntimeCompletionSignalClass.wireValue,
+                result_completion_signal_class = resultCompletionClosureBoundary
+                    .resultCompletionSignalClass.wireValue,
+                closure_finalization_signal_class = resultCompletionClosureBoundary
+                    .closureFinalizationSignalClass.wireValue,
+                operator_done_projection_class = resultCompletionClosureBoundary
+                    .operatorDoneProjectionClass.wireValue,
+                completion_closure_uplink_schema_version =
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+                completion_closure_contract_version =
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                local_execution_completed = resultV2CanonicalBoundary.localExecutionCompleted,
+                advisory_evidence_sent = resultV2CanonicalBoundary.advisoryEvidenceSent,
+                v2_uplink_acknowledged = resultV2CanonicalBoundary.v2UplinkAcknowledged,
+                v2_reconciliation_acknowledged = resultV2CanonicalBoundary.v2ReconciliationAcknowledged,
+                v2_canonical_truth_completed = resultV2CanonicalBoundary.v2CanonicalTruthCompleted,
+                v2_mature_closure_achieved = resultV2CanonicalBoundary.v2MatureClosureAchieved,
+                outward_truth_surface_class = resultV2CanonicalBoundary.outwardTruthSurfaceClass.wireValue,
+                is_v2_confirmed_canonical_truth =
+                    resultV2CanonicalBoundary.outwardTruthSurfaceClass ==
+                        AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                            .V2_CONFIRMED_CANONICAL_TRUTH,
+                participation_boundary_role = resultParticipationBoundary.participationBoundaryRole.wireValue,
+                ownership_posture_class = resultParticipationBoundary.ownershipPostureClass.wireValue,
+                remote_local_mode_class = resultParticipationBoundary.remoteLocalModeClass.wireValue,
+                participation_boundary_schema_version =
+                    AndroidDistributedRuntimeParticipationBoundaryContract.SCHEMA_VERSION,
+                authority_signal_class = resultTruthOwnershipBoundary.authoritySignalClass.wireValue,
+                ownership_uplink_class = resultTruthOwnershipBoundary.ownershipUplinkClass.wireValue,
+                session_continuity_class = resultTruthOwnershipBoundary.sessionContinuityClass.wireValue,
+                device_posture_signal_class =
+                    resultTruthOwnershipBoundary.devicePostureSignalClass.wireValue,
+                distributed_truth_ownership_uplink_schema_version =
+                    AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION,
+                durable_session_id = result.durable_session_id ?: resultDurableRecord?.durableSessionId,
+                session_continuity_epoch =
+                    result.session_continuity_epoch ?: resultDurableRecord?.sessionContinuityEpoch,
+                continuity_recovery_state = resultRecoveryPhase,
+                continuity_recovery_source = resultRecoverySource,
+                continuity_recovery_schema_version = AndroidContinuityRecoveryStateModel.SCHEMA_VERSION,
+                execution_continuity_class = emissionTruth.executionContinuityClass.wireValue,
+                terminal_emission_class = emissionTruth.terminalEmissionClass.wireValue,
+                terminal_delivery_disposition = emissionTruth.deliveryDisposition.wireValue,
+                result_convergence_decision = emissionTruth.resultConvergenceDecision,
+                runtime_emission_truth_schema_version = AndroidRuntimeEmissionTruthSemantics.SCHEMA_VERSION,
+                recovery_state_v2_routing_category = resultRecoveryRoutingWireMap.getValue(
+                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_V2_ROUTING_CATEGORY
                 ),
-            recovery_state_routing_is_advisory_only =
-                resultRecoveryRoutingWireMap.getValue(
-                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_IS_ADVISORY_ONLY
+                recovery_state_routing_requires_v2_action =
+                    resultRecoveryRoutingWireMap.getValue(
+                        AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_REQUIRES_V2_ACTION
+                    ),
+                recovery_state_routing_is_advisory_only =
+                    resultRecoveryRoutingWireMap.getValue(
+                        AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_IS_ADVISORY_ONLY
+                    ),
+                recovery_state_routing_canonical_closure_blocked =
+                    resultRecoveryRoutingWireMap.getValue(
+                        AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED
+                    ),
+                recovery_state_routing_schema_version = resultRecoveryRoutingWireMap.getValue(
+                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
                 ),
-            recovery_state_routing_canonical_closure_blocked =
-                resultRecoveryRoutingWireMap.getValue(
-                    AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED
-                ),
-            recovery_state_routing_schema_version = resultRecoveryRoutingWireMap.getValue(
-                AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
-            ),
-            uplink_lineage_schema_version = result.uplink_lineage_schema_version
-                ?: AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
-            uplink_lineage_execution_id = result.uplink_lineage_execution_id
-                ?: resultLineage.executionIdentity,
-            uplink_lineage_emission_id = result.uplink_lineage_emission_id
-                ?: resultLineage.emissionIdentity,
-            completion_emission_id = result.completion_emission_id
-                ?: result.uplink_lineage_emission_id
-                ?: resultLineage.emissionIdentity,
-            uplink_lineage_dedupe_key = result.uplink_lineage_dedupe_key
-                ?: resultLineage.dedupeKey,
-            uplink_lineage_recovery_basis = result.uplink_lineage_recovery_basis
-                ?: resultLineage.recoveryBasis,
-            idempotency_key = result.idempotency_key
+                uplink_lineage_schema_version = result.uplink_lineage_schema_version
+                    ?: AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
+                uplink_lineage_execution_id = result.uplink_lineage_execution_id
+                    ?: resultLineage.executionIdentity,
+                uplink_lineage_emission_id = result.uplink_lineage_emission_id
+                    ?: resultLineage.emissionIdentity,
+                completion_emission_id = result.completion_emission_id
+                    ?: result.uplink_lineage_emission_id
+                    ?: resultLineage.emissionIdentity,
+                uplink_lineage_dedupe_key = result.uplink_lineage_dedupe_key
+                    ?: resultLineage.dedupeKey,
+                uplink_lineage_recovery_basis = result.uplink_lineage_recovery_basis
+                    ?: resultLineage.recoveryBasis,
+                idempotency_key = goalResultIdempotencyKey
+            )
+        }
+
+        fun buildEnvelope(payload: GoalResultPayload) =
+            AipMessage(
+                type = MsgType.GOAL_EXECUTION_RESULT,
+                payload = payload,
+                correlation_id = payload.correlation_id ?: payload.task_id,
+                device_id = payload.device_id.ifEmpty { localDeviceId },
+                trace_id = traceId,
+                route_mode = routeMode,
+                runtime_session_id = runtimeSession,
+                idempotency_key = payload.idempotency_key,
+                dispatch_trace_id = payload.dispatch_trace_id,
+                source_runtime_posture = payload.source_runtime_posture
+            )
+
+        val directPayload = buildEnrichedPayload(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT
         )
-        val goalResultIdempotencyKey = enriched.idempotency_key
-            ?: buildIdempotencyKey(enriched.task_id, MsgType.GOAL_EXECUTION_RESULT, traceId)
-        val envelopeReadyPayload = enriched.copy(idempotency_key = goalResultIdempotencyKey)
-        val envelope = AipMessage(
-            type = MsgType.GOAL_EXECUTION_RESULT,
-            payload = envelopeReadyPayload,
-            correlation_id = envelopeReadyPayload.correlation_id ?: envelopeReadyPayload.task_id,
-            device_id = envelopeReadyPayload.device_id.ifEmpty { localDeviceId },
-            trace_id = traceId,
-            route_mode = routeMode,
-            runtime_session_id = runtimeSession,
-            idempotency_key = goalResultIdempotencyKey,
-            // Propagate trace/posture fields from the result payload into the envelope so
-            // V2 observability and posture routing see consistent values at both layers.
-            dispatch_trace_id = envelopeReadyPayload.dispatch_trace_id,
-            source_runtime_posture = envelopeReadyPayload.source_runtime_posture
-        )
-        val envelopeJson = gson.toJson(envelope)
         val connectedAtSendAttempt = webSocketClient.isConnected()
-        val sent = webSocketClient.sendJson(envelopeJson)
-        val deliveryDisposition = when {
-            sent -> ResultDeliveryDisposition.DIRECT_SENT
-            else -> {
-                val durableSessionTag = UFOGalaxyApplication.runtimeController
-                    .durableSessionContinuityRecord.value
-                    ?.durableSessionId
+        val sent = webSocketClient.sendJson(gson.toJson(buildEnvelope(directPayload)))
+        val durableSessionTag = UFOGalaxyApplication.runtimeController
+            .durableSessionContinuityRecord.value
+            ?.durableSessionId
+
+        val (envelopeReadyPayload, deliveryDisposition) = if (sent) {
+            directPayload to ResultDeliveryDisposition.DIRECT_SENT
+        } else {
+                val queuedPayload = buildEnrichedPayload(
+                    AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+                )
+                val queueEnvelope = buildEnvelope(queuedPayload)
                 val queueResult = runCatching {
                     webSocketClient.offlineQueue.enqueue(
                         type = MsgType.GOAL_EXECUTION_RESULT.value,
-                        json = envelopeJson,
+                        json = gson.toJson(queueEnvelope),
                         sessionTag = durableSessionTag,
-                        sessionEpoch = envelopeReadyPayload.session_continuity_epoch,
-                        dedupeKey =
-                            envelopeReadyPayload.uplink_lineage_dedupe_key ?: envelope.idempotency_key
+                        sessionEpoch = queuedPayload.session_continuity_epoch,
+                        dedupeKey = queuedPayload.uplink_lineage_dedupe_key ?: queueEnvelope.idempotency_key
                     )
                 }
-                val queueSucceeded = queueResult.isSuccess
-                if (queueSucceeded) {
-                    ResultDeliveryDisposition.OFFLINE_QUEUED
+                if (queueResult.isSuccess) {
+                    queuedPayload to ResultDeliveryDisposition.OFFLINE_QUEUED
                 } else {
+                    val failedPayload = buildEnrichedPayload(
+                        AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+                    )
                     Log.e(
                         TAG,
-                        "goal_execution_result enqueue failed task_id=${envelopeReadyPayload.task_id} " +
+                        "goal_execution_result enqueue failed task_id=${failedPayload.task_id} " +
                             "trace_id=${traceId ?: ""} error=${queueResult.exceptionOrNull()?.message}",
                         queueResult.exceptionOrNull()
                     )
-                    ResultDeliveryDisposition.SEND_FAILED
+                    failedPayload to ResultDeliveryDisposition.SEND_FAILED
                 }
-            }
+        }
+
+        if (shouldMarkResultFlowFinal(deliveryDisposition, convergenceDecision)) {
+            resultConvergenceParticipant.markFlowFinal(scopedResultFlowId, stableResultKey)
+        }
+        if (deliveryDisposition != ResultDeliveryDisposition.SEND_FAILED) {
+            resultConvergenceParticipant.markResultEmitted(stableResultKey)
         }
         updateAcceptanceEvidenceFromResult(
             result = envelopeReadyPayload,
@@ -3457,6 +3552,7 @@ class GalaxyConnectionService : Service() {
                 ResultDeliveryDisposition.DIRECT_SENT -> null
                 ResultDeliveryDisposition.OFFLINE_QUEUED -> "goal_execution_result_offline_queued"
                 ResultDeliveryDisposition.SEND_FAILED -> "goal_execution_result_send_failed"
+                ResultDeliveryDisposition.DUPLICATE_SUPPRESSED -> "goal_execution_result_duplicate_suppressed"
             }
         )
         GalaxyLogger.log(
@@ -3492,6 +3588,37 @@ class GalaxyConnectionService : Service() {
             "disabled" -> "disabled"
             else -> "failure"
         }
+
+    private fun buildScopedResultFlowId(
+        taskId: String,
+        durableSessionId: String?,
+        sessionContinuityEpoch: Int?
+    ): String = listOf(
+        "goal_result_flow",
+        taskId,
+        durableSessionId ?: "no_durable_session",
+        sessionContinuityEpoch?.toString() ?: "no_session_epoch"
+    ).joinToString(":")
+
+    private fun classifyGoalResultFlowResultKind(
+        normalizedLifecycleStatus: String,
+        isHoldStatus: Boolean
+    ): AndroidFlowAwareResultConvergenceParticipant.FlowResultKind = when {
+        isHoldStatus -> AndroidFlowAwareResultConvergenceParticipant.FlowResultKind.PARTIAL
+        normalizedLifecycleStatus == EdgeExecutor.STATUS_CANCELLED ->
+            AndroidFlowAwareResultConvergenceParticipant.FlowResultKind.CANCEL_TERMINAL
+        normalizedLifecycleStatus == EdgeExecutor.STATUS_SUCCESS ->
+            AndroidFlowAwareResultConvergenceParticipant.FlowResultKind.FINAL
+        else ->
+            AndroidFlowAwareResultConvergenceParticipant.FlowResultKind.FAILURE_TERMINAL
+    }
+
+    private fun shouldMarkResultFlowFinal(
+        deliveryDisposition: ResultDeliveryDisposition,
+        convergenceDecision: FlowAwareResultConvergenceDecision
+    ): Boolean =
+        deliveryDisposition != ResultDeliveryDisposition.SEND_FAILED &&
+            convergenceDecision !is FlowAwareResultConvergenceDecision.EmitPartialForFlow
 
     /**
      * Sends an error [GoalResultPayload] as [MsgType.GOAL_EXECUTION_RESULT] when payload
