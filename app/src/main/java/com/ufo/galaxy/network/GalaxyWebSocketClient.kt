@@ -1141,7 +1141,8 @@ class GalaxyWebSocketClient(
         val isClosureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
             type == MsgType.DEVICE_EXECUTION_EVENT.value
         if (isClosureBearingType) {
-            // Strict Stage-1 rule: closure-grade identity comes only from explicit lineage keys.
+            // Stage-1 hardening rule for strict V2 canonical ingress:
+            // closure-grade identity comes only from explicit lineage keys.
             // task_id is necessary routing context but is not sufficient lineage identity.
             val lineageMetadata = AndroidUplinkLineageMetadataContract.derive(
                 executionIdentity = payload.stringOrNull(

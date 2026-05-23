@@ -44,6 +44,8 @@ object AndroidUplinkLineageMetadataContract {
         val safeSession = durableSessionId?.ifBlank { null } ?: "no_durable_session"
         val safeEpoch = sessionContinuityEpoch?.toString() ?: "no_epoch"
         val safeRecoveryBasis = recoveryBasis.ifBlank { "none" }
+        // Seed synthetic identities from session/epoch/recovery lineage so retries stay stable
+        // while still separating different recovery eras and continuity epochs.
         val identitySeed = sha256(
             listOf(safeSession, safeEpoch, safeRecoveryBasis).joinToString("|")
         )

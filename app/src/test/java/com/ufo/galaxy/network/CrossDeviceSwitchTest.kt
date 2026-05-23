@@ -4,7 +4,9 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
+import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import org.junit.Assert.*
 import org.junit.Test
@@ -173,9 +175,20 @@ class CrossDeviceSwitchTest {
             .asJsonObject
             .getAsJsonObject("payload")
 
-        assertEquals("acceptance_closure_signal", payload.get("result_signal_class").asString)
-        assertEquals("acceptance_blocked", payload.get("acceptance_candidate_class").asString)
-        assertEquals("session_finalization_blocked", payload.get("closure_finalization_signal_class").asString)
+        assertEquals(
+            AndroidResultUplinkBoundaryContract.ResultSignalClass.ACCEPTANCE_CLOSURE_SIGNAL.wireValue,
+            payload.get(AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS).asString
+        )
+        assertEquals(
+            AndroidResultUplinkBoundaryContract.AcceptanceCandidateClass.ACCEPTANCE_BLOCKED.wireValue,
+            payload.get(AndroidResultUplinkBoundaryContract.KEY_ACCEPTANCE_CANDIDATE_CLASS).asString
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract
+                .ClosureFinalizationSignalClass.SESSION_FINALIZATION_BLOCKED.wireValue,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS)
+                .asString
+        )
         assertFalse(payload.get("closure_ready_for_acceptance").asBoolean)
     }
 
