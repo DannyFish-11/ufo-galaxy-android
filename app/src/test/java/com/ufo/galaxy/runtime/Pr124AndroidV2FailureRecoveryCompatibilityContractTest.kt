@@ -615,13 +615,13 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
             controller.recordDelegatedTaskAccepted("task-interrupt-124")
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = kotlinx.coroutines.launch {
+            val job = launch {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 
             // Simulate WS disconnect (triggers closeAttachedSession → TASK_FAILED)
             client.simulateDisconnected()
-            kotlinx.coroutines.delay(300)
+            delay(300)
             job.cancel()
 
             val taskFailedSignal = signals.firstOrNull {
@@ -643,12 +643,12 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
             controller.recordDelegatedTaskAccepted("task-schema-124")
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = kotlinx.coroutines.launch {
+            val job = launch {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 
             client.simulateDisconnected()
-            kotlinx.coroutines.delay(300)
+            delay(300)
             job.cancel()
 
             val taskFailedSignal = signals.firstOrNull {
