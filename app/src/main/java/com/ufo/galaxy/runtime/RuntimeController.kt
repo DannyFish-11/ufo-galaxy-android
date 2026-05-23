@@ -2560,6 +2560,10 @@ class RuntimeController(
         progressDetail: String? = null
     ) {
         val activeStatus = _activeTaskStatus
+        // Tighten Stage 10 truthfulness: TASK_STATUS_UPDATE currently uses the coarse wire status
+        // STATUS_IN_PROGRESS plus continuation-active payload semantics. Emitting that while the
+        // task is queued (PENDING), cancelling, failing, or for a different task would overstate
+        // Android's real execution posture to V2's stricter scheduling/orchestration path.
         if (_activeTaskId != taskId || activeStatus != ActiveTaskStatus.RUNNING) {
             Log.w(
                 TAG,
@@ -2604,7 +2608,8 @@ class RuntimeController(
                         AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.NON_TERMINAL,
                     temporalWorkflowRunId = temporalRunId
                 )
-            ).withDispatchPlanId(planId)
+            )
+                .withDispatchPlanId(planId)
                 .withTemporalWorkflowRunId(temporalRunId)
         )
     }
