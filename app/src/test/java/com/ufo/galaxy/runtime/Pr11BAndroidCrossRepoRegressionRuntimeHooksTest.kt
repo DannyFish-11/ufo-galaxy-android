@@ -119,7 +119,12 @@ class Pr11BAndroidCrossRepoRegressionRuntimeHooksTest {
 
         assertEquals("1.0", wire["schema_version"])
         assertTrue(wire.containsKey("flow_outcomes"))
+        assertTrue(wire.containsKey("key_behavior_evidence_status"))
         assertTrue(wire.containsKey("dual_repo_e2e"))
+        @Suppress("UNCHECKED_CAST")
+        val keyBehaviorStatus = wire["key_behavior_evidence_status"] as Map<String, String>
+        assertEquals("partially_run", keyBehaviorStatus["replay_ordering"])
+        assertEquals("not_run", keyBehaviorStatus["reconnect_continuity"])
     }
 
     @Test

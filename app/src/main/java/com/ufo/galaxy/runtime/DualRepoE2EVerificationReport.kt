@@ -51,6 +51,33 @@ data class DualRepoE2EVerificationHookRecord(
 )
 
 /**
+ * Machine-readable evidence state vocabulary for cross-repo protected verification reporting.
+ */
+enum class IntegrationEvidenceState(val wireValue: String) {
+    NOT_RUN("not_run"),
+    PARTIALLY_RUN("partially_run"),
+    FAILED("failed"),
+    EVIDENCED("evidenced")
+}
+
+/**
+ * Key behavior evidence status exposed for replay/reconnect/recovery/closure visibility.
+ */
+data class KeyBehaviorEvidenceStatus(
+    val replayOrdering: IntegrationEvidenceState,
+    val reconnectContinuity: IntegrationEvidenceState,
+    val recoveryBehavior: IntegrationEvidenceState,
+    val closureCompleteness: IntegrationEvidenceState
+) {
+    fun toWireMap(): Map<String, String> = mapOf(
+        "replay_ordering" to replayOrdering.wireValue,
+        "reconnect_continuity" to reconnectContinuity.wireValue,
+        "recovery_behavior" to recoveryBehavior.wireValue,
+        "closure_completeness" to closureCompleteness.wireValue
+    )
+}
+
+/**
  * Canonical verification steps for Android local AI consumer flow uplinked to V2.
  */
 enum class LocalAiCanonicalVerificationStep(val wireValue: String, val isRequired: Boolean) {
@@ -278,6 +305,22 @@ data class DualRepoE2EVerificationReport(
         }
 
     /**
+     * Machine-readable status projection for key cross-repo behaviors.
+     *
+     * This projection intentionally reports bounded evidence states rather than optimistic
+     * promotion. When a behavior was not exercised in this run, it remains `not_run`.
+     */
+    val keyBehaviorEvidenceStatus: KeyBehaviorEvidenceStatus
+        get() = KeyBehaviorEvidenceStatus(
+            replayOrdering = deriveReplayOrderingEvidenceState(),
+            reconnectContinuity = deriveSingleStageEvidenceState(
+                stageOutcomes[DualRepoE2EVerificationStage.RECONNECT_RECOVERY]?.outcomeStatus
+            ),
+            recoveryBehavior = deriveRecoveryBehaviorEvidenceState(),
+            closureCompleteness = deriveClosureCompletenessEvidenceState()
+        )
+
+    /**
      * Produces a stable, V2-consumable key-value map for cross-repo serialization.
      *
      * The map uses snake_case keys and is safe for JSON serialization.  The schema is
@@ -378,6 +421,7 @@ data class DualRepoE2EVerificationReport(
             "is_identity_correlated" to isIdentityCorrelated,
             "is_participation_ready_evidence" to isParticipationReadyEvidence,
             "is_runtime_closed_evidence" to isRuntimeClosedEvidence,
+            "key_behavior_evidence_status" to keyBehaviorEvidenceStatus.toWireMap(),
             "is_local_ai_canonical_chain_verified" to isLocalAiCanonicalChainVerified,
             "has_governance_signal" to hasGovernanceSignal,
             "correlated_trace_id" to correlatedTraceId,
@@ -404,6 +448,69 @@ data class DualRepoE2EVerificationReport(
             "bridge_artifact_tag" to bridgeReport.overallVerificationArtifact.artifactTag,
             "bridge_is_real_device_verified" to bridgeReport.isRealDeviceVerified
         )
+    }
+
+    private fun deriveReplayOrderingEvidenceState(): IntegrationEvidenceState {
+        val orderedReplayStages = listOf(
+            DualRepoE2EVerificationStage.DEVICE_REGISTER,
+            DualRepoE2EVerificationStage.CAPABILITY_REPORT,
+            DualRepoE2EVerificationStage.TASK_ASSIGNMENT_RECEPTION,
+            DualRepoE2EVerificationStage.DELEGATED_EXECUTION_AVAILABLE,
+            DualRepoE2EVerificationStage.TASK_RESULT_RETURN
+        )
+        val statuses = orderedReplayStages.map { stageOutcomes[it]?.outcomeStatus }
+        return deriveEvidenceStateFromStatuses(statuses)
+    }
+
+    private fun deriveRecoveryBehaviorEvidenceState(): IntegrationEvidenceState {
+        val statuses = listOf(
+            stageOutcomes[DualRepoE2EVerificationStage.RECONNECT_RECOVERY]?.outcomeStatus,
+            stageOutcomes[DualRepoE2EVerificationStage.DEGRADED_OUTCOME_RECORDING]?.outcomeStatus
+        )
+        return deriveEvidenceStateFromStatuses(statuses)
+    }
+
+    private fun deriveClosureCompletenessEvidenceState(): IntegrationEvidenceState {
+        val taskResultStatus = stageOutcomes[DualRepoE2EVerificationStage.TASK_RESULT_RETURN]?.outcomeStatus
+        val resultFeedbackStatus =
+            verificationHooks[DualRepoE2EVerificationHookKind.RESULT_FEEDBACK]?.outcomeStatus
+        val statuses = listOf(taskResultStatus, resultFeedbackStatus)
+        if (statuses.all { it == null }) return IntegrationEvidenceState.NOT_RUN
+        if (
+            taskResultStatus == ScenarioOutcomeStatus.PASSED &&
+            resultFeedbackStatus == ScenarioOutcomeStatus.PASSED &&
+            isRuntimeClosedEvidence
+        ) {
+            return IntegrationEvidenceState.EVIDENCED
+        }
+        if (statuses.any { it == ScenarioOutcomeStatus.FAILED || it == ScenarioOutcomeStatus.TIMED_OUT }) {
+            return IntegrationEvidenceState.FAILED
+        }
+        return IntegrationEvidenceState.PARTIALLY_RUN
+    }
+
+    private fun deriveSingleStageEvidenceState(status: ScenarioOutcomeStatus?): IntegrationEvidenceState =
+        when (status) {
+            null -> IntegrationEvidenceState.NOT_RUN
+            ScenarioOutcomeStatus.PASSED -> IntegrationEvidenceState.EVIDENCED
+            ScenarioOutcomeStatus.FAILED, ScenarioOutcomeStatus.TIMED_OUT -> IntegrationEvidenceState.FAILED
+            ScenarioOutcomeStatus.SKIPPED -> IntegrationEvidenceState.PARTIALLY_RUN
+        }
+
+    private fun deriveEvidenceStateFromStatuses(
+        statuses: List<ScenarioOutcomeStatus?>
+    ): IntegrationEvidenceState {
+        if (statuses.all { it == null }) return IntegrationEvidenceState.NOT_RUN
+        if (statuses.any { it == ScenarioOutcomeStatus.FAILED || it == ScenarioOutcomeStatus.TIMED_OUT }) {
+            return IntegrationEvidenceState.FAILED
+        }
+        val recordedStatuses = statuses.filterNotNull()
+        val hasMissingStatuses = statuses.any { it == null }
+        val allPassed = recordedStatuses.isNotEmpty() && recordedStatuses.all { it == ScenarioOutcomeStatus.PASSED }
+        return when {
+            allPassed && !hasMissingStatuses -> IntegrationEvidenceState.EVIDENCED
+            else -> IntegrationEvidenceState.PARTIALLY_RUN
+        }
     }
 
     companion object {

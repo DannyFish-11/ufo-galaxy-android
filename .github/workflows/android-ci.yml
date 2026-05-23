@@ -358,6 +358,110 @@ jobs:
           name: lint-results
           path: app/build/reports/lint-results-debug.html
 
+  # ── Cross-Repo Evidence Status Artifact (always-on visibility) ─────────────
+  #
+  # Always emits a machine-readable artifact describing protected verification
+  # execution state and key behavior evidence visibility. This prevents silent
+  # green states when critical evidence paths were not run.
+  cross-repo-evidence-status:
+    name: "Cross-Repo Evidence Status [visibility]"
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - protocol-contract-guard
+      - runtime-regression
+      - cross-repo-compatibility-guard
+      - e2e-verification-gate
+      - all-unit-tests
+      - lint
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate cross-repo evidence status artifact
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          PROTOCOL_RESULT: ${{ needs.protocol-contract-guard.result }}
+          RUNTIME_RESULT: ${{ needs.runtime-regression.result }}
+          COMPAT_RESULT: ${{ needs.cross-repo-compatibility-guard.result }}
+          E2E_RESULT: ${{ needs.e2e-verification-gate.result }}
+          UNIT_RESULT: ${{ needs.all-unit-tests.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+        run: |
+          mkdir -p app/build/e2e-verification
+
+          protected_execution_state="evidenced"
+          if [[ "$BUILD_RESULT" != "success" ]]; then
+            protected_execution_state="not_run"
+          elif [[ "$PROTOCOL_RESULT" != "success" || "$RUNTIME_RESULT" != "success" || "$COMPAT_RESULT" != "success" || "$E2E_RESULT" != "success" || "$UNIT_RESULT" != "success" || "$LINT_RESULT" != "success" ]]; then
+            if [[ "$E2E_RESULT" == "skipped" || "$COMPAT_RESULT" == "skipped" || "$UNIT_RESULT" == "skipped" || "$LINT_RESULT" == "skipped" ]]; then
+              protected_execution_state="partially_run"
+            else
+              protected_execution_state="failed"
+            fi
+          fi
+
+          replay_ordering_state="not_run"
+          reconnect_continuity_state="not_run"
+          recovery_behavior_state="not_run"
+          closure_completeness_state="not_run"
+          real_device_e2e_state="not_run"
+          evidence_visibility_reason="e2e_gate_not_run"
+
+          if [[ "$E2E_RESULT" == "success" ]]; then
+            replay_ordering_state="partially_run"
+            reconnect_continuity_state="not_run"
+            recovery_behavior_state="not_run"
+            closure_completeness_state="partially_run"
+            real_device_e2e_state="not_run"
+            evidence_visibility_reason="ci_no_physical_device_harness_contracts_verified"
+          elif [[ "$E2E_RESULT" == "failure" || "$E2E_RESULT" == "cancelled" ]]; then
+            replay_ordering_state="failed"
+            reconnect_continuity_state="failed"
+            recovery_behavior_state="failed"
+            closure_completeness_state="failed"
+            real_device_e2e_state="failed"
+            evidence_visibility_reason="e2e_harness_gate_failed"
+          elif [[ "$E2E_RESULT" == "skipped" ]]; then
+            evidence_visibility_reason="e2e_harness_gate_skipped"
+          fi
+
+          cat > app/build/e2e-verification/cross-repo-evidence-status.json <<EOFSTATUS
+          {
+            "schema_version": "1.0",
+            "source": "android-ci",
+            "state_vocabulary": ["not_run", "partially_run", "failed", "evidenced"],
+            "protected_execution_state": "${protected_execution_state}",
+            "real_device_e2e_state": "${real_device_e2e_state}",
+            "key_behavior_evidence_status": {
+              "replay_ordering": "${replay_ordering_state}",
+              "reconnect_continuity": "${reconnect_continuity_state}",
+              "recovery_behavior": "${recovery_behavior_state}",
+              "closure_completeness": "${closure_completeness_state}"
+            },
+            "gate_results": {
+              "build": "${BUILD_RESULT}",
+              "protocol_contract_guard": "${PROTOCOL_RESULT}",
+              "runtime_regression": "${RUNTIME_RESULT}",
+              "cross_repo_compatibility_guard": "${COMPAT_RESULT}",
+              "e2e_verification_gate": "${E2E_RESULT}",
+              "all_unit_tests": "${UNIT_RESULT}",
+              "lint": "${LINT_RESULT}"
+            },
+            "evidence_visibility_reason": "${evidence_visibility_reason}",
+            "no_device_default_artifact_tag": "e2e_blocked_no_device"
+          }
+          EOFSTATUS
+
+      - name: Upload cross-repo evidence status artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-repo-evidence-status
+          path: app/build/e2e-verification/cross-repo-evidence-status.json
+
   # ── CI Gate (final blocking gate — all must be green) ────────────────────
   #
   # This job is the single merge-blocking status check.  Configure branch
@@ -367,7 +471,7 @@ jobs:
   ci-gate:
     name: "CI Gate (all blocking gates must pass)"
     runs-on: ubuntu-latest
-    needs: [all-unit-tests, lint, cross-repo-compatibility-guard]
+    needs: [all-unit-tests, lint, cross-repo-compatibility-guard, cross-repo-evidence-status]
     if: always()
 
     steps:
@@ -376,9 +480,11 @@ jobs:
           echo "Gate results:"
           echo "  all-unit-tests        : ${{ needs.all-unit-tests.result }}"
           echo "  cross-repo-compat     : ${{ needs.cross-repo-compatibility-guard.result }}"
+          echo "  cross-repo-evidence   : ${{ needs.cross-repo-evidence-status.result }}"
           echo "  lint                  : ${{ needs.lint.result }}"
           if [[ "${{ needs.all-unit-tests.result }}" != "success" || \
                 "${{ needs.cross-repo-compatibility-guard.result }}" != "success" || \
+                "${{ needs.cross-repo-evidence-status.result }}" != "success" || \
                 "${{ needs.lint.result }}" != "success" ]]; then
             echo "::error::One or more CI blocking gates failed. PR merge is blocked."
             exit 1
