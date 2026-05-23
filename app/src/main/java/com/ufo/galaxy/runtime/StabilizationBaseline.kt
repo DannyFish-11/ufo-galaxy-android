@@ -2823,6 +2823,39 @@ object StabilizationBaseline {
                 "KEY_FAILURE_IS_RETRY_ELIGIBLE, and KEY_FAILURE_RECOVERY_SCHEMA_VERSION payload key constants. " +
                 "Test: Pr124AndroidV2FailureRecoveryCompatibilityContractTest.",
             introducedPr = 124
+        ),
+        BaselineSurfaceEntry(
+            surfaceId = "android-v2-temporal-continuation-finality-contract",
+            displayName = "AndroidV2TemporalContinuationFinalityContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidV2TemporalContinuationFinalityContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-125 — Stage 9 Android V2 Temporal continuation finality hardening. " +
+                "Classifies Android-side continuation and finality signals into machine-actionable " +
+                "ContinuationFinalityClass values so V2's Temporal-backed execution path can " +
+                "determine whether it can safely close an associated Temporal workflow run without " +
+                "over-reading ambiguous completion output from Android. " +
+                "ContinuationFinalityClass (4 values: WORKFLOW_COMPLETE_FINAL/" +
+                "WORKFLOW_CONTINUATION_ACTIVE/WORKFLOW_INTERRUPTED_RESUME_PENDING/" +
+                "NOT_TEMPORAL_WORKFLOW_PATH) distinguishes genuinely final states from active " +
+                "continuations, interrupted-then-resume-pending states, and non-Temporal-path signals. " +
+                "classify() maps TerminalOutcomeKind + isTemporalWorkflowParticipant + isContinuation " +
+                "to the correct class. toWireMap() embeds temporal_continuation_finality_class, " +
+                "temporal_is_workflow_final, temporal_has_pending_resume, " +
+                "temporal_continuation_finality_schema_version, and temporal_workflow_run_id wire keys. " +
+                "V2_TEMPORAL_CONTINUATION_ALIGNMENT_MAP maps each class to the V2-side Temporal path. " +
+                "TEMPORAL_CONTINUATION_INVARIANTS (15 entries) provide machine-verifiable regression anchors. " +
+                "RuntimeController gains _activeTaskTemporalWorkflowRunId field, updated " +
+                "recordDelegatedTaskAccepted(temporalWorkflowRunId), and " +
+                "buildTemporalContinuationFinalityPayload() populating these keys in all task signals " +
+                "(TASK_ACCEPTED, TASK_RESULT, TASK_CANCELLED, TASK_FAILED). " +
+                "ReconciliationSignal gains temporalWorkflowRunId field, KEY_TEMPORAL_WORKFLOW_RUN_ID, " +
+                "KEY_TEMPORAL_CONTINUATION_FINALITY_CLASS, KEY_IS_TEMPORAL_WORKFLOW_FINAL, " +
+                "KEY_HAS_PENDING_TEMPORAL_RESUME, KEY_TEMPORAL_CONTINUATION_FINALITY_SCHEMA_VERSION, " +
+                "and withTemporalWorkflowRunId() helper. " +
+                "Test: Pr125AndroidV2TemporalContinuationFinalityContractTest.",
+            introducedPr = 125
         )
     )
 
