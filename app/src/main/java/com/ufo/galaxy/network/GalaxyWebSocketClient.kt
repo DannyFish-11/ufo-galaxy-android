@@ -19,6 +19,7 @@ import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
+import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
@@ -1153,8 +1154,16 @@ class GalaxyWebSocketClient(
                     payload.booleanOrNull("completion_signaled") == true ||
                     payload.booleanOrNull("lifecycle_terminal_phase") == true
             if (missingClosureLineage && terminalLikeSignal) {
-                payload.addProperty("result_signal_class", "acceptance_closure_signal")
-                payload.addProperty("acceptance_candidate_class", "acceptance_blocked")
+                payload.addProperty(
+                    AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS,
+                    AndroidResultUplinkBoundaryContract
+                        .ResultSignalClass.ACCEPTANCE_CLOSURE_SIGNAL.wireValue
+                )
+                payload.addProperty(
+                    AndroidResultUplinkBoundaryContract.KEY_ACCEPTANCE_CANDIDATE_CLASS,
+                    AndroidResultUplinkBoundaryContract
+                        .AcceptanceCandidateClass.ACCEPTANCE_BLOCKED.wireValue
+                )
                 payload.addProperty(
                     AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS,
                     AndroidCompletionClosureUplinkContract

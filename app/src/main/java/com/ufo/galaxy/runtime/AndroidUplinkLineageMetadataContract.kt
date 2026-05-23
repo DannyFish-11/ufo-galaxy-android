@@ -46,11 +46,11 @@ object AndroidUplinkLineageMetadataContract {
         val safeRecoveryBasis = recoveryBasis.ifBlank { "none" }
         val identitySeed = sha256(
             listOf(safeSession, safeEpoch, safeRecoveryBasis).joinToString("|")
-        ).take(16)
+        ).take(32)
         val safeExecutionIdentity = executionIdentity?.ifBlank { null }
             ?: "synthetic_execution_$identitySeed"
         val safeEmissionIdentity = emissionIdentity?.ifBlank { null }
-            ?: "synthetic_emission_${sha256("$safeExecutionIdentity|$safeRecoveryBasis").take(16)}"
+            ?: "synthetic_emission_${sha256("$safeExecutionIdentity|$safeRecoveryBasis").take(32)}"
         val lineageStrengthClass = when {
             !hasExecutionIdentity ->
                 LineageStrengthClass.DEGRADED_MISSING_EXECUTION_IDENTITY
