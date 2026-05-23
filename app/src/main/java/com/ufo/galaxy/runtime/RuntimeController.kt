@@ -3416,7 +3416,8 @@ class RuntimeController(
                     readinessState = readinessState,
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
-                    sessionContinuityEpoch = currentSessionContinuityEpoch()
+                    sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                    additionalPayload = currentSignalEmissionTruthPayload(isTerminal = false)
                 )
             )
         }

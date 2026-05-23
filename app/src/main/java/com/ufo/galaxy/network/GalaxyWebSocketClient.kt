@@ -1045,6 +1045,93 @@ class GalaxyWebSocketClient(
         return sent
     }
 
+    /**
+     * Sends or queues a queueable payload while allowing the caller to stamp truthful
+     * delivery semantics into the JSON before the final transport action is taken.
+     *
+     * This is used for payloads whose wire content must distinguish:
+     *  - locally emitted only
+     *  - sent to transport now
+     *  - queued for later replay
+     *
+     * The [buildJson] lambda is called with the final delivery disposition that will be
+     * represented on the wire. When the socket is connected but the immediate send fails,
+     * the message is rebuilt with [AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED]
+     * before being persisted for replay, so the queued JSON does not over-signal direct delivery.
+     */
+    fun sendQueueableJsonWithDeliveryTruth(
+        msgType: MsgType,
+        buildJson: (AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition) -> String
+    ): AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition {
+        require(msgType.value in OfflineTaskQueue.QUEUEABLE_TYPES) {
+            "sendQueueableJsonWithDeliveryTruth requires a queueable MsgType"
+        }
+        if (!crossDeviceEnabled) {
+            val traceId = java.util.UUID.randomUUID().toString()
+            Log.w(
+                TAG,
+                "[WS:BLOCKED] sendQueueableJsonWithDeliveryTruth rejected: cross_device=off " +
+                    "trace_id=$traceId type=${msgType.value} reason=cross_device_disabled"
+            )
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "send_blocked",
+                    "trace_id" to traceId,
+                    "type" to msgType.value,
+                    "reason" to "cross_device_disabled"
+                )
+            )
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+        }
+
+        fun canonicalJsonFor(
+            disposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+        ): String = canonicalizeCompletionIdentityPayload(buildJson(disposition), msgType.value)
+
+        fun ingressAllowed(canonicalJson: String): Boolean =
+            msgType != MsgType.RECONCILIATION_SIGNAL || hasCanonicalReconciliationIngress(canonicalJson)
+
+        if (!isConnected) {
+            val queuedJson = canonicalJsonFor(
+                AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+            )
+            if (!ingressAllowed(queuedJson)) {
+                return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+            }
+            enqueueForReliableReplay(
+                msgType = msgType.value,
+                json = queuedJson,
+                reason = "disconnected"
+            )
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+        }
+
+        val directJson = canonicalJsonFor(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT
+        )
+        if (!ingressAllowed(directJson)) {
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+        }
+        val sent = webSocket?.send(directJson) ?: false
+        if (sent) {
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT
+        }
+
+        val queuedJson = canonicalJsonFor(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+        )
+        if (!ingressAllowed(queuedJson)) {
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+        }
+        enqueueForReliableReplay(
+            msgType = msgType.value,
+            json = queuedJson,
+            reason = "transport_send_failed"
+        )
+        return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+    }
+
     private fun canonicalizeCompletionIdentityPayload(json: String, msgType: String?): String {
         val supportedTypes = setOf(
             MsgType.GOAL_EXECUTION_RESULT.value,

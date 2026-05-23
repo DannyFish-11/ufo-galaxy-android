@@ -612,6 +612,31 @@ class Pr52ReconciliationSignalEmissionTest {
         )
     }
 
+    @Test
+    fun `publishTaskResult payload distinguishes local completion from external propagation`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.publishTaskResult("task-result-truth")
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.LocalRuntimeStateClass
+                .LOCALLY_COMPLETED_STATE.wireValue,
+            signal!!.payload[AndroidRuntimeEmissionTruthSemantics.KEY_LOCAL_RUNTIME_STATE_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalDeliveryState
+                .NOT_EXTERNALLY_DELIVERED.wireValue,
+            signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_DELIVERY_STATE]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalPropagationState
+                .NOT_PROPAGATED_EXTERNALLY.wireValue,
+            signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_PROPAGATION_STATE]
+        )
+    }
+
     // ── RuntimeController — publishTaskCancelled ──────────────────────────────
 
     @Test
@@ -683,6 +708,31 @@ class Pr52ReconciliationSignalEmissionTest {
         val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
         assertNotNull(signal)
         assertTrue("hasRuntimeTruth must be true for RUNTIME_TRUTH_SNAPSHOT", signal!!.hasRuntimeTruth)
+    }
+
+    @Test
+    fun `publishRuntimeTruthSnapshot payload distinguishes local observation from external propagation`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.publishRuntimeTruthSnapshot(ParticipantHealthState.HEALTHY)
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.LocalRuntimeStateClass
+                .LOCALLY_OBSERVED_STATE.wireValue,
+            signal!!.payload[AndroidRuntimeEmissionTruthSemantics.KEY_LOCAL_RUNTIME_STATE_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+                .LOCAL_SIGNAL_EMITTED.wireValue,
+            signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalPropagationState
+                .NOT_PROPAGATED_EXTERNALLY.wireValue,
+            signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_PROPAGATION_STATE]
+        )
     }
 
     @Test
@@ -889,6 +939,26 @@ class Pr52ReconciliationSignalEmissionTest {
         assertEquals(
             ParticipantHealthState.RECOVERING.wireValue,
             signal!!.payload["health_state"]
+        )
+    }
+
+    @Test
+    fun `notifyParticipantHealthChanged payload keeps participant state local until external delivery occurs`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.notifyParticipantHealthChanged(ParticipantHealthState.RECOVERING)
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.LocalRuntimeStateClass
+                .LOCALLY_OBSERVED_STATE.wireValue,
+            signal!!.payload[AndroidRuntimeEmissionTruthSemantics.KEY_LOCAL_RUNTIME_STATE_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalDeliveryState
+                .NOT_EXTERNALLY_DELIVERED.wireValue,
+            signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_DELIVERY_STATE]
         )
     }
 
