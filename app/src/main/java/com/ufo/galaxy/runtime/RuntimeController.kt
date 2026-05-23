@@ -2577,10 +2577,16 @@ class RuntimeController(
     private fun classifyTaskResultTerminalOutcome(
         recoveryPhase: AndroidContinuityRecoveryStateModel.RecoveryPhase
     ): AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
-        if (recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY) {
-            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION
-        } else {
-            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.RECOVERY
+        when (recoveryPhase) {
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY ->
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED ->
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.RECOVERY
         }
 
     private fun classifyTakeoverTerminalOutcome(

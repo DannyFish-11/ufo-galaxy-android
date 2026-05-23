@@ -598,43 +598,18 @@ data class ReconciliationSignal(
                     completionSignaled = completionSignaled,
                     closureReadyForAcceptance = closureReadyForAcceptance
                 )
+            val terminalTruthProjection = terminalOutcomeKind?.let(::buildTerminalTruthProjection)
             val v2Boundary = AndroidCompletionClosureUplinkContract
                 .deriveV2CanonicalBoundary(
-                    localExecutionCompleted =
-                        terminalOutcomeKind?.let { outcome ->
-                            val resultSemanticClass =
-                                AndroidMissionCompletionSemanticsContract
-                                    .classifyReportedResultSemantic(outcome)
-                            val completionTruthGrade =
-                                AndroidCompletionTruthHardeningContract
-                                    .classifyCompletionTruthGrade(
-                                        resultUplinkSemanticClass = resultSemanticClass,
-                                        terminalOutcomeKind = outcome
-                                    )
-                            completionTruthGrade == AndroidCompletionTruthHardeningContract
-                                .CompletionTruthGrade.VERIFIED_COMPLETE ||
-                                completionTruthGrade == AndroidCompletionTruthHardeningContract
-                                    .CompletionTruthGrade.DEGRADED_COMPLETE
-                        } ?: (isTerminalSignal && resultReturned && completionSignaled),
+                    localExecutionCompleted = determineLocalExecutionCompleted(
+                        terminalTruthProjection = terminalTruthProjection,
+                        isTerminalSignal = isTerminalSignal,
+                        resultReturned = resultReturned,
+                        completionSignaled = completionSignaled
+                    ),
                     advisoryEvidenceSent = true,
                     outwardTruthSurfaceClass = outwardTruthSurfaceClass
                 )
-            val terminalOutcomePayload = terminalOutcomeKind?.let { outcome ->
-                val resultSemanticClass =
-                    AndroidMissionCompletionSemanticsContract
-                        .classifyReportedResultSemantic(outcome)
-                val completionTruthGrade =
-                    AndroidCompletionTruthHardeningContract
-                        .classifyCompletionTruthGrade(
-                            resultUplinkSemanticClass = resultSemanticClass,
-                            terminalOutcomeKind = outcome
-                        )
-                mapOf(
-                    KEY_TERMINAL_OUTCOME_KIND to outcome.wireValue,
-                    KEY_RESULT_UPLINK_SEMANTIC_CLASS to resultSemanticClass.wireValue,
-                    KEY_COMPLETION_TRUTH_GRADE to completionTruthGrade.wireValue
-                )
-            }.orEmpty()
             return mapOf(
                 AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION to
                     AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
@@ -666,8 +641,66 @@ data class ReconciliationSignal(
                             AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
                                 .V2_CONFIRMED_CANONICAL_TRUTH
                         )
-            ) + terminalOutcomePayload + additionalPayload
+            ) + (terminalTruthProjection?.payload ?: emptyMap()) + additionalPayload
         }
+
+        private data class TerminalTruthProjection(
+            val payload: Map<String, Any?>,
+            val marksLocalExecutionCompleted: Boolean
+        )
+
+        private fun buildTerminalTruthProjection(
+            outcome: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind
+        ): TerminalTruthProjection {
+            val resultSemanticClass =
+                AndroidMissionCompletionSemanticsContract
+                    .classifyReportedResultSemantic(outcome)
+            val completionTruthGrade =
+                AndroidCompletionTruthHardeningContract
+                    .classifyCompletionTruthGrade(
+                        resultUplinkSemanticClass = resultSemanticClass,
+                        terminalOutcomeKind = outcome
+                    )
+            return TerminalTruthProjection(
+                payload = mapOf(
+                    KEY_TERMINAL_OUTCOME_KIND to outcome.wireValue,
+                    KEY_RESULT_UPLINK_SEMANTIC_CLASS to resultSemanticClass.wireValue,
+                    KEY_COMPLETION_TRUTH_GRADE to completionTruthGrade.wireValue
+                ),
+                marksLocalExecutionCompleted = completionTruthGradeMarksLocalExecutionCompleted(
+                    completionTruthGrade
+                )
+            )
+        }
+
+        private fun completionTruthGradeMarksLocalExecutionCompleted(
+            completionTruthGrade: AndroidCompletionTruthHardeningContract.CompletionTruthGrade
+        ): Boolean =
+            completionTruthGrade in LOCAL_EXECUTION_COMPLETED_GRADES
+
+        private val LOCAL_EXECUTION_COMPLETED_GRADES = setOf(
+            AndroidCompletionTruthHardeningContract.CompletionTruthGrade.VERIFIED_COMPLETE,
+            AndroidCompletionTruthHardeningContract.CompletionTruthGrade.DEGRADED_COMPLETE
+        )
+
+        private fun defaultLocalExecutionCompleted(
+            isTerminalSignal: Boolean,
+            resultReturned: Boolean,
+            completionSignaled: Boolean
+        ): Boolean = isTerminalSignal && resultReturned && completionSignaled
+
+        private fun determineLocalExecutionCompleted(
+            terminalTruthProjection: TerminalTruthProjection?,
+            isTerminalSignal: Boolean,
+            resultReturned: Boolean,
+            completionSignaled: Boolean
+        ): Boolean =
+            terminalTruthProjection?.marksLocalExecutionCompleted
+                ?: defaultLocalExecutionCompleted(
+                    isTerminalSignal = isTerminalSignal,
+                    resultReturned = resultReturned,
+                    completionSignaled = completionSignaled
+                )
 
         private fun buildStableDedupeKey(
             kind: String,
