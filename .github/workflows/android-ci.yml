@@ -630,6 +630,16 @@ jobs:
               "is_protected_release_path": bool(status.get("is_protected_release_path", False)),
               "release_path_class": status.get("release_path_class", "development_or_pr"),
               "protected_execution_state": status.get("protected_execution_state", "not_run"),
+              "session_epoch_recovery_identity": {
+                  "durable_session_id_key": "durable_session_id",
+                  "session_continuity_epoch_key": "session_continuity_epoch",
+                  "recovery_phase_key": "continuity_recovery_state",
+                  "recovery_phase_source_key": "continuity_recovery_source",
+                  "recovery_phase_schema_key": "continuity_recovery_schema_version",
+                  "recovery_routing_category_key": "recovery_state_v2_routing_category",
+                  "recovery_routing_schema_key": "recovery_state_routing_schema_version",
+                  "authority_scope": "android_local_evidence_non_authoritative"
+              },
               "android_signals": {
                   "runtime": {
                       "signal_id": "runtime_regression",
@@ -650,16 +660,38 @@ jobs:
                       "signal_id": "replay_ordering",
                       "state": behavior.get("replay_ordering", "not_run"),
                       "source_gate": "e2e_verification_gate",
+                      "identity": {
+                          "dedupe_contract_schema_version": "android_v2_canonical_dedupe_v1",
+                          "lineage_schema_version_key": "uplink_lineage_schema_version",
+                          "lineage_dedupe_key": "uplink_lineage_dedupe_key",
+                          "durable_session_id_key": "durable_session_id",
+                          "session_continuity_epoch_key": "session_continuity_epoch",
+                      },
+                      "authority_scope": "android_replay_evidence_non_authoritative",
                   },
                   "recovery": {
                       "signal_id": "recovery_behavior",
                       "state": behavior.get("recovery_behavior", "not_run"),
                       "source_gate": "e2e_verification_gate",
+                      "identity": {
+                          "recovery_phase_key": "continuity_recovery_state",
+                          "recovery_phase_source_key": "continuity_recovery_source",
+                          "recovery_phase_schema_key": "continuity_recovery_schema_version",
+                          "routing_category_key": "recovery_state_v2_routing_category",
+                          "routing_schema_key": "recovery_state_routing_schema_version",
+                      },
+                      "authority_scope": "android_recovery_evidence_non_authoritative",
                   },
                   "reconnect_continuity": {
                       "signal_id": "reconnect_continuity",
                       "state": behavior.get("reconnect_continuity", "not_run"),
                       "source_gate": "e2e_verification_gate",
+                      "identity": {
+                          "durable_session_id_key": "durable_session_id",
+                          "session_continuity_epoch_key": "session_continuity_epoch",
+                          "runtime_truth_signal_kind": "runtime_truth_snapshot",
+                      },
+                      "authority_scope": "android_reconnect_evidence_non_authoritative",
                   },
                   "evaluator": {
                       "signal_id": "android_cross_repo_ci_evaluator",
@@ -691,6 +723,7 @@ jobs:
               "evidence_kind",
               "source",
               "is_protected_release_path",
+              "session_epoch_recovery_identity",
               "android_signals",
               "gate_results",
               "release_blocking_conditions",
@@ -721,6 +754,30 @@ jobs:
                   raise SystemExit(
                       f"Signal {signal_key} state '{signal['state']}' is outside allowed vocabulary: {sorted(state_vocab)}"
                   )
+
+          identity_surface = data.get("session_epoch_recovery_identity", {})
+          if not isinstance(identity_surface, dict):
+              raise SystemExit("session_epoch_recovery_identity must be an object")
+          identity_surface_keys = [
+              "durable_session_id_key",
+              "session_continuity_epoch_key",
+              "recovery_phase_key",
+              "recovery_phase_source_key",
+              "recovery_phase_schema_key",
+              "recovery_routing_category_key",
+              "recovery_routing_schema_key",
+              "authority_scope",
+          ]
+          missing_identity_surface = [k for k in identity_surface_keys if k not in identity_surface]
+          if missing_identity_surface:
+              raise SystemExit(f"session_epoch_recovery_identity missing required keys: {missing_identity_surface}")
+
+          for signal_key in ("replay", "recovery", "reconnect_continuity"):
+              signal = signals.get(signal_key, {})
+              if "identity" not in signal or not isinstance(signal["identity"], dict):
+                  raise SystemExit(f"Signal {signal_key} must include identity object")
+              if "authority_scope" not in signal:
+                  raise SystemExit(f"Signal {signal_key} must include authority_scope")
           print("Canonical evidence_json structure is valid.")
           PY
 

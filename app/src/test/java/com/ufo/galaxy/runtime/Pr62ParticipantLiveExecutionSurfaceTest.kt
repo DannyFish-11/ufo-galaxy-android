@@ -767,6 +767,33 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     }
 
     @Test
+    fun `reconnect snapshot includes routing metadata and unified recovery phase`() = runBlocking {
+        val (controller, wsClient) = buildController(buildDescriptor())
+        controller.setActiveForTest()
+        val signals = mutableListOf<ReconciliationSignal>()
+        val job = kotlinx.coroutines.launch {
+            controller.reconciliationSignals.collect { signals.add(it) }
+        }
+        wsClient.simulateDisconnected()
+        kotlinx.coroutines.delay(50)
+        wsClient.simulateConnected()
+        kotlinx.coroutines.delay(200)
+        job.cancel()
+        val snapshotSignal = signals.firstOrNull { it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT }
+        assertNotNull(snapshotSignal)
+        assertEquals(
+            AndroidCrossRepoRecoveryStateRoutingContract.V2RoutingCategory
+                .NO_RECOVERY_ACTION_REQUIRED
+                .wireValue,
+            snapshotSignal!!.payload[ReconciliationSignal.KEY_V2_ROUTING_CATEGORY]
+        )
+        assertEquals(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY.wireValue,
+            snapshotSignal.payload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
+        )
+    }
+
+    @Test
     fun `reconnect snapshot runtimeTruth is non-null`() = runBlocking {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
