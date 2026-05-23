@@ -637,6 +637,58 @@ class Pr52ReconciliationSignalEmissionTest {
         )
     }
 
+    @Test
+    fun `publishTaskResult payload marks clean completion as verified complete`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.publishTaskResult("task-result-completion-grade")
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION.wireValue,
+            signal!!.payload[ReconciliationSignal.KEY_TERMINAL_OUTCOME_KIND]
+        )
+        assertEquals(
+            AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass
+                .AUTHORITATIVE_TERMINAL.wireValue,
+            signal.payload[ReconciliationSignal.KEY_RESULT_UPLINK_SEMANTIC_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionTruthHardeningContract.CompletionTruthGrade
+                .VERIFIED_COMPLETE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_COMPLETION_TRUTH_GRADE]
+        )
+    }
+
+    @Test
+    fun `publishTaskResult in recovery state marks outcome as degraded recovery completion`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.recordDelegatedTaskAccepted("task-result-recovery")
+        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
+
+        controller.publishTaskResult("task-result-recovery")
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.RECOVERY.wireValue,
+            signal!!.payload[ReconciliationSignal.KEY_TERMINAL_OUTCOME_KIND]
+        )
+        assertEquals(
+            AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass
+                .AUTHORITATIVE_RECOVERY.wireValue,
+            signal.payload[ReconciliationSignal.KEY_RESULT_UPLINK_SEMANTIC_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionTruthHardeningContract.CompletionTruthGrade
+                .DEGRADED_COMPLETE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_COMPLETION_TRUTH_GRADE]
+        )
+    }
+
     // ── RuntimeController — publishTaskCancelled ──────────────────────────────
 
     @Test
@@ -842,6 +894,40 @@ class Pr52ReconciliationSignalEmissionTest {
         val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
         assertNotNull("Expected TASK_FAILED signal for DISCONNECT cause", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
+    }
+
+    @Test
+    fun `notifyTakeoverFailed with DISCONNECT cause marks interruption as terminal incomplete`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.notifyTakeoverFailed(
+            takeoverId = "to-disconnect-grade",
+            taskId = "task-disconnect-grade",
+            traceId = "trace-disconnect-grade",
+            reason = "ws disconnected",
+            cause = TakeoverFallbackEvent.Cause.DISCONNECT
+        )
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION.wireValue,
+            signal!!.payload[ReconciliationSignal.KEY_TERMINAL_OUTCOME_KIND]
+        )
+        assertEquals(
+            AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass
+                .AUTHORITATIVE_INTERRUPTION.wireValue,
+            signal.payload[ReconciliationSignal.KEY_RESULT_UPLINK_SEMANTIC_CLASS]
+        )
+        assertEquals(
+            AndroidCompletionTruthHardeningContract.CompletionTruthGrade
+                .TERMINAL_INCOMPLETE.wireValue,
+            signal.payload[ReconciliationSignal.KEY_COMPLETION_TRUTH_GRADE]
+        )
+        assertFalse(
+            signal.payload[AndroidCompletionClosureUplinkContract.KEY_LOCAL_EXECUTION_COMPLETED]
+                as Boolean
+        )
     }
 
     @Test

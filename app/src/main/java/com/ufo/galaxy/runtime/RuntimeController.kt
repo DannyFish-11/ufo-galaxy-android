@@ -1530,6 +1530,7 @@ class RuntimeController(
         // so any observer of activeTaskStatus sees the transitional state before it is cleared.
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
+        val terminalOutcomeKind = classifyTakeoverTerminalOutcome(cause = cause, reason = reason)
         if (_activeTaskId == taskId) {
             _activeTaskStatus = if (cause == TakeoverFallbackEvent.Cause.CANCELLED)
                 ActiveTaskStatus.CANCELLING
@@ -1549,6 +1550,7 @@ class RuntimeController(
                 ReconciliationSignal.taskCancelled(
                     participantId = pid,
                     taskId = taskId,
+                    terminalOutcomeKind = terminalOutcomeKind,
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
                     sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -1562,6 +1564,7 @@ class RuntimeController(
                 ReconciliationSignal.taskFailed(
                     participantId = pid,
                     taskId = taskId,
+                    terminalOutcomeKind = terminalOutcomeKind,
                     errorDetail = "${cause.wireValue}: $reason",
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
@@ -2394,6 +2397,7 @@ class RuntimeController(
     ) {
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
+        val terminalOutcomeKind = classifyTaskResultTerminalOutcome(unifiedRecoveryPhase.value)
         // PR-62: Clear active task state on successful completion.
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "result")
@@ -2411,6 +2415,7 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                terminalOutcomeKind = terminalOutcomeKind,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -2468,6 +2473,8 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                terminalOutcomeKind =
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABORT,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -2566,6 +2573,33 @@ class RuntimeController(
             resultConvergenceDecision = resultConvergenceDecision
         ).toPayloadMap()
     }
+
+    private fun classifyTaskResultTerminalOutcome(
+        recoveryPhase: AndroidContinuityRecoveryStateModel.RecoveryPhase
+    ): AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+        if (recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY) {
+            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION
+        } else {
+            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.RECOVERY
+        }
+
+    private fun classifyTakeoverTerminalOutcome(
+        cause: TakeoverFallbackEvent.Cause,
+        reason: String
+    ): AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+        AndroidMissionCompletionSemanticsContract.classifyLocalTerminalOutcome(
+            phase = if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
+                com.ufo.galaxy.protocol.DeviceExecutionEventPayload.PHASE_CANCELLED
+            } else {
+                com.ufo.galaxy.protocol.DeviceExecutionEventPayload.PHASE_FAILED
+            },
+            status = when (cause) {
+                TakeoverFallbackEvent.Cause.CANCELLED -> "cancelled"
+                TakeoverFallbackEvent.Cause.TIMEOUT -> "timeout"
+                else -> "error"
+            },
+            details = reason
+        )
 
     /**
      * PR-52 — Builds and emits a [ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT] signal
@@ -2919,6 +2953,8 @@ class RuntimeController(
                     ReconciliationSignal.taskFailed(
                         participantId = pid,
                         taskId = interruptedTaskId,
+                        terminalOutcomeKind =
+                            AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION,
                         errorDetail = "session_interrupted: ${cause.wireValue}",
                         reconciliationEpoch = nextReconciliationEpoch(),
                         durableSessionId = currentDurableSessionId(),
