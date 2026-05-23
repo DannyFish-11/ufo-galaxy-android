@@ -476,7 +476,7 @@ jobs:
                   "invariant": "replay_ordering_evidence_state",
                   "source_gate": "e2e_verification_gate",
                   "status": "unresolved" if replay_ordering_state in {"not_run", "failed"} else "satisfied",
-                  "failure_reason": f"replay_ordering_{replay_ordering_state}",
+                  "failure_reason": "none" if replay_ordering_state not in {"not_run", "failed"} else f"replay_ordering_{replay_ordering_state}",
                   "actual_value": replay_ordering_state,
                   "expected_value": "partially_run_or_evidenced",
                   "action_hint": "Ensure replay-ordering evidence is at least partially_run and not failed for protected release."
@@ -488,7 +488,7 @@ jobs:
                   "invariant": "reconnect_continuity_evidence_state",
                   "source_gate": "e2e_verification_gate",
                   "status": "unresolved" if reconnect_continuity_state in {"not_run", "failed"} else "satisfied",
-                  "failure_reason": f"reconnect_continuity_{reconnect_continuity_state}",
+                  "failure_reason": "none" if reconnect_continuity_state not in {"not_run", "failed"} else f"reconnect_continuity_{reconnect_continuity_state}",
                   "actual_value": reconnect_continuity_state,
                   "expected_value": "partially_run_or_evidenced",
                   "action_hint": "Provide reconnect continuity verification evidence for protected release."
@@ -500,7 +500,7 @@ jobs:
                   "invariant": "recovery_behavior_evidence_state",
                   "source_gate": "e2e_verification_gate",
                   "status": "unresolved" if recovery_behavior_state in {"not_run", "failed"} else "satisfied",
-                  "failure_reason": f"recovery_behavior_{recovery_behavior_state}",
+                  "failure_reason": "none" if recovery_behavior_state not in {"not_run", "failed"} else f"recovery_behavior_{recovery_behavior_state}",
                   "actual_value": recovery_behavior_state,
                   "expected_value": "partially_run_or_evidenced",
                   "action_hint": "Provide recovery-behavior evidence instead of relying on advisory-only status."
@@ -512,7 +512,7 @@ jobs:
                   "invariant": "closure_completeness_evidence_state",
                   "source_gate": "e2e_verification_gate",
                   "status": "unresolved" if closure_completeness_state in {"not_run", "failed"} else "satisfied",
-                  "failure_reason": f"closure_completeness_{closure_completeness_state}",
+                  "failure_reason": "none" if closure_completeness_state not in {"not_run", "failed"} else f"closure_completeness_{closure_completeness_state}",
                   "actual_value": closure_completeness_state,
                   "expected_value": "partially_run_or_evidenced",
                   "action_hint": "Ensure closure completeness evidence is available for protected release movement."
@@ -524,7 +524,7 @@ jobs:
                   "invariant": "real_device_e2e_state",
                   "source_gate": "e2e_verification_gate",
                   "status": "unresolved" if real_device_e2e_state != "evidenced" else "satisfied",
-                  "failure_reason": f"real_device_e2e_{real_device_e2e_state}",
+                  "failure_reason": "none" if real_device_e2e_state == "evidenced" else f"real_device_e2e_{real_device_e2e_state}",
                   "actual_value": real_device_e2e_state,
                   "expected_value": "evidenced",
                   "action_hint": "Protected release requires real-device E2E evidence; no-device CI artifact is visibility-only."
@@ -534,6 +534,9 @@ jobs:
           blocking_conditions = [c for c in conditions if c["status"] == "unresolved"]
           release_blocked = is_protected_release_path and len(blocking_conditions) > 0
 
+          # schema_version 1.1 adds protected-release decision keys:
+          # is_protected_release_path, release_blocked, blocking_condition_count,
+          # and release_blocking_conditions.
           payload = {
               "schema_version": "1.1",
               "source": "android-ci",
@@ -575,7 +578,8 @@ jobs:
           python3 - <<'PY'
           import json
           path = "app/build/e2e-verification/cross-repo-evidence-status.json"
-          data = json.load(open(path, "r", encoding="utf-8"))
+          with open(path, "r", encoding="utf-8") as f:
+              data = json.load(f)
           required_top = [
               "schema_version",
               "is_protected_release_path",
@@ -624,7 +628,8 @@ jobs:
           python3 - <<'PY'
           import json
           path = "app/build/e2e-verification/cross-repo-evidence-status.json"
-          data = json.load(open(path, "r", encoding="utf-8"))
+          with open(path, "r", encoding="utf-8") as f:
+              data = json.load(f)
           is_protected = bool(data.get("is_protected_release_path", False))
           is_blocked = bool(data.get("release_blocked", False))
           conditions = data.get("release_blocking_conditions", [])

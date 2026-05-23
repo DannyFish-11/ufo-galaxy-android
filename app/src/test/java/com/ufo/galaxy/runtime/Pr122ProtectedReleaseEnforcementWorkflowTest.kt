@@ -6,7 +6,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 
 /**
- * PR-122Android — Guard rails for protected release enforcement wiring in android-ci workflow.
+ * PR-122 Android — Guard rails for protected release enforcement wiring in android-ci workflow.
  */
 class Pr122ProtectedReleaseEnforcementWorkflowTest {
 
