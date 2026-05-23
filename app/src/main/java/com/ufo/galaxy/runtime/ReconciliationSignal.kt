@@ -544,6 +544,17 @@ data class ReconciliationSignal(
         /** Wire status for a full snapshot signal. */
         const val STATUS_SNAPSHOT = "snapshot"
 
+        /**
+         * Returns [payload] enriched with [KEY_DISPATCH_PLAN_ID] → [dispatchPlanId] when
+         * [dispatchPlanId] is non-null and non-blank, otherwise returns [payload] unchanged.
+         */
+        private fun withDispatchPlanId(
+            payload: Map<String, Any?>,
+            dispatchPlanId: String?
+        ): Map<String, Any?> = if (!dispatchPlanId.isNullOrBlank()) {
+            payload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
+        } else payload
+
         private fun closureSemanticsPayload(
             isTerminalSignal: Boolean,
             resultReturned: Boolean,
@@ -687,9 +698,7 @@ data class ReconciliationSignal(
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false,
-                additionalPayload = if (!dispatchPlanId.isNullOrBlank()) {
-                    additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
-                } else additionalPayload
+                additionalPayload = withDispatchPlanId(additionalPayload, dispatchPlanId)
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -734,9 +743,7 @@ data class ReconciliationSignal(
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
-                additionalPayload = if (!dispatchPlanId.isNullOrBlank()) {
-                    additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
-                } else additionalPayload
+                additionalPayload = withDispatchPlanId(additionalPayload, dispatchPlanId)
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -772,15 +779,12 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
-            val enrichedAdditional = if (!dispatchPlanId.isNullOrBlank()) {
-                additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
-            } else additionalPayload
             val payload = closureSemanticsPayload(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
-                additionalPayload = enrichedAdditional
+                additionalPayload = withDispatchPlanId(additionalPayload, dispatchPlanId)
             ).toMutableMap().apply {
                 errorDetail?.let { put("error_detail", it) }
             }
@@ -836,9 +840,7 @@ data class ReconciliationSignal(
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
-                additionalPayload = if (!dispatchPlanId.isNullOrBlank()) {
-                    additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
-                } else additionalPayload
+                additionalPayload = withDispatchPlanId(additionalPayload, dispatchPlanId)
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -877,15 +879,12 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
-            val enrichedAdditional = if (!dispatchPlanId.isNullOrBlank()) {
-                additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
-            } else additionalPayload
             val payload = closureSemanticsPayload(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false,
-                additionalPayload = enrichedAdditional
+                additionalPayload = withDispatchPlanId(additionalPayload, dispatchPlanId)
             ).toMutableMap().apply {
                 progressDetail?.let { put("progress_detail", it) }
             }

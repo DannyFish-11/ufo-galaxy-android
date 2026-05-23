@@ -2361,7 +2361,7 @@ class RuntimeController(
                 "event" to "task_accepted",
                 "task_id" to taskId,
                 "participant_id" to (currentParticipantId() ?: "unknown"),
-                "dispatch_plan_id" to (_activeTaskDispatchPlanId ?: "")
+                "dispatch_plan_id" to (_activeTaskDispatchPlanId ?: "<none>")
             )
         )
         val pid = currentParticipantId() ?: run {
