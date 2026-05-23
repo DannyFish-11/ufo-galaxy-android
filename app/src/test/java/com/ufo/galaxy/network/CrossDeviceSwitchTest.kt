@@ -176,6 +176,7 @@ class CrossDeviceSwitchTest {
         assertEquals("acceptance_closure_signal", payload.get("result_signal_class").asString)
         assertEquals("acceptance_blocked", payload.get("acceptance_candidate_class").asString)
         assertEquals("session_finalization_blocked", payload.get("closure_finalization_signal_class").asString)
+        assertFalse(payload.get("closure_ready_for_acceptance").asBoolean)
     }
 
     @Test

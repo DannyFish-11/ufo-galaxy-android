@@ -61,12 +61,8 @@ object AndroidUplinkLineageMetadataContract {
             else ->
                 LineageStrengthClass.CLOSURE_GRADE
         }
-        val isClosureLineageComplete = isClosureLineageComplete(
-            executionIdentity = executionIdentity,
-            emissionIdentity = emissionIdentity,
-            durableSessionId = durableSessionId,
-            sessionContinuityEpoch = sessionContinuityEpoch
-        )
+        val isClosureLineageComplete =
+            lineageStrengthClass == LineageStrengthClass.CLOSURE_GRADE
         val dedupeKey = sha256(
             listOf(
                 safeSession,

@@ -1141,6 +1141,8 @@ class GalaxyWebSocketClient(
         val isClosureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
             type == MsgType.DEVICE_EXECUTION_EVENT.value
         if (isClosureBearingType) {
+            // Strict Stage-1 rule: closure-grade identity comes only from explicit lineage keys.
+            // task_id is necessary routing context but is not sufficient lineage identity.
             val isClosureLineageIncomplete = !AndroidUplinkLineageMetadataContract
                 .isClosureLineageComplete(
                     executionIdentity = payload.stringOrNull(
@@ -1172,6 +1174,7 @@ class GalaxyWebSocketClient(
                     AndroidCompletionClosureUplinkContract
                         .ClosureFinalizationSignalClass.SESSION_FINALIZATION_BLOCKED.wireValue
                 )
+                payload.addProperty("closure_ready_for_acceptance", false)
             }
         }
         return gson.toJson(root)
