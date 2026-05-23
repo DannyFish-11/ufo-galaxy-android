@@ -147,6 +147,25 @@ object AndroidV2ContractVersionGate {
      */
     const val EXPECTED_DISTRIBUTED_RUNTIME_PARTICIPATION_SCHEMA_VERSION: String = "1"
 
+    /**
+     * Expected schema version for [AndroidNonClosureSignalBoundaryContract].
+     * V2 must enforce this boundary before any closure-chain handling.
+     */
+    const val EXPECTED_NON_CLOSURE_SCHEMA_VERSION: String = "1"
+
+    /**
+     * Expected schema version for [AndroidCrossRepoRecoveryStateRoutingContract].
+     * V2 continuity/reconciliation routing must validate against this.
+     */
+    const val EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION: String = "1"
+
+    /**
+     * Expected schema version for [AndroidCrossRepoDedupeContract].
+     * V2 replay/dedupe ingress must validate against this.
+     */
+    const val EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION: String =
+        "android_v2_canonical_dedupe_v1"
+
     // ── Critical wire key stability anchors ───────────────────────────────────
 
     /**
@@ -208,6 +227,52 @@ object AndroidV2ContractVersionGate {
      */
     const val KEY_PARTICIPATION_SEMANTIC_SCHEMA_VERSION: String =
         "participation_semantic_schema_version"
+
+    /**
+     * The stable wire key for non-closure schema version.
+     * Defined by [AndroidNonClosureSignalBoundaryContract.KEY_NON_CLOSURE_SCHEMA_VERSION].
+     */
+    const val KEY_NON_CLOSURE_SCHEMA_VERSION: String = "non_closure_schema_version"
+
+    /**
+     * The stable wire key for recovery routing schema version.
+     * Defined by [AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION].
+     */
+    const val KEY_RECOVERY_ROUTING_SCHEMA_VERSION: String =
+        "recovery_state_routing_schema_version"
+
+    /**
+     * Required non-closure message classes that must remain guarded as non-closure.
+     */
+    val REQUIRED_NON_CLOSURE_MSG_TYPES: Set<MsgType> = setOf(
+        MsgType.DIAGNOSTICS_PAYLOAD,
+        MsgType.DEVICE_STATE_SNAPSHOT,
+        MsgType.DEVICE_READINESS_REPORT,
+        MsgType.DEVICE_GOVERNANCE_REPORT,
+        MsgType.DEVICE_ACCEPTANCE_REPORT,
+        MsgType.DEVICE_STRATEGY_REPORT
+    )
+
+    /**
+     * Required replay-bearing classes that must remain dedupe-governed.
+     */
+    val REQUIRED_CANONICAL_REPLAY_TYPES: Set<String> = setOf(
+        MsgType.GOAL_EXECUTION_RESULT.value,
+        MsgType.DEVICE_EXECUTION_EVENT.value,
+        MsgType.DEVICE_STATE_SNAPSHOT.value,
+        MsgType.RECONCILIATION_SIGNAL.value
+    )
+
+    /**
+     * Required replay classes that must carry continuity epoch metadata.
+     */
+    val REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES: Set<String> = setOf(
+        MsgType.GOAL_EXECUTION_RESULT.value,
+        MsgType.DEVICE_EXECUTION_EVENT.value,
+        MsgType.DEVICE_STATE_SNAPSHOT.value,
+        MsgType.RECONCILIATION_SIGNAL.value,
+        MsgType.DELEGATED_EXECUTION_SIGNAL.value
+    )
 
     // ── Gate boundary categories ──────────────────────────────────────────────
 
@@ -345,6 +410,12 @@ object AndroidV2ContractVersionGate {
             EXPECTED_DISTRIBUTED_TRUTH_OWNERSHIP_SCHEMA_VERSION,
         KEY_PARTICIPATION_SEMANTIC_SCHEMA_VERSION to
             EXPECTED_PARTICIPATION_SEMANTIC_SCHEMA_VERSION,
+        KEY_NON_CLOSURE_SCHEMA_VERSION to
+            EXPECTED_NON_CLOSURE_SCHEMA_VERSION,
+        KEY_RECOVERY_ROUTING_SCHEMA_VERSION to
+            EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION,
+        "android_cross_repo_dedupe_schema_version" to
+            EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION,
         V2_GATE_VERSION_KEY to GATE_SCHEMA_VERSION
     )
 
@@ -385,8 +456,15 @@ object AndroidV2ContractVersionGate {
      *     [EXPECTED_DISTRIBUTED_TRUTH_OWNERSHIP_SCHEMA_VERSION].
      *  5. [AndroidParticipationSemanticNormalizationContract.SCHEMA_VERSION] ==
      *     [EXPECTED_PARTICIPATION_SEMANTIC_SCHEMA_VERSION].
-     *  6. Wire key names emitted by the referenced contracts match the local anchor constants.
-     *  7. [CRITICAL_CONTRACT_BOUNDARIES] covers all four [GateBoundaryCategory] values.
+     *  6. [AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION] ==
+     *     [EXPECTED_NON_CLOSURE_SCHEMA_VERSION].
+     *  7. [AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION] ==
+     *     [EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION].
+     *  8. [AndroidCrossRepoDedupeContract.SCHEMA_VERSION] ==
+     *     [EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION].
+     *  9. Wire key names emitted by the referenced contracts match the local anchor constants.
+     * 10. Non-closure and dedupe/replay required type sets are unchanged.
+     * 11. [CRITICAL_CONTRACT_BOUNDARIES] covers all four [GateBoundaryCategory] values.
      *
      * Returns [GateValidationResult] with [GateValidationStatus.PASSED] when no violations are found.
      * CI-gate pattern: `assertEquals(GateValidationStatus.PASSED, validate().status)`
@@ -460,7 +538,46 @@ object AndroidV2ContractVersionGate {
             )
         }
 
-        // ── 6. Wire key name consistency ─────────────────────────────────────
+        // ── 6. Non-closure boundary schema version ───────────────────────────
+        val actualNonClosureSchemaVersion =
+            AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
+        if (actualNonClosureSchemaVersion != EXPECTED_NON_CLOSURE_SCHEMA_VERSION) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.PARTICIPANT_TRUTH_SNAPSHOT.wireValue,
+                description = "AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION drift: " +
+                    "update Android non-closure classification expectations and align V2 non-closure ingress guards",
+                expected = EXPECTED_NON_CLOSURE_SCHEMA_VERSION,
+                actual = actualNonClosureSchemaVersion
+            )
+        }
+
+        // ── 7. Recovery routing schema version ───────────────────────────────
+        val actualRecoveryRoutingSchemaVersion =
+            AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION
+        if (actualRecoveryRoutingSchemaVersion != EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
+                description = "AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION drift: " +
+                    "update Android recovery routing expectations and align V2 continuity/reconciliation routing",
+                expected = EXPECTED_RECOVERY_ROUTING_SCHEMA_VERSION,
+                actual = actualRecoveryRoutingSchemaVersion
+            )
+        }
+
+        // ── 8. Cross-repo dedupe schema version ──────────────────────────────
+        val actualCrossRepoDedupeSchemaVersion =
+            AndroidCrossRepoDedupeContract.SCHEMA_VERSION
+        if (actualCrossRepoDedupeSchemaVersion != EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
+                description = "AndroidCrossRepoDedupeContract.SCHEMA_VERSION drift: " +
+                    "update dedupe/replay contract expectations and align V2 replay ingress guards",
+                expected = EXPECTED_CROSS_REPO_DEDUPE_SCHEMA_VERSION,
+                actual = actualCrossRepoDedupeSchemaVersion
+            )
+        }
+
+        // ── 9. Wire key name consistency ─────────────────────────────────────
         val expectedClosureKey =
             AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION
         if (expectedClosureKey != KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION) {
@@ -509,7 +626,65 @@ object AndroidV2ContractVersionGate {
             )
         }
 
-        // ── 7. All four boundary categories present ───────────────────────────
+        val expectedNonClosureSchemaKey =
+            AndroidNonClosureSignalBoundaryContract.KEY_NON_CLOSURE_SCHEMA_VERSION
+        if (expectedNonClosureSchemaKey != KEY_NON_CLOSURE_SCHEMA_VERSION) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.PARTICIPANT_TRUTH_SNAPSHOT.wireValue,
+                description = "KEY_NON_CLOSURE_SCHEMA_VERSION out of sync with " +
+                    "AndroidNonClosureSignalBoundaryContract source",
+                expected = expectedNonClosureSchemaKey,
+                actual = KEY_NON_CLOSURE_SCHEMA_VERSION
+            )
+        }
+
+        val expectedRecoveryRoutingSchemaKey =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
+        if (expectedRecoveryRoutingSchemaKey != KEY_RECOVERY_ROUTING_SCHEMA_VERSION) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
+                description = "KEY_RECOVERY_ROUTING_SCHEMA_VERSION out of sync with " +
+                    "AndroidCrossRepoRecoveryStateRoutingContract source",
+                expected = expectedRecoveryRoutingSchemaKey,
+                actual = KEY_RECOVERY_ROUTING_SCHEMA_VERSION
+            )
+        }
+
+        // ── 10. Required non-closure and dedupe/replay classes ───────────────
+        if (AndroidNonClosureSignalBoundaryContract.NON_CLOSURE_MSG_TYPES !=
+            REQUIRED_NON_CLOSURE_MSG_TYPES) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.PARTICIPANT_TRUTH_SNAPSHOT.wireValue,
+                description = "NON_CLOSURE_MSG_TYPES drift detected: update REQUIRED_NON_CLOSURE_MSG_TYPES " +
+                    "and align V2 non-closure ingress guard set",
+                expected = REQUIRED_NON_CLOSURE_MSG_TYPES.joinToString(",") { it.value },
+                actual = AndroidNonClosureSignalBoundaryContract.NON_CLOSURE_MSG_TYPES
+                    .joinToString(",") { it.value }
+            )
+        }
+
+        if (AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES != REQUIRED_CANONICAL_REPLAY_TYPES) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
+                description = "CANONICAL_REPLAY_TYPES drift detected: update REQUIRED_CANONICAL_REPLAY_TYPES " +
+                    "and align V2 replay/dedupe canonical type routing",
+                expected = REQUIRED_CANONICAL_REPLAY_TYPES.joinToString(","),
+                actual = AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES.joinToString(",")
+            )
+        }
+
+        if (AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES !=
+            REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES) {
+            violations += GateValidationViolation(
+                boundary = GateBoundaryCategory.RUNTIME_TRUTH_UPLINK.wireValue,
+                description = "REPLAY_EPOCH_REQUIRED_TYPES drift detected: update REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES " +
+                    "and align V2 replay epoch enforcement",
+                expected = REQUIRED_REPLAY_EPOCH_REQUIRED_TYPES.joinToString(","),
+                actual = AndroidCrossRepoDedupeContract.REPLAY_EPOCH_REQUIRED_TYPES.joinToString(",")
+            )
+        }
+
+        // ── 11. All four boundary categories present ──────────────────────────
         val coveredCategories = CRITICAL_CONTRACT_BOUNDARIES.map { it.category }.toSet()
         for (category in GateBoundaryCategory.entries) {
             if (category !in coveredCategories) {
@@ -545,7 +720,10 @@ object AndroidV2ContractVersionGate {
      * | 5 | All four [GateBoundaryCategory] values are present in [CRITICAL_CONTRACT_BOUNDARIES]. |
      * | 6 | [validate] returns [GateValidationStatus.PASSED] when no contracts have drifted. |
      * | 7 | [V2_EXPECTED_VERSIONS] contains an entry for every wire key constant defined here. |
-     * | 8 | Android is not claiming canonical truth authority; this gate is bounded-side only. |
+     * | 8 | Non-closure signal boundary schema + non-closure MsgType set are cross-repo pinned. |
+     * | 9 | Recovery routing schema + wire key are cross-repo pinned. |
+     * | 10 | Replay/dedupe schema + canonical replay/epoch-required type sets are cross-repo pinned. |
+     * | 11 | Android is not claiming canonical truth authority; this gate is bounded-side only. |
      */
     val GATE_INVARIANTS: List<String> = listOf(
         "GATE_SCHEMA_VERSION is non-blank and parseable as a version identifier",
@@ -555,6 +733,9 @@ object AndroidV2ContractVersionGate {
         "All four GateBoundaryCategory values are present in CRITICAL_CONTRACT_BOUNDARIES",
         "validate() returns GateValidationStatus.PASSED when no contracts have drifted",
         "V2_EXPECTED_VERSIONS contains an entry for every critical wire version key",
+        "Non-closure signal boundary schema and non-closure MsgType set are cross-repo pinned",
+        "Recovery routing schema and wire key are cross-repo pinned",
+        "Replay/dedupe schema and canonical replay/epoch-required type sets are cross-repo pinned",
         "Android is not claiming canonical truth authority; this gate is bounded-side only"
     )
 
@@ -562,5 +743,5 @@ object AndroidV2ContractVersionGate {
      * Count of expected [GATE_INVARIANTS].  Tests compare against this to catch additions or
      * removals without a [GATE_SCHEMA_VERSION] bump.
      */
-    const val EXPECTED_GATE_INVARIANT_COUNT: Int = 8
+    const val EXPECTED_GATE_INVARIANT_COUNT: Int = 11
 }
