@@ -29,7 +29,13 @@ object AndroidRuntimeEmissionTruthSemantics {
         RESUMED_EXECUTION("resumed_execution"),
         RECOVERED_EXECUTION("recovered_execution"),
         REPLAYED_DELIVERY("replayed_delivery"),
-        DEGRADED_CONTINUITY("degraded_continuity")
+        DEGRADED_CONTINUITY("degraded_continuity");
+
+        companion object {
+            private val BY_WIRE_VALUE = entries.associateBy(ExecutionContinuityClass::wireValue)
+
+            fun fromWireValue(value: String): ExecutionContinuityClass? = BY_WIRE_VALUE[value]
+        }
     }
 
     enum class TerminalEmissionClass(val wireValue: String) {
@@ -47,7 +53,13 @@ object AndroidRuntimeEmissionTruthSemantics {
         OFFLINE_QUEUED("offline_queued"),
         SEND_FAILED("send_failed"),
         REPLAYED_FORWARDED("replayed_forwarded"),
-        DUPLICATE_SUPPRESSED("duplicate_suppressed")
+        DUPLICATE_SUPPRESSED("duplicate_suppressed");
+
+        companion object {
+            private val BY_WIRE_VALUE = entries.associateBy(DeliveryDisposition::wireValue)
+
+            fun fromWireValue(value: String): DeliveryDisposition? = BY_WIRE_VALUE[value]
+        }
     }
 
     enum class LocalRuntimeStateClass(val wireValue: String) {
@@ -231,8 +243,8 @@ object AndroidRuntimeEmissionTruthSemantics {
     }
 
     private fun parseExecutionContinuityClass(value: String): ExecutionContinuityClass? =
-        ExecutionContinuityClass.entries.firstOrNull { it.wireValue == value }
+        ExecutionContinuityClass.fromWireValue(value)
 
     private fun parseDeliveryDisposition(value: String): DeliveryDisposition? =
-        DeliveryDisposition.entries.firstOrNull { it.wireValue == value }
+        DeliveryDisposition.fromWireValue(value)
 }

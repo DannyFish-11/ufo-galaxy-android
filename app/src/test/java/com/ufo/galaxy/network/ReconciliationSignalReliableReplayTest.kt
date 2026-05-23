@@ -99,10 +99,12 @@ class ReconciliationSignalReliableReplayTest {
         )
         val ingress = AndroidGovernanceExecutionPolicyIngressContract
             .classifyReconciliation(signal.kind)
-        val emissionTruth = AndroidRuntimeEmissionTruthSemantics
-            .TruthSnapshot
-            .fromPayload(signal.payload, signal.isTerminal)
-            ?.withDeliveryDisposition(deliveryDisposition)
+        val emissionTruth = requireNotNull(
+            AndroidRuntimeEmissionTruthSemantics.TruthSnapshot
+                .fromPayload(signal.payload, signal.isTerminal)
+        ) {
+            "Expected reconciliation signal payload to include runtime emission truth metadata"
+        }.withDeliveryDisposition(deliveryDisposition)
         val payload = ReconciliationSignalPayload(
             signal_id = signal.signalId,
             kind = signal.kind.wireValue,
@@ -116,7 +118,7 @@ class ReconciliationSignalReliableReplayTest {
             durable_session_id = signal.durableSessionId,
             session_continuity_epoch = signal.sessionContinuityEpoch,
             payload = signal.payload +
-                (emissionTruth?.toPayloadMap() ?: emptyMap<String, Any?>()) +
+                emissionTruth.toPayloadMap() +
                 mapOf(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY to signal.stableDedupeKey),
             runtime_truth = signal.runtimeTruth?.toMap(),
             uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
