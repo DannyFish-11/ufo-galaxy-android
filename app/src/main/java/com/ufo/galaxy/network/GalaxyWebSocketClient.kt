@@ -1056,8 +1056,9 @@ class GalaxyWebSocketClient(
             null
         } ?: return json
         val payload = root.getAsJsonObject("payload") ?: return json
-        val taskId = payload.stringOrNull("task_id") ?: root.stringOrNull("correlation_id")
-        if (payload.stringOrNull("task_id") == null && taskId != null) {
+        val payloadTaskId = payload.stringOrNull("task_id")
+        val taskId = payloadTaskId ?: root.stringOrNull("correlation_id")
+        if (payloadTaskId == null && taskId != null) {
             payload.addProperty("task_id", taskId)
         }
         if (payload.stringOrNull("status") == null) {
@@ -1088,6 +1089,15 @@ class GalaxyWebSocketClient(
         }
         val existingRootIdempotencyKey = root.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
         val existingPayloadIdempotencyKey = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
+        val fingerprintSeed = listOfNotNull(
+            type,
+            taskId ?: "no_task",
+            payload.stringOrNull("signal_id"),
+            payload.stringOrNull("event_id"),
+            payload.stringOrNull("uplink_lineage_emission_id"),
+            payload.stringOrNull("timestamp_ms"),
+            root.stringOrNull("timestamp")
+        ).joinToString(":")
         val canonicalIdempotencyKey = existingRootIdempotencyKey
             ?: existingPayloadIdempotencyKey
             ?: buildStableFallbackIdempotencyKey(
@@ -1097,7 +1107,7 @@ class GalaxyWebSocketClient(
                     ?: payload.stringOrNull("uplink_lineage_emission_id")
                     ?: payload.stringOrNull("event_id")
                     ?: payload.stringOrNull("signal_id"),
-                payloadFingerprint = sha256Hex(json).take(16)
+                payloadFingerprint = sha256Hex(fingerprintSeed).take(16)
             )
         if (existingRootIdempotencyKey != canonicalIdempotencyKey) {
             root.addProperty(
