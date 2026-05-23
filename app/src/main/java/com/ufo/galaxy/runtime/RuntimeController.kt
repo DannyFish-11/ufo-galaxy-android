@@ -716,6 +716,21 @@ class RuntimeController(
     private var _activeTaskId: String? = null
 
     /**
+     * PR-123 — Tracks the V2-issued dispatch plan ID for the currently executing task.
+     *
+     * Set by [recordDelegatedTaskAccepted] when the inbound dispatch envelope carries a
+     * [AndroidV2DistributedActivationCompatibilityContract] plan identifier.  Cleared
+     * alongside [_activeTaskId] by [clearActiveTaskState] so terminal signals carry the
+     * correct plan anchor when it exists, and are classified as
+     * [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.TASK_IDENTITY_ONLY]
+     * when no plan ID was supplied.
+     *
+     * `null` when no task is executing or when the current task has no dispatch plan ID.
+     */
+    @Volatile
+    private var _activeTaskDispatchPlanId: String? = null
+
+    /**
      * PR-62 — Tracks the [ActiveTaskStatus] of any currently executing delegated task.
      *
      * Updated atomically with [_activeTaskId].  Cleared alongside [_activeTaskId] by
@@ -1513,6 +1528,8 @@ class RuntimeController(
         // ReconciliationSignal kind: CANCELLED for cooperative cancel, FAILED for all others.
         // PR-62: Also set active task status to CANCELLING or FAILING before clearing state,
         // so any observer of activeTaskStatus sees the transitional state before it is cleared.
+        // PR-123: Capture dispatch plan ID before clearing active task state.
+        val planId = _activeTaskDispatchPlanId
         if (_activeTaskId == taskId) {
             _activeTaskStatus = if (cause == TakeoverFallbackEvent.Cause.CANCELLED)
                 ActiveTaskStatus.CANCELLING
@@ -1556,7 +1573,7 @@ class RuntimeController(
                     )
                 )
             }
-            emitReconciliationSignal(signal)
+            emitReconciliationSignal(signal.withDispatchPlanId(planId))
         }
     }
 
@@ -1758,6 +1775,7 @@ class RuntimeController(
         val previous = _activeTaskId
         _activeTaskId = null
         _activeTaskStatus = null
+        _activeTaskDispatchPlanId = null
         if (previous != null) {
             GalaxyLogger.log(
                 GalaxyLogger.TAG_LIVE_EXECUTION,
@@ -2304,12 +2322,17 @@ class RuntimeController(
      * may continue to call [recordDelegatedExecutionAccepted] directly.  New callers with
      * task identity should prefer this method.
      *
-     * @param taskId        Task identifier from the inbound dispatch envelope.
-     * @param correlationId Optional correlation identifier echoed from the originating request.
+     * @param taskId         Task identifier from the inbound dispatch envelope.
+     * @param correlationId  Optional correlation identifier echoed from the originating request.
+     * @param dispatchPlanId PR-123: Optional V2-issued distributed dispatch plan identifier.
+     *                       When non-null, forwarded to all subsequent task signals for this
+     *                       activation so V2 can classify the activation as
+     *                       [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.DISPATCH_PLAN_ANCHORED].
      */
     fun recordDelegatedTaskAccepted(
         taskId: String,
-        correlationId: String? = null
+        correlationId: String? = null,
+        dispatchPlanId: String? = null
     ) {
         recordDelegatedExecutionAccepted()
         // PR-62: Set active task state so the live execution surface tracks the in-flight task.
@@ -2317,6 +2340,8 @@ class RuntimeController(
         // rather than silently losing the task from participant truth.
         _activeTaskId = taskId
         _activeTaskStatus = ActiveTaskStatus.RUNNING
+        // PR-123: Store dispatch plan ID so terminal signals carry the plan anchor.
+        _activeTaskDispatchPlanId = dispatchPlanId
         _isRemoteExecutionActive.value = true
         persistInflightRecoveryArtifact(taskId, ActiveTaskStatus.RUNNING)
         publishInflightContinuityRecovery(
@@ -2348,7 +2373,7 @@ class RuntimeController(
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_PARTIAL_FOR_FLOW
                 )
-            )
+            ).withDispatchPlanId(dispatchPlanId)
         )
     }
 
@@ -2367,6 +2392,8 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        // PR-123: Capture dispatch plan ID before clearing active task state.
+        val planId = _activeTaskDispatchPlanId
         // PR-62: Clear active task state on successful completion.
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "result")
@@ -2392,7 +2419,7 @@ class RuntimeController(
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
                 )
-            )
+            ).withDispatchPlanId(planId)
         )
     }
 
@@ -2417,6 +2444,8 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        // PR-123: Capture dispatch plan ID before clearing active task state.
+        val planId = _activeTaskDispatchPlanId
         // PR-62: Transition to CANCELLING state before emitting the signal so the
         // live execution surface reflects the in-progress cancellation.
         if (_activeTaskId == taskId) {
@@ -2447,7 +2476,7 @@ class RuntimeController(
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
                 )
-            )
+            ).withDispatchPlanId(planId)
         )
     }
 
@@ -2861,6 +2890,8 @@ class RuntimeController(
         // DISABLE is excluded: stop() is a controlled teardown where callers are
         // expected to have already resolved task state.
         val interruptedTaskId = _activeTaskId
+        // PR-123: Capture dispatch plan ID before clearing active task state.
+        val interruptedTaskPlanId = _activeTaskDispatchPlanId
         if (interruptedTaskId != null &&
             (cause == AttachedRuntimeSession.DetachCause.DISCONNECT ||
                 cause == AttachedRuntimeSession.DetachCause.INVALIDATION)
@@ -2897,7 +2928,7 @@ class RuntimeController(
                             resultConvergenceDecision =
                                 AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
                         )
-                    )
+                    ).withDispatchPlanId(interruptedTaskPlanId)
                 )
             }
         }

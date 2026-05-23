@@ -74,6 +74,12 @@ import java.security.MessageDigest
  * @property durableSessionId Stable activation-era session identifier, when available.
  * @property sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId], when
  *                                  available.
+ * @property dispatchPlanId  V2-issued distributed dispatch plan identifier, when available.
+ *                           Populated by [RuntimeController.recordDelegatedTaskAccepted] when
+ *                           the originating dispatch envelope carries a plan ID.  Non-null values
+ *                           enable V2 to classify this activation as
+ *                           [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.DISPATCH_PLAN_ANCHORED]
+ *                           for stricter distributed execution verification.
  */
 data class ReconciliationSignal(
     val kind: Kind,
@@ -87,7 +93,8 @@ data class ReconciliationSignal(
     val emittedAtMs: Long,
     val reconciliationEpoch: Int,
     val durableSessionId: String? = null,
-    val sessionContinuityEpoch: Int? = null
+    val sessionContinuityEpoch: Int? = null,
+    val dispatchPlanId: String? = null
 ) {
 
     /**
@@ -248,6 +255,28 @@ data class ReconciliationSignal(
             runtimeTruth = runtimeTruth?.toMap()
         )
 
+    /**
+     * PR-123 — Returns a copy of this signal with [dispatchPlanId] set to [planId].
+     *
+     * Use this helper to attach a V2-issued dispatch plan identifier to a signal that was
+     * created before the plan ID was known.  Callers that already have the plan ID at signal
+     * construction time should prefer passing [dispatchPlanId] directly to the factory methods
+     * ([taskAccepted], [taskResult], [taskCancelled], [taskFailed]) instead.
+     *
+     * When [planId] is non-null, the corresponding payload entry [KEY_DISPATCH_PLAN_ID] is
+     * also updated so the wire map stays consistent with the [dispatchPlanId] field.
+     *
+     * @param planId  V2-issued dispatch plan identifier; null clears any previously set value.
+     */
+    fun withDispatchPlanId(planId: String?): ReconciliationSignal {
+        val updatedPayload = if (planId != null) {
+            payload + (KEY_DISPATCH_PLAN_ID to planId)
+        } else {
+            payload - KEY_DISPATCH_PLAN_ID
+        }
+        return copy(dispatchPlanId = planId, payload = updatedPayload)
+    }
+
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
@@ -355,6 +384,17 @@ data class ReconciliationSignal(
         /** Wire key for [sessionContinuityEpoch]. */
         const val KEY_SESSION_CONTINUITY_EPOCH =
             DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH
+
+        /**
+         * Wire key for [dispatchPlanId].
+         *
+         * Present in task-bearing [ReconciliationSignal] payloads when the Android-side
+         * activation was tagged with a V2-issued distributed dispatch plan identifier.
+         * Absence means [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.TASK_IDENTITY_ONLY]
+         * (or weaker); presence means [DISPATCH_PLAN_ANCHORED] and enables V2 to enforce
+         * stricter plan-level binding verification.
+         */
+        const val KEY_DISPATCH_PLAN_ID = "dispatch_plan_id"
 
         /** Payload key for [stableDedupeKey]. */
         const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
