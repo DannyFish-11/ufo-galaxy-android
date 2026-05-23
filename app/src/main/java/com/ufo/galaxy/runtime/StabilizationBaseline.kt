@@ -2729,6 +2729,61 @@ object StabilizationBaseline {
                 "in AndroidMinimalRuntimeAccessChainContract with CANONICAL_PRODUCTION. " +
                 "Test: Pr121AndroidCanonicalTransportPathBoundaryContractTest.",
             introducedPr = 121
+        ),
+
+        // ── PR-122: Android runtime emission truth semantics ─────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-runtime-emission-truth-semantics",
+            displayName = "AndroidRuntimeEmissionTruthSemantics",
+            packagePath = "com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-122 — Android runtime emission truth semantics contract. " +
+                "Classifies each Android terminal or non-terminal signal emission into structured " +
+                "ExecutionContinuityClass (FRESH_EXECUTION/RESUMED_EXECUTION/RECOVERED_EXECUTION/ " +
+                "RECOVERY_ATTEMPTED_NO_RECOVERY/DEGRADED_FALLBACK_EXECUTION) and " +
+                "TerminalEmissionClass (TERMINAL_COMPLETION/RESUMED_TERMINAL_COMPLETION/ " +
+                "RECOVERED_TERMINAL_COMPLETION/NON_TERMINAL_EMISSION/NOT_APPLICABLE). " +
+                "derive() maps (recoveryPhase, isContinuation, interruptionReason, isTerminal, " +
+                "deliveryDisposition, resultConvergenceDecision) → EmissionTruth. " +
+                "DeliveryDisposition (DIRECT_SENT/OFFLINE_QUEUED/REPLAYED/LOCAL_SIGNAL_EMITTED) " +
+                "prevents replayed or offline-queued signals from being classified as fresh. " +
+                "toPayloadMap() produces execution_continuity_class/terminal_emission_class/ " +
+                "terminal_delivery_disposition/result_convergence_decision wire fields. " +
+                "Stage 5 completion and runtime truth tightening for V2 downstream interpretation. " +
+                "Test: Pr122AndroidRuntimeEmissionTruthSemanticsTest.",
+            introducedPr = 122
+        ),
+
+        // ── PR-123: Android V2 distributed activation compatibility contract ──
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-v2-distributed-activation-compatibility-contract",
+            displayName = "AndroidV2DistributedActivationCompatibilityContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidV2DistributedActivationCompatibilityContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "Stage 6 / PR-123 — Android-side V2 distributed execution activation compatibility. " +
+                "Adds dispatchPlanId field to ReconciliationSignal and all task lifecycle factory " +
+                "methods (taskAccepted/taskResult/taskCancelled/taskFailed/taskStatusUpdate). " +
+                "RuntimeController stores _activeTaskDispatchPlanId from inbound dispatch envelope " +
+                "at recordDelegatedTaskAccepted() and forwards it to all subsequent task lifecycle " +
+                "signals (RESULT/CANCELLED/FAILED/STATUS_UPDATE) in the same activation span, " +
+                "including session-interrupted TASK_FAILED from closeAttachedSession(). " +
+                "ActivationIdentityClass (4 values: FULL_PLAN_IDENTITY/TASK_AND_PARTICIPANT_IDENTITY/" +
+                "TASK_IDENTITY_ONLY/INSUFFICIENT_IDENTITY) classifies signal correlation tier. " +
+                "classify() maps (kind, taskId, participantId, dispatchPlanId) → class. " +
+                "KEY_DISPATCH_PLAN_ID_IN_RECONCILIATION aliases ReconciliationSignal.KEY_DISPATCH_PLAN_ID. " +
+                "KEY_ACTIVATION_IDENTITY_CLASS provides V2 correlation routing hint. " +
+                "V2_DISTRIBUTED_ACTIVATION_ALIGNMENT_MAP maps each class to its V2 path. " +
+                "DISTRIBUTED_ACTIVATION_INVARIANTS (6 items) prevent: dispatch_plan_id suppression, " +
+                "activation span discontinuity, fabricated plan IDs, non-task signals being " +
+                "correlated as FULL_PLAN_IDENTITY, and payload/field divergence. " +
+                "Test: Pr123AndroidV2DistributedActivationCompatibilityContractTest.",
+            introducedPr = 123
         )
     )
 

@@ -65,6 +65,13 @@ import java.security.MessageDigest
  * @property participantId    Stable participant node identifier for routing by V2.
  * @property taskId           Task this signal belongs to; null for participant-state signals.
  * @property correlationId    Optional correlation identifier echoed from the originating request.
+ * @property dispatchPlanId   Optional V2 distributed execution dispatch plan identifier echoed from
+ *                            the originating [com.ufo.galaxy.protocol.GoalExecutionPayload] or
+ *                            [com.ufo.galaxy.agent.TakeoverRequestEnvelope].  When present,
+ *                            V2's stricter distributed execution activation path can correlate
+ *                            this signal back to the originating dispatch plan record without
+ *                            inference from raw task/correlation IDs alone.  Null for legacy
+ *                            senders or participant-state / snapshot signals.
  * @property status           Wire-level status string; matches [AndroidSessionContribution] status constants.
  * @property payload          Optional free-form payload map carrying signal-specific fields.
  * @property runtimeTruth     Populated only for [Kind.RUNTIME_TRUTH_SNAPSHOT] signals.
@@ -80,6 +87,7 @@ data class ReconciliationSignal(
     val participantId: String,
     val taskId: String?,
     val correlationId: String?,
+    val dispatchPlanId: String? = null,
     val status: String,
     val payload: Map<String, Any?> = emptyMap(),
     val runtimeTruth: AndroidParticipantRuntimeTruth? = null,
@@ -265,6 +273,17 @@ data class ReconciliationSignal(
 
         /** Wire key for [correlationId]; absent when null. */
         const val KEY_CORRELATION_ID = "reconciliation_correlation_id"
+
+        /**
+         * Wire key for [dispatchPlanId]; absent when null.
+         *
+         * Present on task lifecycle signals (TASK_ACCEPTED, TASK_STATUS_UPDATE, TASK_RESULT,
+         * TASK_CANCELLED, TASK_FAILED) when the originating inbound dispatch envelope carried
+         * a V2 dispatch plan identifier.  V2's stricter distributed execution activation path
+         * uses this key to correlate the Android task lifecycle stream back to the originating
+         * dispatch plan record without relying on field-combination inference.
+         */
+        const val KEY_DISPATCH_PLAN_ID = "reconciliation_dispatch_plan_id"
 
         /** Wire key for [status]. */
         const val KEY_STATUS = "reconciliation_status"
@@ -637,6 +656,9 @@ data class ReconciliationSignal(
          * @param participantId Stable participant node identifier.
          * @param taskId        Task identifier from the inbound dispatch envelope.
          * @param correlationId Correlation identifier from the inbound envelope.
+         * @param dispatchPlanId Optional V2 distributed execution dispatch plan ID echoed
+         *                       from the inbound dispatch envelope; enables V2's stricter
+         *                       distributed activation to correlate this signal.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
          * @param durableSessionId Stable activation-era session identifier, when available.
@@ -647,6 +669,7 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            dispatchPlanId: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
@@ -657,13 +680,16 @@ data class ReconciliationSignal(
             participantId = participantId,
             taskId = taskId,
             correlationId = correlationId,
+            dispatchPlanId = dispatchPlanId,
             status = STATUS_RUNNING,
             payload = closureSemanticsPayload(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
+                additionalPayload = if (!dispatchPlanId.isNullOrBlank()) {
+                    additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
+                } else additionalPayload
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -678,6 +704,8 @@ data class ReconciliationSignal(
          * @param participantId Stable participant node identifier.
          * @param taskId        Task identifier of the cancelled task.
          * @param correlationId Correlation identifier from the originating request.
+         * @param dispatchPlanId Optional V2 distributed execution dispatch plan ID; when present
+         *                       V2 can close the dispatch plan record without field-combination inference.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
          * @param durableSessionId Stable activation-era session identifier, when available.
@@ -688,6 +716,7 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            dispatchPlanId: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
@@ -698,13 +727,16 @@ data class ReconciliationSignal(
             participantId = participantId,
             taskId = taskId,
             correlationId = correlationId,
+            dispatchPlanId = dispatchPlanId,
             status = STATUS_CANCELLED,
             payload = closureSemanticsPayload(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
+                additionalPayload = if (!dispatchPlanId.isNullOrBlank()) {
+                    additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
+                } else additionalPayload
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -719,6 +751,8 @@ data class ReconciliationSignal(
          * @param participantId Stable participant node identifier.
          * @param taskId        Task identifier of the failed task.
          * @param correlationId Correlation identifier from the originating request.
+         * @param dispatchPlanId Optional V2 distributed execution dispatch plan ID; when present
+         *                       V2 can close the dispatch plan record without field-combination inference.
          * @param errorDetail   Optional human-readable error detail.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
@@ -730,6 +764,7 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            dispatchPlanId: String? = null,
             errorDetail: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
@@ -737,12 +772,15 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
+            val enrichedAdditional = if (!dispatchPlanId.isNullOrBlank()) {
+                additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
+            } else additionalPayload
             val payload = closureSemanticsPayload(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
+                additionalPayload = enrichedAdditional
             ).toMutableMap().apply {
                 errorDetail?.let { put("error_detail", it) }
             }
@@ -751,6 +789,7 @@ data class ReconciliationSignal(
                 participantId = participantId,
                 taskId = taskId,
                 correlationId = correlationId,
+                dispatchPlanId = dispatchPlanId,
                 status = STATUS_FAILED,
                 payload = payload,
                 signalId = signalId,
@@ -767,6 +806,8 @@ data class ReconciliationSignal(
          * @param participantId Stable participant node identifier.
          * @param taskId        Task identifier of the completed task.
          * @param correlationId Correlation identifier from the originating request.
+         * @param dispatchPlanId Optional V2 distributed execution dispatch plan ID; when present
+         *                       V2 can close the dispatch plan record without field-combination inference.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
          * @param durableSessionId Stable activation-era session identifier, when available.
@@ -777,6 +818,7 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            dispatchPlanId: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
@@ -787,13 +829,16 @@ data class ReconciliationSignal(
             participantId = participantId,
             taskId = taskId,
             correlationId = correlationId,
+            dispatchPlanId = dispatchPlanId,
             status = STATUS_SUCCESS,
             payload = closureSemanticsPayload(
                 isTerminalSignal = true,
                 resultReturned = true,
                 completionSignaled = true,
                 closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
+                additionalPayload = if (!dispatchPlanId.isNullOrBlank()) {
+                    additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
+                } else additionalPayload
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -811,6 +856,8 @@ data class ReconciliationSignal(
          * @param participantId Stable participant node identifier.
          * @param taskId        Task identifier of the in-progress task.
          * @param correlationId Correlation identifier from the originating request.
+         * @param dispatchPlanId Optional V2 distributed execution dispatch plan ID; when present
+         *                       V2 can correlate this progress update to the originating dispatch plan.
          * @param progressDetail Optional human-readable description of the current progress step.
          * @param signalId      Unique signal identifier for deduplication.
          * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
@@ -822,6 +869,7 @@ data class ReconciliationSignal(
             participantId: String,
             taskId: String,
             correlationId: String? = null,
+            dispatchPlanId: String? = null,
             progressDetail: String? = null,
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
@@ -829,12 +877,15 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
+            val enrichedAdditional = if (!dispatchPlanId.isNullOrBlank()) {
+                additionalPayload + mapOf(KEY_DISPATCH_PLAN_ID to dispatchPlanId)
+            } else additionalPayload
             val payload = closureSemanticsPayload(
                 isTerminalSignal = false,
                 resultReturned = false,
                 completionSignaled = false,
                 closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
+                additionalPayload = enrichedAdditional
             ).toMutableMap().apply {
                 progressDetail?.let { put("progress_detail", it) }
             }
@@ -843,6 +894,7 @@ data class ReconciliationSignal(
                 participantId = participantId,
                 taskId = taskId,
                 correlationId = correlationId,
+                dispatchPlanId = dispatchPlanId,
                 status = STATUS_IN_PROGRESS,
                 payload = payload,
                 signalId = signalId,

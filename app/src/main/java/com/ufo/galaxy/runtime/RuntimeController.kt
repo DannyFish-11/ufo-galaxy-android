@@ -728,6 +728,23 @@ class RuntimeController(
     @Volatile
     private var _activeTaskStatus: ActiveTaskStatus? = null
 
+    /**
+     * Stage 6 / PR-123 — Tracks the V2 distributed execution dispatch plan ID for any
+     * currently executing delegated task.
+     *
+     * Set alongside [_activeTaskId] by [recordDelegatedTaskAccepted] when the inbound
+     * dispatch envelope provides a dispatch_plan_id.  Automatically forwarded into all
+     * subsequent task lifecycle [ReconciliationSignal] emissions (TASK_STATUS_UPDATE,
+     * TASK_RESULT, TASK_CANCELLED, TASK_FAILED) so V2's stricter distributed execution
+     * activation path can correlate them to the originating dispatch plan record without
+     * field-combination inference.
+     *
+     * `null` when no task is active, or when the originating sender did not supply a
+     * dispatch_plan_id (pre-PR-48 / legacy callers).
+     */
+    @Volatile
+    private var _activeTaskDispatchPlanId: String? = null
+
     private val authoritativeParticipationTracker =
         AndroidAuthoritativeParticipationTruth.Tracker()
 
@@ -1520,6 +1537,8 @@ class RuntimeController(
                 ActiveTaskStatus.FAILING
         }
         // PR-62: Clear active task state after setting the terminal status transition.
+        // Stage 6 / PR-123: capture the dispatch plan ID before clearActiveTaskState() nulls it.
+        val dispatchPlanId = _activeTaskDispatchPlanId
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = cause.wireValue)
         _isRemoteExecutionActive.value = false
@@ -1532,6 +1551,7 @@ class RuntimeController(
                 ReconciliationSignal.taskCancelled(
                     participantId = pid,
                     taskId = taskId,
+                    dispatchPlanId = dispatchPlanId,
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
                     sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -1545,6 +1565,7 @@ class RuntimeController(
                 ReconciliationSignal.taskFailed(
                     participantId = pid,
                     taskId = taskId,
+                    dispatchPlanId = dispatchPlanId,
                     errorDetail = "${cause.wireValue}: $reason",
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
@@ -1758,6 +1779,7 @@ class RuntimeController(
         val previous = _activeTaskId
         _activeTaskId = null
         _activeTaskStatus = null
+        _activeTaskDispatchPlanId = null
         if (previous != null) {
             GalaxyLogger.log(
                 GalaxyLogger.TAG_LIVE_EXECUTION,
@@ -2306,10 +2328,17 @@ class RuntimeController(
      *
      * @param taskId        Task identifier from the inbound dispatch envelope.
      * @param correlationId Optional correlation identifier echoed from the originating request.
+     * @param dispatchPlanId Optional V2 distributed execution dispatch plan ID echoed from the
+     *                       inbound dispatch envelope ([GoalExecutionPayload.dispatch_plan_id] or
+     *                       [TakeoverRequestEnvelope.dispatch_plan_id]).  When supplied it is
+     *                       stored in [_activeTaskDispatchPlanId] and forwarded to all subsequent
+     *                       task lifecycle [ReconciliationSignal] emissions for this task so V2's
+     *                       stricter distributed activation path can correlate them without inference.
      */
     fun recordDelegatedTaskAccepted(
         taskId: String,
-        correlationId: String? = null
+        correlationId: String? = null,
+        dispatchPlanId: String? = null
     ) {
         recordDelegatedExecutionAccepted()
         // PR-62: Set active task state so the live execution surface tracks the in-flight task.
@@ -2317,6 +2346,9 @@ class RuntimeController(
         // rather than silently losing the task from participant truth.
         _activeTaskId = taskId
         _activeTaskStatus = ActiveTaskStatus.RUNNING
+        // Stage 6 / PR-123: store the dispatch plan ID so it can be forwarded to all
+        // subsequent task lifecycle signals (RESULT / CANCELLED / FAILED) automatically.
+        _activeTaskDispatchPlanId = dispatchPlanId?.takeIf { it.isNotBlank() }
         _isRemoteExecutionActive.value = true
         persistInflightRecoveryArtifact(taskId, ActiveTaskStatus.RUNNING)
         publishInflightContinuityRecovery(
@@ -2328,7 +2360,8 @@ class RuntimeController(
             mapOf(
                 "event" to "task_accepted",
                 "task_id" to taskId,
-                "participant_id" to (currentParticipantId() ?: "unknown")
+                "participant_id" to (currentParticipantId() ?: "unknown"),
+                "dispatch_plan_id" to (_activeTaskDispatchPlanId ?: "")
             )
         )
         val pid = currentParticipantId() ?: run {
@@ -2340,6 +2373,7 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                dispatchPlanId = _activeTaskDispatchPlanId,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -2360,6 +2394,10 @@ class RuntimeController(
      * pipeline state on receipt.  The terminal session-truth record is closed separately
      * by the [AndroidSessionContribution.Kind.FINAL_COMPLETION] contribution.
      *
+     * The [dispatchPlanId] stored by [recordDelegatedTaskAccepted] is automatically forwarded
+     * into the emitted [ReconciliationSignal] so V2's stricter distributed execution activation
+     * path can close the dispatch plan record without field-combination inference (Stage 6).
+     *
      * @param taskId        Task identifier of the completed task.
      * @param correlationId Optional correlation identifier from the originating request.
      */
@@ -2367,6 +2405,8 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        // Stage 6 / PR-123: capture the dispatch plan ID before clearActiveTaskState() nulls it.
+        val dispatchPlanId = _activeTaskDispatchPlanId
         // PR-62: Clear active task state on successful completion.
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "result")
@@ -2384,6 +2424,7 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                dispatchPlanId = dispatchPlanId,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -2410,6 +2451,10 @@ class RuntimeController(
      * emitting the signal, so observers of [activeTaskStatus] see the cancelling state
      * before the task is removed.
      *
+     * The [dispatchPlanId] stored by [recordDelegatedTaskAccepted] is automatically forwarded
+     * into the emitted [ReconciliationSignal] so V2's stricter distributed execution activation
+     * path can correlate the cancellation to the originating dispatch plan (Stage 6).
+     *
      * @param taskId        Task identifier of the cancelled task.
      * @param correlationId Optional correlation identifier from the originating request.
      */
@@ -2417,6 +2462,8 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        // Stage 6 / PR-123: capture the dispatch plan ID before clearActiveTaskState() nulls it.
+        val dispatchPlanId = _activeTaskDispatchPlanId
         // PR-62: Transition to CANCELLING state before emitting the signal so the
         // live execution surface reflects the in-progress cancellation.
         if (_activeTaskId == taskId) {
@@ -2439,6 +2486,7 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                dispatchPlanId = dispatchPlanId,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
@@ -2504,6 +2552,7 @@ class RuntimeController(
                 participantId = pid,
                 taskId = taskId,
                 correlationId = correlationId,
+                dispatchPlanId = _activeTaskDispatchPlanId,
                 progressDetail = progressDetail,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
@@ -2865,6 +2914,8 @@ class RuntimeController(
             (cause == AttachedRuntimeSession.DetachCause.DISCONNECT ||
                 cause == AttachedRuntimeSession.DetachCause.INVALIDATION)
         ) {
+            // Stage 6 / PR-123: capture before clearActiveTaskState() nulls it.
+            val interruptedDispatchPlanId = _activeTaskDispatchPlanId
             GalaxyLogger.log(
                 GalaxyLogger.TAG_LIVE_EXECUTION,
                 mapOf(
@@ -2888,6 +2939,7 @@ class RuntimeController(
                     ReconciliationSignal.taskFailed(
                         participantId = pid,
                         taskId = interruptedTaskId,
+                        dispatchPlanId = interruptedDispatchPlanId,
                         errorDetail = "session_interrupted: ${cause.wireValue}",
                         reconciliationEpoch = nextReconciliationEpoch(),
                         durableSessionId = currentDurableSessionId(),
