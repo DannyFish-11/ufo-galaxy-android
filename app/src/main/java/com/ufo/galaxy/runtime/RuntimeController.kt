@@ -1534,7 +1534,12 @@ class RuntimeController(
                     taskId = taskId,
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
-                    sessionContinuityEpoch = currentSessionContinuityEpoch()
+                    sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                    additionalPayload = currentSignalEmissionTruthPayload(
+                        isTerminal = true,
+                        resultConvergenceDecision =
+                            AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
+                    )
                 )
             } else {
                 ReconciliationSignal.taskFailed(
@@ -1543,7 +1548,12 @@ class RuntimeController(
                     errorDetail = "${cause.wireValue}: $reason",
                     reconciliationEpoch = nextReconciliationEpoch(),
                     durableSessionId = currentDurableSessionId(),
-                    sessionContinuityEpoch = currentSessionContinuityEpoch()
+                    sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                    additionalPayload = currentSignalEmissionTruthPayload(
+                        isTerminal = true,
+                        resultConvergenceDecision =
+                            AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
+                    )
                 )
             }
             emitReconciliationSignal(signal)
@@ -2332,7 +2342,12 @@ class RuntimeController(
                 correlationId = correlationId,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
-                sessionContinuityEpoch = currentSessionContinuityEpoch()
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                additionalPayload = currentSignalEmissionTruthPayload(
+                    isTerminal = false,
+                    resultConvergenceDecision =
+                        AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_PARTIAL_FOR_FLOW
+                )
             )
         )
     }
@@ -2371,7 +2386,12 @@ class RuntimeController(
                 correlationId = correlationId,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
-                sessionContinuityEpoch = currentSessionContinuityEpoch()
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                additionalPayload = currentSignalEmissionTruthPayload(
+                    isTerminal = true,
+                    resultConvergenceDecision =
+                        AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
+                )
             )
         )
     }
@@ -2421,7 +2441,12 @@ class RuntimeController(
                 correlationId = correlationId,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
-                sessionContinuityEpoch = currentSessionContinuityEpoch()
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                additionalPayload = currentSignalEmissionTruthPayload(
+                    isTerminal = true,
+                    resultConvergenceDecision =
+                        AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
+                )
             )
         )
     }
@@ -2482,9 +2507,35 @@ class RuntimeController(
                 progressDetail = progressDetail,
                 reconciliationEpoch = nextReconciliationEpoch(),
                 durableSessionId = currentDurableSessionId(),
-                sessionContinuityEpoch = currentSessionContinuityEpoch()
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                additionalPayload = currentSignalEmissionTruthPayload(
+                    isTerminal = false,
+                    resultConvergenceDecision =
+                        AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_PARTIAL_FOR_FLOW
+                )
             )
         )
+    }
+
+    private fun currentSignalEmissionTruthPayload(
+        isTerminal: Boolean,
+        resultConvergenceDecision: String? = null
+    ): Map<String, Any?> {
+        val phase = unifiedRecoveryPhase.value
+        val inflightRecovery = inflightContinuityRecovery.value
+        return AndroidRuntimeEmissionTruthSemantics.derive(
+            recoveryPhase = phase,
+            isContinuation =
+                phase != AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY,
+            interruptionReason = inflightRecovery.source.takeIf {
+                phase != AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY
+            },
+            isTerminal = isTerminal,
+            deliveryDisposition = AndroidRuntimeEmissionTruthSemantics
+                .DeliveryDisposition
+                .LOCAL_SIGNAL_EMITTED,
+            resultConvergenceDecision = resultConvergenceDecision
+        ).toPayloadMap()
     }
 
     /**
@@ -2548,7 +2599,8 @@ class RuntimeController(
                 truth,
                 durableSessionId = currentDurableSessionId(),
                 sessionContinuityEpoch = currentSessionContinuityEpoch(),
-                v2RoutingDecision = routingDecision
+                v2RoutingDecision = routingDecision,
+                additionalPayload = currentSignalEmissionTruthPayload(isTerminal = false)
             )
         )
     }
@@ -2773,7 +2825,8 @@ class RuntimeController(
                         idleTruth,
                         durableSessionId = currentDurableSessionId(),
                         sessionContinuityEpoch = currentSessionContinuityEpoch(),
-                        v2RoutingDecision = routingDecision
+                        v2RoutingDecision = routingDecision,
+                        additionalPayload = currentSignalEmissionTruthPayload(isTerminal = false)
                     )
                 )
                 GalaxyLogger.log(
@@ -2838,7 +2891,12 @@ class RuntimeController(
                         errorDetail = "session_interrupted: ${cause.wireValue}",
                         reconciliationEpoch = nextReconciliationEpoch(),
                         durableSessionId = currentDurableSessionId(),
-                        sessionContinuityEpoch = currentSessionContinuityEpoch()
+                        sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                        additionalPayload = currentSignalEmissionTruthPayload(
+                            isTerminal = true,
+                            resultConvergenceDecision =
+                                AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_FINAL_FOR_FLOW
+                        )
                     )
                 )
             }

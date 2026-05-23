@@ -621,6 +621,28 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     }
 
     @Test
+    fun `publishTaskStatusUpdate in recovering state reports resumed in progress semantics`() = runBlocking {
+        val (controller, _) = buildController(buildDescriptor())
+        controller.setActiveForTest()
+        controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
+        controller.publishTaskStatusUpdate("task-su-recovering", progressDetail = "rebind")
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.RESUMED_EXECUTION.wireValue,
+            signal!!.payload[ReconciliationSignal.KEY_EXECUTION_CONTINUITY_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.TerminalEmissionClass.ACTIVE_IN_PROGRESS.wireValue,
+            signal.payload[ReconciliationSignal.KEY_TERMINAL_EMISSION_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.LOCAL_SIGNAL_EMITTED.wireValue,
+            signal.payload[ReconciliationSignal.KEY_TERMINAL_DELIVERY_DISPOSITION]
+        )
+    }
+
+    @Test
     fun `publishTaskStatusUpdate emitted signal payload does not contain progress_detail when omitted`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
@@ -790,6 +812,14 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         assertEquals(
             AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY.wireValue,
             snapshotSignal.payload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.FRESH_EXECUTION.wireValue,
+            snapshotSignal.payload[ReconciliationSignal.KEY_EXECUTION_CONTINUITY_CLASS]
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.TerminalEmissionClass.ACTIVE_IN_PROGRESS.wireValue,
+            snapshotSignal.payload[ReconciliationSignal.KEY_TERMINAL_EMISSION_CLASS]
         )
     }
 
