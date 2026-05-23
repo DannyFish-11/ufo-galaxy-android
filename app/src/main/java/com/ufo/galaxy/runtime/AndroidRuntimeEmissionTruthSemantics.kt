@@ -18,6 +18,9 @@ object AndroidRuntimeEmissionTruthSemantics {
     const val KEY_EXECUTION_CONTINUITY_CLASS = "execution_continuity_class"
     const val KEY_TERMINAL_EMISSION_CLASS = "terminal_emission_class"
     const val KEY_TERMINAL_DELIVERY_DISPOSITION = "terminal_delivery_disposition"
+    const val KEY_LOCAL_RUNTIME_STATE_CLASS = "local_runtime_state_class"
+    const val KEY_EXTERNAL_DELIVERY_STATE = "external_delivery_state"
+    const val KEY_EXTERNAL_PROPAGATION_STATE = "external_propagation_state"
     const val KEY_RESULT_CONVERGENCE_DECISION = "result_convergence_decision"
     const val KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION = "runtime_emission_truth_schema_version"
 
@@ -47,20 +50,74 @@ object AndroidRuntimeEmissionTruthSemantics {
         DUPLICATE_SUPPRESSED("duplicate_suppressed")
     }
 
+    enum class LocalRuntimeStateClass(val wireValue: String) {
+        LOCALLY_OBSERVED_STATE("locally_observed_state"),
+        LOCALLY_COMPLETED_STATE("locally_completed_state")
+    }
+
+    enum class ExternalDeliveryState(val wireValue: String) {
+        NOT_EXTERNALLY_DELIVERED("not_externally_delivered"),
+        DELIVERED_TO_TRANSPORT("delivered_to_transport"),
+        QUEUED_FOR_EXTERNAL_DELIVERY("queued_for_external_delivery"),
+        EXTERNAL_DELIVERY_FAILED("external_delivery_failed")
+    }
+
+    enum class ExternalPropagationState(val wireValue: String) {
+        NOT_PROPAGATED_EXTERNALLY("not_propagated_externally"),
+        PROPAGATED_UNCONFIRMED("propagated_unconfirmed"),
+        EXTERNALLY_CONFIRMED("externally_confirmed")
+    }
+
     data class TruthSnapshot(
         val executionContinuityClass: ExecutionContinuityClass,
         val terminalEmissionClass: TerminalEmissionClass,
         val deliveryDisposition: DeliveryDisposition,
+        val localRuntimeStateClass: LocalRuntimeStateClass,
+        val externalDeliveryState: ExternalDeliveryState,
+        val externalPropagationState: ExternalPropagationState,
         val resultConvergenceDecision: String? = null
     ) {
         fun toPayloadMap(): Map<String, Any?> = buildMap {
             put(KEY_EXECUTION_CONTINUITY_CLASS, executionContinuityClass.wireValue)
             put(KEY_TERMINAL_EMISSION_CLASS, terminalEmissionClass.wireValue)
             put(KEY_TERMINAL_DELIVERY_DISPOSITION, deliveryDisposition.wireValue)
+            put(KEY_LOCAL_RUNTIME_STATE_CLASS, localRuntimeStateClass.wireValue)
+            put(KEY_EXTERNAL_DELIVERY_STATE, externalDeliveryState.wireValue)
+            put(KEY_EXTERNAL_PROPAGATION_STATE, externalPropagationState.wireValue)
             resultConvergenceDecision?.let {
                 put(KEY_RESULT_CONVERGENCE_DECISION, it)
             }
             put(KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION, SCHEMA_VERSION)
+        }
+
+        fun withDeliveryDisposition(deliveryDisposition: DeliveryDisposition): TruthSnapshot =
+            fromDerivedState(
+                executionContinuityClass = executionContinuityClass,
+                isTerminal = localRuntimeStateClass == LocalRuntimeStateClass.LOCALLY_COMPLETED_STATE,
+                deliveryDisposition = deliveryDisposition,
+                resultConvergenceDecision = resultConvergenceDecision
+            )
+
+        companion object {
+            fun fromPayload(
+                payload: Map<String, Any?>,
+                isTerminal: Boolean
+            ): TruthSnapshot? {
+                val continuityClass = payload[KEY_EXECUTION_CONTINUITY_CLASS]
+                    ?.toString()
+                    ?.let(::parseExecutionContinuityClass)
+                    ?: return null
+                val deliveryDisposition = payload[KEY_TERMINAL_DELIVERY_DISPOSITION]
+                    ?.toString()
+                    ?.let(::parseDeliveryDisposition)
+                    ?: DeliveryDisposition.LOCAL_SIGNAL_EMITTED
+                return fromDerivedState(
+                    executionContinuityClass = continuityClass,
+                    isTerminal = isTerminal,
+                    deliveryDisposition = deliveryDisposition,
+                    resultConvergenceDecision = payload[KEY_RESULT_CONVERGENCE_DECISION]?.toString()
+                )
+            }
         }
     }
 
@@ -92,29 +149,90 @@ object AndroidRuntimeEmissionTruthSemantics {
                 ExecutionContinuityClass.FRESH_EXECUTION
         }
 
-        val terminalClass = when {
-            !isTerminal ->
-                TerminalEmissionClass.ACTIVE_IN_PROGRESS
-            deliveryDisposition == DeliveryDisposition.REPLAYED_FORWARDED ->
-                TerminalEmissionClass.REPLAYED_TERMINAL_COMPLETION
-            continuityClass == ExecutionContinuityClass.RECOVERED_EXECUTION ->
-                TerminalEmissionClass.RECOVERED_TERMINAL_COMPLETION
-            continuityClass == ExecutionContinuityClass.RESUMED_EXECUTION ->
-                TerminalEmissionClass.RESUMED_TERMINAL_COMPLETION
-            continuityClass == ExecutionContinuityClass.DEGRADED_CONTINUITY ||
-                deliveryDisposition == DeliveryDisposition.OFFLINE_QUEUED ||
-                deliveryDisposition == DeliveryDisposition.SEND_FAILED ||
-                deliveryDisposition == DeliveryDisposition.DUPLICATE_SUPPRESSED ->
-                TerminalEmissionClass.DEGRADED_TERMINAL_OUTPUT
-            else ->
-                TerminalEmissionClass.TERMINAL_COMPLETION
-        }
-
-        return TruthSnapshot(
+        return fromDerivedState(
             executionContinuityClass = continuityClass,
-            terminalEmissionClass = terminalClass,
+            isTerminal = isTerminal,
             deliveryDisposition = deliveryDisposition,
             resultConvergenceDecision = resultConvergenceDecision
         )
     }
+
+    private fun fromDerivedState(
+        executionContinuityClass: ExecutionContinuityClass,
+        isTerminal: Boolean,
+        deliveryDisposition: DeliveryDisposition,
+        resultConvergenceDecision: String?
+    ): TruthSnapshot = TruthSnapshot(
+        executionContinuityClass = executionContinuityClass,
+        terminalEmissionClass = deriveTerminalEmissionClass(
+            executionContinuityClass = executionContinuityClass,
+            isTerminal = isTerminal,
+            deliveryDisposition = deliveryDisposition
+        ),
+        deliveryDisposition = deliveryDisposition,
+        localRuntimeStateClass = if (isTerminal) {
+            LocalRuntimeStateClass.LOCALLY_COMPLETED_STATE
+        } else {
+            LocalRuntimeStateClass.LOCALLY_OBSERVED_STATE
+        },
+        externalDeliveryState = deriveExternalDeliveryState(deliveryDisposition),
+        externalPropagationState = deriveExternalPropagationState(deliveryDisposition),
+        resultConvergenceDecision = resultConvergenceDecision
+    )
+
+    private fun deriveTerminalEmissionClass(
+        executionContinuityClass: ExecutionContinuityClass,
+        isTerminal: Boolean,
+        deliveryDisposition: DeliveryDisposition
+    ): TerminalEmissionClass = when {
+        !isTerminal ->
+            TerminalEmissionClass.ACTIVE_IN_PROGRESS
+        deliveryDisposition == DeliveryDisposition.REPLAYED_FORWARDED ->
+            TerminalEmissionClass.REPLAYED_TERMINAL_COMPLETION
+        executionContinuityClass == ExecutionContinuityClass.RECOVERED_EXECUTION ->
+            TerminalEmissionClass.RECOVERED_TERMINAL_COMPLETION
+        executionContinuityClass == ExecutionContinuityClass.RESUMED_EXECUTION ->
+            TerminalEmissionClass.RESUMED_TERMINAL_COMPLETION
+        executionContinuityClass == ExecutionContinuityClass.DEGRADED_CONTINUITY ||
+            deliveryDisposition == DeliveryDisposition.OFFLINE_QUEUED ||
+            deliveryDisposition == DeliveryDisposition.SEND_FAILED ||
+            deliveryDisposition == DeliveryDisposition.DUPLICATE_SUPPRESSED ->
+            TerminalEmissionClass.DEGRADED_TERMINAL_OUTPUT
+        else ->
+            TerminalEmissionClass.TERMINAL_COMPLETION
+    }
+
+    private fun deriveExternalDeliveryState(
+        deliveryDisposition: DeliveryDisposition
+    ): ExternalDeliveryState = when (deliveryDisposition) {
+        DeliveryDisposition.DIRECT_SENT,
+        DeliveryDisposition.REPLAYED_FORWARDED ->
+            ExternalDeliveryState.DELIVERED_TO_TRANSPORT
+        DeliveryDisposition.OFFLINE_QUEUED ->
+            ExternalDeliveryState.QUEUED_FOR_EXTERNAL_DELIVERY
+        DeliveryDisposition.SEND_FAILED ->
+            ExternalDeliveryState.EXTERNAL_DELIVERY_FAILED
+        DeliveryDisposition.LOCAL_SIGNAL_EMITTED,
+        DeliveryDisposition.DUPLICATE_SUPPRESSED ->
+            ExternalDeliveryState.NOT_EXTERNALLY_DELIVERED
+    }
+
+    private fun deriveExternalPropagationState(
+        deliveryDisposition: DeliveryDisposition
+    ): ExternalPropagationState = when (deliveryDisposition) {
+        DeliveryDisposition.DIRECT_SENT,
+        DeliveryDisposition.REPLAYED_FORWARDED ->
+            ExternalPropagationState.PROPAGATED_UNCONFIRMED
+        DeliveryDisposition.LOCAL_SIGNAL_EMITTED,
+        DeliveryDisposition.OFFLINE_QUEUED,
+        DeliveryDisposition.SEND_FAILED,
+        DeliveryDisposition.DUPLICATE_SUPPRESSED ->
+            ExternalPropagationState.NOT_PROPAGATED_EXTERNALLY
+    }
+
+    private fun parseExecutionContinuityClass(value: String): ExecutionContinuityClass? =
+        ExecutionContinuityClass.entries.firstOrNull { it.wireValue == value }
+
+    private fun parseDeliveryDisposition(value: String): DeliveryDisposition? =
+        DeliveryDisposition.entries.firstOrNull { it.wireValue == value }
 }

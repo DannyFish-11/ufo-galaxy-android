@@ -78,6 +78,18 @@ class ReconciliationSignalReliableReplayTest {
     )
 
     private fun toEnvelopeJson(signal: ReconciliationSignal): String {
+        return toEnvelopeJson(
+            signal = signal,
+            deliveryDisposition = AndroidRuntimeEmissionTruthSemantics
+                .DeliveryDisposition
+                .LOCAL_SIGNAL_EMITTED
+        )
+    }
+
+    private fun toEnvelopeJson(
+        signal: ReconciliationSignal,
+        deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+    ): String {
         val lineage = AndroidUplinkLineageMetadataContract.derive(
             executionIdentity = signal.taskId ?: signal.kind.wireValue,
             emissionIdentity = signal.signalId,
@@ -87,6 +99,10 @@ class ReconciliationSignalReliableReplayTest {
         )
         val ingress = AndroidGovernanceExecutionPolicyIngressContract
             .classifyReconciliation(signal.kind)
+        val emissionTruth = AndroidRuntimeEmissionTruthSemantics
+            .TruthSnapshot
+            .fromPayload(signal.payload, signal.isTerminal)
+            ?.withDeliveryDisposition(deliveryDisposition)
         val payload = ReconciliationSignalPayload(
             signal_id = signal.signalId,
             kind = signal.kind.wireValue,
@@ -99,9 +115,9 @@ class ReconciliationSignalReliableReplayTest {
             correlation_id = signal.correlationId,
             durable_session_id = signal.durableSessionId,
             session_continuity_epoch = signal.sessionContinuityEpoch,
-            payload = signal.payload + mapOf(
-                ReconciliationSignal.KEY_STABLE_DEDUPE_KEY to signal.stableDedupeKey
-            ),
+            payload = signal.payload +
+                (emissionTruth?.toPayloadMap() ?: emptyMap<String, Any?>()) +
+                mapOf(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY to signal.stableDedupeKey),
             runtime_truth = signal.runtimeTruth?.toMap(),
             uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
             uplink_lineage_execution_id = lineage.executionIdentity,
@@ -154,6 +170,91 @@ class ReconciliationSignalReliableReplayTest {
         assertEquals("durable-reliable", queued.sessionTag)
         assertEquals(0, queued.sessionEpoch)
         assertEquals(signal.stableDedupeKey, queued.dedupeKey)
+    }
+
+    @Test
+    fun `sendQueueableJsonWithDeliveryTruth sends reconciliation payload as direct transport delivery`() {
+        val client = buildClient()
+        val recordingSocket = RecordingWebSocket()
+        client.installWebSocketForTest(recordingSocket)
+        client.simulateConnected()
+        val signal = buildSignal(
+            taskId = "task-direct-truth",
+            signalId = "sig-direct-truth",
+            durableSessionId = "durable-reliable",
+            sessionEpoch = 0
+        )
+
+        val disposition = client.sendQueueableJsonWithDeliveryTruth(MsgType.RECONCILIATION_SIGNAL) {
+            toEnvelopeJson(signal, it)
+        }
+
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT,
+            disposition
+        )
+        val payload = reconciliationEnvelopes(recordingSocket).single()
+            .getAsJsonObject("payload")
+            .getAsJsonObject("payload")
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT.wireValue,
+            payload.get(AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION)
+                .asString
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalDeliveryState
+                .DELIVERED_TO_TRANSPORT.wireValue,
+            payload.get(AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_DELIVERY_STATE).asString
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalPropagationState
+                .PROPAGATED_UNCONFIRMED.wireValue,
+            payload.get(AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_PROPAGATION_STATE)
+                .asString
+        )
+    }
+
+    @Test
+    fun `sendQueueableJsonWithDeliveryTruth queues reconciliation payload as offline delivery when immediate send fails`() {
+        val client = buildClient()
+        client.installWebSocketForTest(FailingWebSocket())
+        client.simulateConnected()
+        val signal = buildSignal(
+            taskId = "task-queued-truth",
+            signalId = "sig-queued-truth",
+            durableSessionId = "durable-reliable",
+            sessionEpoch = 0
+        )
+
+        val disposition = client.sendQueueableJsonWithDeliveryTruth(MsgType.RECONCILIATION_SIGNAL) {
+            toEnvelopeJson(signal, it)
+        }
+
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED,
+            disposition
+        )
+        val queuedPayload = JsonParser.parseString(client.offlineQueue.drainAll().single().json)
+            .asJsonObject
+            .getAsJsonObject("payload")
+            .getAsJsonObject("payload")
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED.wireValue,
+            queuedPayload.get(AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION)
+                .asString
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalDeliveryState
+                .QUEUED_FOR_EXTERNAL_DELIVERY.wireValue,
+            queuedPayload.get(AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_DELIVERY_STATE)
+                .asString
+        )
+        assertEquals(
+            AndroidRuntimeEmissionTruthSemantics.ExternalPropagationState
+                .NOT_PROPAGATED_EXTERNALLY.wireValue,
+            queuedPayload.get(AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_PROPAGATION_STATE)
+                .asString
+        )
     }
 
     @Test

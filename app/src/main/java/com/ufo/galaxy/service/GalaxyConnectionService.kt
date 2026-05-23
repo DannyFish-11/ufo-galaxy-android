@@ -4025,107 +4025,150 @@ class GalaxyConnectionService : Service() {
             val runtimeController = UFOGalaxyApplication.runtimeController
             val ingress = AndroidGovernanceExecutionPolicyIngressContract
                 .classifyReconciliation(signal.kind)
-            val reliablePayload = signal.payload.toMutableMap().apply {
-                put(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY, stableDedupeKey)
-                put(
-                    AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION,
-                    AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION
-                )
-                put(
-                    AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION,
-                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
-                )
-                signal.taskId?.let { put("task_id", it) }
-                put("status", signal.status)
-                put(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY, stableDedupeKey)
-                put(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID, signal.signalId)
-                put(
-                    AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH,
-                    false
-                )
+            fun buildReliablePayload(
+                deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+            ): Map<String, Any?> {
+                val adjustedTruth = AndroidRuntimeEmissionTruthSemantics.TruthSnapshot
+                    .fromPayload(signal.payload, signal.isTerminal)
+                    ?.withDeliveryDisposition(deliveryDisposition)
+                return signal.payload.toMutableMap().apply {
+                    adjustedTruth?.let { putAll(it.toPayloadMap()) }
+                    put(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY, stableDedupeKey)
+                    put(
+                        AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION,
+                        AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION
+                    )
+                    put(
+                        AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION,
+                        AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+                    )
+                    signal.taskId?.let { put("task_id", it) }
+                    put("status", signal.status)
+                    put(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY, stableDedupeKey)
+                    put(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID, signal.signalId)
+                    put(
+                        AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH,
+                        false
+                    )
+                }
             }
-            val fallbackRecoveryPhase = runtimeController.unifiedRecoveryPhase.value
-            val fallbackRecoverySource = deriveRecoverySource(
-                phase = fallbackRecoveryPhase,
-                inflightSource = runtimeController.inflightContinuityRecovery.value.source
-            )
-            val recoveryState = reliablePayload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
-                ?.toString()
-                ?.ifBlank { null }
-                ?: fallbackRecoveryPhase.wireValue
-            val recoverySource = reliablePayload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_SOURCE]
-                ?.toString()
-                ?.ifBlank { null }
-                ?: fallbackRecoverySource
-            val lineage = AndroidUplinkLineageMetadataContract.derive(
-                executionIdentity = signal.taskId ?: signal.kind.wireValue,
-                emissionIdentity = signal.signalId,
-                durableSessionId = signal.durableSessionId,
-                sessionContinuityEpoch = signal.sessionContinuityEpoch,
-                recoveryBasis = "$recoveryState:${recoverySource.ifBlank { "none" }}"
-            )
-            val payload = ReconciliationSignalPayload(
-                signal_id = signal.signalId,
-                kind = signal.kind.wireValue,
-                participant_id = signal.participantId,
-                status = signal.status,
-                emitted_at_ms = signal.emittedAtMs,
-                reconciliation_epoch = signal.reconciliationEpoch,
-                device_id = localDeviceId,
-                task_id = signal.taskId,
-                correlation_id = signal.correlationId,
-                session_id = sessionId,
-                durable_session_id = signal.durableSessionId,
-                session_continuity_epoch = signal.sessionContinuityEpoch,
-                payload = reliablePayload,
-                runtime_truth = runtimeTruth,
-                schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
-                completion_closure_contract_version = AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
-                completion_emission_id = signal.signalId,
-                idempotency_key = stableDedupeKey,
-                is_v2_confirmed_canonical_truth = false,
-                ingress_boundary_class = ingress.boundaryClass.wireValue,
-                ingress_consumption_kind = ingress.consumptionKind.wireValue,
-                ingress_signal_class = ingress.signalClass.wireValue,
-                ingress_schema_version = ingress.schemaVersion,
-                uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
-                uplink_lineage_execution_id = lineage.executionIdentity,
-                uplink_lineage_emission_id = lineage.emissionIdentity,
-                uplink_lineage_dedupe_key = lineage.dedupeKey,
-                uplink_lineage_recovery_basis = lineage.recoveryBasis
-            )
-            val envelope = AipMessage(
-                type = MsgType.RECONCILIATION_SIGNAL,
-                payload = payload,
-                device_id = localDeviceId,
-                correlation_id = signal.taskId,
-                idempotency_key = stableDedupeKey,
-                runtime_session_id = sessionId
-            )
-            val sent = webSocketClient.sendJson(gson.toJson(envelope))
-            if (sent) {
-                Log.d(
-                    TAG,
-                    "[RECONCILIATION_SIGNAL] sent signal_id=${signal.signalId} dedupe_key=$stableDedupeKey " +
-                        "kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+
+            fun buildEnvelopeJson(
+                deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+            ): String {
+                val reliablePayload = buildReliablePayload(deliveryDisposition)
+                val fallbackRecoveryPhase = runtimeController.unifiedRecoveryPhase.value
+                val fallbackRecoverySource = deriveRecoverySource(
+                    phase = fallbackRecoveryPhase,
+                    inflightSource = runtimeController.inflightContinuityRecovery.value.source
                 )
-            } else {
-                Log.w(
-                    TAG,
-                    "[RECONCILIATION_SIGNAL] send failed signal_id=${signal.signalId} dedupe_key=$stableDedupeKey " +
-                        "kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                val recoveryState = reliablePayload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
+                    ?.toString()
+                    ?.ifBlank { null }
+                    ?: fallbackRecoveryPhase.wireValue
+                val recoverySource = reliablePayload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_SOURCE]
+                    ?.toString()
+                    ?.ifBlank { null }
+                    ?: fallbackRecoverySource
+                val lineage = AndroidUplinkLineageMetadataContract.derive(
+                    executionIdentity = signal.taskId ?: signal.kind.wireValue,
+                    emissionIdentity = signal.signalId,
+                    durableSessionId = signal.durableSessionId,
+                    sessionContinuityEpoch = signal.sessionContinuityEpoch,
+                    recoveryBasis = "$recoveryState:${recoverySource.ifBlank { "none" }}"
                 )
-                GalaxyLogger.log(
-                    TAG, mapOf(
-                        "event" to "reconciliation_signal_send_failed",
-                        "signal_id" to signal.signalId,
-                        "dedupe_key" to stableDedupeKey,
-                        "signal_kind" to signal.kind.wireValue,
-                        "task_id" to (signal.taskId ?: ""),
-                        "participant_id" to signal.participantId,
-                        "is_terminal" to signal.isTerminal
+                val payload = ReconciliationSignalPayload(
+                    signal_id = signal.signalId,
+                    kind = signal.kind.wireValue,
+                    participant_id = signal.participantId,
+                    status = signal.status,
+                    emitted_at_ms = signal.emittedAtMs,
+                    reconciliation_epoch = signal.reconciliationEpoch,
+                    device_id = localDeviceId,
+                    task_id = signal.taskId,
+                    correlation_id = signal.correlationId,
+                    session_id = sessionId,
+                    durable_session_id = signal.durableSessionId,
+                    session_continuity_epoch = signal.sessionContinuityEpoch,
+                    payload = reliablePayload,
+                    runtime_truth = runtimeTruth,
+                    schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+                    completion_closure_contract_version = AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                    completion_emission_id = signal.signalId,
+                    idempotency_key = stableDedupeKey,
+                    is_v2_confirmed_canonical_truth = false,
+                    ingress_boundary_class = ingress.boundaryClass.wireValue,
+                    ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                    ingress_signal_class = ingress.signalClass.wireValue,
+                    ingress_schema_version = ingress.schemaVersion,
+                    uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
+                    uplink_lineage_execution_id = lineage.executionIdentity,
+                    uplink_lineage_emission_id = lineage.emissionIdentity,
+                    uplink_lineage_dedupe_key = lineage.dedupeKey,
+                    uplink_lineage_recovery_basis = lineage.recoveryBasis
+                )
+                return gson.toJson(
+                    AipMessage(
+                        type = MsgType.RECONCILIATION_SIGNAL,
+                        payload = payload,
+                        device_id = localDeviceId,
+                        correlation_id = signal.taskId,
+                        idempotency_key = stableDedupeKey,
+                        runtime_session_id = sessionId
                     )
                 )
+            }
+
+            when (
+                webSocketClient.sendQueueableJsonWithDeliveryTruth(
+                    msgType = MsgType.RECONCILIATION_SIGNAL,
+                    buildJson = ::buildEnvelopeJson
+                )
+            ) {
+                AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT -> {
+                    Log.d(
+                        TAG,
+                        "[RECONCILIATION_SIGNAL] sent signal_id=${signal.signalId} dedupe_key=$stableDedupeKey " +
+                            "kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                    )
+                }
+                AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED -> {
+                    Log.i(
+                        TAG,
+                        "[RECONCILIATION_SIGNAL] queued for replay signal_id=${signal.signalId} " +
+                            "dedupe_key=$stableDedupeKey kind=${signal.kind.wireValue} " +
+                            "task_id=${signal.taskId}"
+                    )
+                    GalaxyLogger.log(
+                        TAG, mapOf(
+                            "event" to "reconciliation_signal_offline_queued",
+                            "signal_id" to signal.signalId,
+                            "dedupe_key" to stableDedupeKey,
+                            "signal_kind" to signal.kind.wireValue,
+                            "task_id" to (signal.taskId ?: ""),
+                            "participant_id" to signal.participantId,
+                            "is_terminal" to signal.isTerminal
+                        )
+                    )
+                }
+                else -> {
+                    Log.w(
+                        TAG,
+                        "[RECONCILIATION_SIGNAL] send failed signal_id=${signal.signalId} dedupe_key=$stableDedupeKey " +
+                            "kind=${signal.kind.wireValue} task_id=${signal.taskId}"
+                    )
+                    GalaxyLogger.log(
+                        TAG, mapOf(
+                            "event" to "reconciliation_signal_send_failed",
+                            "signal_id" to signal.signalId,
+                            "dedupe_key" to stableDedupeKey,
+                            "signal_kind" to signal.kind.wireValue,
+                            "task_id" to (signal.taskId ?: ""),
+                            "participant_id" to signal.participantId,
+                            "is_terminal" to signal.isTerminal
+                        )
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "[RECONCILIATION_SIGNAL] unexpected error sending signal signal_id=${signal.signalId}: ${e.message}", e)

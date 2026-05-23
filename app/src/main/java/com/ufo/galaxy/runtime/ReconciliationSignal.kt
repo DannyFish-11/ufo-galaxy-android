@@ -881,7 +881,8 @@ data class ReconciliationSignal(
             signalId: String = java.util.UUID.randomUUID().toString(),
             reconciliationEpoch: Int = 0,
             durableSessionId: String? = null,
-            sessionContinuityEpoch: Int? = null
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
             val payload = buildMap<String, Any?> {
                 putAll(
@@ -889,7 +890,8 @@ data class ReconciliationSignal(
                         isTerminalSignal = false,
                         resultReturned = false,
                         completionSignaled = false,
-                        closureReadyForAcceptance = false
+                        closureReadyForAcceptance = false,
+                        additionalPayload = additionalPayload
                     )
                 )
                 put("health_state", healthState.wireValue)
