@@ -711,9 +711,13 @@ jobs:
               if not isinstance(signal, dict):
                   raise SystemExit(f"Signal {signal_key} must be an object")
               for required in ("signal_id", "state", "source_gate"):
-                  if not signal.get(required):
+                  if required not in signal:
                       raise SystemExit(f"Signal {signal_key} is missing required key: {required}")
-              if signal["state"] not in state_vocab:
+              for required_non_blank in ("signal_id", "source_gate"):
+                  value = signal.get(required_non_blank)
+                  if not isinstance(value, str) or not value.strip():
+                      raise SystemExit(f"Signal {signal_key} key {required_non_blank} must be a non-empty string")
+              if not isinstance(signal["state"], str) or signal["state"] not in state_vocab:
                   raise SystemExit(
                       f"Signal {signal_key} state '{signal['state']}' is outside allowed vocabulary: {sorted(state_vocab)}"
                   )
@@ -789,7 +793,8 @@ jobs:
           try:
               with urlopen(req) as response:
                   status = int(response.status)
-                  body = response.read().decode("utf-8")
+                  response_body = response.read().decode("utf-8")
+                  response_headers = dict(response.headers.items())
           except HTTPError as exc:
               response_body = exc.read().decode("utf-8", errors="replace")
               raise SystemExit(
@@ -799,7 +804,10 @@ jobs:
               raise SystemExit(f"repository_dispatch failed with network error: {exc}") from exc
 
           if status not in (200, 201, 202, 204):
-              raise SystemExit(f"repository_dispatch failed with unexpected status {status}; body={body}")
+              raise SystemExit(
+                  f"repository_dispatch failed with unexpected status {status}; "
+                  f"headers={response_headers}; body={response_body}"
+              )
 
           response_path = Path("app/build/e2e-verification/repository-dispatch-response.json")
           response_path.write_text(
