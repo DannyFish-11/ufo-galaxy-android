@@ -689,6 +689,41 @@ class Pr52ReconciliationSignalEmissionTest {
         )
     }
 
+    // ── RuntimeController — publishTaskStatusUpdate ────────────────────────────
+
+    @Test
+    fun `publishTaskStatusUpdate emits TASK_STATUS_UPDATE for active running task`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+        controller.openTestSession()
+
+        controller.recordDelegatedTaskAccepted("task-status-active")
+        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+
+        controller.publishTaskStatusUpdate(
+            taskId = "task-status-active",
+            progressDetail = "step-1"
+        )
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull("Expected TASK_STATUS_UPDATE signal on reconciliationSignals", signal)
+        assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
+        assertEquals("step-1", signal.payload["progress_detail"])
+    }
+
+    @Test
+    fun `publishTaskStatusUpdate suppresses signal for task that is not actively running`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+        controller.openTestSession()
+
+        controller.publishTaskStatusUpdate(
+            taskId = "task-status-inactive",
+            progressDetail = "should-not-emit"
+        )
+
+        val signal = withTimeoutOrNull(50) { controller.reconciliationSignals.first() }
+        assertNull("Inactive task must not emit TASK_STATUS_UPDATE", signal)
+    }
+
     // ── RuntimeController — publishTaskCancelled ──────────────────────────────
 
     @Test

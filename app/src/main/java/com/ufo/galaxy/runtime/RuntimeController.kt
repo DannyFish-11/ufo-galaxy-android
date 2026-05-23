@@ -2559,9 +2559,19 @@ class RuntimeController(
         correlationId: String? = null,
         progressDetail: String? = null
     ) {
-        if (_activeTaskId == taskId) {
-            persistInflightRecoveryArtifact(taskId, _activeTaskStatus ?: ActiveTaskStatus.RUNNING)
+        val activeStatus = _activeTaskStatus
+        if (_activeTaskId != taskId || activeStatus != ActiveTaskStatus.RUNNING) {
+            Log.w(
+                TAG,
+                "[RUNTIME] publishTaskStatusUpdate: suppressing non-running or mismatched task " +
+                    "signal task_id=$taskId active_task_id=${_activeTaskId ?: "none"} " +
+                    "active_status=${activeStatus?.wireValue ?: "none"}"
+            )
+            return
         }
+        val planId = _activeTaskDispatchPlanId
+        val temporalRunId = _activeTaskTemporalWorkflowRunId
+        persistInflightRecoveryArtifact(taskId, activeStatus)
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskStatusUpdate: no hostDescriptor — skipping signal")
             return
@@ -2589,8 +2599,13 @@ class RuntimeController(
                     isTerminal = false,
                     resultConvergenceDecision =
                         AndroidFlowAwareResultConvergenceParticipant.DECISION_EMIT_PARTIAL_FOR_FLOW
+                ) + buildTemporalContinuationFinalityPayload(
+                    terminalOutcomeKind =
+                        AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.NON_TERMINAL,
+                    temporalWorkflowRunId = temporalRunId
                 )
-            )
+            ).withDispatchPlanId(planId)
+                .withTemporalWorkflowRunId(temporalRunId)
         )
     }
 

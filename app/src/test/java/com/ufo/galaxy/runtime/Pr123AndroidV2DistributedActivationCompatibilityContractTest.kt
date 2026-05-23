@@ -516,6 +516,28 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
         assertEquals("plan-cancel-001", signal.dispatchPlanId)
     }
 
+    @Test
+    fun `publishTaskStatusUpdate emits TASK_STATUS_UPDATE with stored dispatchPlanId`() = runBlocking {
+        val controller = buildController()
+
+        controller.recordDelegatedTaskAccepted(
+            taskId = "task-status-plan",
+            dispatchPlanId = "plan-status-001"
+        )
+        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+
+        controller.publishTaskStatusUpdate("task-status-plan", progressDetail = "still-running")
+
+        val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+        assertNotNull("Expected TASK_STATUS_UPDATE signal", signal)
+        assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
+        assertEquals("plan-status-001", signal.dispatchPlanId)
+        assertEquals(
+            "plan-status-001",
+            signal.payload[ReconciliationSignal.KEY_DISPATCH_PLAN_ID]
+        )
+    }
+
     // ── 11. StabilizationBaseline registration ────────────────────────────────
 
     @Test
