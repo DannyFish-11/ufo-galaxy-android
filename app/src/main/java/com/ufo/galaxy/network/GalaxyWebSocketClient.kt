@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.atomic.AtomicLong
@@ -1087,7 +1088,7 @@ class GalaxyWebSocketClient(
         }
         val existingRootIdempotencyKey = root.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
         val existingPayloadIdempotencyKey = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
-        val fallbackIdempotencyKey = existingRootIdempotencyKey
+        val canonicalIdempotencyKey = existingRootIdempotencyKey
             ?: existingPayloadIdempotencyKey
             ?: buildStableFallbackIdempotencyKey(
                 type = type,
@@ -1095,19 +1096,26 @@ class GalaxyWebSocketClient(
                 completionEmissionId = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID)
                     ?: payload.stringOrNull("uplink_lineage_emission_id")
                     ?: payload.stringOrNull("event_id")
-                    ?: payload.stringOrNull("signal_id")
+                    ?: payload.stringOrNull("signal_id"),
+                payloadFingerprint = sha256Hex(json).take(16)
             )
-        if (existingRootIdempotencyKey == null) {
-            root.addProperty(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY, fallbackIdempotencyKey)
+        if (existingRootIdempotencyKey != canonicalIdempotencyKey) {
+            root.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY,
+                canonicalIdempotencyKey
+            )
         }
-        if (existingPayloadIdempotencyKey == null) {
-            payload.addProperty(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY, fallbackIdempotencyKey)
+        if (existingPayloadIdempotencyKey != canonicalIdempotencyKey) {
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY,
+                canonicalIdempotencyKey
+            )
         }
         if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID) == null) {
             val emissionId = payload.stringOrNull("uplink_lineage_emission_id")
                 ?: payload.stringOrNull("event_id")
                 ?: payload.stringOrNull("signal_id")
-                ?: fallbackIdempotencyKey
+                ?: canonicalIdempotencyKey
             payload.addProperty(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID, emissionId)
         }
         if (!payload.has(AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)) {
@@ -1132,12 +1140,19 @@ class GalaxyWebSocketClient(
     private fun buildStableFallbackIdempotencyKey(
         type: String,
         taskId: String?,
-        completionEmissionId: String?
+        completionEmissionId: String?,
+        payloadFingerprint: String
     ): String {
         val session = runtimeSessionId ?: "no_runtime_session"
         val task = taskId ?: "no_task"
-        val emission = completionEmissionId ?: "no_completion_emission"
+        val emission = completionEmissionId ?: "payload_$payloadFingerprint"
         return "$session:$type:$task:$emission"
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(value.toByteArray())
+            .joinToString(separator = "") { "%02x".format(it) }
     }
 
     private fun hasCanonicalReconciliationIngress(json: String): Boolean {
