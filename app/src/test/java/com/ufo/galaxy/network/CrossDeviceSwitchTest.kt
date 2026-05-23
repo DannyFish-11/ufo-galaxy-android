@@ -4,7 +4,9 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
+import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import org.junit.Assert.*
 import org.junit.Test
@@ -144,6 +146,50 @@ class CrossDeviceSwitchTest {
         val json = """{"type":"heartbeat","timestamp":1234}"""
         client.sendJson(json)
         assertEquals("Non-queueable type should not be enqueued", 0, testQueue.size)
+    }
+
+    @Test
+    fun `sendJson downgrades terminal closure semantics when lineage-critical identity is missing`() {
+        val testQueue = OfflineTaskQueue(prefs = null)
+        val client = GalaxyWebSocketClient(
+            serverUrl = "ws://localhost:9999",
+            crossDeviceEnabled = true,
+            offlineQueue = testQueue
+        )
+        val json = """
+            {
+              "type":"goal_execution_result",
+              "payload":{
+                "task_id":"task-weak-lineage",
+                "status":"success",
+                "result_returned":true,
+                "completion_signaled":true,
+                "closure_ready_for_acceptance":true
+              }
+            }
+        """.trimIndent()
+
+        assertFalse(client.sendJson(json))
+        val queued = testQueue.drainAll().first()
+        val payload = JsonParser.parseString(queued.json)
+            .asJsonObject
+            .getAsJsonObject("payload")
+
+        assertEquals(
+            AndroidResultUplinkBoundaryContract.ResultSignalClass.ACCEPTANCE_CLOSURE_SIGNAL.wireValue,
+            payload.get(AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS).asString
+        )
+        assertEquals(
+            AndroidResultUplinkBoundaryContract.AcceptanceCandidateClass.ACCEPTANCE_BLOCKED.wireValue,
+            payload.get(AndroidResultUplinkBoundaryContract.KEY_ACCEPTANCE_CANDIDATE_CLASS).asString
+        )
+        assertEquals(
+            AndroidCompletionClosureUplinkContract
+                .ClosureFinalizationSignalClass.SESSION_FINALIZATION_BLOCKED.wireValue,
+            payload.get(AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS)
+                .asString
+        )
+        assertFalse(payload.get("closure_ready_for_acceptance").asBoolean)
     }
 
     @Test

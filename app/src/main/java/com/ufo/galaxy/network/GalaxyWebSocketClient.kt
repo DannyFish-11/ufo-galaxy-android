@@ -19,6 +19,8 @@ import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
+import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
+import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -1136,6 +1138,47 @@ class GalaxyWebSocketClient(
                 isV2Confirmed
             )
         }
+        val isClosureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
+            type == MsgType.DEVICE_EXECUTION_EVENT.value
+        if (isClosureBearingType) {
+            // Stage-1 hardening rule for strict V2 canonical ingress:
+            // closure-grade identity comes only from explicit lineage keys.
+            // task_id is necessary routing context but is not sufficient lineage identity.
+            val lineageMetadata = AndroidUplinkLineageMetadataContract.derive(
+                executionIdentity = payload.stringOrNull(
+                    AndroidUplinkLineageMetadataContract.KEY_EXECUTION_IDENTITY
+                ),
+                emissionIdentity = payload.stringOrNull(
+                    AndroidUplinkLineageMetadataContract.KEY_EMISSION_IDENTITY
+                ),
+                durableSessionId = payload.stringOrNull("durable_session_id"),
+                sessionContinuityEpoch = payload.intOrNull("session_continuity_epoch"),
+                recoveryBasis = "transport_canonicalization"
+            )
+            val isClosureLineageIncomplete = !lineageMetadata.isClosureLineageComplete
+            val resultReturned = payload.booleanOrNull("result_returned") == true
+            val completionSignaled = payload.booleanOrNull("completion_signaled") == true
+            val lifecycleTerminal = payload.booleanOrNull("lifecycle_terminal_phase") == true
+            val isTerminalLikeSignal = resultReturned || completionSignaled || lifecycleTerminal
+            if (isClosureLineageIncomplete && isTerminalLikeSignal) {
+                payload.addProperty(
+                    AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS,
+                    AndroidResultUplinkBoundaryContract
+                        .ResultSignalClass.ACCEPTANCE_CLOSURE_SIGNAL.wireValue
+                )
+                payload.addProperty(
+                    AndroidResultUplinkBoundaryContract.KEY_ACCEPTANCE_CANDIDATE_CLASS,
+                    AndroidResultUplinkBoundaryContract
+                        .AcceptanceCandidateClass.ACCEPTANCE_BLOCKED.wireValue
+                )
+                payload.addProperty(
+                    AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS,
+                    AndroidCompletionClosureUplinkContract
+                        .ClosureFinalizationSignalClass.SESSION_FINALIZATION_BLOCKED.wireValue
+                )
+                payload.addProperty("closure_ready_for_acceptance", false)
+            }
+        }
         return gson.toJson(root)
     }
 
@@ -1144,6 +1187,22 @@ class GalaxyWebSocketClient(
             null
         } else {
             get(key)?.asString?.takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
+    private fun JsonObject.booleanOrNull(key: String): Boolean? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.takeUnless { it.isJsonNull }?.asBoolean
+        }
+    }.getOrNull()
+
+    private fun JsonObject.intOrNull(key: String): Int? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.takeUnless { it.isJsonNull }?.asInt
         }
     }.getOrNull()
 

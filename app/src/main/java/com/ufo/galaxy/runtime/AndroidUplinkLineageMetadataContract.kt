@@ -14,11 +14,20 @@ object AndroidUplinkLineageMetadataContract {
     const val KEY_DEDUPE_KEY = "uplink_lineage_dedupe_key"
     const val KEY_RECOVERY_BASIS = "uplink_lineage_recovery_basis"
 
+    enum class LineageStrengthClass(val wireValue: String) {
+        CLOSURE_GRADE("closure_grade"),
+        DEGRADED_MISSING_EXECUTION_IDENTITY("degraded_missing_execution_identity"),
+        DEGRADED_MISSING_EMISSION_IDENTITY("degraded_missing_emission_identity"),
+        DEGRADED_MISSING_SESSION_LINEAGE("degraded_missing_session_lineage")
+    }
+
     data class Metadata(
         val executionIdentity: String,
         val emissionIdentity: String,
         val dedupeKey: String,
-        val recoveryBasis: String
+        val recoveryBasis: String,
+        val lineageStrengthClass: LineageStrengthClass,
+        val isClosureLineageComplete: Boolean
     )
 
     fun derive(
@@ -28,11 +37,34 @@ object AndroidUplinkLineageMetadataContract {
         sessionContinuityEpoch: Int?,
         recoveryBasis: String
     ): Metadata {
-        val safeExecutionIdentity = executionIdentity?.ifBlank { null } ?: "unknown_execution"
-        val safeEmissionIdentity = emissionIdentity?.ifBlank { null } ?: "unknown_emission"
+        val hasExecutionIdentity = !executionIdentity.isNullOrBlank()
+        val hasEmissionIdentity = !emissionIdentity.isNullOrBlank()
+        val hasSessionLineage = !durableSessionId.isNullOrBlank() && sessionContinuityEpoch != null
+
         val safeSession = durableSessionId?.ifBlank { null } ?: "no_durable_session"
         val safeEpoch = sessionContinuityEpoch?.toString() ?: "no_epoch"
         val safeRecoveryBasis = recoveryBasis.ifBlank { "none" }
+        // Seed synthetic identities from session/epoch/recovery lineage so retries stay stable
+        // while still separating different recovery eras and continuity epochs.
+        val identitySeed = sha256(
+            listOf(safeSession, safeEpoch, safeRecoveryBasis).joinToString("|")
+        )
+        val safeExecutionIdentity = executionIdentity?.ifBlank { null }
+            ?: "synthetic_execution_$identitySeed"
+        val safeEmissionIdentity = emissionIdentity?.ifBlank { null }
+            ?: "synthetic_emission_${sha256("$safeExecutionIdentity|$safeRecoveryBasis")}"
+        val lineageStrengthClass = when {
+            !hasExecutionIdentity ->
+                LineageStrengthClass.DEGRADED_MISSING_EXECUTION_IDENTITY
+            !hasEmissionIdentity ->
+                LineageStrengthClass.DEGRADED_MISSING_EMISSION_IDENTITY
+            !hasSessionLineage ->
+                LineageStrengthClass.DEGRADED_MISSING_SESSION_LINEAGE
+            else ->
+                LineageStrengthClass.CLOSURE_GRADE
+        }
+        val isClosureLineageComplete =
+            lineageStrengthClass == LineageStrengthClass.CLOSURE_GRADE
         val dedupeKey = sha256(
             listOf(
                 safeSession,
@@ -46,7 +78,9 @@ object AndroidUplinkLineageMetadataContract {
             executionIdentity = safeExecutionIdentity,
             emissionIdentity = safeEmissionIdentity,
             dedupeKey = dedupeKey,
-            recoveryBasis = safeRecoveryBasis
+            recoveryBasis = safeRecoveryBasis,
+            lineageStrengthClass = lineageStrengthClass,
+            isClosureLineageComplete = isClosureLineageComplete
         )
     }
 
