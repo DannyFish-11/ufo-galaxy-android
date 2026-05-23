@@ -597,12 +597,237 @@ jobs:
           print("Structured cross-repo evidence artifact shape is valid.")
           PY
 
+      - name: Generate canonical evidence_json bundle
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          status_path = Path("app/build/e2e-verification/cross-repo-evidence-status.json")
+          out_path = Path("app/build/e2e-verification/evidence_json.json")
+          status = json.loads(status_path.read_text(encoding="utf-8"))
+
+          state_vocabulary = status.get("state_vocabulary", [])
+          gate_results = status.get("gate_results", {})
+          behavior = status.get("key_behavior_evidence_status", {})
+
+          def gate_to_signal_state(gate_name: str) -> str:
+              result = gate_results.get(gate_name, "unknown")
+              if result == "success":
+                  return "evidenced"
+              if result in {"failure", "cancelled"}:
+                  return "failed"
+              if result == "skipped":
+                  return "not_run"
+              return "not_run"
+
+          canonical_bundle = {
+              "schema_version": "1.0",
+              "evidence_kind": "android_canonical_dual_repo_evidence",
+              "source": "android-ci",
+              "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+              "is_protected_release_path": bool(status.get("is_protected_release_path", False)),
+              "release_path_class": status.get("release_path_class", "development_or_pr"),
+              "protected_execution_state": status.get("protected_execution_state", "not_run"),
+              "android_signals": {
+                  "runtime": {
+                      "signal_id": "runtime_regression",
+                      "state": gate_to_signal_state("runtime_regression"),
+                      "source_gate": "runtime_regression",
+                  },
+                  "lifecycle": {
+                      "signal_id": "protocol_contract_guard",
+                      "state": gate_to_signal_state("protocol_contract_guard"),
+                      "source_gate": "protocol_contract_guard",
+                  },
+                  "closure": {
+                      "signal_id": "closure_completeness",
+                      "state": behavior.get("closure_completeness", "not_run"),
+                      "source_gate": "e2e_verification_gate",
+                  },
+                  "replay": {
+                      "signal_id": "replay_ordering",
+                      "state": behavior.get("replay_ordering", "not_run"),
+                      "source_gate": "e2e_verification_gate",
+                  },
+                  "recovery": {
+                      "signal_id": "recovery_behavior",
+                      "state": behavior.get("recovery_behavior", "not_run"),
+                      "source_gate": "e2e_verification_gate",
+                  },
+                  "continuity": {
+                      "signal_id": "reconnect_continuity",
+                      "state": behavior.get("reconnect_continuity", "not_run"),
+                      "source_gate": "e2e_verification_gate",
+                  },
+                  "evaluator": {
+                      "signal_id": "android_cross_repo_ci_evaluator",
+                      "state": "failed" if bool(status.get("release_blocked", False)) else "evidenced",
+                      "release_blocked": bool(status.get("release_blocked", False)),
+                      "blocking_condition_count": int(status.get("blocking_condition_count", 0)),
+                      "source_gate": "cross_repo_evidence_status",
+                  },
+              },
+              "gate_results": gate_results,
+              "release_blocking_conditions": status.get("release_blocking_conditions", []),
+              "state_vocabulary": state_vocabulary,
+          }
+
+          out_path.write_text(json.dumps(canonical_bundle, indent=2, ensure_ascii=False), encoding="utf-8")
+          print(f"Wrote canonical evidence bundle: {out_path}")
+          PY
+
+      - name: Validate canonical evidence_json bundle structure
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("app/build/e2e-verification/evidence_json.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          required_top = [
+              "schema_version",
+              "evidence_kind",
+              "source",
+              "is_protected_release_path",
+              "android_signals",
+              "gate_results",
+              "release_blocking_conditions",
+          ]
+          missing_top = [k for k in required_top if k not in data]
+          if missing_top:
+              raise SystemExit(f"Missing top-level keys in canonical evidence_json: {missing_top}")
+
+          required_signals = ["runtime", "lifecycle", "closure", "replay", "recovery", "continuity", "evaluator"]
+          signals = data.get("android_signals", {})
+          missing_signals = [k for k in required_signals if k not in signals]
+          if missing_signals:
+              raise SystemExit(f"Missing required android_signals entries: {missing_signals}")
+
+          state_vocab = set(data.get("state_vocabulary", []))
+          for signal_key in required_signals:
+              signal = signals.get(signal_key, {})
+              if not isinstance(signal, dict):
+                  raise SystemExit(f"Signal {signal_key} must be an object")
+              for required in ("signal_id", "state", "source_gate"):
+                  if not signal.get(required):
+                      raise SystemExit(f"Signal {signal_key} is missing required key: {required}")
+              if signal["state"] not in state_vocab:
+                  raise SystemExit(
+                      f"Signal {signal_key} state '{signal['state']}' is outside allowed vocabulary: {sorted(state_vocab)}"
+                  )
+          print("Canonical evidence_json structure is valid.")
+          PY
+
+      - name: Read protected path flag from evidence_json
+        id: evidence_flags
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("app/build/e2e-verification/evidence_json.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          is_protected = bool(data.get("is_protected_release_path", False))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"is_protected_release_path={'true' if is_protected else 'false'}\n")
+          print(f"is_protected_release_path={is_protected}")
+          PY
+
+      - name: Dispatch canonical evidence_json bundle to V2
+        if: steps.evidence_flags.outputs.is_protected_release_path == 'true'
+        env:
+          V2_DISPATCH_TOKEN: ${{ secrets.V2_REPO_DISPATCH_TOKEN }}
+          GITHUB_REPOSITORY_VALUE: ${{ github.repository }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
+          GITHUB_SHA_VALUE: ${{ github.sha }}
+          GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+
+          token = os.getenv("V2_DISPATCH_TOKEN", "")
+          if not token:
+              raise SystemExit(
+                  "Protected release path requires secrets.V2_REPO_DISPATCH_TOKEN for cross-repo repository_dispatch."
+              )
+
+          evidence = json.loads(Path("app/build/e2e-verification/evidence_json.json").read_text(encoding="utf-8"))
+          payload = {
+              "event_type": "android_canonical_evidence_bundle",
+              "client_payload": {
+                  "source_repository": os.getenv("GITHUB_REPOSITORY_VALUE", ""),
+                  "source_ref": os.getenv("GITHUB_REF_VALUE", ""),
+                  "source_sha": os.getenv("GITHUB_SHA_VALUE", ""),
+                  "source_run_id": os.getenv("GITHUB_RUN_ID_VALUE", ""),
+                  "evidence_json": evidence,
+              },
+          }
+
+          request_path = Path("app/build/e2e-verification/repository-dispatch-request.json")
+          request_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+          req = Request(
+              "https://api.github.com/repos/DannyFish-11/ufo-galaxy-realization-v2/dispatches",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+                  "User-Agent": "ufo-galaxy-android-ci",
+              },
+              method="POST",
+          )
+
+          try:
+              with urlopen(req) as response:
+                  status = int(response.status)
+                  body = response.read().decode("utf-8")
+          except HTTPError as exc:
+              response_body = exc.read().decode("utf-8", errors="replace")
+              raise SystemExit(
+                  f"repository_dispatch failed with HTTP {exc.code}: {response_body}"
+              ) from exc
+          except URLError as exc:
+              raise SystemExit(f"repository_dispatch failed with network error: {exc}") from exc
+
+          if status not in (200, 201, 202, 204):
+              raise SystemExit(f"repository_dispatch failed with unexpected status {status}; body={body}")
+
+          response_path = Path("app/build/e2e-verification/repository-dispatch-response.json")
+          response_path.write_text(
+              json.dumps(
+                  {
+                      "status": status,
+                      "accepted": True,
+                      "target_repository": "DannyFish-11/ufo-galaxy-realization-v2",
+                      "event_type": payload["event_type"],
+                  },
+                  indent=2,
+                  ensure_ascii=False,
+              ),
+              encoding="utf-8",
+          )
+          print(f"repository_dispatch succeeded with status {status}.")
+          PY
+
       - name: Upload cross-repo evidence status artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cross-repo-evidence-status
-          path: app/build/e2e-verification/cross-repo-evidence-status.json
+          path: |
+            app/build/e2e-verification/cross-repo-evidence-status.json
+            app/build/e2e-verification/evidence_json.json
+            app/build/e2e-verification/repository-dispatch-request.json
+            app/build/e2e-verification/repository-dispatch-response.json
 
   # ── CI Gate (final blocking gate — all must be green) ────────────────────
   #
