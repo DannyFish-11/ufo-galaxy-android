@@ -1854,14 +1854,20 @@ class RuntimeController(
                 "active_status" to (activeStatus?.wireValue ?: "")
             )
         )
-        // When no active task exists, a delayed terminal callback is stale local evidence.
-        // Demote runtime continuity to REQUIRES_RECONCILIATION so Android does not silently
-        // preserve a resumed-cleanly posture that could conflict with canonical V2 closure truth.
-        if (activeTaskId == null) {
-            _isRemoteExecutionActive.value = false
+        // A suppressed terminal callback indicates stale local delivery context on a sensitive
+        // canonical-looking path. Demote continuity to REQUIRES_RECONCILIATION so Android does
+        // not silently preserve a resumed-cleanly posture while V2 canonical closure may differ.
+        val staleTerminalContext = activeTaskId == null || activeTaskId != taskId
+        if (staleTerminalContext) {
+            val staleSourcePrefix = if (activeTaskId == null) {
+                _isRemoteExecutionActive.value = false
+                "suppressed_terminal_no_active"
+            } else {
+                "suppressed_terminal_mismatched_active"
+            }
             publishInflightContinuityRecovery(
                 disposition = InflightContinuityDisposition.REQUIRES_RECONCILIATION,
-                source = "suppressed_terminal_no_active_${signalKind.lowercase()}",
+                source = "${staleSourcePrefix}_${signalKind.lowercase()}",
                 artifact = InflightContinuityRecoveryArtifact(
                     taskId = taskId,
                     activeTaskStatus = (activeStatus ?: ActiveTaskStatus.RUNNING).wireValue,
