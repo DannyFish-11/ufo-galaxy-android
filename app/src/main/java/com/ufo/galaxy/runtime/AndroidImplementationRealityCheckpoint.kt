@@ -11,6 +11,7 @@ object AndroidImplementationRealityCheckpoint {
 
     const val SCHEMA_VERSION = "1"
     const val KEY_CHECKPOINT = "android_implementation_reality_checkpoint"
+    private const val MEANINGFUL_AUTONOMY_COMPLETION_THRESHOLD = 2
 
     fun build(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> = mapOf(
         "schema_version" to SCHEMA_VERSION,
@@ -146,7 +147,10 @@ object AndroidImplementationRealityCheckpoint {
 
     private fun buildAutonomyTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> {
         val allocationRecords = truth.taskAllocationTruth?.recentTaskAllocations.orEmpty()
-        val acceptedEvidenceCount = allocationRecords.count { it.requestedAtMs > 0L }
+        val acceptedEvidenceCount = allocationRecords.count { record ->
+            record.transitions.any { it.event == TaskAllocationTransitionEvent.ALLOCATION_REQUESTED } ||
+                (record.requestedAtMs > 0L && record.selectedAtMs > 0L)
+        }
         val stableCompletionCount = allocationRecords.count {
             it.participantLocalPhase == TaskAllocationPhase.CLOSED &&
                 it.closureClass == TaskAllocationClosureClass.RESULT &&
@@ -156,18 +160,15 @@ object AndroidImplementationRealityCheckpoint {
             AndroidContinuityRecoveryStateModel.RecoveryPhase.fromWireValue(truth.inflightContinuityState)
         ) {
             AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY,
-            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT,
-            AndroidContinuityRecoveryStateModel.RecoveryPhase.UNKNOWN,
-            null -> true
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT -> true
             else -> false
         }
-        val executionEvidenceCount = acceptedEvidenceCount + stableCompletionCount +
-            if (truth.activeTaskId != null) 1 else 0
+        val executionEvidenceCount = acceptedEvidenceCount + if (truth.activeTaskId != null) 1 else 0
         val evidenceClass = when {
             truth.capabilityTruthLevel != RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE &&
                 truth.capabilityTruthLevel != RuntimeNodeCapabilityTruthLevel.EXECUTION_DEGRADED ->
                 "insufficient_execution_capability"
-            stableCompletionCount >= 2 && continuityStable ->
+            stableCompletionCount >= MEANINGFUL_AUTONOMY_COMPLETION_THRESHOLD && continuityStable ->
                 "meaningful_runtime_execution_evidence"
             executionEvidenceCount > 0 -> "limited_runtime_execution_evidence"
             else -> "self_report_only_no_execution_evidence"

@@ -18,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -132,9 +133,10 @@ class Pr88InflightContinuityRecoveryTest {
             .fromJson(settings.taskAllocationTruthArtifact)
         val interruptedRecord = allocationSnapshot?.recentTaskAllocations
             ?.firstOrNull { it.taskId == "task-process-recreated" }
+        assertNotNull(interruptedRecord)
         assertEquals(TaskAllocationPhase.CLOSED, interruptedRecord?.participantLocalPhase)
         assertEquals(TaskAllocationClosureClass.INTERRUPTED, interruptedRecord?.closureClass)
-        assertFalse(interruptedRecord?.inFlightOwnership ?: true)
+        assertEquals(false, interruptedRecord?.inFlightOwnership)
     }
 
     @Test
@@ -173,9 +175,10 @@ class Pr88InflightContinuityRecoveryTest {
             .fromJson(settings.taskAllocationTruthArtifact)
         val interruptedRecord = allocationSnapshot?.recentTaskAllocations
             ?.firstOrNull { it.taskId == "task-runtime-stop" }
+        assertNotNull(interruptedRecord)
         assertEquals(TaskAllocationPhase.CLOSED, interruptedRecord?.participantLocalPhase)
         assertEquals(TaskAllocationClosureClass.INTERRUPTED, interruptedRecord?.closureClass)
-        assertFalse(interruptedRecord?.inFlightOwnership ?: true)
+        assertEquals(false, interruptedRecord?.inFlightOwnership)
     }
 
     @Test

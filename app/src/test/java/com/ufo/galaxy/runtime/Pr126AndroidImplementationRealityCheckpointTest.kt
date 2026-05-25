@@ -116,9 +116,8 @@ class Pr126AndroidImplementationRealityCheckpointTest {
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY,
             taskAllocationTruth = allocationTruthWithStableCompletions(),
-            inflightContinuityState = AndroidContinuityRecoveryStateModel.RecoveryPhase
-                .RESUMED_CLEANLY
-                .wireValue,
+            inflightContinuityState = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase.RESUMED_CLEANLY.wireValue,
             reconciliationEpoch = 14
         )
 
