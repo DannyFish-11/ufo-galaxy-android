@@ -345,6 +345,33 @@ data class ReconciliationSignal(
         const val KEY_COMPLETION_TRUTH_GRADE = "completion_truth_grade"
 
         /**
+         * Payload key describing who owns canonical closure authority for this signal.
+         *
+         * Android is always a participant and evidence emitter; V2 remains canonical closure authority.
+         */
+        const val KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS = "canonical_closure_authority_class"
+
+        /**
+         * Payload key describing participant-local convergence/finality stage relative to V2 closure.
+         */
+        const val KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE = "participant_local_convergence_state"
+
+        enum class CanonicalClosureAuthorityClass(val wireValue: String) {
+            V2_CANONICAL_AUTHORITY("v2_canonical_authority"),
+            ANDROID_PARTICIPANT_EVIDENCE_ONLY("android_participant_evidence_only")
+        }
+
+        enum class ParticipantLocalConvergenceState(val wireValue: String) {
+            UNRESOLVED_INFLIGHT("unresolved_inflight"),
+            LOCAL_COMPLETION_PENDING_DELIVERY("local_completion_pending_delivery"),
+            LOCAL_COMPLETION_DELIVERED_PENDING_CANONICAL("local_completion_delivered_pending_canonical"),
+            INTERRUPTION_RESUME_PENDING("interruption_resume_pending"),
+            TIMEOUT_PENDING_CANONICAL("timeout_pending_canonical"),
+            ABANDONED_UNRESOLVED("abandoned_unresolved"),
+            REPLAYED_PENDING_V2_REVALIDATION("replayed_pending_v2_revalidation")
+        }
+
+        /**
          * Payload key: whether Android has produced a terminal result for this task.
          *
          * `true` for terminal task signals (`task_result` / `task_cancelled` / `task_failed`);
@@ -755,6 +782,21 @@ data class ReconciliationSignal(
                     KEY_COMPLETION_TRUTH_GRADE to completionTruthGrade.wireValue
                 )
             }.orEmpty()
+            val participantLocalConvergenceState = when {
+                !isTerminalSignal ->
+                    ParticipantLocalConvergenceState.UNRESOLVED_INFLIGHT
+                terminalOutcomeKind ==
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION ->
+                    ParticipantLocalConvergenceState.INTERRUPTION_RESUME_PENDING
+                terminalOutcomeKind ==
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.TIMEOUT ->
+                    ParticipantLocalConvergenceState.TIMEOUT_PENDING_CANONICAL
+                terminalOutcomeKind ==
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABANDON ->
+                    ParticipantLocalConvergenceState.ABANDONED_UNRESOLVED
+                else ->
+                    ParticipantLocalConvergenceState.LOCAL_COMPLETION_PENDING_DELIVERY
+            }
             return mapOf(
                 AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION to
                     AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
@@ -780,6 +822,9 @@ data class ReconciliationSignal(
                 KEY_V2_CANONICAL_TRUTH_COMPLETED to v2Boundary.v2CanonicalTruthCompleted,
                 KEY_V2_MATURE_CLOSURE_ACHIEVED to v2Boundary.v2MatureClosureAchieved,
                 KEY_OUTWARD_TRUTH_SURFACE_CLASS to v2Boundary.outwardTruthSurfaceClass.wireValue,
+                KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS to
+                    CanonicalClosureAuthorityClass.V2_CANONICAL_AUTHORITY.wireValue,
+                KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE to participantLocalConvergenceState.wireValue,
                 AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH to
                     (
                         v2Boundary.outwardTruthSurfaceClass ==
