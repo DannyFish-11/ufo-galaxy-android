@@ -222,6 +222,27 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         posture = posture
     )
 
+    private fun allocationTruthWithResult(
+        taskId: String = "task-001",
+        nowMs: Long = 900L
+    ): AndroidTaskAllocationTruthSnapshot {
+        val ledger = AndroidTaskAllocationTruthLedger()
+        ledger.recordAccepted(
+            taskId = taskId,
+            participantId = "Pixel_8:host-001",
+            hostDescriptor = activeDescriptor(),
+            fallbackAllowed = false,
+            nowMs = nowMs
+        )
+        ledger.recordClosed(
+            taskId = taskId,
+            closureClass = TaskAllocationClosureClass.RESULT,
+            requiresCanonicalReconciliation = false,
+            nowMs = nowMs + 10L
+        )
+        return ledger.snapshot(activeTaskId = null)
+    }
+
     private fun fullyReconcilableTruth(): AndroidParticipantRuntimeTruth =
         AndroidParticipantRuntimeTruth(
             participantId = "Pixel_8:host-001",
@@ -238,6 +259,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
             readinessState = ParticipantReadinessState.READY,
             activeTaskId = null,
             activeTaskStatus = null,
+            taskAllocationTruth = allocationTruthWithResult(),
             reportedAtMs = 1000L,
             reconciliationEpoch = 5
         )
@@ -548,7 +570,9 @@ class Pr51AndroidParticipantRuntimeTruthTest {
                 sessionSnapshot = attachedSnapshot(),
                 healthState = ParticipantHealthState.HEALTHY,
                 readinessState = ParticipantReadinessState.READY,
-                carrierForegroundVisible = true
+                carrierForegroundVisible = true,
+                taskAllocationTruth = allocationTruthWithResult(),
+                reportedAtMs = 1_000L
             )
         )
         assertEquals(RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE, truth.capabilityTruthLevel)
@@ -591,6 +615,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         assertTrue(map.containsKey(keys.KEY_CAPABILITY_TRUTH_LEVEL))
         assertTrue(map.containsKey(keys.KEY_AUTONOMY_TRUTH_LEVEL))
         assertTrue(map.containsKey(keys.KEY_FEATURE_READINESS_TRUTH_STATE))
+        assertTrue(map.containsKey(keys.KEY_RUNTIME_PARTICIPATION_TOPOLOGY))
         assertTrue(map.containsKey(keys.KEY_OUTWARD_TRUTH_SURFACE_CLASS))
         assertTrue(map.containsKey(keys.KEY_TRUTH_TIER))
         assertTrue(map.containsKey(keys.KEY_SOURCE_AUTHORITY_CLASS))

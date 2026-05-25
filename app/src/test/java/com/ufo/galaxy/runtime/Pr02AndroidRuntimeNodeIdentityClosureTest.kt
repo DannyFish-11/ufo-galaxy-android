@@ -1,11 +1,30 @@
 package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class Pr02AndroidRuntimeNodeIdentityClosureTest {
+
+    private fun allocationTruthWithResult(nowMs: Long = 1_000L): AndroidTaskAllocationTruthSnapshot {
+        val ledger = AndroidTaskAllocationTruthLedger()
+        ledger.recordAccepted(
+            taskId = "task-001",
+            participantId = "Pixel_8:host-001",
+            hostDescriptor = descriptor(),
+            fallbackAllowed = false,
+            nowMs = nowMs
+        )
+        ledger.recordClosed(
+            taskId = "task-001",
+            closureClass = TaskAllocationClosureClass.RESULT,
+            requiresCanonicalReconciliation = false,
+            nowMs = nowMs + 10
+        )
+        return ledger.snapshot(activeTaskId = null)
+    }
 
     private fun descriptor(
         role: RuntimeHostDescriptor.FormationRole = RuntimeHostDescriptor.FormationRole.PRIMARY,
@@ -43,6 +62,8 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY,
             carrierForegroundVisible = true,
+            taskAllocationTruth = allocationTruthWithResult(),
+            reportedAtMs = 1_050L,
             reconciliationEpoch = 1
         )
 
@@ -188,6 +209,8 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY,
             carrierForegroundVisible = true,
+            taskAllocationTruth = allocationTruthWithResult(),
+            reportedAtMs = 1_050L,
             reconciliationEpoch = 5
         )
         val map = truth.runtimeNodeIdentity!!.toMap()
@@ -203,6 +226,7 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
             RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION.wireValue,
             map[AndroidRuntimeNodeIdentity.KEY_AUTONOMY_TRUTH_LEVEL]
         )
+        assertTrue(map.containsKey(AndroidRuntimeNodeIdentity.KEY_AUTONOMY_EVIDENCE))
         assertEquals(
             RuntimeNodeAuthorityBoundaryClass.ANDROID_PARTICIPANT_RUNTIME_ONLY.wireValue,
             map[AndroidRuntimeNodeIdentity.KEY_AUTHORITY_BOUNDARY_CLASS]
@@ -210,6 +234,52 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
         assertEquals(
             RuntimeNodeControlSurfaceBoundaryClass.LOCAL_UI_CONTROL_SURFACE_ONLY.wireValue,
             map[AndroidRuntimeNodeIdentity.KEY_CONTROL_SURFACE_BOUNDARY_CLASS]
+        )
+    }
+
+    @Test
+    fun `runtime node autonomy demotes when evidence is stale`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = sessionSnapshot(),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            taskAllocationTruth = allocationTruthWithResult(nowMs = 1_000L),
+            reportedAtMs = 10_000_000L,
+            reconciliationEpoch = 7
+        )
+
+        assertEquals(
+            RuntimeNodeAutonomyEvidenceClass.STALE_EVIDENCE_DEMOTED,
+            truth.runtimeNodeIdentity?.autonomyEvidence?.evidenceClass
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT,
+            truth.runtimeNodeIdentity?.autonomyTruthLevel
+        )
+    }
+
+    @Test
+    fun `runtime node autonomy demotes during recovery degraded phases`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = sessionSnapshot(),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            taskAllocationTruth = allocationTruthWithResult(),
+            inflightContinuityState = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase.REQUIRES_RECONCILIATION.wireValue,
+            reportedAtMs = 1_050L,
+            reconciliationEpoch = 8
+        )
+
+        assertEquals(
+            RuntimeNodeAutonomyEvidenceClass.RECOVERY_DEGRADED_DEMOTED,
+            truth.runtimeNodeIdentity?.autonomyEvidence?.evidenceClass
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT,
+            truth.runtimeNodeIdentity?.autonomyTruthLevel
         )
     }
 }

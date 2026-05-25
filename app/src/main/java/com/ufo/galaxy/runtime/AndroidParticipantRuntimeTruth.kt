@@ -239,6 +239,9 @@ data class AndroidParticipantRuntimeTruth(
             runtimeAvailabilityTruthState = runtimeAvailabilityTruthState
         )
 
+    val runtimeParticipationTopology: AndroidRuntimeParticipationTopology
+        get() = AndroidRuntimeParticipationTopology.from(this)
+
     // ── Wire serialization ────────────────────────────────────────────────────
 
     /**
@@ -271,6 +274,7 @@ data class AndroidParticipantRuntimeTruth(
         inflightContinuitySource?.let { put(KEY_INFLIGHT_CONTINUITY_SOURCE, it) }
         inflightContinuityObservedAtMs?.let { put(KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS, it) }
         taskAllocationTruth?.let { put(KEY_TASK_ALLOCATION_TRUTH, it.toMap()) }
+        put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, runtimeParticipationTopology.toMap())
         put(KEY_AUTHORITATIVE_PARTICIPATION_STATE, authoritativeParticipationState)
         authoritativeParticipationTransitionSequence?.let {
             put(KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_SEQUENCE, it)
@@ -376,6 +380,7 @@ data class AndroidParticipantRuntimeTruth(
 
         /** Wire key for [taskAllocationTruth]; absent when null. */
         const val KEY_TASK_ALLOCATION_TRUTH = "task_allocation_truth"
+        const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY = "runtime_participation_topology"
 
         /** Wire key for [authoritativeParticipationState]. */
         const val KEY_AUTHORITATIVE_PARTICIPATION_STATE = "authoritative_participation_state"
@@ -511,7 +516,10 @@ data class AndroidParticipantRuntimeTruth(
                     sessionSnapshot = driftCheckedSessionSnapshot,
                     healthState = healthState,
                     readinessState = readinessState,
-                    carrierForegroundVisible = carrierForegroundVisible
+                    carrierForegroundVisible = carrierForegroundVisible,
+                    taskAllocationTruth = taskAllocationTruth,
+                    inflightContinuityState = inflightContinuityState,
+                    reportedAtMs = reportedAtMs
                 ),
                 authoritativeParticipationTransitionSequence =
                     authoritativeParticipationTransitionSequence,
@@ -686,13 +694,7 @@ private fun deriveFallbackAutonomyTruthLevel(
     if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME) {
         return RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY
     }
-    return if (readinessState == ParticipantReadinessState.READY &&
-        healthState == ParticipantHealthState.HEALTHY
-    ) {
-        RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION
-    } else {
-        RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
-    }
+    return RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
 }
 
 private fun deriveFeatureReadinessTruthState(

@@ -32,6 +32,47 @@ enum class RuntimeNodeAutonomyTruthLevel(val wireValue: String) {
     SEMI_AUTONOMOUS_EXECUTION("semi_autonomous_execution")
 }
 
+enum class RuntimeNodeAutonomyEvidenceClass(val wireValue: String) {
+    SELF_REPORTED_ONLY("self_reported_only"),
+    ACTIVE_EXECUTION_PROOF("active_execution_proof"),
+    RESULT_RETURN_PROOF("result_return_proof"),
+    STALE_EVIDENCE_DEMOTED("stale_evidence_demoted"),
+    RECOVERY_DEGRADED_DEMOTED("recovery_degraded_demoted")
+}
+
+data class RuntimeNodeAutonomyEvidence(
+    val evidenceClass: RuntimeNodeAutonomyEvidenceClass,
+    val acceptedExecutionEvidenceCount: Int,
+    val resultReturnEvidenceCount: Int,
+    val closureIntegratedEvidenceCount: Int,
+    val lastEvidenceAtMs: Long?,
+    val hasFreshRuntimeEvidence: Boolean,
+    val stableRuntimeParticipation: Boolean,
+    val demotionReasons: List<String>
+) {
+    fun toMap(): Map<String, Any?> = mapOf(
+        KEY_EVIDENCE_CLASS to evidenceClass.wireValue,
+        KEY_ACCEPTED_EXECUTION_EVIDENCE_COUNT to acceptedExecutionEvidenceCount,
+        KEY_RESULT_RETURN_EVIDENCE_COUNT to resultReturnEvidenceCount,
+        KEY_CLOSURE_INTEGRATED_EVIDENCE_COUNT to closureIntegratedEvidenceCount,
+        KEY_LAST_EVIDENCE_AT_MS to lastEvidenceAtMs,
+        KEY_HAS_FRESH_RUNTIME_EVIDENCE to hasFreshRuntimeEvidence,
+        KEY_STABLE_RUNTIME_PARTICIPATION to stableRuntimeParticipation,
+        KEY_DEMOTION_REASONS to demotionReasons
+    )
+
+    companion object {
+        private const val KEY_EVIDENCE_CLASS = "evidence_class"
+        private const val KEY_ACCEPTED_EXECUTION_EVIDENCE_COUNT = "accepted_execution_evidence_count"
+        private const val KEY_RESULT_RETURN_EVIDENCE_COUNT = "result_return_evidence_count"
+        private const val KEY_CLOSURE_INTEGRATED_EVIDENCE_COUNT = "closure_integrated_evidence_count"
+        private const val KEY_LAST_EVIDENCE_AT_MS = "last_evidence_at_ms"
+        private const val KEY_HAS_FRESH_RUNTIME_EVIDENCE = "has_fresh_runtime_evidence"
+        private const val KEY_STABLE_RUNTIME_PARTICIPATION = "stable_runtime_participation"
+        private const val KEY_DEMOTION_REASONS = "demotion_reasons"
+    }
+}
+
 enum class RuntimeNodeAuthorityBoundaryClass(val wireValue: String) {
     ANDROID_PARTICIPANT_RUNTIME_ONLY("android_participant_runtime_only"),
     V2_CANONICAL_AUTHORITY_EXTERNAL("v2_canonical_authority_external")
@@ -60,7 +101,8 @@ data class AndroidRuntimeNodeIdentity(
     val executionParticipationState: RuntimeNodeExecutionParticipationState,
     val collaborationParticipationState: RuntimeNodeCollaborationParticipationState,
     val manifestationParticipationState: RuntimeNodeManifestationParticipationState,
-    private val sessionSnapshotDelegatedExecutionCount: Int
+    private val sessionSnapshotDelegatedExecutionCount: Int,
+    val autonomyEvidence: RuntimeNodeAutonomyEvidence
 ) {
     val capabilityTruthLevel: RuntimeNodeCapabilityTruthLevel
         get() = deriveCapabilityTruthLevel(
@@ -75,7 +117,8 @@ data class AndroidRuntimeNodeIdentity(
             sourceRuntimePosture = sourceRuntimePosture,
             executionParticipationState = executionParticipationState,
             collaborationParticipationState = collaborationParticipationState,
-            delegatedExecutionCount = sessionSnapshotDelegatedExecutionCount
+            delegatedExecutionCount = sessionSnapshotDelegatedExecutionCount,
+            autonomyEvidence = autonomyEvidence
         )
 
     val authorityBoundaryClass: RuntimeNodeAuthorityBoundaryClass
@@ -107,6 +150,7 @@ data class AndroidRuntimeNodeIdentity(
         KEY_MANIFESTATION_PARTICIPATION_STATE to manifestationParticipationState.wireValue,
         KEY_CAPABILITY_TRUTH_LEVEL to capabilityTruthLevel.wireValue,
         KEY_AUTONOMY_TRUTH_LEVEL to autonomyTruthLevel.wireValue,
+        KEY_AUTONOMY_EVIDENCE to autonomyEvidence.toMap(),
         KEY_AUTHORITY_BOUNDARY_CLASS to authorityBoundaryClass.wireValue,
         KEY_CANONICAL_AUTHORITY_BOUNDARY_CLASS to canonicalAuthorityBoundaryClass.wireValue,
         KEY_CONTROL_SURFACE_BOUNDARY_CLASS to controlSurfaceBoundaryClass.wireValue,
@@ -130,6 +174,7 @@ data class AndroidRuntimeNodeIdentity(
         const val KEY_MANIFESTATION_PARTICIPATION_STATE = "manifestation_participation_state"
         const val KEY_CAPABILITY_TRUTH_LEVEL = "capability_truth_level"
         const val KEY_AUTONOMY_TRUTH_LEVEL = "autonomy_truth_level"
+        const val KEY_AUTONOMY_EVIDENCE = "autonomy_evidence"
         const val KEY_AUTHORITY_BOUNDARY_CLASS = "authority_boundary_class"
         const val KEY_CANONICAL_AUTHORITY_BOUNDARY_CLASS = "canonical_authority_boundary_class"
         const val KEY_CONTROL_SURFACE_BOUNDARY_CLASS = "control_surface_boundary_class"
@@ -140,7 +185,10 @@ data class AndroidRuntimeNodeIdentity(
             sessionSnapshot: AttachedRuntimeHostSessionSnapshot?,
             healthState: ParticipantHealthState,
             readinessState: ParticipantReadinessState,
-            carrierForegroundVisible: Boolean? = null
+            carrierForegroundVisible: Boolean? = null,
+            taskAllocationTruth: AndroidTaskAllocationTruthSnapshot? = null,
+            inflightContinuityState: String? = null,
+            reportedAtMs: Long = System.currentTimeMillis()
         ): AndroidRuntimeNodeIdentity {
             val nodeId = RuntimeIdentityContracts.participantNodeId(
                 deviceId = descriptor.deviceId,
@@ -171,6 +219,15 @@ data class AndroidRuntimeNodeIdentity(
                 deriveCollaborationParticipationState(descriptor, sessionSnapshot)
             val manifestationParticipationState =
                 deriveManifestationParticipationState(sessionSnapshot, carrierForegroundVisible)
+            val autonomyEvidence = deriveAutonomyEvidence(
+                sourceRuntimePosture = sessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                executionParticipationState = executionParticipationState,
+                collaborationParticipationState = collaborationParticipationState,
+                delegatedExecutionCount = sessionSnapshot?.delegatedExecutionCount ?: 0,
+                taskAllocationTruth = taskAllocationTruth,
+                inflightContinuityState = inflightContinuityState,
+                observedAtMs = reportedAtMs
+            )
 
             return AndroidRuntimeNodeIdentity(
                 nodeId = nodeId,
@@ -186,7 +243,8 @@ data class AndroidRuntimeNodeIdentity(
                 executionParticipationState = executionParticipationState,
                 collaborationParticipationState = collaborationParticipationState,
                 manifestationParticipationState = manifestationParticipationState,
-                sessionSnapshotDelegatedExecutionCount = sessionSnapshot?.delegatedExecutionCount ?: 0
+                sessionSnapshotDelegatedExecutionCount = sessionSnapshot?.delegatedExecutionCount ?: 0,
+                autonomyEvidence = autonomyEvidence
             )
         }
 
@@ -276,7 +334,8 @@ data class AndroidRuntimeNodeIdentity(
             sourceRuntimePosture: String,
             executionParticipationState: RuntimeNodeExecutionParticipationState,
             collaborationParticipationState: RuntimeNodeCollaborationParticipationState,
-            delegatedExecutionCount: Int
+            delegatedExecutionCount: Int,
+            autonomyEvidence: RuntimeNodeAutonomyEvidence
         ): RuntimeNodeAutonomyTruthLevel {
             if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME ||
                 collaborationParticipationState == RuntimeNodeCollaborationParticipationState.INACTIVE
@@ -284,15 +343,112 @@ data class AndroidRuntimeNodeIdentity(
                 return RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY
             }
             return when (executionParticipationState) {
-                RuntimeNodeExecutionParticipationState.ELIGIBLE -> if (delegatedExecutionCount > 0) {
-                    RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION
-                } else {
-                    RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
+                RuntimeNodeExecutionParticipationState.ELIGIBLE -> when (autonomyEvidence.evidenceClass) {
+                    RuntimeNodeAutonomyEvidenceClass.RESULT_RETURN_PROOF ->
+                        RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION
+                    RuntimeNodeAutonomyEvidenceClass.ACTIVE_EXECUTION_PROOF ->
+                        if (delegatedExecutionCount > 0 && autonomyEvidence.hasFreshRuntimeEvidence) {
+                            RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION
+                        } else {
+                            RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
+                        }
+                    else -> RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
                 }
                 RuntimeNodeExecutionParticipationState.DEGRADED,
                 RuntimeNodeExecutionParticipationState.BLOCKED ->
                     RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
             }
         }
+
+        private fun deriveAutonomyEvidence(
+            sourceRuntimePosture: String,
+            executionParticipationState: RuntimeNodeExecutionParticipationState,
+            collaborationParticipationState: RuntimeNodeCollaborationParticipationState,
+            delegatedExecutionCount: Int,
+            taskAllocationTruth: AndroidTaskAllocationTruthSnapshot?,
+            inflightContinuityState: String?,
+            observedAtMs: Long
+        ): RuntimeNodeAutonomyEvidence {
+            val allocationRecords = taskAllocationTruth?.recentTaskAllocations.orEmpty()
+            val acceptedExecutionEvidenceCount = allocationRecords.count { record ->
+                record.transitions.any { it.event == TaskAllocationTransitionEvent.ALLOCATION_REQUESTED } ||
+                    (record.requestedAtMs > 0L && record.selectedAtMs > 0L)
+            }
+            val resultReturnEvidenceCount = allocationRecords.count { record ->
+                record.closureClass == TaskAllocationClosureClass.RESULT &&
+                    record.closedAtMs != null
+            }
+            val closureIntegratedEvidenceCount = allocationRecords.count { record ->
+                record.participantLocalPhase == TaskAllocationPhase.CLOSED &&
+                    record.closedAtMs != null
+            }
+            val lastEvidenceAtMs = allocationRecords
+                .mapNotNull { it.lastUpdatedAtMs.takeIf { value -> value > 0L } }
+                .maxOrNull()
+            val hasFreshRuntimeEvidence = lastEvidenceAtMs?.let { evidenceAt ->
+                observedAtMs >= evidenceAt &&
+                    (observedAtMs - evidenceAt) <= AUTONOMY_EVIDENCE_FRESHNESS_WINDOW_MS
+            } ?: false
+            val recoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase
+                .fromWireValue(inflightContinuityState)
+            val recoveryDemoted = recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING ||
+                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION ||
+                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT ||
+                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT ||
+                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED
+            val postureInsufficient = sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME ||
+                collaborationParticipationState == RuntimeNodeCollaborationParticipationState.INACTIVE
+            val hasAnyEvidence = acceptedExecutionEvidenceCount > 0 ||
+                resultReturnEvidenceCount > 0 ||
+                delegatedExecutionCount > 0
+            val evidenceClass = when {
+                postureInsufficient ->
+                    RuntimeNodeAutonomyEvidenceClass.SELF_REPORTED_ONLY
+                recoveryDemoted ->
+                    RuntimeNodeAutonomyEvidenceClass.RECOVERY_DEGRADED_DEMOTED
+                hasAnyEvidence && !hasFreshRuntimeEvidence ->
+                    RuntimeNodeAutonomyEvidenceClass.STALE_EVIDENCE_DEMOTED
+                resultReturnEvidenceCount > 0 && closureIntegratedEvidenceCount > 0 ->
+                    RuntimeNodeAutonomyEvidenceClass.RESULT_RETURN_PROOF
+                hasAnyEvidence ->
+                    RuntimeNodeAutonomyEvidenceClass.ACTIVE_EXECUTION_PROOF
+                else ->
+                    RuntimeNodeAutonomyEvidenceClass.SELF_REPORTED_ONLY
+            }
+            val demotionReasons = buildList {
+                if (executionParticipationState == RuntimeNodeExecutionParticipationState.BLOCKED) {
+                    add("execution_participation_blocked")
+                }
+                if (executionParticipationState == RuntimeNodeExecutionParticipationState.DEGRADED) {
+                    add("execution_participation_degraded")
+                }
+                if (recoveryDemoted) {
+                    add("continuity_recovery_not_stable")
+                }
+                if (hasAnyEvidence && !hasFreshRuntimeEvidence) {
+                    add("runtime_evidence_stale")
+                }
+                if (!hasAnyEvidence) {
+                    add("no_runtime_execution_evidence")
+                }
+            }.distinct()
+            val stableRuntimeParticipation = sourceRuntimePosture == SourceRuntimePosture.JOIN_RUNTIME &&
+                collaborationParticipationState != RuntimeNodeCollaborationParticipationState.INACTIVE &&
+                executionParticipationState != RuntimeNodeExecutionParticipationState.BLOCKED &&
+                !recoveryDemoted &&
+                (hasFreshRuntimeEvidence || delegatedExecutionCount > 0)
+            return RuntimeNodeAutonomyEvidence(
+                evidenceClass = evidenceClass,
+                acceptedExecutionEvidenceCount = acceptedExecutionEvidenceCount,
+                resultReturnEvidenceCount = resultReturnEvidenceCount,
+                closureIntegratedEvidenceCount = closureIntegratedEvidenceCount,
+                lastEvidenceAtMs = lastEvidenceAtMs,
+                hasFreshRuntimeEvidence = hasFreshRuntimeEvidence,
+                stableRuntimeParticipation = stableRuntimeParticipation,
+                demotionReasons = demotionReasons
+            )
+        }
+
+        private const val AUTONOMY_EVIDENCE_FRESHNESS_WINDOW_MS = 15 * 60 * 1000L
     }
 }

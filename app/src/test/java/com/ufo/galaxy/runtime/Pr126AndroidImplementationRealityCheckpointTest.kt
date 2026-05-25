@@ -68,6 +68,7 @@ class Pr126AndroidImplementationRealityCheckpointTest {
             sessionSnapshot = attachedSnapshot(delegatedCount = 2),
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY,
+            taskAllocationTruth = allocationTruthWithStableCompletions(),
             reconciliationEpoch = 12
         )
 
@@ -79,6 +80,7 @@ class Pr126AndroidImplementationRealityCheckpointTest {
         assertEquals("1", checkpoint["schema_version"])
         assertTrue(checkpoint.containsKey("node_system_truth"))
         assertTrue(checkpoint.containsKey("runtime_semantics_truth"))
+        assertTrue(checkpoint.containsKey("model_topology_truth"))
         assertTrue(checkpoint.containsKey("task_allocation_truth"))
         assertTrue(checkpoint.containsKey("device_support_truth"))
         assertTrue(checkpoint.containsKey("autonomy_truth"))
@@ -86,6 +88,8 @@ class Pr126AndroidImplementationRealityCheckpointTest {
         val taskAllocationTruth = checkpoint["task_allocation_truth"] as Map<String, Any?>
         assertTrue(taskAllocationTruth.containsKey("allocation_truth_substrate"))
         assertTrue(signal.payload.containsKey(ReconciliationSignal.KEY_TASK_ALLOCATION_TRUTH))
+        assertTrue(signal.payload.containsKey(ReconciliationSignal.KEY_RUNTIME_PARTICIPATION_TOPOLOGY))
+        assertTrue(signal.payload.containsKey(ReconciliationSignal.KEY_AUTONOMY_RUNTIME_EVIDENCE))
     }
 
     @Test
