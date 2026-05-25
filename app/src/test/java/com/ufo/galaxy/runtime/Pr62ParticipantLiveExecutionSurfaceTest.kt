@@ -530,6 +530,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-1",
             taskId = "task-62g",
+            traceId = "trace-62g",
             reason = "test failure",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
@@ -544,11 +545,80 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-2",
             taskId = "task-62h",
+            traceId = "trace-62h",
             reason = "test cancel",
             cause = TakeoverFallbackEvent.Cause.CANCELLED
         )
         assertNull(controller.activeTaskId)
     }
+
+    @Test
+    fun `publishTaskResult with mismatched task id is suppressed and preserves active task truth`() =
+        runBlocking {
+            val (controller, _) = buildController(buildDescriptor())
+            controller.setActiveForTest()
+            controller.recordDelegatedTaskAccepted("task-62-active-result")
+            val signals = mutableListOf<ReconciliationSignal>()
+            val job = launch { controller.reconciliationSignals.collect { signals.add(it) } }
+            controller.publishTaskResult("task-62-stale-result")
+            delay(120)
+            job.cancel()
+            assertEquals("task-62-active-result", controller.activeTaskId)
+            assertEquals(ActiveTaskStatus.RUNNING, controller.activeTaskStatus)
+            assertNull(
+                signals.firstOrNull {
+                    it.kind == ReconciliationSignal.Kind.TASK_RESULT && it.taskId == "task-62-stale-result"
+                }
+            )
+        }
+
+    @Test
+    fun `publishTaskCancelled with mismatched task id is suppressed and preserves active task truth`() =
+        runBlocking {
+            val (controller, _) = buildController(buildDescriptor())
+            controller.setActiveForTest()
+            controller.recordDelegatedTaskAccepted("task-62-active-cancel")
+            val signals = mutableListOf<ReconciliationSignal>()
+            val job = launch { controller.reconciliationSignals.collect { signals.add(it) } }
+            controller.publishTaskCancelled("task-62-stale-cancel")
+            delay(120)
+            job.cancel()
+            assertEquals("task-62-active-cancel", controller.activeTaskId)
+            assertEquals(ActiveTaskStatus.RUNNING, controller.activeTaskStatus)
+            assertNull(
+                signals.firstOrNull {
+                    it.kind == ReconciliationSignal.Kind.TASK_CANCELLED &&
+                        it.taskId == "task-62-stale-cancel"
+                }
+            )
+        }
+
+    @Test
+    fun `notifyTakeoverFailed with mismatched task id is suppressed and preserves active task truth`() =
+        runBlocking {
+            val (controller, _) = buildController(buildDescriptor())
+            controller.setActiveForTest()
+            controller.recordDelegatedTaskAccepted("task-62-active-failure")
+            val signals = mutableListOf<ReconciliationSignal>()
+            val job = launch { controller.reconciliationSignals.collect { signals.add(it) } }
+            controller.notifyTakeoverFailed(
+                takeoverId = "takeover-62-stale",
+                taskId = "task-62-stale-failure",
+                traceId = "trace-62-stale",
+                reason = "late_failure_after_state_divergence",
+                cause = TakeoverFallbackEvent.Cause.FAILED
+            )
+            delay(120)
+            job.cancel()
+            assertEquals("task-62-active-failure", controller.activeTaskId)
+            assertEquals(ActiveTaskStatus.RUNNING, controller.activeTaskStatus)
+            assertNull(
+                signals.firstOrNull {
+                    it.kind == ReconciliationSignal.Kind.TASK_FAILED &&
+                        it.taskId == "task-62-stale-failure"
+                }
+            )
+        }
 
     // ── RuntimeController — publishTaskStatusUpdate ───────────────────────────
 
