@@ -782,20 +782,19 @@ data class ReconciliationSignal(
                     KEY_COMPLETION_TRUTH_GRADE to completionTruthGrade.wireValue
                 )
             }.orEmpty()
-            val participantLocalConvergenceState = when {
-                !isTerminalSignal ->
-                    ParticipantLocalConvergenceState.UNRESOLVED_INFLIGHT
-                terminalOutcomeKind ==
+            val participantLocalConvergenceState = if (!isTerminalSignal) {
+                ParticipantLocalConvergenceState.UNRESOLVED_INFLIGHT
+            } else {
+                when (terminalOutcomeKind) {
                     AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION ->
-                    ParticipantLocalConvergenceState.INTERRUPTION_RESUME_PENDING
-                terminalOutcomeKind ==
+                        ParticipantLocalConvergenceState.INTERRUPTION_RESUME_PENDING
                     AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.TIMEOUT ->
-                    ParticipantLocalConvergenceState.TIMEOUT_PENDING_CANONICAL
-                terminalOutcomeKind ==
+                        ParticipantLocalConvergenceState.TIMEOUT_PENDING_CANONICAL
                     AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABANDON ->
-                    ParticipantLocalConvergenceState.ABANDONED_UNRESOLVED
-                else ->
-                    ParticipantLocalConvergenceState.LOCAL_COMPLETION_PENDING_DELIVERY
+                        ParticipantLocalConvergenceState.ABANDONED_UNRESOLVED
+                    else ->
+                        ParticipantLocalConvergenceState.LOCAL_COMPLETION_PENDING_DELIVERY
+                }
             }
             return mapOf(
                 AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION to

@@ -1489,6 +1489,9 @@ class GalaxyWebSocketClient(
             }
         }
         if (message.type == MsgType.RECONCILIATION_SIGNAL.value) {
+            // Reconciliation envelopes are structured as:
+            // root.payload (ReconciliationSignalPayload) -> payload (signal detail map).
+            // Replay legality metadata belongs on the inner signal-detail payload.
             root.objectOrNull("payload")
                 ?.objectOrNull("payload")
                 ?.let { nestedPayload ->
