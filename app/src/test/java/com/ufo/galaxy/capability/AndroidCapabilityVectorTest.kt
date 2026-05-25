@@ -184,6 +184,21 @@ class AndroidCapabilityVectorTest {
     }
 
     @Test
+    fun `hub role is not eligible for cross device participation even when cross device dimension is present`() {
+        val settings = allReadySettings().also { it.deviceRole = "hub" }
+        val descriptor = RuntimeHostDescriptor.of(
+            deviceId = "pixel-hub",
+            deviceRole = "hub",
+            hostId = "host-hub"
+        ).withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
+
+        val vector = AndroidCapabilityVector.from(settings, descriptor)
+
+        assertFalse(vector.isEligibleForCrossDeviceParticipation)
+        assertFalse(vector.isEligibleForParallelSubtask)
+    }
+
+    @Test
     fun `all four dimensions present for a fully-ready device`() {
         val vector = AndroidCapabilityVector.from(allReadySettings())
         assertEquals(

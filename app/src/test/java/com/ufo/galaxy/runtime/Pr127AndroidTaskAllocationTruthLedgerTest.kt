@@ -24,6 +24,8 @@ class Pr127AndroidTaskAllocationTruthLedgerTest {
             participantId = "participant-127",
             hostDescriptor = hostDescriptor(),
             fallbackAllowed = true,
+            dispatchPlanId = "plan-127",
+            temporalWorkflowRunId = "workflow-127",
             nowMs = 1_000L
         )
         ledger.recordStatus("task-127", ActiveTaskStatus.CANCELLING, nowMs = 1_100L)
@@ -41,6 +43,8 @@ class Pr127AndroidTaskAllocationTruthLedgerTest {
         assertEquals(TaskAllocationClosureClass.CANCELLED, record.closureClass)
         assertFalse(record.inFlightOwnership)
         assertEquals(TaskAllocationPathClass.CANONICAL_FALLBACK_LOCAL, record.fallbackPathClass)
+        assertEquals("plan-127", record.dispatchPlanId)
+        assertEquals("workflow-127", record.temporalWorkflowRunId)
         assertTrue(record.transitions.any { it.event == TaskAllocationTransitionEvent.CLOSURE_RECORDED })
     }
 
@@ -52,6 +56,7 @@ class Pr127AndroidTaskAllocationTruthLedgerTest {
             participantId = "participant-restore",
             hostDescriptor = hostDescriptor(),
             fallbackAllowed = false,
+            dispatchPlanId = "plan-restore",
             nowMs = 2_000L
         )
         val raw = ledger.toJson(activeTaskId = "task-restore")
@@ -65,5 +70,33 @@ class Pr127AndroidTaskAllocationTruthLedgerTest {
             TaskAllocationPathClass.CANONICAL_DELEGATED_DISPATCH,
             snapshot.recentTaskAllocations.first().allocationPathClass
         )
+        assertEquals("plan-restore", snapshot.recentTaskAllocations.first().dispatchPlanId)
+    }
+
+    @Test
+    fun `restored ledger marks durable truth as requiring live revalidation until a live update arrives`() {
+        val liveLedger = AndroidTaskAllocationTruthLedger()
+        liveLedger.recordAccepted(
+            taskId = "task-revalidate",
+            participantId = "participant-revalidate",
+            hostDescriptor = hostDescriptor(),
+            fallbackAllowed = false,
+            dispatchPlanId = "plan-revalidate",
+            nowMs = 3_000L
+        )
+        val raw = liveLedger.toJson(activeTaskId = "task-revalidate")
+
+        val restored = AndroidTaskAllocationTruthLedger()
+        restored.restore(raw, restoredNowMs = 9_000L)
+
+        val restoredSnapshot = restored.snapshot(activeTaskId = "task-revalidate")
+        assertTrue(restoredSnapshot.restoredFromDurableArtifact)
+        assertTrue(restoredSnapshot.requiresLiveRevalidation)
+        assertEquals(9_000L, restoredSnapshot.restoredAtMs)
+
+        restored.recordStatus("task-revalidate", ActiveTaskStatus.FAILING, nowMs = 9_100L)
+        val revalidatedSnapshot = restored.snapshot(activeTaskId = "task-revalidate")
+        assertTrue(revalidatedSnapshot.restoredFromDurableArtifact)
+        assertFalse(revalidatedSnapshot.requiresLiveRevalidation)
     }
 }

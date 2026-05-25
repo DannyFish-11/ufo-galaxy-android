@@ -1059,7 +1059,10 @@ class RuntimeController(
 
     init {
         webSocketClient.addListener(permanentWsListener)
-        taskAllocationTruthLedger.restore(settings.taskAllocationTruthArtifact)
+        taskAllocationTruthLedger.restore(
+            raw = settings.taskAllocationTruthArtifact,
+            restoredNowMs = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -2521,7 +2524,9 @@ class RuntimeController(
             taskId = taskId,
             participantId = currentParticipantId(),
             hostDescriptor = hostDescriptor,
-            fallbackAllowed = settings.fallbackToLocalAllowed
+            fallbackAllowed = settings.fallbackToLocalAllowed,
+            dispatchPlanId = dispatchPlanId,
+            temporalWorkflowRunId = temporalWorkflowRunId
         )
         persistTaskAllocationTruthArtifact()
         _isRemoteExecutionActive.value = true

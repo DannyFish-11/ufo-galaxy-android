@@ -72,7 +72,11 @@ object AndroidImplementationRealityCheckpoint {
                 truth.inflightContinuityState
                     ?: AndroidContinuityRecoveryStateModel.RecoveryPhase.UNKNOWN.wireValue
                 ),
-            "continuity_recovery_source" to truth.inflightContinuitySource
+            "continuity_recovery_source" to truth.inflightContinuitySource,
+            "allocation_truth_requires_live_revalidation" to
+                (truth.taskAllocationTruth?.requiresLiveRevalidation ?: false),
+            "allocation_truth_restored_from_durable_artifact" to
+                (truth.taskAllocationTruth?.restoredFromDurableArtifact ?: false)
         )
 
     private fun runtimeFreshnessClass(inflightContinuityState: String?): String {
@@ -124,6 +128,9 @@ object AndroidImplementationRealityCheckpoint {
             )
             truth.taskAllocationTruth?.let {
                 put("allocation_truth_substrate", it.toMap())
+                put("requires_live_revalidation", it.requiresLiveRevalidation)
+                put("restored_from_durable_artifact", it.restoredFromDurableArtifact)
+                put("restored_at_ms", it.restoredAtMs)
             }
         }
 
@@ -143,7 +150,10 @@ object AndroidImplementationRealityCheckpoint {
                 .contractFirstCapabilities
                 .map { it.wireValue },
             "current_capability_truth_level" to truth.capabilityTruthLevel.wireValue,
-            "feature_readiness_truth_state" to truth.featureReadinessTruthState.wireValue
+            "feature_readiness_truth_state" to truth.featureReadinessTruthState.wireValue,
+            "operational_device_support" to AndroidOperationalDeviceSupport
+                .classify(truth.deviceRole)
+                .toMap()
         )
 
     private fun buildAutonomyTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> {
@@ -166,11 +176,21 @@ object AndroidImplementationRealityCheckpoint {
             else -> false
         }
         val executionEvidenceCount = acceptedEvidenceCount + if (truth.activeTaskId != null) 1 else 0
+        val planAnchoredExecutionCount = allocationRecords.count { !it.dispatchPlanId.isNullOrBlank() }
+        val repeatedPlanAnchoredCompletionCount = allocationRecords.count {
+            it.closureClass == TaskAllocationClosureClass.RESULT &&
+                it.closedAtMs != null &&
+                !it.dispatchPlanId.isNullOrBlank()
+        }
         val evidenceClass = when {
             truth.capabilityTruthLevel != RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE &&
                 truth.capabilityTruthLevel != RuntimeNodeCapabilityTruthLevel.EXECUTION_DEGRADED ->
                 "insufficient_execution_capability"
-            stableCompletionCount >= MEANINGFUL_AUTONOMY_COMPLETION_THRESHOLD && continuityStable ->
+            runtimeAutonomyEvidence?.durableTruthRequiresRevalidation == true ->
+                "restored_truth_requires_live_revalidation"
+            stableCompletionCount >= MEANINGFUL_AUTONOMY_COMPLETION_THRESHOLD &&
+                continuityStable &&
+                planAnchoredExecutionCount > 0 ->
                 "meaningful_runtime_execution_evidence"
             executionEvidenceCount > 0 -> "limited_runtime_execution_evidence"
             else -> "self_report_only_no_execution_evidence"
@@ -189,6 +209,8 @@ object AndroidImplementationRealityCheckpoint {
             "execution_evidence_count" to executionEvidenceCount,
             "accepted_execution_evidence_count" to acceptedEvidenceCount,
             "stable_completion_evidence_count" to stableCompletionCount,
+            "plan_anchored_execution_evidence_count" to planAnchoredExecutionCount,
+            "repeated_plan_anchored_completion_count" to repeatedPlanAnchoredCompletionCount,
             "continuity_stable_for_autonomy_evidence" to continuityStable,
             "evidence_class" to evidenceClass,
             "effective_autonomy_class" to effectiveAutonomyClass,

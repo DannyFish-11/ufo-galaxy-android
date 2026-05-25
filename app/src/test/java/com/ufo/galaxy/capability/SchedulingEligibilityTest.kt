@@ -75,6 +75,11 @@ class SchedulingEligibilityTest {
         deviceRole = "phone"
     ).withState(RuntimeHostDescriptor.HostParticipationState.DRAINING)
 
+    private fun hubDescriptor() = RuntimeHostDescriptor.of(
+        deviceId = "pixel-hub",
+        deviceRole = "hub"
+    ).withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
+
     // ── PlacementPreference derivation ────────────────────────────────────────
 
     @Test
@@ -130,6 +135,17 @@ class SchedulingEligibilityTest {
             SchedulingEligibility.PlacementPreference.INDIFFERENT,
             eligibility.placementPreference
         )
+    }
+
+    @Test
+    fun `LOCAL_PREFERRED when device role is hub and cross device near peer execution is demoted`() {
+        val settings = allReadySettings().also { it.deviceRole = "hub" }
+        val vector = AndroidCapabilityVector.from(settings, hubDescriptor())
+        val eligibility = SchedulingEligibility.from(vector)
+
+        assertEquals(SchedulingEligibility.PlacementPreference.LOCAL_PREFERRED, eligibility.placementPreference)
+        assertFalse(eligibility.canAcceptCrossDeviceTasks)
+        assertFalse(eligibility.canAcceptParallelSubtasks)
     }
 
     // ── Individual eligibility flags ──────────────────────────────────────────
