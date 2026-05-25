@@ -927,6 +927,7 @@ class RuntimeController(
                     )
                 }
             }
+
         }
 
         override fun onDisconnected() {
@@ -1489,6 +1490,20 @@ class RuntimeController(
         reason: String,
         cause: TakeoverFallbackEvent.Cause
     ) {
+        val allowedStatuses = allowedStatusesForTakeoverFailure(cause)
+        if (
+            shouldSuppressTerminalSignal(
+                taskId = taskId,
+                signalKind = if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
+                    ReconciliationSignal.Kind.TASK_CANCELLED.wireValue
+                } else {
+                    ReconciliationSignal.Kind.TASK_FAILED.wireValue
+                },
+                allowedStatuses = allowedStatuses
+            )
+        ) {
+            return
+        }
         // PR-29: Deduplication guard — drop a second notification for the same takeoverId
         // within the same session lifetime to prevent double-emission when both an explicit
         // failure path and a simultaneous WS disconnect both attempt to notify.
@@ -1812,6 +1827,44 @@ class RuntimeController(
             )
         }
     }
+
+    private fun shouldSuppressTerminalSignal(
+        taskId: String,
+        signalKind: String,
+        allowedStatuses: Set<ActiveTaskStatus>
+    ): Boolean {
+        val activeTaskId = _activeTaskId
+        val activeStatus = _activeTaskStatus
+        if (activeTaskId == taskId && activeStatus != null && activeStatus in allowedStatuses) {
+            return false
+        }
+        Log.w(
+            TAG,
+            "[RUNTIME] Suppressing terminal signal to preserve canonical closure truth " +
+                "signal_kind=$signalKind task_id=$taskId " +
+                "active_task_id=${activeTaskId ?: "none"} active_status=${activeStatus?.wireValue ?: "none"}"
+        )
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_LIVE_EXECUTION,
+            mapOf(
+                "event" to "terminal_signal_suppressed",
+                "signal_kind" to signalKind,
+                "task_id" to taskId,
+                "active_task_id" to (activeTaskId ?: ""),
+                "active_status" to (activeStatus?.wireValue ?: "")
+            )
+        )
+        return true
+    }
+
+    private fun allowedStatusesForTakeoverFailure(
+        cause: TakeoverFallbackEvent.Cause
+    ): Set<ActiveTaskStatus> =
+        if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
+            setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.CANCELLING)
+        } else {
+            setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.FAILING)
+        }
 
     /**
      * PR-52 — Emits [signal] on [_reconciliationSignals] and logs it.
@@ -2430,6 +2483,15 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        if (
+            shouldSuppressTerminalSignal(
+                taskId = taskId,
+                signalKind = ReconciliationSignal.Kind.TASK_RESULT.wireValue,
+                allowedStatuses = setOf(ActiveTaskStatus.RUNNING)
+            )
+        ) {
+            return
+        }
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
         // PR-125: Capture Temporal workflow run ID before clearing active task state.
@@ -2487,6 +2549,17 @@ class RuntimeController(
         taskId: String,
         correlationId: String? = null
     ) {
+        if (
+            shouldSuppressTerminalSignal(
+                taskId = taskId,
+                signalKind = ReconciliationSignal.Kind.TASK_CANCELLED.wireValue,
+                allowedStatuses = allowedStatusesForTakeoverFailure(
+                    TakeoverFallbackEvent.Cause.CANCELLED
+                )
+            )
+        ) {
+            return
+        }
         // PR-123: Capture dispatch plan ID before clearing active task state.
         val planId = _activeTaskDispatchPlanId
         // PR-125: Capture Temporal workflow run ID before clearing active task state.
