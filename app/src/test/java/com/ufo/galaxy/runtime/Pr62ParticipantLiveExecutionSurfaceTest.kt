@@ -138,6 +138,10 @@ import org.junit.rules.TemporaryFolder
  */
 class Pr62ParticipantLiveExecutionSurfaceTest {
 
+    private companion object {
+        const val SIGNAL_COLLECTION_DELAY_MS = 120L
+    }
+
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
@@ -561,7 +565,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
             val signals = mutableListOf<ReconciliationSignal>()
             val job = launch { controller.reconciliationSignals.collect { signals.add(it) } }
             controller.publishTaskResult("task-62-stale-result")
-            delay(120)
+            delay(SIGNAL_COLLECTION_DELAY_MS)
             job.cancel()
             assertEquals("task-62-active-result", controller.activeTaskId)
             assertEquals(ActiveTaskStatus.RUNNING, controller.activeTaskStatus)
@@ -581,7 +585,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
             val signals = mutableListOf<ReconciliationSignal>()
             val job = launch { controller.reconciliationSignals.collect { signals.add(it) } }
             controller.publishTaskCancelled("task-62-stale-cancel")
-            delay(120)
+            delay(SIGNAL_COLLECTION_DELAY_MS)
             job.cancel()
             assertEquals("task-62-active-cancel", controller.activeTaskId)
             assertEquals(ActiveTaskStatus.RUNNING, controller.activeTaskStatus)
@@ -608,7 +612,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
                 reason = "late_failure_after_state_divergence",
                 cause = TakeoverFallbackEvent.Cause.FAILED
             )
-            delay(120)
+            delay(SIGNAL_COLLECTION_DELAY_MS)
             job.cancel()
             assertEquals("task-62-active-failure", controller.activeTaskId)
             assertEquals(ActiveTaskStatus.RUNNING, controller.activeTaskStatus)
