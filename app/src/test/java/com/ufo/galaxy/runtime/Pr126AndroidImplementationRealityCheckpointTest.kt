@@ -26,6 +26,41 @@ class Pr126AndroidImplementationRealityCheckpointTest {
         posture = SourceRuntimePosture.JOIN_RUNTIME
     )
 
+    private fun allocationTruthWithStableCompletions(): AndroidTaskAllocationTruthSnapshot {
+        val recordA = TaskAllocationTruthRecord(
+            taskId = "task-a",
+            requestedAllocationClass = "delegated_takeover_request",
+            selectedExecutorRef = "android:participant:device-126:host-126",
+            inFlightOwnerRef = "android:participant:device-126:host-126",
+            executionLocation = "android_participant_runtime",
+            allocationPathClass = TaskAllocationPathClass.CANONICAL_DELEGATED_DISPATCH,
+            fallbackPathClass = null,
+            participantLocalPhase = TaskAllocationPhase.CLOSED,
+            inFlightOwnership = false,
+            requestedAtMs = 1_000L,
+            selectedAtMs = 1_000L,
+            inFlightAtMs = 1_100L,
+            closedAtMs = 1_300L,
+            closureClass = TaskAllocationClosureClass.RESULT,
+            lastUpdatedAtMs = 1_300L,
+            transitions = emptyList()
+        )
+        val recordB = recordA.copy(
+            taskId = "task-b",
+            requestedAtMs = 2_000L,
+            selectedAtMs = 2_000L,
+            inFlightAtMs = 2_100L,
+            closedAtMs = 2_300L,
+            lastUpdatedAtMs = 2_300L
+        )
+        return AndroidTaskAllocationTruthSnapshot(
+            activeTaskId = null,
+            activeTask = null,
+            recentTaskAllocations = listOf(recordA, recordB),
+            generatedAtMs = 2_400L
+        )
+    }
+
     @Test
     fun `runtime truth snapshot payload includes implementation reality checkpoint`() {
         val truth = AndroidParticipantRuntimeTruth.from(
@@ -80,6 +115,10 @@ class Pr126AndroidImplementationRealityCheckpointTest {
             sessionSnapshot = attachedSnapshot(delegatedCount = 3),
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY,
+            taskAllocationTruth = allocationTruthWithStableCompletions(),
+            inflightContinuityState = AndroidContinuityRecoveryStateModel.RecoveryPhase
+                .RESUMED_CLEANLY
+                .wireValue,
             reconciliationEpoch = 14
         )
 

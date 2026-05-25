@@ -128,6 +128,13 @@ class Pr88InflightContinuityRecoveryTest {
         assertNull(recreatedController.activeTaskId)
         assertFalse(recreatedController.isRemoteExecutionActive.value)
         assertEquals("", settings.inflightContinuityRecoveryArtifact)
+        val allocationSnapshot = AndroidTaskAllocationTruthSnapshot
+            .fromJson(settings.taskAllocationTruthArtifact)
+        val interruptedRecord = allocationSnapshot?.recentTaskAllocations
+            ?.firstOrNull { it.taskId == "task-process-recreated" }
+        assertEquals(TaskAllocationPhase.CLOSED, interruptedRecord?.participantLocalPhase)
+        assertEquals(TaskAllocationClosureClass.INTERRUPTED, interruptedRecord?.closureClass)
+        assertFalse(interruptedRecord?.inFlightOwnership ?: true)
     }
 
     @Test
@@ -162,6 +169,13 @@ class Pr88InflightContinuityRecoveryTest {
         assertNull(controller.activeTaskId)
         assertFalse(controller.isRemoteExecutionActive.value)
         assertEquals("", settings.inflightContinuityRecoveryArtifact)
+        val allocationSnapshot = AndroidTaskAllocationTruthSnapshot
+            .fromJson(settings.taskAllocationTruthArtifact)
+        val interruptedRecord = allocationSnapshot?.recentTaskAllocations
+            ?.firstOrNull { it.taskId == "task-runtime-stop" }
+        assertEquals(TaskAllocationPhase.CLOSED, interruptedRecord?.participantLocalPhase)
+        assertEquals(TaskAllocationClosureClass.INTERRUPTED, interruptedRecord?.closureClass)
+        assertFalse(interruptedRecord?.inFlightOwnership ?: true)
     }
 
     @Test
