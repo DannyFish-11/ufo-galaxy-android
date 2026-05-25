@@ -144,9 +144,12 @@ data class AndroidRuntimeParticipationTopology(
                             fromNodeId = participantNodeId,
                             toNodeId = allocationNodeId,
                             relation = "executes_allocation",
-                            attributes = mapOf(
-                                "task_execution_visibility_state" to truth.taskExecutionVisibilityState.wireValue
-                            )
+                            attributes = buildMap {
+                                put(
+                                    "task_execution_visibility_state",
+                                    truth.taskExecutionVisibilityState.wireValue
+                                )
+                            }
                         )
                     )
                 }

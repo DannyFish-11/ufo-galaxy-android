@@ -1254,7 +1254,10 @@ data class ReconciliationSignal(
                 truth.taskAllocationTruth?.let {
                     put(KEY_TASK_ALLOCATION_TRUTH, it.toMap())
                 }
-                put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, truth.runtimeParticipationTopology.toMap())
+                val runtimeTopology = truth.runtimeParticipationTopology
+                if (runtimeTopology.nodes.isNotEmpty()) {
+                    put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, runtimeTopology.toMap())
+                }
                 truth.runtimeNodeIdentity?.let {
                     put(KEY_AUTONOMY_RUNTIME_EVIDENCE, it.autonomyEvidence.toMap())
                 }

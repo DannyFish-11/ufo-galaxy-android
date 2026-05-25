@@ -370,10 +370,7 @@ data class AndroidRuntimeNodeIdentity(
             observedAtMs: Long
         ): RuntimeNodeAutonomyEvidence {
             val allocationRecords = taskAllocationTruth?.recentTaskAllocations.orEmpty()
-            val acceptedExecutionEvidenceCount = allocationRecords.count { record ->
-                record.transitions.any { it.event == TaskAllocationTransitionEvent.ALLOCATION_REQUESTED } ||
-                    (record.requestedAtMs > 0L && record.selectedAtMs > 0L)
-            }
+            val acceptedExecutionEvidenceCount = allocationRecords.count(::hasAcceptedExecutionEvidence)
             val resultReturnEvidenceCount = allocationRecords.count { record ->
                 record.closureClass == TaskAllocationClosureClass.RESULT &&
                     record.closedAtMs != null
@@ -383,19 +380,19 @@ data class AndroidRuntimeNodeIdentity(
                     record.closedAtMs != null
             }
             val lastEvidenceAtMs = allocationRecords
-                .mapNotNull { it.lastUpdatedAtMs.takeIf { value -> value > 0L } }
+                .mapNotNull { record -> record.lastUpdatedAtMs.takeIf { it > 0L } }
                 .maxOrNull()
             val hasFreshRuntimeEvidence = lastEvidenceAtMs?.let { evidenceAt ->
-                observedAtMs >= evidenceAt &&
+                // Future evidence timestamps are treated as non-fresh to avoid clock skew promotion.
+                if (evidenceAt > observedAtMs) {
+                    false
+                } else {
                     (observedAtMs - evidenceAt) <= AUTONOMY_EVIDENCE_FRESHNESS_WINDOW_MS
+                }
             } ?: false
             val recoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase
                 .fromWireValue(inflightContinuityState)
-            val recoveryDemoted = recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING ||
-                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION ||
-                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT ||
-                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT ||
-                recoveryPhase == AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED
+            val recoveryDemoted = recoveryPhase in RECOVERY_DEMOTION_PHASES
             val postureInsufficient = sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME ||
                 collaborationParticipationState == RuntimeNodeCollaborationParticipationState.INACTIVE
             val hasAnyEvidence = acceptedExecutionEvidenceCount > 0 ||
@@ -431,7 +428,7 @@ data class AndroidRuntimeNodeIdentity(
                 if (!hasAnyEvidence) {
                     add("no_runtime_execution_evidence")
                 }
-            }.distinct()
+            }
             val stableRuntimeParticipation = sourceRuntimePosture == SourceRuntimePosture.JOIN_RUNTIME &&
                 collaborationParticipationState != RuntimeNodeCollaborationParticipationState.INACTIVE &&
                 executionParticipationState != RuntimeNodeExecutionParticipationState.BLOCKED &&
@@ -449,6 +446,23 @@ data class AndroidRuntimeNodeIdentity(
             )
         }
 
+        // Keep evidence freshness bounded to a short-lived active-runtime window (15 minutes)
+        // so stale historical activity cannot sustain elevated autonomy classification.
         private const val AUTONOMY_EVIDENCE_FRESHNESS_WINDOW_MS = 15 * 60 * 1000L
+        private val RECOVERY_DEMOTION_PHASES = setOf(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED
+        )
+
+        private fun hasAcceptedExecutionEvidence(record: TaskAllocationTruthRecord): Boolean =
+            // Accept either explicit transition evidence or timestamp-ordered legacy artifacts
+            // that predate transition logging but still preserve monotonic allocation markers.
+            record.transitions.any { it.event == TaskAllocationTransitionEvent.ALLOCATION_REQUESTED } ||
+                (record.requestedAtMs > 0L &&
+                    record.selectedAtMs >= record.requestedAtMs &&
+                    (record.inFlightAtMs == null || record.inFlightAtMs >= record.selectedAtMs))
     }
 }
