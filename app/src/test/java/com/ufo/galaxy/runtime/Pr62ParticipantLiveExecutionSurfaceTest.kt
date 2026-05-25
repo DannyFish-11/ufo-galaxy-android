@@ -574,6 +574,14 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
                     it.kind == ReconciliationSignal.Kind.TASK_RESULT && it.taskId == "task-62-stale-result"
                 }
             )
+            assertEquals(
+                InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+                controller.inflightContinuityRecovery.value.disposition
+            )
+            assertEquals(
+                "suppressed_terminal_mismatched_active_task_result",
+                controller.inflightContinuityRecovery.value.source
+            )
         }
 
     @Test
@@ -594,6 +602,14 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
                     it.kind == ReconciliationSignal.Kind.TASK_CANCELLED &&
                         it.taskId == "task-62-stale-cancel"
                 }
+            )
+            assertEquals(
+                InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+                controller.inflightContinuityRecovery.value.disposition
+            )
+            assertEquals(
+                "suppressed_terminal_mismatched_active_task_cancelled",
+                controller.inflightContinuityRecovery.value.source
             )
         }
 
@@ -621,6 +637,14 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
                     it.kind == ReconciliationSignal.Kind.TASK_FAILED &&
                         it.taskId == "task-62-stale-failure"
                 }
+            )
+            assertEquals(
+                InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+                controller.inflightContinuityRecovery.value.disposition
+            )
+            assertEquals(
+                "suppressed_terminal_mismatched_active_task_failed",
+                controller.inflightContinuityRecovery.value.source
             )
         }
 
