@@ -492,6 +492,9 @@ data class ReconciliationSignal(
         const val KEY_IMPLEMENTATION_REALITY_CHECKPOINT =
             AndroidImplementationRealityCheckpoint.KEY_CHECKPOINT
         const val KEY_TASK_ALLOCATION_TRUTH = AndroidParticipantRuntimeTruth.KEY_TASK_ALLOCATION_TRUTH
+        const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY =
+            AndroidParticipantRuntimeTruth.KEY_RUNTIME_PARTICIPATION_TOPOLOGY
+        const val KEY_AUTONOMY_RUNTIME_EVIDENCE = "autonomy_runtime_evidence"
 
         // ── PR-116: Continuity recovery state payload key constants ──────────────────────
 
@@ -1250,6 +1253,10 @@ data class ReconciliationSignal(
                 )
                 truth.taskAllocationTruth?.let {
                     put(KEY_TASK_ALLOCATION_TRUTH, it.toMap())
+                }
+                put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, truth.runtimeParticipationTopology.toMap())
+                truth.runtimeNodeIdentity?.let {
+                    put(KEY_AUTONOMY_RUNTIME_EVIDENCE, it.autonomyEvidence.toMap())
                 }
                 putAll(additionalPayload)
             }

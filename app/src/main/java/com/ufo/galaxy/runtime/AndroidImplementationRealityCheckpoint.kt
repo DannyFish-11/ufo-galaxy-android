@@ -107,7 +107,8 @@ object AndroidImplementationRealityCheckpoint {
                 "execution_participant_without_provider_selection_authority"
             } else {
                 "observability_or_participant_only_without_provider_selection_authority"
-            }
+            },
+            "runtime_participation_topology" to truth.runtimeParticipationTopology.toMap()
         )
 
     private fun buildTaskAllocationTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> =
@@ -146,6 +147,7 @@ object AndroidImplementationRealityCheckpoint {
         )
 
     private fun buildAutonomyTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> {
+        val runtimeAutonomyEvidence = truth.runtimeNodeIdentity?.autonomyEvidence
         val allocationRecords = truth.taskAllocationTruth?.recentTaskAllocations.orEmpty()
         val acceptedEvidenceCount = allocationRecords.count { record ->
             record.transitions.any { it.event == TaskAllocationTransitionEvent.ALLOCATION_REQUESTED } ||
@@ -189,7 +191,8 @@ object AndroidImplementationRealityCheckpoint {
             "stable_completion_evidence_count" to stableCompletionCount,
             "continuity_stable_for_autonomy_evidence" to continuityStable,
             "evidence_class" to evidenceClass,
-            "effective_autonomy_class" to effectiveAutonomyClass
+            "effective_autonomy_class" to effectiveAutonomyClass,
+            "runtime_node_autonomy_evidence" to runtimeAutonomyEvidence?.toMap()
         )
     }
 }
