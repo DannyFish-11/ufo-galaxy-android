@@ -110,16 +110,20 @@ object AndroidImplementationRealityCheckpoint {
         )
 
     private fun buildTaskAllocationTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> =
-        mapOf(
-            "task_execution_visibility_state" to truth.taskExecutionVisibilityState.wireValue,
-            "active_task_id" to truth.activeTaskId,
-            "active_task_status" to truth.activeTaskStatus?.wireValue,
-            "fallback_path_active" to (
+        buildMap {
+            put("task_execution_visibility_state", truth.taskExecutionVisibilityState.wireValue)
+            put("active_task_id", truth.activeTaskId)
+            put("active_task_status", truth.activeTaskStatus?.wireValue)
+            put(
+                "fallback_path_active",
                 truth.readinessState == ParticipantReadinessState.READY_WITH_FALLBACK ||
                     truth.taskExecutionVisibilityState ==
                     TaskExecutionVisibilityState.LOCAL_COMPLETION_PENDING_CANONICAL_RECONCILIATION
-                )
-        )
+            )
+            truth.taskAllocationTruth?.let {
+                put("allocation_truth_substrate", it.toMap())
+            }
+        }
 
     private fun buildDeviceSupportTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> =
         mapOf(

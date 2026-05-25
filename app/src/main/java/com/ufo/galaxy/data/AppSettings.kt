@@ -210,6 +210,15 @@ interface AppSettings {
      */
     var inflightContinuityRecoveryArtifact: String
 
+    /**
+     * Durable per-task allocation truth artifact.
+     *
+     * Stores Android-local authoritative allocation transitions (requested allocation,
+     * executor selection, in-flight ownership, fallback path, closure) so runtime restarts
+     * can recover task-allocation truth without relying on process-local memory.
+     */
+    var taskAllocationTruthArtifact: String
+
     // ── Local-chain execution settings (planner / grounding) ─────────────────
 
     /**
@@ -494,6 +503,7 @@ class InMemoryAppSettings(
     override var lastDurableSessionId: String = "",
     override var durableParticipantId: String = "",
     override var inflightContinuityRecoveryArtifact: String = "",
+    override var taskAllocationTruthArtifact: String = "",
     // Local-chain execution settings
     override var plannerMaxTokens: Int = SharedPrefsAppSettings.DEFAULT_PLANNER_MAX_TOKENS,
     override var plannerTemperature: Double = SharedPrefsAppSettings.DEFAULT_PLANNER_TEMPERATURE,
@@ -665,6 +675,10 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         get() = prefs.getString(KEY_INFLIGHT_CONTINUITY_RECOVERY_ARTIFACT, "") ?: ""
         set(value) { prefs.edit().putString(KEY_INFLIGHT_CONTINUITY_RECOVERY_ARTIFACT, value).apply() }
 
+    override var taskAllocationTruthArtifact: String
+        get() = prefs.getString(KEY_TASK_ALLOCATION_TRUTH_ARTIFACT, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_TASK_ALLOCATION_TRUTH_ARTIFACT, value).apply() }
+
     // ── Local-chain execution settings ───────────────────────────────────────
 
     override var plannerMaxTokens: Int
@@ -726,6 +740,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
 
         // Durable recovery artifact for interrupted local in-flight execution continuity.
         const val KEY_INFLIGHT_CONTINUITY_RECOVERY_ARTIFACT = "inflight_continuity_recovery_artifact"
+        const val KEY_TASK_ALLOCATION_TRUTH_ARTIFACT = "task_allocation_truth_artifact"
 
         // Local-chain execution keys
         const val KEY_PLANNER_MAX_TOKENS = "planner_max_tokens"

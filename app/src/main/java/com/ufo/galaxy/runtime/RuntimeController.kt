@@ -758,6 +758,8 @@ class RuntimeController(
     @Volatile
     private var _activeTaskStatus: ActiveTaskStatus? = null
 
+    private val taskAllocationTruthLedger = AndroidTaskAllocationTruthLedger()
+
     private val authoritativeParticipationTracker =
         AndroidAuthoritativeParticipationTruth.Tracker()
 
@@ -1057,6 +1059,7 @@ class RuntimeController(
 
     init {
         webSocketClient.addListener(permanentWsListener)
+        taskAllocationTruthLedger.restore(settings.taskAllocationTruthArtifact)
     }
 
     /**
@@ -1568,7 +1571,18 @@ class RuntimeController(
                 ActiveTaskStatus.CANCELLING
             else
                 ActiveTaskStatus.FAILING
+            taskAllocationTruthLedger.recordStatus(taskId, _activeTaskStatus ?: ActiveTaskStatus.FAILING)
         }
+        taskAllocationTruthLedger.recordClosed(
+            taskId = taskId,
+            closureClass = if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
+                TaskAllocationClosureClass.CANCELLED
+            } else {
+                TaskAllocationClosureClass.FAILED
+            },
+            requiresCanonicalReconciliation = false
+        )
+        persistTaskAllocationTruthArtifact()
         // PR-62: Clear active task state after setting the terminal status transition.
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = cause.wireValue)
@@ -1663,6 +1677,13 @@ class RuntimeController(
     private fun clearPersistedInflightRecoveryArtifact() {
         settings.inflightContinuityRecoveryArtifact = ""
     }
+
+    private fun persistTaskAllocationTruthArtifact() {
+        settings.taskAllocationTruthArtifact = taskAllocationTruthLedger.toJson(_activeTaskId)
+    }
+
+    private fun currentTaskAllocationTruthSnapshot(): AndroidTaskAllocationTruthSnapshot =
+        taskAllocationTruthLedger.snapshot(_activeTaskId)
 
     private fun consumePersistedInflightRecoveryArtifact(): InflightContinuityRecoveryArtifact? {
         val artifact = InflightContinuityRecoveryArtifact.fromJson(
@@ -1816,6 +1837,7 @@ class RuntimeController(
         _activeTaskStatus = null
         _activeTaskDispatchPlanId = null
         _activeTaskTemporalWorkflowRunId = null
+        persistTaskAllocationTruthArtifact()
         if (previous != null) {
             GalaxyLogger.log(
                 GalaxyLogger.TAG_LIVE_EXECUTION,
@@ -2452,6 +2474,13 @@ class RuntimeController(
         _activeTaskDispatchPlanId = dispatchPlanId
         // PR-125: Store Temporal workflow run ID so terminal signals carry the temporal anchor.
         _activeTaskTemporalWorkflowRunId = temporalWorkflowRunId
+        taskAllocationTruthLedger.recordAccepted(
+            taskId = taskId,
+            participantId = currentParticipantId(),
+            hostDescriptor = hostDescriptor,
+            fallbackAllowed = settings.fallbackToLocalAllowed
+        )
+        persistTaskAllocationTruthArtifact()
         _isRemoteExecutionActive.value = true
         persistInflightRecoveryArtifact(taskId, ActiveTaskStatus.RUNNING)
         publishInflightContinuityRecovery(
@@ -2521,6 +2550,12 @@ class RuntimeController(
         // PR-125: Capture Temporal workflow run ID before clearing active task state.
         val temporalRunId = _activeTaskTemporalWorkflowRunId
         val terminalOutcomeKind = classifyTaskResultTerminalOutcome(unifiedRecoveryPhase.value)
+        taskAllocationTruthLedger.recordClosed(
+            taskId = taskId,
+            closureClass = TaskAllocationClosureClass.RESULT,
+            requiresCanonicalReconciliation = false
+        )
+        persistTaskAllocationTruthArtifact()
         // PR-62: Clear active task state on successful completion.
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "result")
@@ -2592,7 +2627,14 @@ class RuntimeController(
         // live execution surface reflects the in-progress cancellation.
         if (_activeTaskId == taskId) {
             _activeTaskStatus = ActiveTaskStatus.CANCELLING
+            taskAllocationTruthLedger.recordStatus(taskId, ActiveTaskStatus.CANCELLING)
         }
+        taskAllocationTruthLedger.recordClosed(
+            taskId = taskId,
+            closureClass = TaskAllocationClosureClass.CANCELLED,
+            requiresCanonicalReconciliation = false
+        )
+        persistTaskAllocationTruthArtifact()
         // PR-62: Clear active task state after setting the cancelling status.
         clearPersistedInflightRecoveryArtifact()
         clearActiveTaskState(taskId, finishedWith = "cancelled")
@@ -2672,6 +2714,8 @@ class RuntimeController(
         }
         val planId = _activeTaskDispatchPlanId
         val temporalRunId = _activeTaskTemporalWorkflowRunId
+        taskAllocationTruthLedger.recordStatus(taskId, activeStatus)
+        persistTaskAllocationTruthArtifact()
         persistInflightRecoveryArtifact(taskId, activeStatus)
         val pid = currentParticipantId() ?: run {
             Log.d(TAG, "[RUNTIME] publishTaskStatusUpdate: no hostDescriptor — skipping signal")
@@ -2854,6 +2898,7 @@ class RuntimeController(
             inflightContinuityTaskId = inflightRecovery.taskId,
             inflightContinuitySource = inflightRecovery.source,
             inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
+            taskAllocationTruth = currentTaskAllocationTruthSnapshot(),
             carrierForegroundVisible = appForegroundVisible.value,
             authoritativeParticipationState = participationSnapshot.state.wireValue,
             authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
@@ -3152,6 +3197,13 @@ class RuntimeController(
             )
             // Set FAILING status before clearing to reflect the interruption transition.
             _activeTaskStatus = ActiveTaskStatus.FAILING
+            taskAllocationTruthLedger.recordStatus(interruptedTaskId, ActiveTaskStatus.FAILING)
+            taskAllocationTruthLedger.recordClosed(
+                taskId = interruptedTaskId,
+                closureClass = TaskAllocationClosureClass.INTERRUPTED,
+                requiresCanonicalReconciliation = true
+            )
+            persistTaskAllocationTruthArtifact()
             clearPersistedInflightRecoveryArtifact()
             clearActiveTaskState(interruptedTaskId, finishedWith = "interrupted_${cause.wireValue}")
             _isRemoteExecutionActive.value = false
