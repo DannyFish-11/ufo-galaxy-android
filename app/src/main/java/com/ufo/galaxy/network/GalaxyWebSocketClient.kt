@@ -1485,9 +1485,46 @@ class GalaxyWebSocketClient(
                     AndroidRuntimeEmissionTruthSemantics.KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION,
                     AndroidRuntimeEmissionTruthSemantics.SCHEMA_VERSION
                 )
+                applyReplayLegalityPayloadSemantics(payload)
             }
         }
+        if (message.type == MsgType.RECONCILIATION_SIGNAL.value) {
+            // Reconciliation envelopes are structured as:
+            // root.payload (ReconciliationSignalPayload) -> payload (signal detail map).
+            // Replay legality metadata belongs on the inner signal-detail payload.
+            root.objectOrNull("payload")
+                ?.objectOrNull("payload")
+                ?.let { nestedPayload ->
+                    applyReplayLegalityPayloadSemantics(nestedPayload)
+                }
+        }
         return gson.toJson(root)
+    }
+
+    private fun applyReplayLegalityPayloadSemantics(payload: JsonObject) {
+        payload.addProperty(
+            ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS,
+            ReconciliationSignal.CanonicalClosureAuthorityClass.V2_CANONICAL_AUTHORITY.wireValue
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE,
+            ReconciliationSignal.ParticipantLocalConvergenceState
+                .REPLAYED_PENDING_V2_REVALIDATION.wireValue
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE,
+            false
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED,
+            false
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED,
+            false
+        )
+        payload.addProperty("replay_continuity_revalidation_required", true)
+        payload.addProperty("replay_freshness_class", "stale_replayed_delivery")
     }
 
     private fun JsonObject.objectOrNull(key: String): JsonObject? =

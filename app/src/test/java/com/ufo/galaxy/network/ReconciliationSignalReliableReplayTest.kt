@@ -336,6 +336,33 @@ class ReconciliationSignalReliableReplayTest {
         assertTrue(payload.has("uplink_lineage_emission_id"))
         assertTrue(payload.has("uplink_lineage_dedupe_key"))
         assertTrue(payload.has("uplink_lineage_recovery_basis"))
+        val nestedPayload = payload.getAsJsonObject("payload")
+        assertEquals(
+            ReconciliationSignal.CanonicalClosureAuthorityClass
+                .V2_CANONICAL_AUTHORITY.wireValue,
+            nestedPayload.get(ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS).asString
+        )
+        assertEquals(
+            ReconciliationSignal.ParticipantLocalConvergenceState
+                .REPLAYED_PENDING_V2_REVALIDATION.wireValue,
+            nestedPayload.get(ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE).asString
+        )
+        assertFalse(
+            nestedPayload.get(ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE).asBoolean
+        )
+        assertFalse(
+            nestedPayload.get(ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED).asBoolean
+        )
+        assertFalse(
+            nestedPayload.get(ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED).asBoolean
+        )
+        assertTrue(
+            nestedPayload.get("replay_continuity_revalidation_required").asBoolean
+        )
+        assertEquals(
+            "stale_replayed_delivery",
+            nestedPayload.get("replay_freshness_class").asString
+        )
     }
 
     @Test
@@ -530,6 +557,21 @@ class ReconciliationSignalReliableReplayTest {
             AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING.wireValue,
             payload.get(AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE).asString
         )
+        assertEquals(
+            ReconciliationSignal.CanonicalClosureAuthorityClass
+                .V2_CANONICAL_AUTHORITY.wireValue,
+            payload.get(ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS).asString
+        )
+        assertEquals(
+            ReconciliationSignal.ParticipantLocalConvergenceState
+                .REPLAYED_PENDING_V2_REVALIDATION.wireValue,
+            payload.get(ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE).asString
+        )
+        assertFalse(payload.get(ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE).asBoolean)
+        assertFalse(payload.get(ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED).asBoolean)
+        assertFalse(payload.get(ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED).asBoolean)
+        assertTrue(payload.get("replay_continuity_revalidation_required").asBoolean)
+        assertEquals("stale_replayed_delivery", payload.get("replay_freshness_class").asString)
     }
 
     @Test

@@ -635,6 +635,16 @@ class Pr52ReconciliationSignalEmissionTest {
                 .NOT_PROPAGATED_EXTERNALLY.wireValue,
             signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_PROPAGATION_STATE]
         )
+        assertEquals(
+            ReconciliationSignal.CanonicalClosureAuthorityClass
+                .V2_CANONICAL_AUTHORITY.wireValue,
+            signal.payload[ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS]
+        )
+        assertEquals(
+            ReconciliationSignal.ParticipantLocalConvergenceState
+                .LOCAL_COMPLETION_PENDING_DELIVERY.wireValue,
+            signal.payload[ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE]
+        )
     }
 
     @Test
@@ -962,6 +972,11 @@ class Pr52ReconciliationSignalEmissionTest {
         assertFalse(
             signal.payload[AndroidCompletionClosureUplinkContract.KEY_LOCAL_EXECUTION_COMPLETED]
                 as Boolean
+        )
+        assertEquals(
+            ReconciliationSignal.ParticipantLocalConvergenceState
+                .INTERRUPTION_RESUME_PENDING.wireValue,
+            signal.payload[ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE]
         )
     }
 
