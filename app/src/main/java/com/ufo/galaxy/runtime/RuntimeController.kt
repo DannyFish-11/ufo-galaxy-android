@@ -1490,12 +1490,7 @@ class RuntimeController(
         reason: String,
         cause: TakeoverFallbackEvent.Cause
     ) {
-        val allowedStatuses =
-            if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
-                setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.CANCELLING)
-            } else {
-                setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.FAILING)
-            }
+        val allowedStatuses = allowedStatusesForTakeoverFailure(cause)
         if (
             shouldSuppressTerminalSignal(
                 taskId = taskId,
@@ -1861,6 +1856,15 @@ class RuntimeController(
         )
         return true
     }
+
+    private fun allowedStatusesForTakeoverFailure(
+        cause: TakeoverFallbackEvent.Cause
+    ): Set<ActiveTaskStatus> =
+        if (cause == TakeoverFallbackEvent.Cause.CANCELLED) {
+            setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.CANCELLING)
+        } else {
+            setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.FAILING)
+        }
 
     /**
      * PR-52 — Emits [signal] on [_reconciliationSignals] and logs it.
@@ -2549,7 +2553,9 @@ class RuntimeController(
             shouldSuppressTerminalSignal(
                 taskId = taskId,
                 signalKind = ReconciliationSignal.Kind.TASK_CANCELLED.wireValue,
-                allowedStatuses = setOf(ActiveTaskStatus.RUNNING, ActiveTaskStatus.CANCELLING)
+                allowedStatuses = allowedStatusesForTakeoverFailure(
+                    TakeoverFallbackEvent.Cause.CANCELLED
+                )
             )
         ) {
             return
