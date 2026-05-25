@@ -47,6 +47,10 @@ class Pr126AndroidImplementationRealityCheckpointTest {
         assertTrue(checkpoint.containsKey("task_allocation_truth"))
         assertTrue(checkpoint.containsKey("device_support_truth"))
         assertTrue(checkpoint.containsKey("autonomy_truth"))
+        @Suppress("UNCHECKED_CAST")
+        val taskAllocationTruth = checkpoint["task_allocation_truth"] as Map<String, Any?>
+        assertTrue(taskAllocationTruth.containsKey("allocation_truth_substrate"))
+        assertTrue(signal.payload.containsKey(ReconciliationSignal.KEY_TASK_ALLOCATION_TRUTH))
     }
 
     @Test

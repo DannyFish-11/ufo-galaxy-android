@@ -80,6 +80,7 @@ package com.ufo.galaxy.runtime
  *                                   in-flight execution interrupted by restart/recovery.
  * @property inflightContinuityTaskId Task identifier referenced by [inflightContinuityState], when any.
  * @property inflightContinuityObservedAtMs Timestamp when Android produced the local continuity classification.
+ * @property taskAllocationTruth    Android-local authoritative task allocation truth snapshot.
  * @property reportedAtMs            Epoch-millisecond timestamp when this snapshot was created.
  * @property reconciliationEpoch     Monotonically increasing snapshot epoch for V2 staleness detection.
  */
@@ -102,6 +103,7 @@ data class AndroidParticipantRuntimeTruth(
     val inflightContinuityTaskId: String? = null,
     val inflightContinuitySource: String? = null,
     val inflightContinuityObservedAtMs: Long? = null,
+    val taskAllocationTruth: AndroidTaskAllocationTruthSnapshot? = null,
     val authoritativeParticipationState: String = defaultAuthoritativeParticipationState(
         sourceRuntimePosture = sourceRuntimePosture,
         sessionState = sessionState,
@@ -268,6 +270,7 @@ data class AndroidParticipantRuntimeTruth(
         inflightContinuityTaskId?.let { put(KEY_INFLIGHT_CONTINUITY_TASK_ID, it) }
         inflightContinuitySource?.let { put(KEY_INFLIGHT_CONTINUITY_SOURCE, it) }
         inflightContinuityObservedAtMs?.let { put(KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS, it) }
+        taskAllocationTruth?.let { put(KEY_TASK_ALLOCATION_TRUTH, it.toMap()) }
         put(KEY_AUTHORITATIVE_PARTICIPATION_STATE, authoritativeParticipationState)
         authoritativeParticipationTransitionSequence?.let {
             put(KEY_AUTHORITATIVE_PARTICIPATION_TRANSITION_SEQUENCE, it)
@@ -371,6 +374,9 @@ data class AndroidParticipantRuntimeTruth(
         /** Wire key for [inflightContinuityObservedAtMs]; absent when null. */
         const val KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS = "inflight_continuity_observed_at_ms"
 
+        /** Wire key for [taskAllocationTruth]; absent when null. */
+        const val KEY_TASK_ALLOCATION_TRUTH = "task_allocation_truth"
+
         /** Wire key for [authoritativeParticipationState]. */
         const val KEY_AUTHORITATIVE_PARTICIPATION_STATE = "authoritative_participation_state"
 
@@ -443,6 +449,7 @@ data class AndroidParticipantRuntimeTruth(
             inflightContinuityTaskId: String? = null,
             inflightContinuitySource: String? = null,
             inflightContinuityObservedAtMs: Long? = null,
+            taskAllocationTruth: AndroidTaskAllocationTruthSnapshot? = null,
             carrierForegroundVisible: Boolean? = null,
             authoritativeParticipationState: String? = null,
             authoritativeParticipationTransitionSequence: Long? = null,
@@ -497,6 +504,7 @@ data class AndroidParticipantRuntimeTruth(
                 inflightContinuityTaskId = inflightContinuityTaskId,
                 inflightContinuitySource = inflightContinuitySource,
                 inflightContinuityObservedAtMs = inflightContinuityObservedAtMs,
+                taskAllocationTruth = taskAllocationTruth,
                 authoritativeParticipationState = derivedParticipationState,
                 runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
                     descriptor = descriptor,
