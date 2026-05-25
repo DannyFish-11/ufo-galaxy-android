@@ -1854,6 +1854,24 @@ class RuntimeController(
                 "active_status" to (activeStatus?.wireValue ?: "")
             )
         )
+        // When no active task exists, a delayed terminal callback is stale local evidence.
+        // Demote runtime continuity to REQUIRES_RECONCILIATION so Android does not silently
+        // preserve a resumed-cleanly posture that could conflict with canonical V2 closure truth.
+        if (activeTaskId == null) {
+            _isRemoteExecutionActive.value = false
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+                source = "suppressed_terminal_no_active_${signalKind.lowercase()}",
+                artifact = InflightContinuityRecoveryArtifact(
+                    taskId = taskId,
+                    activeTaskStatus = (activeStatus ?: ActiveTaskStatus.RUNNING).wireValue,
+                    durableSessionId = currentDurableSessionId(),
+                    sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                    runtimeAttachmentSessionId = runtimeAttachmentSessionId,
+                    attachedSessionId = _attachedSession.value?.sessionId
+                )
+            )
+        }
         return true
     }
 
@@ -3130,6 +3148,19 @@ class RuntimeController(
             _activeTaskStatus = ActiveTaskStatus.FAILING
             clearPersistedInflightRecoveryArtifact()
             clearActiveTaskState(interruptedTaskId, finishedWith = "interrupted_${cause.wireValue}")
+            _isRemoteExecutionActive.value = false
+            publishInflightContinuityRecovery(
+                disposition = InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+                source = "session_interrupted_${cause.wireValue}",
+                artifact = InflightContinuityRecoveryArtifact(
+                    taskId = interruptedTaskId,
+                    activeTaskStatus = ActiveTaskStatus.FAILING.wireValue,
+                    durableSessionId = currentDurableSessionId(),
+                    sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                    runtimeAttachmentSessionId = runtimeAttachmentSessionId,
+                    attachedSessionId = _attachedSession.value?.sessionId
+                )
+            )
             val interruptOutcome =
                 AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION
             currentParticipantId()?.let { pid ->

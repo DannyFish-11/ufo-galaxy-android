@@ -848,6 +848,22 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     }
 
     @Test
+    fun `disconnect with active task demotes continuity to requires reconciliation and clears remote-active flag`() = runBlocking {
+        val (controller, wsClient) = buildController(buildDescriptor())
+        controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-dc-5b")
+        assertTrue(controller.isRemoteExecutionActive.value)
+        wsClient.simulateDisconnected()
+        kotlinx.coroutines.delay(200)
+        assertFalse("Remote execution flag must be cleared after interruption", controller.isRemoteExecutionActive.value)
+        assertEquals(
+            InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+            controller.inflightContinuityRecovery.value.disposition
+        )
+        assertEquals("task-dc-5b", controller.inflightContinuityRecovery.value.taskId)
+    }
+
+    @Test
     fun `disconnect with no active task does NOT emit TASK_FAILED`() = runBlocking {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
@@ -861,6 +877,36 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         job.cancel()
         val taskFailedSignal = signals.firstOrNull { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
         assertNull("Expected NO TASK_FAILED signal when no active task", taskFailedSignal)
+    }
+
+    @Test
+    fun `late task result after disconnect is suppressed and remains reconciliation required`() = runBlocking {
+        val (controller, wsClient) = buildController(buildDescriptor())
+        controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-dc-late-1")
+        wsClient.simulateDisconnected()
+        kotlinx.coroutines.delay(120)
+        val signals = mutableListOf<ReconciliationSignal>()
+        val job = kotlinx.coroutines.launch {
+            controller.reconciliationSignals.collect { signals.add(it) }
+        }
+        controller.publishTaskResult("task-dc-late-1")
+        kotlinx.coroutines.delay(200)
+        job.cancel()
+        assertNull(
+            "Late local completion must not re-elevate terminal authority after interruption",
+            signals.firstOrNull {
+                it.kind == ReconciliationSignal.Kind.TASK_RESULT && it.taskId == "task-dc-late-1"
+            }
+        )
+        assertEquals(
+            InflightContinuityDisposition.REQUIRES_RECONCILIATION,
+            controller.inflightContinuityRecovery.value.disposition
+        )
+        assertEquals(
+            "suppressed_terminal_no_active_task_result",
+            controller.inflightContinuityRecovery.value.source
+        )
     }
 
     // ── RuntimeController — automatic RUNTIME_TRUTH_SNAPSHOT on reconnect ─────
@@ -915,6 +961,34 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         assertEquals(
             AndroidRuntimeEmissionTruthSemantics.TerminalEmissionClass.ACTIVE_IN_PROGRESS.wireValue,
             snapshotSignal.payload[ReconciliationSignal.KEY_TERMINAL_EMISSION_CLASS]
+        )
+    }
+
+    @Test
+    fun `reconnect after interrupted task keeps canonical reconciliation routing`() = runBlocking {
+        val (controller, wsClient) = buildController(buildDescriptor())
+        controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-reconnect-reconcile-1")
+        val signals = mutableListOf<ReconciliationSignal>()
+        val job = kotlinx.coroutines.launch {
+            controller.reconciliationSignals.collect { signals.add(it) }
+        }
+        wsClient.simulateDisconnected()
+        kotlinx.coroutines.delay(50)
+        wsClient.simulateConnected()
+        kotlinx.coroutines.delay(200)
+        job.cancel()
+        val snapshotSignal = signals.lastOrNull { it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT }
+        assertNotNull(snapshotSignal)
+        assertEquals(
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION.wireValue,
+            snapshotSignal!!.payload[ReconciliationSignal.KEY_CONTINUITY_RECOVERY_STATE]
+        )
+        assertEquals(
+            AndroidCrossRepoRecoveryStateRoutingContract.V2RoutingCategory
+                .CANONICAL_RECONCILIATION_PASS
+                .wireValue,
+            snapshotSignal.payload[ReconciliationSignal.KEY_V2_ROUTING_CATEGORY]
         )
     }
 
