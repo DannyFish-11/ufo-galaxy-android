@@ -174,6 +174,69 @@ data class AndroidParticipantRuntimeTruth(
     val hasActiveTask: Boolean
         get() = activeTaskId != null && activeTaskStatus != null
 
+    /**
+     * Android runtime availability posture exported to V2/system surfaces.
+     *
+     * This is participant-runtime availability evidence only; it does not override
+     * canonical global availability/ownership adjudication in V2.
+     */
+    val runtimeAvailabilityTruthState: RuntimeAvailabilityTruthState
+        get() = deriveRuntimeAvailabilityTruthState(
+            participationState = participationState,
+            sessionState = sessionState,
+            healthState = healthState,
+            readinessState = readinessState,
+            inflightContinuityState = inflightContinuityState
+        )
+
+    /**
+     * Participant-local task allocation/execution visibility state.
+     *
+     * Exposes whether Android is idle, accepted-pending, executing, interrupted, or
+     * waiting for canonical reconciliation so upstream allocation surfaces do not need to
+     * infer this from multiple raw fields.
+     */
+    val taskExecutionVisibilityState: TaskExecutionVisibilityState
+        get() = deriveTaskExecutionVisibilityState(
+            activeTaskStatus = activeTaskStatus,
+            inflightContinuityState = inflightContinuityState,
+            runtimeAvailabilityTruthState = runtimeAvailabilityTruthState
+        )
+
+    /**
+     * Consolidated Android capability-truth level (observable / participant / execution).
+     */
+    val capabilityTruthLevel: RuntimeNodeCapabilityTruthLevel
+        get() = runtimeNodeIdentity?.capabilityTruthLevel
+            ?: deriveFallbackCapabilityTruthLevel(
+                participationState = participationState,
+                sourceRuntimePosture = sourceRuntimePosture,
+                readinessState = readinessState,
+                healthState = healthState
+            )
+
+    /**
+     * Consolidated Android autonomy-truth level.
+     */
+    val autonomyTruthLevel: RuntimeNodeAutonomyTruthLevel
+        get() = runtimeNodeIdentity?.autonomyTruthLevel
+            ?: deriveFallbackAutonomyTruthLevel(
+                sourceRuntimePosture = sourceRuntimePosture,
+                readinessState = readinessState,
+                healthState = healthState
+            )
+
+    /**
+     * Runtime feature/modality readiness truth exported to upstream surfaces.
+     */
+    val featureReadinessTruthState: FeatureReadinessTruthState
+        get() = deriveFeatureReadinessTruthState(
+            participationState = participationState,
+            readinessState = readinessState,
+            healthState = healthState,
+            runtimeAvailabilityTruthState = runtimeAvailabilityTruthState
+        )
+
     // ── Wire serialization ────────────────────────────────────────────────────
 
     /**
@@ -222,6 +285,11 @@ data class AndroidParticipantRuntimeTruth(
         put(KEY_REPORTED_AT_MS, reportedAtMs)
         put(KEY_RECONCILIATION_EPOCH, reconciliationEpoch)
         put(KEY_IS_FULLY_RECONCILABLE, isFullyReconcilable)
+        put(KEY_RUNTIME_AVAILABILITY_TRUTH_STATE, runtimeAvailabilityTruthState.wireValue)
+        put(KEY_TASK_EXECUTION_VISIBILITY_STATE, taskExecutionVisibilityState.wireValue)
+        put(KEY_CAPABILITY_TRUTH_LEVEL, capabilityTruthLevel.wireValue)
+        put(KEY_AUTONOMY_TRUTH_LEVEL, autonomyTruthLevel.wireValue)
+        put(KEY_FEATURE_READINESS_TRUTH_STATE, featureReadinessTruthState.wireValue)
         put(KEY_OUTWARD_TRUTH_SURFACE_CLASS, outwardTruthSurfaceClass)
         put(KEY_TRUTH_TIER, truthTier)
         put(KEY_SOURCE_AUTHORITY_CLASS, sourceAuthorityClass)
@@ -329,6 +397,21 @@ data class AndroidParticipantRuntimeTruth(
 
         /** Wire key for [isFullyReconcilable] pre-computed boolean. */
         const val KEY_IS_FULLY_RECONCILABLE = "is_fully_reconcilable"
+
+        /** Wire key for [runtimeAvailabilityTruthState]. */
+        const val KEY_RUNTIME_AVAILABILITY_TRUTH_STATE = "runtime_availability_truth_state"
+
+        /** Wire key for [taskExecutionVisibilityState]. */
+        const val KEY_TASK_EXECUTION_VISIBILITY_STATE = "task_execution_visibility_state"
+
+        /** Wire key for [capabilityTruthLevel]. */
+        const val KEY_CAPABILITY_TRUTH_LEVEL = "capability_truth_level"
+
+        /** Wire key for [autonomyTruthLevel]. */
+        const val KEY_AUTONOMY_TRUTH_LEVEL = "autonomy_truth_level"
+
+        /** Wire key for [featureReadinessTruthState]. */
+        const val KEY_FEATURE_READINESS_TRUTH_STATE = "feature_readiness_truth_state"
 
         // ── Factory ───────────────────────────────────────────────────────────
 
@@ -474,6 +557,161 @@ private fun defaultAuthoritativeParticipationState(
             distributedRuntimeActivity = activeTaskId != null && activeTaskStatus != null
         )
     ).wireValue
+
+enum class RuntimeAvailabilityTruthState(val wireValue: String) {
+    AVAILABLE("available"),
+    AVAILABLE_DEGRADED("available_degraded"),
+    RECOVERING_INTERRUPTED("recovering_interrupted"),
+    RECONCILIATION_PENDING("reconciliation_pending"),
+    RECOVERY_FAILED_UNAVAILABLE("recovery_failed_unavailable"),
+    OFFLINE_OR_UNATTACHED("offline_or_unattached")
+}
+
+enum class TaskExecutionVisibilityState(val wireValue: String) {
+    IDLE_UNASSIGNED("idle_unassigned"),
+    ASSIGNMENT_ACCEPTED_PENDING_EXECUTION("assignment_accepted_pending_execution"),
+    EXECUTING_IN_FLIGHT("executing_in_flight"),
+    EXECUTING_TERMINALIZING("executing_terminalizing"),
+    RESUMED_INFLIGHT_EXECUTION("resumed_inflight_execution"),
+    INTERRUPTED_LOST_INFLIGHT_PENDING_CANONICAL("interrupted_lost_inflight_pending_canonical"),
+    LOCAL_COMPLETION_PENDING_CANONICAL_RECONCILIATION("local_completion_pending_canonical_reconciliation"),
+    EXECUTION_UNAVAILABLE("execution_unavailable")
+}
+
+enum class FeatureReadinessTruthState(val wireValue: String) {
+    READY_OPERATIONAL("ready_operational"),
+    PARTIALLY_READY_DEGRADED("partially_ready_degraded"),
+    NOT_READY("not_ready"),
+    UNAVAILABLE("unavailable")
+}
+
+private fun deriveRuntimeAvailabilityTruthState(
+    participationState: RuntimeHostDescriptor.HostParticipationState,
+    sessionState: AttachedRuntimeSession.State?,
+    healthState: ParticipantHealthState,
+    readinessState: ParticipantReadinessState,
+    inflightContinuityState: String?
+): RuntimeAvailabilityTruthState {
+    if (participationState == RuntimeHostDescriptor.HostParticipationState.INACTIVE ||
+        sessionState != AttachedRuntimeSession.State.ATTACHED
+    ) {
+        return RuntimeAvailabilityTruthState.OFFLINE_OR_UNATTACHED
+    }
+    return when (AndroidContinuityRecoveryStateModel.RecoveryPhase.fromWireValue(inflightContinuityState)) {
+        AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED ->
+            RuntimeAvailabilityTruthState.RECOVERY_FAILED_UNAVAILABLE
+        AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING ->
+            RuntimeAvailabilityTruthState.RECOVERING_INTERRUPTED
+        AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION,
+        AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT ->
+            RuntimeAvailabilityTruthState.RECONCILIATION_PENDING
+        else -> {
+            if (healthState == ParticipantHealthState.HEALTHY &&
+                readinessState == ParticipantReadinessState.READY
+            ) {
+                RuntimeAvailabilityTruthState.AVAILABLE
+            } else {
+                RuntimeAvailabilityTruthState.AVAILABLE_DEGRADED
+            }
+        }
+    }
+}
+
+private fun deriveTaskExecutionVisibilityState(
+    activeTaskStatus: ActiveTaskStatus?,
+    inflightContinuityState: String?,
+    runtimeAvailabilityTruthState: RuntimeAvailabilityTruthState
+): TaskExecutionVisibilityState {
+    if (runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.RECOVERY_FAILED_UNAVAILABLE ||
+        runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.OFFLINE_OR_UNATTACHED
+    ) {
+        return TaskExecutionVisibilityState.EXECUTION_UNAVAILABLE
+    }
+    return when (activeTaskStatus) {
+        ActiveTaskStatus.PENDING ->
+            TaskExecutionVisibilityState.ASSIGNMENT_ACCEPTED_PENDING_EXECUTION
+        ActiveTaskStatus.RUNNING ->
+            TaskExecutionVisibilityState.EXECUTING_IN_FLIGHT
+        ActiveTaskStatus.CANCELLING,
+        ActiveTaskStatus.FAILING ->
+            TaskExecutionVisibilityState.EXECUTING_TERMINALIZING
+        null -> when (AndroidContinuityRecoveryStateModel.RecoveryPhase.fromWireValue(inflightContinuityState)) {
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT ->
+                TaskExecutionVisibilityState.RESUMED_INFLIGHT_EXECUTION
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.LOST_INFLIGHT ->
+                TaskExecutionVisibilityState.INTERRUPTED_LOST_INFLIGHT_PENDING_CANONICAL
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION,
+            AndroidContinuityRecoveryStateModel.RecoveryPhase.STALE_RECOVERY_ARTIFACT ->
+                TaskExecutionVisibilityState.LOCAL_COMPLETION_PENDING_CANONICAL_RECONCILIATION
+            else ->
+                TaskExecutionVisibilityState.IDLE_UNASSIGNED
+        }
+    }
+}
+
+private fun deriveFallbackCapabilityTruthLevel(
+    participationState: RuntimeHostDescriptor.HostParticipationState,
+    sourceRuntimePosture: String,
+    readinessState: ParticipantReadinessState,
+    healthState: ParticipantHealthState
+): RuntimeNodeCapabilityTruthLevel {
+    if (participationState == RuntimeHostDescriptor.HostParticipationState.INACTIVE) {
+        return RuntimeNodeCapabilityTruthLevel.UNAVAILABLE
+    }
+    if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME) {
+        return RuntimeNodeCapabilityTruthLevel.CONNECTED_OBSERVABILITY_ONLY
+    }
+    return if (readinessState == ParticipantReadinessState.READY &&
+        healthState == ParticipantHealthState.HEALTHY
+    ) {
+        RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE
+    } else {
+        RuntimeNodeCapabilityTruthLevel.PARTICIPANT_RUNTIME_CAPABLE
+    }
+}
+
+private fun deriveFallbackAutonomyTruthLevel(
+    sourceRuntimePosture: String,
+    readinessState: ParticipantReadinessState,
+    healthState: ParticipantHealthState
+): RuntimeNodeAutonomyTruthLevel {
+    if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME) {
+        return RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY
+    }
+    return if (readinessState == ParticipantReadinessState.READY &&
+        healthState == ParticipantHealthState.HEALTHY
+    ) {
+        RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION
+    } else {
+        RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
+    }
+}
+
+private fun deriveFeatureReadinessTruthState(
+    participationState: RuntimeHostDescriptor.HostParticipationState,
+    readinessState: ParticipantReadinessState,
+    healthState: ParticipantHealthState,
+    runtimeAvailabilityTruthState: RuntimeAvailabilityTruthState
+): FeatureReadinessTruthState {
+    if (participationState == RuntimeHostDescriptor.HostParticipationState.INACTIVE ||
+        runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.RECOVERY_FAILED_UNAVAILABLE ||
+        runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.OFFLINE_OR_UNATTACHED
+    ) {
+        return FeatureReadinessTruthState.UNAVAILABLE
+    }
+    return when {
+        readinessState == ParticipantReadinessState.READY &&
+            healthState == ParticipantHealthState.HEALTHY &&
+            runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.AVAILABLE ->
+            FeatureReadinessTruthState.READY_OPERATIONAL
+        readinessState == ParticipantReadinessState.READY_WITH_FALLBACK ||
+            healthState == ParticipantHealthState.DEGRADED ||
+            runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.RECONCILIATION_PENDING ||
+            runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.RECOVERING_INTERRUPTED ->
+            FeatureReadinessTruthState.PARTIALLY_READY_DEGRADED
+        else -> FeatureReadinessTruthState.NOT_READY
+    }
+}
 
 /**
  * In-flight task execution status reported as part of [AndroidParticipantRuntimeTruth].

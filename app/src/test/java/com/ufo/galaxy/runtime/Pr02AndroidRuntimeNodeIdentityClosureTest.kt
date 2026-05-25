@@ -61,6 +61,26 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
             RuntimeNodeManifestationParticipationState.INTERACTIVE_FOREGROUND,
             truth.runtimeNodeIdentity?.manifestationParticipationState
         )
+        assertEquals(
+            RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE,
+            truth.runtimeNodeIdentity?.capabilityTruthLevel
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION,
+            truth.runtimeNodeIdentity?.autonomyTruthLevel
+        )
+        assertEquals(
+            RuntimeNodeAuthorityBoundaryClass.ANDROID_PARTICIPANT_RUNTIME_ONLY,
+            truth.runtimeNodeIdentity?.authorityBoundaryClass
+        )
+        assertEquals(
+            RuntimeNodeControlSurfaceBoundaryClass.LOCAL_UI_CONTROL_SURFACE_ONLY,
+            truth.runtimeNodeIdentity?.controlSurfaceBoundaryClass
+        )
+        assertEquals(
+            RuntimeIdentityContracts.capabilityProviderRef("Pixel_8", "host-001"),
+            truth.runtimeNodeIdentity?.capabilityProviderRef
+        )
     }
 
     @Test
@@ -127,6 +147,47 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
         assertEquals(
             ParticipantLifecycleTruthState.UNAVAILABLE,
             truth.runtimeNodeIdentity?.lifecycleState
+        )
+        assertEquals(
+            RuntimeNodeCapabilityTruthLevel.UNAVAILABLE,
+            truth.runtimeNodeIdentity?.capabilityTruthLevel
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY,
+            truth.runtimeNodeIdentity?.autonomyTruthLevel
+        )
+    }
+
+    @Test
+    fun `runtime node identity map exports capability autonomy and authority boundaries`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = sessionSnapshot(),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            carrierForegroundVisible = true,
+            reconciliationEpoch = 5
+        )
+        val map = truth.runtimeNodeIdentity!!.toMap()
+        assertEquals(
+            "capability_provider:Pixel_8:host-001",
+            map[AndroidRuntimeNodeIdentity.KEY_CAPABILITY_PROVIDER_REF]
+        )
+        assertEquals(
+            RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE.wireValue,
+            map[AndroidRuntimeNodeIdentity.KEY_CAPABILITY_TRUTH_LEVEL]
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION.wireValue,
+            map[AndroidRuntimeNodeIdentity.KEY_AUTONOMY_TRUTH_LEVEL]
+        )
+        assertEquals(
+            RuntimeNodeAuthorityBoundaryClass.ANDROID_PARTICIPANT_RUNTIME_ONLY.wireValue,
+            map[AndroidRuntimeNodeIdentity.KEY_AUTHORITY_BOUNDARY_CLASS]
+        )
+        assertEquals(
+            RuntimeNodeControlSurfaceBoundaryClass.LOCAL_UI_CONTROL_SURFACE_ONLY.wireValue,
+            map[AndroidRuntimeNodeIdentity.KEY_CONTROL_SURFACE_BOUNDARY_CLASS]
         )
     }
 }

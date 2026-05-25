@@ -492,6 +492,80 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         assertFalse(truth.hasActiveTask)
     }
 
+    @Test
+    fun `runtimeAvailabilityTruthState is AVAILABLE when attached healthy and ready`() {
+        val truth = fullyReconcilableTruth()
+        assertEquals(RuntimeAvailabilityTruthState.AVAILABLE, truth.runtimeAvailabilityTruthState)
+    }
+
+    @Test
+    fun `runtimeAvailabilityTruthState is RECOVERY_FAILED_UNAVAILABLE on recovery failed continuity`() {
+        val truth = fullyReconcilableTruth().copy(
+            inflightContinuityState = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase
+                .RECOVERY_FAILED
+                .wireValue
+        )
+        assertEquals(
+            RuntimeAvailabilityTruthState.RECOVERY_FAILED_UNAVAILABLE,
+            truth.runtimeAvailabilityTruthState
+        )
+    }
+
+    @Test
+    fun `taskExecutionVisibilityState is ASSIGNMENT_ACCEPTED_PENDING_EXECUTION when active task pending`() {
+        val truth = fullyReconcilableTruth().copy(
+            activeTaskId = "task-pending",
+            activeTaskStatus = ActiveTaskStatus.PENDING
+        )
+        assertEquals(
+            TaskExecutionVisibilityState.ASSIGNMENT_ACCEPTED_PENDING_EXECUTION,
+            truth.taskExecutionVisibilityState
+        )
+    }
+
+    @Test
+    fun `taskExecutionVisibilityState is LOCAL_COMPLETION_PENDING_CANONICAL_RECONCILIATION when continuity requires reconciliation`() {
+        val truth = fullyReconcilableTruth().copy(
+            activeTaskId = null,
+            activeTaskStatus = null,
+            inflightContinuityState = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase
+                .REQUIRES_RECONCILIATION
+                .wireValue
+        )
+        assertEquals(
+            TaskExecutionVisibilityState.LOCAL_COMPLETION_PENDING_CANONICAL_RECONCILIATION,
+            truth.taskExecutionVisibilityState
+        )
+    }
+
+    @Test
+    fun `capability and autonomy truth levels derive from runtime node identity`() {
+        val truth = fullyReconcilableTruth().copy(
+            runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
+                descriptor = activeDescriptor(),
+                sessionSnapshot = attachedSnapshot(),
+                healthState = ParticipantHealthState.HEALTHY,
+                readinessState = ParticipantReadinessState.READY,
+                carrierForegroundVisible = true
+            )
+        )
+        assertEquals(RuntimeNodeCapabilityTruthLevel.EXECUTION_CAPABLE, truth.capabilityTruthLevel)
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION,
+            truth.autonomyTruthLevel
+        )
+    }
+
+    @Test
+    fun `featureReadinessTruthState is PARTIALLY_READY_DEGRADED when readiness is fallback`() {
+        val truth = fullyReconcilableTruth().copy(
+            readinessState = ParticipantReadinessState.READY_WITH_FALLBACK
+        )
+        assertEquals(FeatureReadinessTruthState.PARTIALLY_READY_DEGRADED, truth.featureReadinessTruthState)
+    }
+
     // ── AndroidParticipantRuntimeTruth — toMap ────────────────────────────────
 
     @Test
@@ -512,6 +586,11 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         assertTrue(map.containsKey(keys.KEY_REPORTED_AT_MS))
         assertTrue(map.containsKey(keys.KEY_RECONCILIATION_EPOCH))
         assertTrue(map.containsKey(keys.KEY_IS_FULLY_RECONCILABLE))
+        assertTrue(map.containsKey(keys.KEY_RUNTIME_AVAILABILITY_TRUTH_STATE))
+        assertTrue(map.containsKey(keys.KEY_TASK_EXECUTION_VISIBILITY_STATE))
+        assertTrue(map.containsKey(keys.KEY_CAPABILITY_TRUTH_LEVEL))
+        assertTrue(map.containsKey(keys.KEY_AUTONOMY_TRUTH_LEVEL))
+        assertTrue(map.containsKey(keys.KEY_FEATURE_READINESS_TRUTH_STATE))
         assertTrue(map.containsKey(keys.KEY_OUTWARD_TRUTH_SURFACE_CLASS))
         assertTrue(map.containsKey(keys.KEY_TRUTH_TIER))
         assertTrue(map.containsKey(keys.KEY_SOURCE_AUTHORITY_CLASS))
@@ -1090,6 +1169,40 @@ class Pr51AndroidParticipantRuntimeTruthTest {
     }
 
     @Test
+    fun `KEY_RUNTIME_AVAILABILITY_TRUTH_STATE is runtime_availability_truth_state`() {
+        assertEquals(
+            "runtime_availability_truth_state",
+            AndroidParticipantRuntimeTruth.KEY_RUNTIME_AVAILABILITY_TRUTH_STATE
+        )
+    }
+
+    @Test
+    fun `KEY_TASK_EXECUTION_VISIBILITY_STATE is task_execution_visibility_state`() {
+        assertEquals(
+            "task_execution_visibility_state",
+            AndroidParticipantRuntimeTruth.KEY_TASK_EXECUTION_VISIBILITY_STATE
+        )
+    }
+
+    @Test
+    fun `KEY_CAPABILITY_TRUTH_LEVEL is capability_truth_level`() {
+        assertEquals("capability_truth_level", AndroidParticipantRuntimeTruth.KEY_CAPABILITY_TRUTH_LEVEL)
+    }
+
+    @Test
+    fun `KEY_AUTONOMY_TRUTH_LEVEL is autonomy_truth_level`() {
+        assertEquals("autonomy_truth_level", AndroidParticipantRuntimeTruth.KEY_AUTONOMY_TRUTH_LEVEL)
+    }
+
+    @Test
+    fun `KEY_FEATURE_READINESS_TRUTH_STATE is feature_readiness_truth_state`() {
+        assertEquals(
+            "feature_readiness_truth_state",
+            AndroidParticipantRuntimeTruth.KEY_FEATURE_READINESS_TRUTH_STATE
+        )
+    }
+
+    @Test
     fun `AndroidParticipantRuntimeTruth all key constants are distinct`() {
         val keys = listOf(
             AndroidParticipantRuntimeTruth.KEY_PARTICIPANT_ID,
@@ -1109,7 +1222,12 @@ class Pr51AndroidParticipantRuntimeTruthTest {
             AndroidParticipantRuntimeTruth.KEY_AUTHORITATIVE_PARTICIPATION_STATE,
             AndroidParticipantRuntimeTruth.KEY_REPORTED_AT_MS,
             AndroidParticipantRuntimeTruth.KEY_RECONCILIATION_EPOCH,
-            AndroidParticipantRuntimeTruth.KEY_IS_FULLY_RECONCILABLE
+            AndroidParticipantRuntimeTruth.KEY_IS_FULLY_RECONCILABLE,
+            AndroidParticipantRuntimeTruth.KEY_RUNTIME_AVAILABILITY_TRUTH_STATE,
+            AndroidParticipantRuntimeTruth.KEY_TASK_EXECUTION_VISIBILITY_STATE,
+            AndroidParticipantRuntimeTruth.KEY_CAPABILITY_TRUTH_LEVEL,
+            AndroidParticipantRuntimeTruth.KEY_AUTONOMY_TRUTH_LEVEL,
+            AndroidParticipantRuntimeTruth.KEY_FEATURE_READINESS_TRUTH_STATE
         )
         assertEquals(keys.size, keys.toSet().size)
     }
