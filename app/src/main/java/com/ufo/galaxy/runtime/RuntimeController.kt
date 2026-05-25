@@ -1682,6 +1682,33 @@ class RuntimeController(
         settings.taskAllocationTruthArtifact = taskAllocationTruthLedger.toJson(_activeTaskId)
     }
 
+    private fun markAllocationInterruptedForRecovery(
+        taskId: String?,
+        requiresCanonicalReconciliation: Boolean,
+        source: String
+    ) {
+        val interruptedTaskId = taskId?.takeIf { it.isNotBlank() } ?: return
+        taskAllocationTruthLedger.recordStatus(
+            interruptedTaskId,
+            ActiveTaskStatus.FAILING
+        )
+        taskAllocationTruthLedger.recordClosed(
+            taskId = interruptedTaskId,
+            closureClass = TaskAllocationClosureClass.INTERRUPTED,
+            requiresCanonicalReconciliation = requiresCanonicalReconciliation
+        )
+        persistTaskAllocationTruthArtifact()
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_LIVE_EXECUTION,
+            mapOf(
+                "event" to "task_allocation_interrupted_for_recovery",
+                "task_id" to interruptedTaskId,
+                "requires_canonical_reconciliation" to requiresCanonicalReconciliation,
+                "source" to source
+            )
+        )
+    }
+
     private fun currentTaskAllocationTruthSnapshot(): AndroidTaskAllocationTruthSnapshot =
         taskAllocationTruthLedger.snapshot(_activeTaskId)
 
@@ -1749,6 +1776,11 @@ class RuntimeController(
             currentSessionId != null &&
             artifactSessionId != currentSessionId
         if (isStaleSession) {
+            markAllocationInterruptedForRecovery(
+                taskId = artifact.taskId,
+                requiresCanonicalReconciliation = true,
+                source = "stale_recovery_artifact"
+            )
             publishInflightContinuityRecovery(
                 disposition = InflightContinuityDisposition.STALE_RECOVERY_ARTIFACT,
                 source = source,
@@ -1777,9 +1809,15 @@ class RuntimeController(
             taskId = artifact.taskId,
             finishedWith = "recovery_reclassified"
         )
+        val requiresCanonicalReconciliation = settings.crossDeviceEnabled
+        markAllocationInterruptedForRecovery(
+            taskId = artifact.taskId,
+            requiresCanonicalReconciliation = requiresCanonicalReconciliation,
+            source = source
+        )
         _isRemoteExecutionActive.value = false
         publishInflightContinuityRecovery(
-            disposition = if (settings.crossDeviceEnabled) {
+            disposition = if (requiresCanonicalReconciliation) {
                 InflightContinuityDisposition.REQUIRES_RECONCILIATION
             } else {
                 InflightContinuityDisposition.LOST_INFLIGHT
@@ -1804,6 +1842,11 @@ class RuntimeController(
         }
         clearPersistedInflightRecoveryArtifact()
         if (artifact != null) {
+            markAllocationInterruptedForRecovery(
+                taskId = artifact.taskId,
+                requiresCanonicalReconciliation = false,
+                source = source
+            )
             publishInflightContinuityRecovery(
                 disposition = InflightContinuityDisposition.LOST_INFLIGHT,
                 source = source,

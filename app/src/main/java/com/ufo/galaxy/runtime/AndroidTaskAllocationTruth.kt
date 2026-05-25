@@ -358,6 +358,7 @@ class AndroidTaskAllocationTruthLedger(
         nowMs: Long = System.currentTimeMillis()
     ) {
         val current = recordsByTaskId[taskId] ?: return
+        if (current.participantLocalPhase == TaskAllocationPhase.CLOSED) return
         val targetPhase = when (status) {
             ActiveTaskStatus.CANCELLING,
             ActiveTaskStatus.FAILING -> TaskAllocationPhase.EXECUTION_TERMINALIZING
@@ -386,6 +387,12 @@ class AndroidTaskAllocationTruthLedger(
         nowMs: Long = System.currentTimeMillis()
     ) {
         val current = recordsByTaskId[taskId] ?: return
+        if (current.participantLocalPhase == TaskAllocationPhase.CLOSED &&
+            current.closureClass == closureClass &&
+            !current.inFlightOwnership
+        ) {
+            return
+        }
         val transitions = current.transitions.toMutableList()
         var phase = current.participantLocalPhase
         if (requiresCanonicalReconciliation && phase != TaskAllocationPhase.RECONCILIATION_PENDING) {
