@@ -33,6 +33,8 @@ class Pr126AndroidImplementationRealityCheckpointTest {
             selectedExecutorRef = "android:participant:device-126:host-126",
             inFlightOwnerRef = "android:participant:device-126:host-126",
             executionLocation = "android_participant_runtime",
+            dispatchPlanId = "plan-a",
+            temporalWorkflowRunId = "workflow-a",
             allocationPathClass = TaskAllocationPathClass.CANONICAL_DELEGATED_DISPATCH,
             fallbackPathClass = null,
             participantLocalPhase = TaskAllocationPhase.CLOSED,
@@ -110,6 +112,9 @@ class Pr126AndroidImplementationRealityCheckpointTest {
         assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.HYBRID_EXECUTE.wireValue))
         assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.RAG_QUERY.wireValue))
         assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.CODE_EXECUTE.wireValue))
+        @Suppress("UNCHECKED_CAST")
+        val operationalSupport = supportTruth["operational_device_support"] as Map<String, Any?>
+        assertEquals("execution_near_peer", operationalSupport["support_class"])
     }
 
     @Test
@@ -133,5 +138,28 @@ class Pr126AndroidImplementationRealityCheckpointTest {
             "meaningfully_autonomous_operator_runtime_capable",
             autonomyTruth["effective_autonomy_class"]
         )
+    }
+
+    @Test
+    fun `checkpoint autonomy truth demotes restored durable evidence pending live revalidation`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = attachedSnapshot(delegatedCount = 3),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            taskAllocationTruth = allocationTruthWithStableCompletions().copy(
+                restoredFromDurableArtifact = true,
+                restoredAtMs = 3_000L,
+                requiresLiveRevalidation = true
+            ),
+            inflightContinuityState = AndroidContinuityRecoveryStateModel
+                .RecoveryPhase.RESUMED_CLEANLY.wireValue,
+            reconciliationEpoch = 15
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val autonomyTruth = AndroidImplementationRealityCheckpoint.build(truth)["autonomy_truth"]
+            as Map<String, Any?>
+        assertEquals("restored_truth_requires_live_revalidation", autonomyTruth["evidence_class"])
     }
 }

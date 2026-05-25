@@ -232,6 +232,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
             participantId = "Pixel_8:host-001",
             hostDescriptor = activeDescriptor(),
             fallbackAllowed = false,
+            dispatchPlanId = "plan-$taskId",
             nowMs = nowMs
         )
         ledger.recordClosed(

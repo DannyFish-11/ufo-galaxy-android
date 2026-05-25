@@ -109,6 +109,8 @@ data class TaskAllocationTruthRecord(
     val selectedExecutorRef: String,
     val inFlightOwnerRef: String,
     val executionLocation: String,
+    val dispatchPlanId: String?,
+    val temporalWorkflowRunId: String?,
     val allocationPathClass: TaskAllocationPathClass,
     val fallbackPathClass: TaskAllocationPathClass?,
     val participantLocalPhase: TaskAllocationPhase,
@@ -127,6 +129,8 @@ data class TaskAllocationTruthRecord(
         put(KEY_SELECTED_EXECUTOR_REF, selectedExecutorRef)
         put(KEY_IN_FLIGHT_OWNER_REF, inFlightOwnerRef)
         put(KEY_EXECUTION_LOCATION, executionLocation)
+        dispatchPlanId?.let { put(KEY_DISPATCH_PLAN_ID, it) }
+        temporalWorkflowRunId?.let { put(KEY_TEMPORAL_WORKFLOW_RUN_ID, it) }
         put(KEY_ALLOCATION_PATH_CLASS, allocationPathClass.wireValue)
         fallbackPathClass?.let { put(KEY_FALLBACK_PATH_CLASS, it.wireValue) }
         put(KEY_PARTICIPANT_LOCAL_PHASE, participantLocalPhase.wireValue)
@@ -148,6 +152,8 @@ data class TaskAllocationTruthRecord(
         put(KEY_SELECTED_EXECUTOR_REF, selectedExecutorRef)
         put(KEY_IN_FLIGHT_OWNER_REF, inFlightOwnerRef)
         put(KEY_EXECUTION_LOCATION, executionLocation)
+        put(KEY_DISPATCH_PLAN_ID, dispatchPlanId)
+        put(KEY_TEMPORAL_WORKFLOW_RUN_ID, temporalWorkflowRunId)
         put(KEY_ALLOCATION_PATH_CLASS, allocationPathClass.wireValue)
         put(KEY_FALLBACK_PATH_CLASS, fallbackPathClass?.wireValue)
         put(KEY_PARTICIPANT_LOCAL_PHASE, participantLocalPhase.wireValue)
@@ -167,6 +173,8 @@ data class TaskAllocationTruthRecord(
         private const val KEY_SELECTED_EXECUTOR_REF = "selected_executor_ref"
         private const val KEY_IN_FLIGHT_OWNER_REF = "in_flight_owner_ref"
         private const val KEY_EXECUTION_LOCATION = "execution_location"
+        private const val KEY_DISPATCH_PLAN_ID = "dispatch_plan_id"
+        private const val KEY_TEMPORAL_WORKFLOW_RUN_ID = "temporal_workflow_run_id"
         private const val KEY_ALLOCATION_PATH_CLASS = "allocation_path_class"
         private const val KEY_FALLBACK_PATH_CLASS = "fallback_path_class"
         private const val KEY_PARTICIPANT_LOCAL_PHASE = "participant_local_phase"
@@ -211,6 +219,9 @@ data class TaskAllocationTruthRecord(
                 selectedExecutorRef = selectedExecutorRef,
                 inFlightOwnerRef = inFlightOwnerRef,
                 executionLocation = executionLocation,
+                dispatchPlanId = json.optString(KEY_DISPATCH_PLAN_ID).takeIf { it.isNotBlank() },
+                temporalWorkflowRunId = json.optString(KEY_TEMPORAL_WORKFLOW_RUN_ID)
+                    .takeIf { it.isNotBlank() },
                 allocationPathClass = pathClass,
                 fallbackPathClass = fallbackPathClass,
                 participantLocalPhase = phase,
@@ -235,14 +246,20 @@ data class AndroidTaskAllocationTruthSnapshot(
     val activeTaskId: String?,
     val activeTask: TaskAllocationTruthRecord?,
     val recentTaskAllocations: List<TaskAllocationTruthRecord>,
-    val generatedAtMs: Long = System.currentTimeMillis()
+    val generatedAtMs: Long = System.currentTimeMillis(),
+    val restoredFromDurableArtifact: Boolean = false,
+    val restoredAtMs: Long? = null,
+    val requiresLiveRevalidation: Boolean = false
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         KEY_SCHEMA_VERSION to SCHEMA_VERSION,
         KEY_GENERATED_AT_MS to generatedAtMs,
         KEY_ACTIVE_TASK_ID to activeTaskId,
         KEY_ACTIVE_TASK to activeTask?.toMap(),
-        KEY_RECENT_TASK_ALLOCATIONS to recentTaskAllocations.map { it.toMap() }
+        KEY_RECENT_TASK_ALLOCATIONS to recentTaskAllocations.map { it.toMap() },
+        KEY_RESTORED_FROM_DURABLE_ARTIFACT to restoredFromDurableArtifact,
+        KEY_RESTORED_AT_MS to restoredAtMs,
+        KEY_REQUIRES_LIVE_REVALIDATION to requiresLiveRevalidation
     )
 
     fun toJson(): String = JSONObject().apply {
@@ -250,6 +267,9 @@ data class AndroidTaskAllocationTruthSnapshot(
         put(KEY_GENERATED_AT_MS, generatedAtMs)
         activeTaskId?.let { put(KEY_ACTIVE_TASK_ID, it) }
         activeTask?.let { put(KEY_ACTIVE_TASK, it.toJson()) }
+        put(KEY_RESTORED_FROM_DURABLE_ARTIFACT, restoredFromDurableArtifact)
+        restoredAtMs?.let { put(KEY_RESTORED_AT_MS, it) }
+        put(KEY_REQUIRES_LIVE_REVALIDATION, requiresLiveRevalidation)
         put(KEY_RECENT_TASK_ALLOCATIONS, JSONArray().apply {
             recentTaskAllocations.forEach { put(it.toJson()) }
         })
@@ -262,6 +282,9 @@ data class AndroidTaskAllocationTruthSnapshot(
         const val KEY_ACTIVE_TASK_ID = "active_task_id"
         const val KEY_ACTIVE_TASK = "active_task"
         const val KEY_RECENT_TASK_ALLOCATIONS = "recent_task_allocations"
+        const val KEY_RESTORED_FROM_DURABLE_ARTIFACT = "restored_from_durable_artifact"
+        const val KEY_RESTORED_AT_MS = "restored_at_ms"
+        const val KEY_REQUIRES_LIVE_REVALIDATION = "requires_live_revalidation"
 
         fun fromJson(raw: String?): AndroidTaskAllocationTruthSnapshot? {
             if (raw.isNullOrBlank()) return null
@@ -281,7 +304,17 @@ data class AndroidTaskAllocationTruthSnapshot(
                     activeTaskId = activeTaskId,
                     activeTask = activeTask,
                     recentTaskAllocations = recentAllocations,
-                    generatedAtMs = json.optLong(KEY_GENERATED_AT_MS, 0L)
+                    generatedAtMs = json.optLong(KEY_GENERATED_AT_MS, 0L),
+                    restoredFromDurableArtifact = json.optBoolean(
+                        KEY_RESTORED_FROM_DURABLE_ARTIFACT,
+                        false
+                    ),
+                    restoredAtMs = json.takeIf { it.has(KEY_RESTORED_AT_MS) }
+                        ?.optLong(KEY_RESTORED_AT_MS),
+                    requiresLiveRevalidation = json.optBoolean(
+                        KEY_REQUIRES_LIVE_REVALIDATION,
+                        false
+                    )
                 )
             } catch (_: Exception) {
                 null
@@ -294,14 +327,20 @@ class AndroidTaskAllocationTruthLedger(
     private val historyLimit: Int = DEFAULT_HISTORY_LIMIT
 ) {
     private val recordsByTaskId = linkedMapOf<String, TaskAllocationTruthRecord>()
+    private var restoredFromDurableArtifact: Boolean = false
+    private var restoredAtMs: Long? = null
+    private var requiresLiveRevalidation: Boolean = false
 
     fun recordAccepted(
         taskId: String,
         participantId: String?,
         hostDescriptor: RuntimeHostDescriptor?,
         fallbackAllowed: Boolean,
+        dispatchPlanId: String? = null,
+        temporalWorkflowRunId: String? = null,
         nowMs: Long = System.currentTimeMillis()
     ) {
+        markLiveRevalidated()
         val executorRef = buildExecutorRef(participantId, hostDescriptor)
         val transitions = listOf(
             TaskAllocationTransition(
@@ -333,6 +372,8 @@ class AndroidTaskAllocationTruthLedger(
                 selectedExecutorRef = executorRef,
                 inFlightOwnerRef = executorRef,
                 executionLocation = "android_participant_runtime",
+                dispatchPlanId = dispatchPlanId,
+                temporalWorkflowRunId = temporalWorkflowRunId,
                 allocationPathClass = TaskAllocationPathClass.CANONICAL_DELEGATED_DISPATCH,
                 fallbackPathClass = if (fallbackAllowed) {
                     TaskAllocationPathClass.CANONICAL_FALLBACK_LOCAL
@@ -357,6 +398,7 @@ class AndroidTaskAllocationTruthLedger(
         status: ActiveTaskStatus,
         nowMs: Long = System.currentTimeMillis()
     ) {
+        markLiveRevalidated()
         val current = recordsByTaskId[taskId] ?: return
         if (current.participantLocalPhase == TaskAllocationPhase.CLOSED) return
         val targetPhase = when (status) {
@@ -386,6 +428,7 @@ class AndroidTaskAllocationTruthLedger(
         requiresCanonicalReconciliation: Boolean,
         nowMs: Long = System.currentTimeMillis()
     ) {
+        markLiveRevalidated()
         val current = recordsByTaskId[taskId] ?: return
         if (current.participantLocalPhase == TaskAllocationPhase.CLOSED &&
             current.closureClass == closureClass &&
@@ -429,17 +472,28 @@ class AndroidTaskAllocationTruthLedger(
         return AndroidTaskAllocationTruthSnapshot(
             activeTaskId = activeTaskId,
             activeTask = activeTaskId?.let { recordsByTaskId[it] },
-            recentTaskAllocations = ordered
+            recentTaskAllocations = ordered,
+            restoredFromDurableArtifact = restoredFromDurableArtifact,
+            restoredAtMs = restoredAtMs,
+            requiresLiveRevalidation = requiresLiveRevalidation
         )
     }
 
-    fun restore(raw: String?) {
+    fun restore(raw: String?, restoredNowMs: Long = System.currentTimeMillis()) {
         recordsByTaskId.clear()
-        val restored = AndroidTaskAllocationTruthSnapshot.fromJson(raw)
+        val restoredSnapshot = AndroidTaskAllocationTruthSnapshot.fromJson(raw)
+        val restored = restoredSnapshot
             ?.recentTaskAllocations
             .orEmpty()
             .sortedBy { it.lastUpdatedAtMs }
         restored.forEach { upsertRecord(it) }
+        restoredFromDurableArtifact = restored.isNotEmpty() || restoredSnapshot?.restoredFromDurableArtifact == true
+        restoredAtMs = if (restoredFromDurableArtifact) {
+            restoredNowMs
+        } else {
+            null
+        }
+        requiresLiveRevalidation = restoredFromDurableArtifact
     }
 
     fun toJson(activeTaskId: String?): String = snapshot(activeTaskId).toJson()
@@ -448,6 +502,10 @@ class AndroidTaskAllocationTruthLedger(
         recordsByTaskId.remove(record.taskId)
         recordsByTaskId[record.taskId] = record
         prune()
+    }
+
+    private fun markLiveRevalidated() {
+        requiresLiveRevalidation = false
     }
 
     private fun prune() {

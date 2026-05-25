@@ -15,6 +15,7 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
             participantId = "Pixel_8:host-001",
             hostDescriptor = descriptor(),
             fallbackAllowed = false,
+            dispatchPlanId = "plan-001",
             nowMs = nowMs
         )
         ledger.recordClosed(
@@ -280,6 +281,62 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
         assertEquals(
             RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT,
             truth.runtimeNodeIdentity?.autonomyTruthLevel
+        )
+    }
+
+    @Test
+    fun `runtime node autonomy demotes restored durable truth until live revalidation occurs`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = sessionSnapshot(),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            taskAllocationTruth = allocationTruthWithResult().copy(
+                restoredFromDurableArtifact = true,
+                restoredAtMs = 1_500L,
+                requiresLiveRevalidation = true
+            ),
+            reportedAtMs = 1_550L,
+            reconciliationEpoch = 9
+        )
+
+        assertEquals(
+            RuntimeNodeAutonomyEvidenceClass.RECOVERY_DEGRADED_DEMOTED,
+            truth.runtimeNodeIdentity?.autonomyEvidence?.evidenceClass
+        )
+        assertTrue(
+            truth.runtimeNodeIdentity?.autonomyEvidence
+                ?.demotionReasons
+                ?.contains("restored_durable_truth_requires_live_revalidation") == true
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT,
+            truth.runtimeNodeIdentity?.autonomyTruthLevel
+        )
+    }
+
+    @Test
+    fun `hub role is demoted from execution near peer support`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor().copy(deviceRole = "hub"),
+            sessionSnapshot = sessionSnapshot(),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            reportedAtMs = 1_050L,
+            reconciliationEpoch = 10
+        )
+
+        assertEquals(
+            RuntimeNodeExecutionParticipationState.BLOCKED,
+            truth.runtimeNodeIdentity?.executionParticipationState
+        )
+        assertEquals(
+            RuntimeNodeCapabilityTruthLevel.PARTICIPANT_RUNTIME_CAPABLE,
+            truth.runtimeNodeIdentity?.capabilityTruthLevel
+        )
+        assertEquals(
+            FeatureReadinessTruthState.PARTIALLY_READY_DEGRADED,
+            truth.featureReadinessTruthState
         )
     }
 }
