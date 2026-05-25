@@ -486,6 +486,12 @@ data class ReconciliationSignal(
         /** Payload key for [stableDedupeKey]. */
         const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
 
+        /**
+         * Payload key for the structured Android implementation-reality checkpoint map.
+         */
+        const val KEY_IMPLEMENTATION_REALITY_CHECKPOINT =
+            AndroidImplementationRealityCheckpoint.KEY_CHECKPOINT
+
         // ── PR-116: Continuity recovery state payload key constants ──────────────────────
 
         /**
@@ -1237,6 +1243,10 @@ data class ReconciliationSignal(
                 v2RoutingDecision?.let { decision ->
                     putAll(AndroidCrossRepoRecoveryStateRoutingContract.toWireMap(decision))
                 }
+                put(
+                    KEY_IMPLEMENTATION_REALITY_CHECKPOINT,
+                    AndroidImplementationRealityCheckpoint.build(truth)
+                )
                 putAll(additionalPayload)
             }
             return ReconciliationSignal(

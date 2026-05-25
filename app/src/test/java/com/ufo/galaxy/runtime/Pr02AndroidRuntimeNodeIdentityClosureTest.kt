@@ -21,14 +21,15 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
     private fun sessionSnapshot(
         deviceId: String = "Pixel_8",
         hostRole: String = RuntimeHostDescriptor.FormationRole.PRIMARY.wireValue,
-        posture: String = SourceRuntimePosture.JOIN_RUNTIME
+        posture: String = SourceRuntimePosture.JOIN_RUNTIME,
+        delegatedExecutionCount: Int = 2
     ): AttachedRuntimeHostSessionSnapshot = AttachedRuntimeHostSessionSnapshot(
         sessionId = "sess-001",
         deviceId = deviceId,
         runtimeSessionId = "rt-001",
         attachmentState = AttachedRuntimeSession.State.ATTACHED.wireValue,
         isReuseValid = true,
-        delegatedExecutionCount = 2,
+        delegatedExecutionCount = delegatedExecutionCount,
         invalidationReason = null,
         hostRole = hostRole,
         posture = posture
@@ -154,6 +155,27 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
         )
         assertEquals(
             RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY,
+            truth.runtimeNodeIdentity?.autonomyTruthLevel
+        )
+    }
+
+    @Test
+    fun `runtime node autonomy requires delegated execution evidence for semi autonomous classification`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = sessionSnapshot(delegatedExecutionCount = 0),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            carrierForegroundVisible = true,
+            reconciliationEpoch = 6
+        )
+
+        assertEquals(
+            RuntimeNodeExecutionParticipationState.ELIGIBLE,
+            truth.runtimeNodeIdentity?.executionParticipationState
+        )
+        assertEquals(
+            RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT,
             truth.runtimeNodeIdentity?.autonomyTruthLevel
         )
     }

@@ -59,7 +59,8 @@ data class AndroidRuntimeNodeIdentity(
     val runtimeSessionId: String?,
     val executionParticipationState: RuntimeNodeExecutionParticipationState,
     val collaborationParticipationState: RuntimeNodeCollaborationParticipationState,
-    val manifestationParticipationState: RuntimeNodeManifestationParticipationState
+    val manifestationParticipationState: RuntimeNodeManifestationParticipationState,
+    private val sessionSnapshotDelegatedExecutionCount: Int
 ) {
     val capabilityTruthLevel: RuntimeNodeCapabilityTruthLevel
         get() = deriveCapabilityTruthLevel(
@@ -73,7 +74,8 @@ data class AndroidRuntimeNodeIdentity(
         get() = deriveAutonomyTruthLevel(
             sourceRuntimePosture = sourceRuntimePosture,
             executionParticipationState = executionParticipationState,
-            collaborationParticipationState = collaborationParticipationState
+            collaborationParticipationState = collaborationParticipationState,
+            delegatedExecutionCount = sessionSnapshotDelegatedExecutionCount
         )
 
     val authorityBoundaryClass: RuntimeNodeAuthorityBoundaryClass
@@ -183,7 +185,8 @@ data class AndroidRuntimeNodeIdentity(
                 runtimeSessionId = sessionSnapshot?.runtimeSessionId,
                 executionParticipationState = executionParticipationState,
                 collaborationParticipationState = collaborationParticipationState,
-                manifestationParticipationState = manifestationParticipationState
+                manifestationParticipationState = manifestationParticipationState,
+                sessionSnapshotDelegatedExecutionCount = sessionSnapshot?.delegatedExecutionCount ?: 0
             )
         }
 
@@ -272,7 +275,8 @@ data class AndroidRuntimeNodeIdentity(
         private fun deriveAutonomyTruthLevel(
             sourceRuntimePosture: String,
             executionParticipationState: RuntimeNodeExecutionParticipationState,
-            collaborationParticipationState: RuntimeNodeCollaborationParticipationState
+            collaborationParticipationState: RuntimeNodeCollaborationParticipationState,
+            delegatedExecutionCount: Int
         ): RuntimeNodeAutonomyTruthLevel {
             if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME ||
                 collaborationParticipationState == RuntimeNodeCollaborationParticipationState.INACTIVE
@@ -280,8 +284,11 @@ data class AndroidRuntimeNodeIdentity(
                 return RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY
             }
             return when (executionParticipationState) {
-                RuntimeNodeExecutionParticipationState.ELIGIBLE ->
+                RuntimeNodeExecutionParticipationState.ELIGIBLE -> if (delegatedExecutionCount > 0) {
                     RuntimeNodeAutonomyTruthLevel.SEMI_AUTONOMOUS_EXECUTION
+                } else {
+                    RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
+                }
                 RuntimeNodeExecutionParticipationState.DEGRADED,
                 RuntimeNodeExecutionParticipationState.BLOCKED ->
                     RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT

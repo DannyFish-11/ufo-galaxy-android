@@ -1,0 +1,91 @@
+package com.ufo.galaxy.runtime
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class Pr126AndroidImplementationRealityCheckpointTest {
+
+    private fun descriptor() = RuntimeHostDescriptor(
+        hostId = "host-126",
+        deviceId = "device-126",
+        deviceRole = "phone",
+        formationRole = RuntimeHostDescriptor.FormationRole.PRIMARY,
+        participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+    )
+
+    private fun attachedSnapshot(delegatedCount: Int) = AttachedRuntimeHostSessionSnapshot(
+        sessionId = "sess-126",
+        deviceId = "device-126",
+        runtimeSessionId = "rt-126",
+        attachmentState = AttachedRuntimeSession.State.ATTACHED.wireValue,
+        isReuseValid = true,
+        delegatedExecutionCount = delegatedCount,
+        invalidationReason = null,
+        hostRole = RuntimeHostDescriptor.FormationRole.PRIMARY.wireValue,
+        posture = SourceRuntimePosture.JOIN_RUNTIME
+    )
+
+    @Test
+    fun `runtime truth snapshot payload includes implementation reality checkpoint`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = attachedSnapshot(delegatedCount = 2),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            reconciliationEpoch = 12
+        )
+
+        val signal = ReconciliationSignal.runtimeTruthSnapshot(truth)
+
+        @Suppress("UNCHECKED_CAST")
+        val checkpoint = signal.payload[ReconciliationSignal.KEY_IMPLEMENTATION_REALITY_CHECKPOINT]
+            as Map<String, Any?>
+        assertEquals("1", checkpoint["schema_version"])
+        assertTrue(checkpoint.containsKey("node_system_truth"))
+        assertTrue(checkpoint.containsKey("runtime_semantics_truth"))
+        assertTrue(checkpoint.containsKey("task_allocation_truth"))
+        assertTrue(checkpoint.containsKey("device_support_truth"))
+        assertTrue(checkpoint.containsKey("autonomy_truth"))
+    }
+
+    @Test
+    fun `checkpoint support truth reports contract-first capabilities as unsupported-but-declared`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = attachedSnapshot(delegatedCount = 2),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            reconciliationEpoch = 13
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val supportTruth = AndroidImplementationRealityCheckpoint.build(truth)["device_support_truth"]
+            as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val unsupported = supportTruth["unsupported_but_declared_capabilities"] as List<String>
+        assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.HYBRID_EXECUTE.wireValue))
+        assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.RAG_QUERY.wireValue))
+        assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.CODE_EXECUTE.wireValue))
+    }
+
+    @Test
+    fun `checkpoint autonomy truth promotes to meaningful autonomy only with stronger execution evidence`() {
+        val truth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor(),
+            sessionSnapshot = attachedSnapshot(delegatedCount = 3),
+            healthState = ParticipantHealthState.HEALTHY,
+            readinessState = ParticipantReadinessState.READY,
+            reconciliationEpoch = 14
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val autonomyTruth = AndroidImplementationRealityCheckpoint.build(truth)["autonomy_truth"]
+            as Map<String, Any?>
+        assertEquals("meaningful_runtime_execution_evidence", autonomyTruth["evidence_class"])
+        assertEquals(
+            "meaningfully_autonomous_operator_runtime_capable",
+            autonomyTruth["effective_autonomy_class"]
+        )
+    }
+}
