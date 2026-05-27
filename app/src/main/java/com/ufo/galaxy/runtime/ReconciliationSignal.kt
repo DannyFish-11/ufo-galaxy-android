@@ -491,6 +491,10 @@ data class ReconciliationSignal(
          */
         const val KEY_IMPLEMENTATION_REALITY_CHECKPOINT =
             AndroidImplementationRealityCheckpoint.KEY_CHECKPOINT
+        const val KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE = "unified_action_lifecycle_surface"
+        const val KEY_UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION =
+            "unified_action_lifecycle_schema_version"
+        const val UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION = "1.0"
         const val KEY_TASK_ALLOCATION_TRUTH = AndroidParticipantRuntimeTruth.KEY_TASK_ALLOCATION_TRUTH
         const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY =
             AndroidParticipantRuntimeTruth.KEY_RUNTIME_PARTICIPATION_TOPOLOGY
@@ -843,6 +847,103 @@ data class ReconciliationSignal(
             ) + terminalOutcomePayload + additionalPayload
         }
 
+        private fun boolValue(value: Any?): Boolean = when (value) {
+            is Boolean -> value
+            is String -> value.equals("true", ignoreCase = true)
+            is Number -> value.toInt() != 0
+            else -> false
+        }
+
+        private fun withUnifiedActionLifecycleSurface(
+            kind: Kind,
+            status: String,
+            taskId: String?,
+            reconciliationEpoch: Int,
+            payload: Map<String, Any?>
+        ): Map<String, Any?> {
+            val isTerminal = kind == Kind.TASK_RESULT ||
+                kind == Kind.TASK_CANCELLED ||
+                kind == Kind.TASK_FAILED
+            val resultReturned = boolValue(payload[KEY_RESULT_RETURNED]) || isTerminal
+            val closureReadyForAcceptance = boolValue(payload[KEY_CLOSURE_READY_FOR_ACCEPTANCE])
+            val canonicalClosureBlocked = boolValue(payload[KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED])
+            val hasFailureBlocker = kind == Kind.TASK_FAILED
+            val isBlocked = canonicalClosureBlocked || hasFailureBlocker
+            val blockerReason = when {
+                canonicalClosureBlocked -> "canonical_closure_blocked"
+                hasFailureBlocker -> "execution_failed"
+                else -> null
+            }
+            val confirmationNeeded = isTerminal && !closureReadyForAcceptance
+            val stage = when (kind) {
+                Kind.TASK_ACCEPTED -> "accepted"
+                Kind.TASK_STATUS_UPDATE -> "executing"
+                Kind.TASK_RESULT -> "result_emitted"
+                Kind.TASK_CANCELLED -> "cancelled"
+                Kind.TASK_FAILED -> "failed"
+                Kind.PARTICIPANT_STATE -> "participant_state"
+                Kind.RUNTIME_TRUTH_SNAPSHOT -> "reconciliation_snapshot"
+            }
+            val surface = mapOf(
+                "schema_version" to UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION,
+                "stage" to stage,
+                "action" to mapOf(
+                    "kind" to kind.wireValue,
+                    "task_id" to taskId,
+                    "status" to status
+                ),
+                "acceptance" to mapOf(
+                    "accepted" to (kind == Kind.TASK_ACCEPTED),
+                    "status" to if (kind == Kind.TASK_ACCEPTED) "accepted" else "not_applicable"
+                ),
+                "execution" to mapOf(
+                    "state" to status,
+                    "progress_detail" to payload["progress_detail"],
+                    "is_terminal" to isTerminal
+                ),
+                "result" to mapOf(
+                    "is_first_class_surface" to true,
+                    "returned" to resultReturned,
+                    "terminal_outcome_kind" to payload[KEY_TERMINAL_OUTCOME_KIND],
+                    "semantic_class" to payload[KEY_RESULT_UPLINK_SEMANTIC_CLASS],
+                    "completion_truth_grade" to payload[KEY_COMPLETION_TRUTH_GRADE]
+                ),
+                "blocker" to mapOf(
+                    "is_blocked" to isBlocked,
+                    "reason" to blockerReason
+                ),
+                "confirmation" to mapOf(
+                    "confirmation_needed" to confirmationNeeded,
+                    "closure_ready_for_acceptance" to closureReadyForAcceptance
+                ),
+                "handoff" to mapOf(
+                    "state" to when {
+                        kind == Kind.RUNTIME_TRUTH_SNAPSHOT -> "reconciliation_handoff"
+                        isTerminal -> "result_handoff_to_v2"
+                        else -> "android_execution_active"
+                    }
+                ),
+                "closure" to mapOf(
+                    "closure_ready_for_acceptance" to closureReadyForAcceptance,
+                    "participant_local_convergence_state" to payload[KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE]
+                ),
+                "reconciliation" to mapOf(
+                    "epoch" to reconciliationEpoch,
+                    "signal_kind" to kind.wireValue,
+                    "completion_state" to when {
+                        kind == Kind.RUNTIME_TRUTH_SNAPSHOT -> "snapshot_emitted"
+                        isTerminal -> "terminal_signal_emitted"
+                        else -> "inflight_signal_emitted"
+                    }
+                )
+            )
+            return payload + mapOf(
+                KEY_UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION to
+                    UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION,
+                KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE to surface
+            )
+        }
+
         private fun buildStableDedupeKey(
             kind: String,
             participantId: String,
@@ -919,12 +1020,18 @@ data class ReconciliationSignal(
             taskId = taskId,
             correlationId = correlationId,
             status = STATUS_RUNNING,
-            payload = closureSemanticsPayload(
-                isTerminalSignal = false,
-                resultReturned = false,
-                completionSignaled = false,
-                closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
+            payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_ACCEPTED,
+                status = STATUS_RUNNING,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = false,
+                    resultReturned = false,
+                    completionSignaled = false,
+                    closureReadyForAcceptance = false,
+                    additionalPayload = additionalPayload
+                )
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -962,13 +1069,19 @@ data class ReconciliationSignal(
             taskId = taskId,
             correlationId = correlationId,
             status = STATUS_CANCELLED,
-            payload = closureSemanticsPayload(
-                isTerminalSignal = true,
-                resultReturned = true,
-                completionSignaled = true,
-                closureReadyForAcceptance = false,
-                terminalOutcomeKind = terminalOutcomeKind,
-                additionalPayload = additionalPayload
+            payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_CANCELLED,
+                status = STATUS_CANCELLED,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = true,
+                    resultReturned = true,
+                    completionSignaled = true,
+                    closureReadyForAcceptance = false,
+                    terminalOutcomeKind = terminalOutcomeKind,
+                    additionalPayload = additionalPayload
+                )
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -1003,16 +1116,22 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
-            val payload = closureSemanticsPayload(
-                isTerminalSignal = true,
-                resultReturned = true,
-                completionSignaled = true,
-                closureReadyForAcceptance = false,
-                terminalOutcomeKind = terminalOutcomeKind,
-                additionalPayload = additionalPayload
-            ).toMutableMap().apply {
-                errorDetail?.let { put("error_detail", it) }
-            }
+            val payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_FAILED,
+                status = STATUS_FAILED,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = true,
+                    resultReturned = true,
+                    completionSignaled = true,
+                    closureReadyForAcceptance = false,
+                    terminalOutcomeKind = terminalOutcomeKind,
+                    additionalPayload = additionalPayload
+                ).toMutableMap().apply {
+                    errorDetail?.let { put("error_detail", it) }
+                }
+            )
             return ReconciliationSignal(
                 kind = Kind.TASK_FAILED,
                 participantId = participantId,
@@ -1057,13 +1176,19 @@ data class ReconciliationSignal(
             taskId = taskId,
             correlationId = correlationId,
             status = STATUS_SUCCESS,
-            payload = closureSemanticsPayload(
-                isTerminalSignal = true,
-                resultReturned = true,
-                completionSignaled = true,
-                closureReadyForAcceptance = false,
-                terminalOutcomeKind = terminalOutcomeKind,
-                additionalPayload = additionalPayload
+            payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_RESULT,
+                status = STATUS_SUCCESS,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = true,
+                    resultReturned = true,
+                    completionSignaled = true,
+                    closureReadyForAcceptance = false,
+                    terminalOutcomeKind = terminalOutcomeKind,
+                    additionalPayload = additionalPayload
+                )
             ),
             signalId = signalId,
             emittedAtMs = System.currentTimeMillis(),
@@ -1099,15 +1224,21 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
-            val payload = closureSemanticsPayload(
-                isTerminalSignal = false,
-                resultReturned = false,
-                completionSignaled = false,
-                closureReadyForAcceptance = false,
-                additionalPayload = additionalPayload
-            ).toMutableMap().apply {
-                progressDetail?.let { put("progress_detail", it) }
-            }
+            val payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_STATUS_UPDATE,
+                status = STATUS_IN_PROGRESS,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = false,
+                    resultReturned = false,
+                    completionSignaled = false,
+                    closureReadyForAcceptance = false,
+                    additionalPayload = additionalPayload
+                ).toMutableMap().apply {
+                    progressDetail?.let { put("progress_detail", it) }
+                }
+            )
             return ReconciliationSignal(
                 kind = Kind.TASK_STATUS_UPDATE,
                 participantId = participantId,
@@ -1154,20 +1285,26 @@ data class ReconciliationSignal(
             sessionContinuityEpoch: Int? = null,
             additionalPayload: Map<String, Any?> = emptyMap()
         ): ReconciliationSignal {
-            val payload = buildMap<String, Any?> {
-                putAll(
-                    closureSemanticsPayload(
-                        isTerminalSignal = false,
-                        resultReturned = false,
-                        completionSignaled = false,
-                        closureReadyForAcceptance = false,
-                        additionalPayload = additionalPayload
+            val payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.PARTICIPANT_STATE,
+                status = STATUS_STATE_CHANGED,
+                taskId = null,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = buildMap<String, Any?> {
+                    putAll(
+                        closureSemanticsPayload(
+                            isTerminalSignal = false,
+                            resultReturned = false,
+                            completionSignaled = false,
+                            closureReadyForAcceptance = false,
+                            additionalPayload = additionalPayload
+                        )
                     )
-                )
-                put("health_state", healthState.wireValue)
-                put("readiness_state", readinessState.wireValue)
-                posture?.let { put("source_runtime_posture", it) }
-            }
+                    put("health_state", healthState.wireValue)
+                    put("readiness_state", readinessState.wireValue)
+                    posture?.let { put("source_runtime_posture", it) }
+                }
+            )
             return ReconciliationSignal(
                 kind = Kind.PARTICIPANT_STATE,
                 participantId = participantId,
@@ -1226,40 +1363,48 @@ data class ReconciliationSignal(
             // Promote inflight continuity state into explicit payload keys so V2 can consume
             // recovery evidence directly from the reconciliation signal payload without having
             // to read nested runtimeTruth fields (INV-REC-04).
-            val recoveryPayload = closureSemanticsPayload(
-                isTerminalSignal = false,
-                resultReturned = false,
-                completionSignaled = false,
-                closureReadyForAcceptance = false,
-                outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
-                    .OutwardTruthSurfaceClass.ANDROID_RUNTIME_VISIBLE_STATE
-            ).toMutableMap<String, Any?>().apply {
-                truth.inflightContinuityState?.let {
-                    put(KEY_CONTINUITY_RECOVERY_STATE, it)
+            val recoveryPayload = withUnifiedActionLifecycleSurface(
+                kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
+                status = STATUS_SNAPSHOT,
+                taskId = truth.activeTaskId,
+                reconciliationEpoch = truth.reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = false,
+                    resultReturned = false,
+                    completionSignaled = false,
+                    closureReadyForAcceptance = false,
+                    outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                        .OutwardTruthSurfaceClass.ANDROID_RUNTIME_VISIBLE_STATE
+                ).toMutableMap<String, Any?>().apply {
+                    truth.inflightContinuityState?.let {
+                        put(KEY_CONTINUITY_RECOVERY_STATE, it)
+                    }
+                    truth.inflightContinuitySource?.let {
+                        put(KEY_CONTINUITY_RECOVERY_SOURCE, it)
+                    }
+                    put(
+                        KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION,
+                        AndroidContinuityRecoveryStateModel.SCHEMA_VERSION
+                    )
+                    // PR-119: include structured routing metadata so V2 can consume routing
+                    // intent without re-deriving it from the raw phase value (INV-ROUTING-05).
+                    v2RoutingDecision?.let { decision ->
+                        putAll(AndroidCrossRepoRecoveryStateRoutingContract.toWireMap(decision))
+                    }
+                    put(
+                        KEY_IMPLEMENTATION_REALITY_CHECKPOINT,
+                        AndroidImplementationRealityCheckpoint.build(truth)
+                    )
+                    truth.taskAllocationTruth?.let {
+                        put(KEY_TASK_ALLOCATION_TRUTH, it.toMap())
+                    }
+                    put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, truth.runtimeParticipationTopology.toMap())
+                    truth.runtimeNodeIdentity?.let {
+                        put(KEY_AUTONOMY_RUNTIME_EVIDENCE, it.autonomyEvidence.toMap())
+                    }
+                    putAll(additionalPayload)
                 }
-                truth.inflightContinuitySource?.let {
-                    put(KEY_CONTINUITY_RECOVERY_SOURCE, it)
-                }
-                put(KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION,
-                    AndroidContinuityRecoveryStateModel.SCHEMA_VERSION)
-                // PR-119: include structured routing metadata so V2 can consume routing
-                // intent without re-deriving it from the raw phase value (INV-ROUTING-05).
-                v2RoutingDecision?.let { decision ->
-                    putAll(AndroidCrossRepoRecoveryStateRoutingContract.toWireMap(decision))
-                }
-                put(
-                    KEY_IMPLEMENTATION_REALITY_CHECKPOINT,
-                    AndroidImplementationRealityCheckpoint.build(truth)
-                )
-                truth.taskAllocationTruth?.let {
-                    put(KEY_TASK_ALLOCATION_TRUTH, it.toMap())
-                }
-                put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, truth.runtimeParticipationTopology.toMap())
-                truth.runtimeNodeIdentity?.let {
-                    put(KEY_AUTONOMY_RUNTIME_EVIDENCE, it.autonomyEvidence.toMap())
-                }
-                putAll(additionalPayload)
-            }
+            )
             return ReconciliationSignal(
                 kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
                 participantId = truth.participantId,

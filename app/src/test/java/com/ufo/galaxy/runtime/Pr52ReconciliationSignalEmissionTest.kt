@@ -613,6 +613,26 @@ class Pr52ReconciliationSignalEmissionTest {
     }
 
     @Test
+    fun `publishTaskResult emits unified lifecycle surface with result handoff and closure mapping`() = runBlocking {
+        val (controller, _) = buildController(descriptor = buildDescriptor())
+
+        controller.publishTaskResult("task-result-lifecycle")
+
+        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        assertNotNull(signal)
+        val lifecycle = signal!!.payload[ReconciliationSignal.KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE]
+            as? Map<*, *>
+        assertNotNull("unified lifecycle surface must be emitted", lifecycle)
+        assertEquals("result_emitted", lifecycle!!["stage"])
+        val result = lifecycle["result"] as? Map<*, *>
+        assertEquals(true, result?.get("returned"))
+        val handoff = lifecycle["handoff"] as? Map<*, *>
+        assertEquals("result_handoff_to_v2", handoff?.get("state"))
+        val closure = lifecycle["closure"] as? Map<*, *>
+        assertEquals(false, closure?.get("closure_ready_for_acceptance"))
+    }
+
+    @Test
     fun `publishTaskResult payload distinguishes local completion from external propagation`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
@@ -718,6 +738,11 @@ class Pr52ReconciliationSignalEmissionTest {
         assertNotNull("Expected TASK_STATUS_UPDATE signal on reconciliationSignals", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
         assertEquals("step-1", signal.payload["progress_detail"])
+        val lifecycle = signal.payload[ReconciliationSignal.KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE]
+            as? Map<*, *>
+        val execution = lifecycle?.get("execution") as? Map<*, *>
+        assertEquals("executing", lifecycle?.get("stage"))
+        assertEquals(ReconciliationSignal.STATUS_IN_PROGRESS, execution?.get("state"))
     }
 
     @Test
