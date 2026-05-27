@@ -52,12 +52,13 @@ data class CanonicalContinuousIngressBackbone(
 
     companion object {
         private const val MINIMUM_UNIFIED_FAMILY_COUNT = 2
-        private const val DEVICE_STREAM_SESSION_FALLBACK_PREFIX = "device_stream_session"
         val EMPTY = CanonicalContinuousIngressBackbone(emptyList())
     }
 }
 
 object CanonicalContinuousIngressBackboneBuilder {
+    private const val DEVICE_STREAM_SESSION_FALLBACK_PREFIX = "device_stream_session"
+
     fun deviceStreamSession(
         deviceId: String,
         runtimeSessionId: String?,
