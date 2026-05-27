@@ -493,6 +493,20 @@ data class ReconciliationSignal(
             AndroidImplementationRealityCheckpoint.KEY_CHECKPOINT
         const val KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE = "unified_action_lifecycle_surface"
         const val UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION = "1.0"
+
+        /**
+         * Wire key for the `visibility_boundary` section of `unified_action_lifecycle_surface`.
+         *
+         * Contains a map from [AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.wireValue]
+         * to the corresponding [AndroidDualRepoHiddenVisibleBoundaryContract.BoundaryDecision.toWireMap]
+         * for every Android-originated information item classified in this surface emission.
+         *
+         * V2 MUST read this section to determine which Android-originated items in the surface
+         * payload are foreground-eligible and which have been suppressed.
+         *
+         * Introduced: PR-128.
+         */
+        const val KEY_VISIBILITY_BOUNDARY = "visibility_boundary"
         const val KEY_TASK_ALLOCATION_TRUTH = AndroidParticipantRuntimeTruth.KEY_TASK_ALLOCATION_TRUTH
         const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY =
             AndroidParticipantRuntimeTruth.KEY_RUNTIME_PARTICIPATION_TOPOLOGY
@@ -873,7 +887,7 @@ data class ReconciliationSignal(
                 toBooleanOrFalse(payload[KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED])
             val hasFailureBlocker = kind == Kind.TASK_FAILED
             val isBlocked = canonicalClosureBlocked || hasFailureBlocker
-            val blockerReason = when {
+            val rawBlockerReason = when {
                 canonicalClosureBlocked -> "canonical_closure_blocked"
                 hasFailureBlocker -> "execution_failed"
                 else -> null
@@ -906,6 +920,49 @@ data class ReconciliationSignal(
                     else -> "reconciliation_snapshot"
                 }
             }
+
+            // ── Dual-repo hidden-visible boundary classification (PR-128) ──────
+            // Each Android-originated information item is routed through the shared boundary
+            // contract.  The resulting BoundaryDecision governs whether the item appears in
+            // the foreground payload or is suppressed.
+            val Contract = AndroidDualRepoHiddenVisibleBoundaryContract
+            val blockerDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.BLOCKER,
+                    blockerReason = rawBlockerReason,
+                    isCanonicalClosureBlocked = canonicalClosureBlocked,
+                    isExecutionFailed = hasFailureBlocker
+                )
+            )
+            val confirmationDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.CONFIRMATION_NEEDED,
+                    confirmationNeeded = confirmationNeeded,
+                    isTerminalSignal = isTerminal,
+                    closureReadyForAcceptance = closureReadyForAcceptance
+                )
+            )
+            val deviceStateDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY,
+                    deviceStateStage = stage
+                )
+            )
+            val lifecycleDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.LIFECYCLE_STATE,
+                    lifecycleStage = stage
+                )
+            )
+
+            // Foreground payload for "blocker": only expose if boundary says FOREGROUND.
+            // An OPERATOR_ONLY or BACKGROUND blocker must not appear as a user-facing block.
+            val foregroundBlockedValue = isBlocked && !blockerDecision.foregroundSuppressed
+            val foregroundBlockerReason = if (blockerDecision.foregroundSuppressed) null else rawBlockerReason
+
+            // Foreground payload for "confirmation": only expose if boundary says FOREGROUND.
+            val foregroundConfirmationNeeded = confirmationNeeded && !confirmationDecision.foregroundSuppressed
+
             val surface = mapOf(
                 "schema_version" to UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION,
                 "stage" to stage,
@@ -930,12 +987,18 @@ data class ReconciliationSignal(
                     "semantic_class" to payload[KEY_RESULT_UPLINK_SEMANTIC_CLASS],
                     "completion_truth_grade" to payload[KEY_COMPLETION_TRUTH_GRADE]
                 ),
+                // Blocker foreground payload is governed by the dual-repo boundary decision.
+                // When blockerDecision.foregroundSuppressed=true the block is not surfaced to
+                // the user; the raw blocker information remains in visibility_boundary only.
                 "blocker" to mapOf(
-                    "is_blocked" to isBlocked,
-                    "reason" to blockerReason
+                    "is_blocked" to foregroundBlockedValue,
+                    "reason" to foregroundBlockerReason
                 ),
+                // Confirmation foreground payload is governed by the dual-repo boundary decision.
+                // Non-terminal or post-closure confirmations are demoted to BACKGROUND and do
+                // not appear as foreground confirmation_needed.
                 "confirmation" to mapOf(
-                    "confirmation_needed" to confirmationNeeded,
+                    "confirmation_needed" to foregroundConfirmationNeeded,
                     "closure_ready_for_acceptance" to closureReadyForAcceptance
                 ),
                 "handoff" to mapOf(
@@ -967,6 +1030,19 @@ data class ReconciliationSignal(
                                 .REQUIRES_RECONCILIATION
                                 .wireValue
                         )
+                ),
+                // Dual-repo hidden-visible boundary decisions (PR-128).
+                // V2 reads this section to know which Android-originated items are foreground-
+                // eligible and which have been classified as BACKGROUND or OPERATOR_ONLY.
+                KEY_VISIBILITY_BOUNDARY to mapOf(
+                    Contract.AndroidInfoOriginClass.BLOCKER.wireValue to
+                        blockerDecision.toWireMap(),
+                    Contract.AndroidInfoOriginClass.CONFIRMATION_NEEDED.wireValue to
+                        confirmationDecision.toWireMap(),
+                    Contract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY.wireValue to
+                        deviceStateDecision.toWireMap(),
+                    Contract.AndroidInfoOriginClass.LIFECYCLE_STATE.wireValue to
+                        lifecycleDecision.toWireMap()
                 )
             )
             return payload + mapOf(KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE to surface)
