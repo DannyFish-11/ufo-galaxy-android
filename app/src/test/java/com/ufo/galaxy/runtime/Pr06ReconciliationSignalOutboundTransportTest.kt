@@ -199,10 +199,44 @@ class Pr06ReconciliationSignalOutboundTransportTest {
     }
 
     @Test
+    fun `task result payload includes unified lifecycle surface as first class result`() {
+        val signal = makeTaskResultSignal()
+        val lifecycle = signal.payload[ReconciliationSignal.KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE]
+            as? Map<*, *>
+        assertNotNull("unified lifecycle surface must be present", lifecycle)
+        val result = lifecycle!!["result"] as? Map<*, *>
+        assertNotNull("lifecycle.result must be present", result)
+        assertEquals(true, result!!["is_first_class_surface"])
+        assertEquals(true, result["returned"])
+    }
+
+    @Test
+    fun `task failed payload exposes blocker and confirmation in unified lifecycle surface`() {
+        val signal = makeTaskFailedSignal()
+        val lifecycle = signal.payload[ReconciliationSignal.KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE]
+            as? Map<*, *>
+        assertNotNull("unified lifecycle surface must be present", lifecycle)
+        val blocker = lifecycle!!["blocker"] as? Map<*, *>
+        val confirmation = lifecycle["confirmation"] as? Map<*, *>
+        assertEquals(true, blocker?.get("is_blocked"))
+        assertEquals(true, confirmation?.get("confirmation_needed"))
+    }
+
+    @Test
     fun `payload contains emitted_at_ms in Gson-serialised JSON`() {
         val signal = makeTaskResultSignal()
         val json = toEnvelopeJson(signal)
         assertTrue("JSON must contain emitted_at_ms field", json.contains("emitted_at_ms"))
+    }
+
+    @Test
+    fun `envelope json contains unified lifecycle surface payload`() {
+        val signal = makeTaskResultSignal()
+        val json = toEnvelopeJson(signal)
+        assertTrue(
+            "JSON must contain unified lifecycle surface payload",
+            json.contains(ReconciliationSignal.KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE)
+        )
     }
 
     @Test
