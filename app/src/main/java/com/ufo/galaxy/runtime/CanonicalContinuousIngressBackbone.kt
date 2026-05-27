@@ -31,7 +31,7 @@ data class CanonicalContinuousIngressBackbone(
         get() = activeEntries.mapTo(linkedSetOf()) { it.family }
 
     val hasUnifiedContinuousIngress: Boolean
-        get() = activeFamilies.size >= 2
+        get() = activeFamilies.size >= MINIMUM_UNIFIED_FAMILY_COUNT
 
     val hasCanonicalPerceptionInput: Boolean
         get() = activeEntries.any {
@@ -51,6 +51,7 @@ data class CanonicalContinuousIngressBackbone(
             promotesDeviceStreamIntoCanonicalCognition
 
     companion object {
+        private const val MINIMUM_UNIFIED_FAMILY_COUNT = 2
         val EMPTY = CanonicalContinuousIngressBackbone(emptyList())
     }
 }
@@ -64,7 +65,9 @@ object CanonicalContinuousIngressBackboneBuilder {
     ): CanonicalContinuousIngressEntry =
         CanonicalContinuousIngressEntry(
             family = CanonicalContinuousIngressEntry.ContinuousIngressFamily.DEVICE_STREAM_SESSION,
-            entryId = deviceId.ifBlank { "device_stream_session" },
+            entryId = runtimeSessionId?.takeIf { it.isNotBlank() }
+                ?: deviceId.takeIf { it.isNotBlank() }
+                ?: "device_stream_session:${routeMode ?: "unknown"}",
             cognitionRole = CanonicalContinuousIngressEntry.CognitionRole.CANONICAL_COGNITION_CARRIER,
             isActive = connected,
             sessionId = runtimeSessionId,

@@ -565,7 +565,7 @@ private fun defaultAuthoritativeParticipationState(
             capabilityVisible = participationState !=
                 RuntimeHostDescriptor.HostParticipationState.INACTIVE,
             readinessSatisfied = readinessState == ParticipantReadinessState.READY,
-            continuousIngressReady = readinessState == ParticipantReadinessState.READY,
+            continuousIngressReady = false,
             runtimeSessionAvailable = sessionState != null,
             fullyAttached = sessionState == AttachedRuntimeSession.State.ATTACHED,
             dispatchEligible = readinessState == ParticipantReadinessState.READY &&
