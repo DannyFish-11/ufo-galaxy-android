@@ -102,6 +102,9 @@ import com.ufo.galaxy.network.OfflineTaskQueue
  * @see AndroidContinuityIntegration
  */
 object UnifiedReplayRecoveryContract {
+    private const val PAYLOAD_KEY = "payload"
+    private const val DIVERGENCE_OFFLINE_QUEUE_PENDING_CANONICALIZATION =
+        "offline_queue_pending_canonicalization"
 
     // ── PR identifier ─────────────────────────────────────────────────────────
 
@@ -276,8 +279,8 @@ object UnifiedReplayRecoveryContract {
         message: OfflineTaskQueue.QueuedMessage,
         currentDurableSessionId: String?
     ): MessageAuthorityDecision {
-        val ownershipClass = classifyReplayOwnership(message)
         if (message.type in authoritySensitiveReplayTypes) {
+            val ownershipClass = classifyReplayOwnership(message)
             when (ownershipClass) {
                 ReplayOwnershipClass.PARTICIPANT_LOCAL_TRUTH ->
                     return MessageAuthorityDecision.PARTICIPANT_LOCAL_TRUTH_REPLAY_BLOCKED
@@ -315,7 +318,7 @@ object UnifiedReplayRecoveryContract {
                 truthIngressClass == AndroidCanonicalOwnershipIngressContract.TruthIngressClass.PARTICIPANT_LOCAL_TRUTH.wireValue ->
                 ReplayOwnershipClass.PARTICIPANT_LOCAL_TRUTH
             ownershipStatus == AndroidCanonicalOwnershipIngressContract.OwnershipStatus.DIVERGED_FALLBACK.wireValue &&
-                divergenceMarker == "offline_queue_pending_canonicalization" ->
+                divergenceMarker == DIVERGENCE_OFFLINE_QUEUE_PENDING_CANONICALIZATION ->
                 ReplayOwnershipClass.FALLBACK_NON_CANONICAL
             ownershipStatus == AndroidCanonicalOwnershipIngressContract.OwnershipStatus.DIVERGED_FALLBACK.wireValue ->
                 ReplayOwnershipClass.REJECTED_NON_CANONICAL_DIVERGENCE
@@ -329,23 +332,41 @@ object UnifiedReplayRecoveryContract {
         }.getOrNull()
 
     private fun readStringOwnershipField(json: JsonObject, key: String): String? {
-        if (json.has(key) && json.get(key).isJsonPrimitive) return json.get(key).asString
-        val payload =
-            if (json.has("payload") && json.get("payload").isJsonObject) json.getAsJsonObject("payload") else null
+        val rootValue = readPrimitiveAsString(json, key)
+        if (rootValue != null) return rootValue
+        val payload = extractPayloadObject(json)
         payload ?: return null
-        return if (payload.has(key) && payload.get(key).isJsonPrimitive) payload.get(key).asString else null
+        return readPrimitiveAsString(payload, key)
     }
 
     private fun readBooleanOwnershipField(json: JsonObject, key: String): Boolean? {
-        if (json.has(key) && json.get(key).isJsonPrimitive) return runCatching { json.get(key).asBoolean }.getOrNull()
-        val payload =
-            if (json.has("payload") && json.get("payload").isJsonObject) json.getAsJsonObject("payload") else null
+        val rootField = if (json.has(key)) json.get(key) else null
+        if (rootField != null && rootField.isJsonPrimitive) {
+            return runCatching { rootField.asBoolean }.getOrNull()
+        }
+        val payload = extractPayloadObject(json)
         payload ?: return null
-        return if (payload.has(key) && payload.get(key).isJsonPrimitive) {
-            runCatching { payload.get(key).asBoolean }.getOrNull()
+        val payloadField = if (payload.has(key)) payload.get(key) else null
+        return if (payloadField != null && payloadField.isJsonPrimitive) {
+            runCatching { payloadField.asBoolean }.getOrNull()
         } else {
             null
         }
+    }
+
+    private fun extractPayloadObject(json: JsonObject): JsonObject? =
+        if (json.has(PAYLOAD_KEY)) {
+            val payload = json.get(PAYLOAD_KEY)
+            if (payload.isJsonObject) payload.asJsonObject else null
+        } else {
+            null
+        }
+
+    private fun readPrimitiveAsString(json: JsonObject, key: String): String? {
+        if (!json.has(key)) return null
+        val primitive = json.get(key)
+        if (!primitive.isJsonPrimitive) return null
+        return runCatching { primitive.asString }.getOrNull()
     }
 
     // ── Canonical phase sequence ──────────────────────────────────────────────
