@@ -321,7 +321,7 @@ class OfflineQueueTest {
     fun `previewReplayGovernance blocks authority-sensitive replay missing session epoch`() {
         queue.enqueue(
             "goal_execution_result",
-            """{"id":5}""",
+            """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,"id":5}""",
             sessionTag = "durable-5"
             // sessionEpoch intentionally missing
         )
@@ -331,6 +331,22 @@ class OfflineQueueTest {
         assertEquals("attachment_only_recovery", decision.disposition.wireValue)
         assertFalse(decision.shouldForward)
         assertEquals("replay_order_metadata_missing_session_epoch", decision.reason)
+    }
+
+    @Test
+    fun `previewReplayGovernance blocks ownership-unspecified authority-sensitive replay`() {
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-unspecified"}}""",
+            sessionTag = "durable-6",
+            sessionEpoch = 1
+        )
+
+        val decision = queue.previewReplayGovernance(currentTag = "durable-6").single()
+
+        assertEquals("attachment_only_recovery", decision.disposition.wireValue)
+        assertFalse(decision.shouldForward)
+        assertEquals("ownership_unspecified_not_canonical_replay_eligible", decision.reason)
     }
 
     @Test

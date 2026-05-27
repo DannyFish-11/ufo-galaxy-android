@@ -292,6 +292,48 @@ class UnifiedResultPresentationTest {
         assertEquals("result_emitted", p.outcome)
     }
 
+    @Test
+    fun `server lifecycle recovery replaying summary is derived from unified lifecycle recovery surface`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            """
+            {
+              "payload": {
+                "unified_action_lifecycle_surface": {
+                  "stage": "recovery_replaying",
+                  "recovery": { "phase": "recovering" },
+                  "blocker": { "is_blocked": false },
+                  "confirmation": { "confirmation_needed": false }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+        assertEquals("恢复中：正在重放会话状态", p.summary)
+        assertEquals("recovery_replaying", p.outcome)
+        assertFalse(p.isSuccess)
+    }
+
+    @Test
+    fun `server lifecycle recovery recovered stage is treated as successful foreground result`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            """
+            {
+              "payload": {
+                "unified_action_lifecycle_surface": {
+                  "stage": "recovery_recovered",
+                  "recovery": { "phase": "recovered-inflight" },
+                  "blocker": { "is_blocked": false },
+                  "confirmation": { "confirmation_needed": false }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+        assertEquals("恢复完成，任务状态已同步", p.summary)
+        assertEquals("recovery_recovered", p.outcome)
+        assertTrue(p.isSuccess)
+    }
+
     // ── Fallback (TakeoverFallbackEvent) normalization ────────────────────────
 
     @Test

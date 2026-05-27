@@ -884,6 +884,8 @@ data class ReconciliationSignal(
                 isTerminal = isTerminal,
                 closureReadyForAcceptance = closureReadyForAcceptance
             )
+            val continuityRecoveryState =
+                payload[KEY_CONTINUITY_RECOVERY_STATE]?.toString()?.ifBlank { null }
             val stage = when (kind) {
                 Kind.TASK_ACCEPTED -> "accepted"
                 Kind.TASK_STATUS_UPDATE -> "executing"
@@ -891,7 +893,18 @@ data class ReconciliationSignal(
                 Kind.TASK_CANCELLED -> "cancelled"
                 Kind.TASK_FAILED -> "failed"
                 Kind.PARTICIPANT_STATE -> "participant_state"
-                Kind.RUNTIME_TRUTH_SNAPSHOT -> "reconciliation_snapshot"
+                Kind.RUNTIME_TRUTH_SNAPSHOT -> when (continuityRecoveryState) {
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING.wireValue ->
+                        "recovery_replaying"
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT.wireValue,
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY.wireValue ->
+                        "recovery_recovered"
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED.wireValue ->
+                        "recovery_failed"
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION.wireValue ->
+                        "recovery_reconciliation_pending"
+                    else -> "reconciliation_snapshot"
+                }
             }
             val surface = mapOf(
                 "schema_version" to UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION,
@@ -944,6 +957,16 @@ data class ReconciliationSignal(
                         isTerminal -> "terminal_signal_emitted"
                         else -> "inflight_signal_emitted"
                     }
+                ),
+                "recovery" to mapOf(
+                    "phase" to continuityRecoveryState,
+                    "source" to payload[KEY_CONTINUITY_RECOVERY_SOURCE],
+                    "requires_reconciliation" to (
+                        continuityRecoveryState ==
+                            AndroidContinuityRecoveryStateModel.RecoveryPhase
+                                .REQUIRES_RECONCILIATION
+                                .wireValue
+                        )
                 )
             )
             return payload + mapOf(KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE to surface)

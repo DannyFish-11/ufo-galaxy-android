@@ -213,6 +213,15 @@ object UnifiedReplayRecoveryContract {
         ),
 
         /**
+         * Message is authority-sensitive but does not carry explicit ownership classification.
+         * Replay is blocked so unclassified records cannot silently enter canonical replay truth.
+         */
+        OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED(
+            "ownership_unspecified_replay_blocked",
+            isReplayAllowed = false
+        ),
+
+        /**
          * Message is session-tagged but there is no current durable session authority.
          * Replay is blocked until V2 establishes the current authority era.
          */
@@ -288,6 +297,8 @@ object UnifiedReplayRecoveryContract {
                     return MessageAuthorityDecision.FALLBACK_NON_CANONICAL_REPLAY_BLOCKED
                 ReplayOwnershipClass.REJECTED_NON_CANONICAL_DIVERGENCE ->
                     return MessageAuthorityDecision.REJECTED_NON_CANONICAL_REPLAY_BLOCKED
+                ReplayOwnershipClass.OWNERSHIP_UNSPECIFIED ->
+                    return MessageAuthorityDecision.OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED
                 else -> Unit
             }
         }
