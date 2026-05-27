@@ -2856,6 +2856,46 @@ object StabilizationBaseline {
                 "and withTemporalWorkflowRunId() helper. " +
                 "Test: Pr125AndroidV2TemporalContinuationFinalityContractTest.",
             introducedPr = 125
+        ),
+
+        // ── PR-128: Android dual-repo hidden/visible boundary ─────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-dual-repo-hidden-visible-boundary-contract",
+            displayName = "AndroidDualRepoHiddenVisibleBoundaryContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidDualRepoHiddenVisibleBoundaryContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-128 — Android dual-repo hidden-visible boundary governance. " +
+                "Establishes the first unified hidden-visible runtime decision that governs " +
+                "Android-originated information across the Android → V2 dual-repo boundary. " +
+                "Prior to this contract, Android-originated blocker, confirmation_needed, " +
+                "result visibility, device state, and lifecycle stage information was resolved " +
+                "through handler-local logic inside ReconciliationSignal without shared boundary " +
+                "adjudication. This contract introduces VisibilityTier (FOREGROUND/BACKGROUND/" +
+                "OPERATOR_ONLY) and classify() as the single shared boundary resolution function " +
+                "for all Android-originated information items appearing in " +
+                "unified_action_lifecycle_surface. " +
+                "AndroidInfoOriginClass (5 values: BLOCKER/CONFIRMATION_NEEDED/" +
+                "RESULT_VISIBILITY/DEVICE_STATE_VISIBILITY/LIFECYCLE_STATE) identifies which " +
+                "category of Android-originated signal is under boundary adjudication. " +
+                "classify() routes each item through tier-specific rules: blockers without " +
+                "concrete evidence go to OPERATOR_ONLY; non-terminal or post-closure " +
+                "confirmations go to BACKGROUND; recovery replay / reconciliation detail goes " +
+                "to OPERATOR_ONLY; recovery failures and concrete blockers go to FOREGROUND. " +
+                "ReconciliationSignal.withUnifiedActionLifecycleSurface now routes Android-originated " +
+                "blocker and confirmation through classify(), then composes the foreground " +
+                "blocker.is_blocked and confirmation.confirmation_needed values from the " +
+                "boundary-adjudicated results — suppressed items are zeroed out in the " +
+                "foreground payload. A new visibility_boundary section in " +
+                "unified_action_lifecycle_surface embeds the full BoundaryDecision wire maps " +
+                "for all four classified Android-originated items, keyed by " +
+                "KEY_VISIBILITY_BOUNDARY. V2_VISIBILITY_ALIGNMENT_MAP maps each tier to the " +
+                "V2-side handling path. BOUNDARY_INVARIANTS (10 entries) provide machine-verifiable " +
+                "regression anchors. " +
+                "Test: Pr128AndroidDualRepoHiddenVisibleBoundaryContractTest.",
+            introducedPr = 128
         )
     )
 

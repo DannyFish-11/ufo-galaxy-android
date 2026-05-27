@@ -113,6 +113,7 @@ import org.junit.Test
  * (Updated by PR-123: CANONICAL_STABLE=146, total=152, EXTEND=146.)
  * (Updated by PR-124: CANONICAL_STABLE=147, total=153, EXTEND=147.)
  * (Updated by PR-125: CANONICAL_STABLE=148, total=154, EXTEND=148.)
+ * (Updated by PR-128: CANONICAL_STABLE=149, total=155, EXTEND=149.)
  *
  * ### StabilizationBaseline — data integrity
  *  - all entries have non-blank surfaceId
@@ -448,11 +449,28 @@ class Pr11StabilizationBaselineTest {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // 11b. PR-128 dual-repo hidden-visible boundary surface
+    // ══════════════════════════════════════════════════════════════════════════
+
+    @Test fun `android-dual-repo-hidden-visible-boundary-contract is registered and CANONICAL_STABLE with EXTEND guidance`() {
+        val e = StabilizationBaseline.forId("android-dual-repo-hidden-visible-boundary-contract")
+        assertNotNull(e)
+        assertEquals(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE, e!!.stability)
+        assertEquals(StabilizationBaseline.ExtensionGuidance.EXTEND, e.extensionGuidance)
+    }
+
+    @Test fun `android-dual-repo-hidden-visible-boundary-contract was introduced in PR-128`() {
+        val e = StabilizationBaseline.forId("android-dual-repo-hidden-visible-boundary-contract")
+        assertNotNull(e)
+        assertEquals(128, e!!.introducedPr)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // 12. Tier and guidance counts
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `CANONICAL_STABLE count is 148`() {
-        assertEquals(148, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
+    @Test fun `CANONICAL_STABLE count is 149`() {
+        assertEquals(149, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test fun `CANONICAL_FROZEN count is 1`() {
@@ -467,12 +485,12 @@ class Pr11StabilizationBaselineTest {
         assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 154`() {
-        assertEquals(154, StabilizationBaseline.entries.size)
+    @Test fun `total entry count is 155`() {
+        assertEquals(155, StabilizationBaseline.entries.size)
     }
 
-    @Test fun `EXTEND guidance count is 148`() {
-        assertEquals(148, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
+    @Test fun `EXTEND guidance count is 149`() {
+        assertEquals(149, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
     }
 
     @Test fun `CONVERGE guidance count is 3`() {
