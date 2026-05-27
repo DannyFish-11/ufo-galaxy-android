@@ -326,6 +326,88 @@ class Pr74UnifiedReplayRecoveryContractTest {
         assertFalse(decision.isReplayAllowed)
     }
 
+    @Test
+    fun `ownership class distinguishes canonical participant local fallback and rejected divergence`() {
+        val canonical = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}"""
+        )
+        val participantLocal = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"participant_local_only","truth_ingress_class":"participant_local_truth","is_canonicalization_ready":false}"""
+        )
+        val fallback = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"diverged_fallback","ownership_divergence_marker":"offline_queue_pending_canonicalization"}"""
+        )
+        val rejected = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"diverged_fallback","ownership_divergence_marker":"transport_send_failed"}"""
+        )
+
+        assertEquals(
+            UnifiedReplayRecoveryContract.ReplayOwnershipClass.CANONICALIZED_TRUTH,
+            UnifiedReplayRecoveryContract.classifyReplayOwnership(canonical)
+        )
+        assertEquals(
+            UnifiedReplayRecoveryContract.ReplayOwnershipClass.PARTICIPANT_LOCAL_TRUTH,
+            UnifiedReplayRecoveryContract.classifyReplayOwnership(participantLocal)
+        )
+        assertEquals(
+            UnifiedReplayRecoveryContract.ReplayOwnershipClass.FALLBACK_NON_CANONICAL,
+            UnifiedReplayRecoveryContract.classifyReplayOwnership(fallback)
+        )
+        assertEquals(
+            UnifiedReplayRecoveryContract.ReplayOwnershipClass.REJECTED_NON_CANONICAL_DIVERGENCE,
+            UnifiedReplayRecoveryContract.classifyReplayOwnership(rejected)
+        )
+    }
+
+    @Test
+    fun `same-session participant-local truth is blocked from canonical replay`() {
+        val msg = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"participant_local_only","truth_ingress_class":"participant_local_truth","is_canonicalization_ready":false}""",
+            sessionTag = "session-A"
+        )
+        val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
+        assertEquals(
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.PARTICIPANT_LOCAL_TRUTH_REPLAY_BLOCKED,
+            decision
+        )
+        assertFalse(decision.isReplayAllowed)
+    }
+
+    @Test
+    fun `same-session fallback and divergence truths are blocked from canonical replay`() {
+        val fallback = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"diverged_fallback","ownership_divergence_marker":"offline_queue_pending_canonicalization"}""",
+            sessionTag = "session-A"
+        )
+        val rejected = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"diverged_fallback","ownership_divergence_marker":"transport_send_failed"}""",
+            sessionTag = "session-A"
+        )
+
+        assertEquals(
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.FALLBACK_NON_CANONICAL_REPLAY_BLOCKED,
+            UnifiedReplayRecoveryContract.evaluateMessageAuthority(fallback, "session-A")
+        )
+        assertEquals(
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.REJECTED_NON_CANONICAL_REPLAY_BLOCKED,
+            UnifiedReplayRecoveryContract.evaluateMessageAuthority(rejected, "session-A")
+        )
+    }
+
     // ── Session tag at enqueue time (sendJson integration) ────────────────────
 
     @Test
@@ -469,6 +551,33 @@ class Pr74UnifiedReplayRecoveryContractTest {
         assertEquals(0, queue.size)
     }
 
+    @Test
+    fun `non-canonical ownership records are isolated while canonical replay record survives`() {
+        val queue = OfflineTaskQueue(prefs = null)
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
+            sessionTag = "session-NEW"
+        )
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","canonical_ownership_status":"participant_local_only","truth_ingress_class":"participant_local_truth","is_canonicalization_ready":false}""",
+            sessionTag = "session-NEW"
+        )
+        queue.enqueue(
+            "goal_execution_result",
+            """{"type":"goal_execution_result","canonical_ownership_status":"diverged_fallback","ownership_divergence_marker":"transport_send_failed"}""",
+            sessionTag = "session-NEW"
+        )
+
+        val discarded = queue.discardForDifferentSession("session-NEW")
+
+        assertEquals(2, discarded)
+        val surviving = queue.drainAll()
+        assertEquals(1, surviving.size)
+        assertTrue(surviving[0].json.contains("\"canonical_bound\""))
+    }
+
     // ── Gate enforcement ──────────────────────────────────────────────────────
 
     @Test
@@ -558,6 +667,23 @@ class Pr74UnifiedReplayRecoveryContractTest {
     fun `buildContractWireMap authority_sensitive_null_tag_replay_blocked is true`() {
         val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
         assertTrue(wireMap["authority_sensitive_null_tag_replay_blocked"] as Boolean)
+    }
+
+    @Test
+    fun `buildContractWireMap non_canonical_ownership_replay_blocked is true`() {
+        val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
+        assertTrue(wireMap["non_canonical_ownership_replay_blocked"] as Boolean)
+    }
+
+    @Test
+    fun `buildContractWireMap includes replay ownership classes`() {
+        val wireMap = UnifiedReplayRecoveryContract.buildContractWireMap()
+        @Suppress("UNCHECKED_CAST")
+        val ownershipClasses = wireMap["replay_ownership_classes"] as List<String>
+        assertTrue(ownershipClasses.contains("canonicalized_truth"))
+        assertTrue(ownershipClasses.contains("participant_local_truth"))
+        assertTrue(ownershipClasses.contains("fallback_non_canonical"))
+        assertTrue(ownershipClasses.contains("rejected_non_canonical_divergence"))
     }
 
     @Test
