@@ -33,7 +33,7 @@ android {
         // sourced from AppSettings (SharedPreferences → assets/config.properties → here).
         buildConfigField "String", "GALAXY_SERVER_URL", '"ws://192.168.1.100:8765"'
         buildConfigField "String", "API_VERSION", '"v2.0"'
-        buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "false"
+        buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "true"
         // NOTE: PLANNER_* / GROUNDING_* / SCALED_MAX_EDGE are last-resort fallback constants.
         // Effective runtime values are owned by AppSettings:
         //   SharedPreferences override → assets/config.properties → these BuildConfig values.
