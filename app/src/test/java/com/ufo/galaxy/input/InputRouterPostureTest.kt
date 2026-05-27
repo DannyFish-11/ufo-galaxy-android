@@ -12,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.Locale
 import com.ufo.galaxy.local.LocalLoopExecutor
 import com.ufo.galaxy.local.LocalLoopOptions
 import com.ufo.galaxy.local.LocalLoopResult
@@ -293,6 +294,131 @@ class InputRouterPostureTest {
             AndroidNlSemanticContract.LOCAL_NL_LAYER_ROLE,
             extra.getString(AndroidNlSemanticContract.KEY_LOCAL_NL_LAYER_ROLE)
         )
+    }
+
+    @Test
+    fun `cross-device route assembles canonical subject input with NL plus device context plus state snapshot`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("open maps and start navigation", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
+
+        val envelope = JSONObject(gateway.sentMessages.first())
+        val payload = envelope.getJSONObject("payload")
+        val extra = payload.getJSONObject("context").getJSONObject("extra")
+        val canonicalSubjectInput = JSONObject(extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_SUBJECT_INPUT))
+
+        assertTrue(canonicalSubjectInput.has("naturalLanguage"))
+        assertTrue(canonicalSubjectInput.has("deviceContext"))
+        assertTrue(canonicalSubjectInput.has("stateSnapshot"))
+        assertTrue(canonicalSubjectInput.has("mixedContext"))
+        assertEquals(
+            "open maps and start navigation",
+            canonicalSubjectInput.getJSONObject("naturalLanguage").getString("text")
+        )
+        assertEquals(
+            SourceRuntimePosture.JOIN_RUNTIME,
+            canonicalSubjectInput.getJSONObject("deviceContext").getString("sourceRuntimePosture")
+        )
+        assertEquals(
+            canonicalSubjectInput.getJSONObject("deviceContext").getString("localeTag"),
+            payload.getJSONObject("context").getString("locale")
+        )
+    }
+
+    @Test
+    fun `cross-device route canonical subject input advertises mixed modalities in one unified structure`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("open mail", sourceRuntimePosture = SourceRuntimePosture.CONTROL_ONLY)
+
+        val envelope = JSONObject(gateway.sentMessages.first())
+        val payload = envelope.getJSONObject("payload")
+        val extra = payload.getJSONObject("context").getJSONObject("extra")
+        val canonicalSubjectInput = JSONObject(extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_SUBJECT_INPUT))
+        val modalities = canonicalSubjectInput.getJSONObject("mixedContext").getJSONArray("modalities")
+
+        val modalityValues = (0 until modalities.length()).map { modalities.getString(it) }.toSet()
+        assertEquals(AndroidNlSemanticContract.CANONICAL_MODALITIES.toSet(), modalityValues)
+        assertEquals(
+            AndroidNlSemanticContract.CANONICAL_MODALITIES.joinToString(separator = ","),
+            extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_INPUT_MODALITIES)
+        )
+    }
+
+    @Test
+    fun `canonical subject input changes request packaging strategy and downstream request shaping by posture`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("execute task", sourceRuntimePosture = SourceRuntimePosture.CONTROL_ONLY)
+        router.route("execute task", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
+
+        val controlEnvelope = JSONObject(gateway.sentMessages[0])
+        val controlPayload = controlEnvelope.getJSONObject("payload")
+        val controlExtra = controlPayload.getJSONObject("context").getJSONObject("extra")
+        val joinEnvelope = JSONObject(gateway.sentMessages[1])
+        val joinPayload = joinEnvelope.getJSONObject("payload")
+        val joinExtra = joinPayload.getJSONObject("context").getJSONObject("extra")
+
+        assertEquals(
+            AndroidNlSemanticContract.RequestPackagingStrategy.CONTROLLED_HANDOFF_BASELINE.wireValue,
+            controlExtra.getString(AndroidNlSemanticContract.KEY_REQUEST_PACKAGING_STRATEGY)
+        )
+        assertEquals(
+            AndroidNlSemanticContract.RequestPackagingStrategy.STATEFUL_PARTICIPANT_FUSION.wireValue,
+            joinExtra.getString(AndroidNlSemanticContract.KEY_REQUEST_PACKAGING_STRATEGY)
+        )
+        assertTrue(controlPayload.getString("session_id").startsWith("android-control-"))
+        assertTrue(joinPayload.getString("session_id").startsWith("android-participant-"))
+        assertTrue(controlEnvelope.getString("idempotency_key").startsWith("controlled-handoff-"))
+        assertTrue(joinEnvelope.getString("idempotency_key").startsWith("participant-fusion-"))
+    }
+
+    @Test
+    fun `canonical subject input runtimeSessionAttached is false when runtime session id is null`() {
+        val subjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+            text = "open maps",
+            deviceId = "android-test",
+            posture = SourceRuntimePosture.CONTROL_ONLY,
+            crossDeviceEnabled = true,
+            websocketConnected = true,
+            runtimeSessionId = null
+        )
+        assertFalse(subjectInput.stateSnapshot.runtimeSessionAttached)
+    }
+
+    @Test
+    fun `canonical subject input runtimeSessionAttached is true when runtime session id exists`() {
+        val subjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+            text = "open maps",
+            deviceId = "android-test",
+            posture = SourceRuntimePosture.CONTROL_ONLY,
+            crossDeviceEnabled = true,
+            websocketConnected = true,
+            runtimeSessionId = "runtime-session-1"
+        )
+        assertTrue(subjectInput.stateSnapshot.runtimeSessionAttached)
+    }
+
+    @Test
+    fun `canonical subject input falls back to und locale when default locale has no language`() {
+        val original = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale("", ""))
+            val subjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+                text = "open maps",
+                deviceId = "android-test",
+                posture = SourceRuntimePosture.CONTROL_ONLY,
+                crossDeviceEnabled = true,
+                websocketConnected = true,
+                runtimeSessionId = "runtime-session-1"
+            )
+            assertEquals("und", subjectInput.deviceContext.localeTag)
+        } finally {
+            Locale.setDefault(original)
+        }
     }
 
     // ── Local path: posture forwarded in LocalLoopOptions ─────────────────────
