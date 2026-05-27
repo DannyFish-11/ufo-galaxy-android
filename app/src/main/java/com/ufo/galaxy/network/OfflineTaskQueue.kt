@@ -245,6 +245,30 @@ class OfflineTaskQueue(
                 shouldForward = false,
                 reason = "authority_sensitive_replay_requires_session_tag"
             )
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.PARTICIPANT_LOCAL_TRUTH_REPLAY_BLOCKED ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                shouldForward = false,
+                reason = "participant_local_truth_not_canonical_replay_eligible"
+            )
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.FALLBACK_NON_CANONICAL_REPLAY_BLOCKED ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                shouldForward = false,
+                reason = "fallback_non_canonical_truth_not_replay_eligible"
+            )
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.REJECTED_NON_CANONICAL_REPLAY_BLOCKED ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.STALE_RESULT,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REJECT_STALE,
+                shouldForward = false,
+                reason = "rejected_non_canonical_divergence"
+            )
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED ->
             ReplayGovernanceDecision(
                 message = message,

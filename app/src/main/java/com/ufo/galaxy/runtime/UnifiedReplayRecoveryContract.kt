@@ -1,5 +1,7 @@
 package com.ufo.galaxy.runtime
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.ufo.galaxy.network.OfflineTaskQueue
 
 /**
@@ -100,6 +102,9 @@ import com.ufo.galaxy.network.OfflineTaskQueue
  * @see AndroidContinuityIntegration
  */
 object UnifiedReplayRecoveryContract {
+    private const val PAYLOAD_KEY = "payload"
+    private const val DIVERGENCE_OFFLINE_QUEUE_PENDING_CANONICALIZATION =
+        "offline_queue_pending_canonicalization"
 
     // ── PR identifier ─────────────────────────────────────────────────────────
 
@@ -181,6 +186,33 @@ object UnifiedReplayRecoveryContract {
         ),
 
         /**
+         * Message is explicitly marked as participant-local truth and therefore must not be
+         * promoted into canonical replay truth substrate.
+         */
+        PARTICIPANT_LOCAL_TRUTH_REPLAY_BLOCKED(
+            "participant_local_truth_replay_blocked",
+            isReplayAllowed = false
+        ),
+
+        /**
+         * Message is explicitly marked as fallback non-canonical truth and must not be treated as
+         * canonical replay truth.
+         */
+        FALLBACK_NON_CANONICAL_REPLAY_BLOCKED(
+            "fallback_non_canonical_replay_blocked",
+            isReplayAllowed = false
+        ),
+
+        /**
+         * Message is explicitly marked as diverged/rejected non-canonical truth and must not be
+         * replayed into canonical truth substrate.
+         */
+        REJECTED_NON_CANONICAL_REPLAY_BLOCKED(
+            "rejected_non_canonical_replay_blocked",
+            isReplayAllowed = false
+        ),
+
+        /**
          * Message is session-tagged but there is no current durable session authority.
          * Replay is blocked until V2 establishes the current authority era.
          */
@@ -212,6 +244,19 @@ object UnifiedReplayRecoveryContract {
     val authoritySensitiveReplayTypes: Set<String> =
         AndroidCrossRepoDedupeContract.AUTHORITY_SENSITIVE_REPLAY_TYPES
 
+    enum class ReplayOwnershipClass(val wireValue: String) {
+        CANONICALIZED_TRUTH("canonicalized_truth"),
+        PARTICIPANT_LOCAL_TRUTH("participant_local_truth"),
+        FALLBACK_NON_CANONICAL("fallback_non_canonical"),
+        REJECTED_NON_CANONICAL_DIVERGENCE("rejected_non_canonical_divergence"),
+        OWNERSHIP_UNSPECIFIED("ownership_unspecified");
+
+        companion object {
+            fun fromWireValue(value: String?): ReplayOwnershipClass? =
+                entries.firstOrNull { it.wireValue == value }
+        }
+    }
+
     // ── evaluateMessageAuthority ──────────────────────────────────────────────
 
     /**
@@ -234,6 +279,18 @@ object UnifiedReplayRecoveryContract {
         message: OfflineTaskQueue.QueuedMessage,
         currentDurableSessionId: String?
     ): MessageAuthorityDecision {
+        if (message.type in authoritySensitiveReplayTypes) {
+            val ownershipClass = classifyReplayOwnership(message)
+            when (ownershipClass) {
+                ReplayOwnershipClass.PARTICIPANT_LOCAL_TRUTH ->
+                    return MessageAuthorityDecision.PARTICIPANT_LOCAL_TRUTH_REPLAY_BLOCKED
+                ReplayOwnershipClass.FALLBACK_NON_CANONICAL ->
+                    return MessageAuthorityDecision.FALLBACK_NON_CANONICAL_REPLAY_BLOCKED
+                ReplayOwnershipClass.REJECTED_NON_CANONICAL_DIVERGENCE ->
+                    return MessageAuthorityDecision.REJECTED_NON_CANONICAL_REPLAY_BLOCKED
+                else -> Unit
+            }
+        }
         val tag = message.sessionTag
         return when {
             tag == null && message.type in authoritySensitiveReplayTypes ->
@@ -243,6 +300,73 @@ object UnifiedReplayRecoveryContract {
             tag == currentDurableSessionId -> MessageAuthorityDecision.SAME_SESSION_REPLAY_ALLOWED
             else -> MessageAuthorityDecision.STALE_SESSION_BLOCKED
         }
+    }
+
+    fun classifyReplayOwnership(message: OfflineTaskQueue.QueuedMessage): ReplayOwnershipClass {
+        val json = parseReplayJson(message.json) ?: return ReplayOwnershipClass.OWNERSHIP_UNSPECIFIED
+        val ownershipStatus = readStringOwnershipField(json, AndroidCanonicalOwnershipIngressContract.KEY_OWNERSHIP_STATUS)
+        val truthIngressClass = readStringOwnershipField(json, AndroidCanonicalOwnershipIngressContract.KEY_TRUTH_INGRESS_CLASS)
+        val divergenceMarker = readStringOwnershipField(json, AndroidCanonicalOwnershipIngressContract.KEY_DIVERGENCE_MARKER)
+        val canonicalizationReady =
+            readBooleanOwnershipField(json, AndroidCanonicalOwnershipIngressContract.KEY_CANONICALIZATION_READY)
+
+        return when {
+            ownershipStatus == AndroidCanonicalOwnershipIngressContract.OwnershipStatus.CANONICAL_BOUND.wireValue &&
+                canonicalizationReady == true ->
+                ReplayOwnershipClass.CANONICALIZED_TRUTH
+            ownershipStatus == AndroidCanonicalOwnershipIngressContract.OwnershipStatus.PARTICIPANT_LOCAL_ONLY.wireValue ||
+                truthIngressClass == AndroidCanonicalOwnershipIngressContract.TruthIngressClass.PARTICIPANT_LOCAL_TRUTH.wireValue ->
+                ReplayOwnershipClass.PARTICIPANT_LOCAL_TRUTH
+            ownershipStatus == AndroidCanonicalOwnershipIngressContract.OwnershipStatus.DIVERGED_FALLBACK.wireValue &&
+                divergenceMarker == DIVERGENCE_OFFLINE_QUEUE_PENDING_CANONICALIZATION ->
+                ReplayOwnershipClass.FALLBACK_NON_CANONICAL
+            ownershipStatus == AndroidCanonicalOwnershipIngressContract.OwnershipStatus.DIVERGED_FALLBACK.wireValue ->
+                ReplayOwnershipClass.REJECTED_NON_CANONICAL_DIVERGENCE
+            else -> ReplayOwnershipClass.OWNERSHIP_UNSPECIFIED
+        }
+    }
+
+    private fun parseReplayJson(json: String): JsonObject? =
+        runCatching {
+            JsonParser.parseString(json).asJsonObject
+        }.getOrNull()
+
+    private fun readStringOwnershipField(json: JsonObject, key: String): String? {
+        val rootValue = readPrimitiveAsString(json, key)
+        if (rootValue != null) return rootValue
+        val payload = extractPayloadObject(json)
+        payload ?: return null
+        return readPrimitiveAsString(payload, key)
+    }
+
+    private fun readBooleanOwnershipField(json: JsonObject, key: String): Boolean? {
+        val rootField = if (json.has(key)) json.get(key) else null
+        if (rootField != null && rootField.isJsonPrimitive) {
+            return runCatching { rootField.asBoolean }.getOrNull()
+        }
+        val payload = extractPayloadObject(json)
+        payload ?: return null
+        val payloadField = if (payload.has(key)) payload.get(key) else null
+        return if (payloadField != null && payloadField.isJsonPrimitive) {
+            runCatching { payloadField.asBoolean }.getOrNull()
+        } else {
+            null
+        }
+    }
+
+    private fun extractPayloadObject(json: JsonObject): JsonObject? =
+        if (json.has(PAYLOAD_KEY)) {
+            val payload = json.get(PAYLOAD_KEY)
+            if (payload.isJsonObject) payload.asJsonObject else null
+        } else {
+            null
+        }
+
+    private fun readPrimitiveAsString(json: JsonObject, key: String): String? {
+        if (!json.has(key)) return null
+        val primitive = json.get(key)
+        if (!primitive.isJsonPrimitive) return null
+        return runCatching { primitive.asString }.getOrNull()
     }
 
     // ── Canonical phase sequence ──────────────────────────────────────────────
@@ -282,6 +406,7 @@ object UnifiedReplayRecoveryContract {
         "required_send_gate" to REQUIRED_SEND_GATE,
         "canonical_phase_sequence" to canonicalPhaseSequence.map { it.wireValue },
         "authority_filter_decisions" to MessageAuthorityDecision.entries.map { it.wireValue },
+        "replay_ownership_classes" to ReplayOwnershipClass.entries.map { it.wireValue },
         "authority_sensitive_replay_types" to authoritySensitiveReplayTypes.toList(),
         // Contract assertions — all true in the closed PR-74 implementation:
         "session_tag_set_at_enqueue" to true,
@@ -289,6 +414,7 @@ object UnifiedReplayRecoveryContract {
         "stale_session_messages_blocked" to true,
         "no_current_authority_replay_blocked" to true,
         "authority_sensitive_null_tag_replay_blocked" to true,
+        "non_canonical_ownership_replay_blocked" to true,
         "online_offline_contract_unified" to true,
         "authority_filtering_precedes_replay" to true
     )
