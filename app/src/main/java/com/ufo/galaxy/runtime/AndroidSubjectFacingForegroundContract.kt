@@ -433,9 +433,11 @@ object AndroidSubjectFacingForegroundContract {
         ),
         SubjectForegroundInvariant(
             id = "CONTROL_PLANE_STAGE_VALUES_ARE_DEMOTED",
-            description = "Stages reconciliation_snapshot, participant_state, recovery_replaying, " +
-                "recovery_reconciliation_pending map to UNKNOWN (not subject-facing) and produce " +
-                "CONTROL_PLANE_DEMOTED as foregroundPrimaryObject"
+            description = "Stages reconciliation_snapshot and participant_state (and any " +
+                "unrecognised stage) map to ActionPhase.UNKNOWN (isSubjectFacing=false) and produce " +
+                "CONTROL_PLANE_DEMOTED as foregroundPrimaryObject; recovery stages such as " +
+                "recovery_replaying and recovery_reconciliation_pending map to ActionPhase.RECOVERY " +
+                "(isSubjectFacing=true) and produce ACTION_PHASE instead"
         ),
         SubjectForegroundInvariant(
             id = "V2_ALIGNMENT_MAP_COVERS_ALL_PRIMARY_OBJECTS",
