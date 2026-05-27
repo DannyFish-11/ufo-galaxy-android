@@ -496,6 +496,50 @@ class Pr129AndroidSubjectFacingForegroundContractTest {
     }
 
     @Test
+    fun `runtime coupling - lifecycle hidden by boundary promotes presence-only foreground with stream-fused readiness`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            serverMessageWithLifecycle(
+                """{
+                   "stage":"executing",
+                   "execution":{"progress_detail":"步骤2/5"},
+                   "blocker":{"is_blocked":false},
+                   "confirmation":{"confirmation_needed":false},
+                   "presence_participation_projection":{"presence_participation_kind":"background_participant"},
+                   "canonical_continuous_ingress":{"mainline_behavior":"stream_fused_continuous_preparation"},
+                   "visibility_boundary":{"lifecycle_state":{"tier":"background"}}
+                }"""
+            )
+        )
+        val card = p.subjectFacingCard!!
+        assertEquals(C.PresenceMode.BACKGROUND_PARTICIPANT, card.presenceMode)
+        assertEquals(
+            C.ContinuousIngressBehavior.STREAM_FUSED_CONTINUOUS_PREPARATION,
+            card.continuousIngressBehavior
+        )
+        assertEquals(C.ForegroundPrimaryObject.PRESENCE_ONLY, card.foregroundPrimaryObject)
+        assertEquals("任务在后台持续协同中，前台可随时接管", p.summary)
+    }
+
+    @Test
+    fun `runtime coupling - same lifecycle without stream fusion keeps default executing summary`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            serverMessageWithLifecycle(
+                """{
+                   "stage":"executing",
+                   "execution":{"progress_detail":"步骤2/5"},
+                   "blocker":{"is_blocked":false},
+                   "confirmation":{"confirmation_needed":false},
+                   "presence_participation_projection":{"presence_participation_kind":"background_participant"},
+                   "visibility_boundary":{"lifecycle_state":{"tier":"foreground"}}
+                }"""
+            )
+        )
+        val card = p.subjectFacingCard!!
+        assertEquals(C.ForegroundPrimaryObject.ACTION_PHASE, card.foregroundPrimaryObject)
+        assertEquals("任务执行中：步骤2/5", p.summary)
+    }
+
+    @Test
     fun `invariant - SUBJECT_FACING_CARD_ALWAYS_PRODUCED`() {
         // fromUnifiedLifecycleSurface must never return null for any input
         val testInputs = listOf(

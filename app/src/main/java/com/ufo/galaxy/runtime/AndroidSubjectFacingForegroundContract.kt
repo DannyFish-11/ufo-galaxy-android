@@ -127,6 +127,15 @@ object AndroidSubjectFacingForegroundContract {
         UNKNOWN("unknown");
 
         companion object {
+            fun fromParticipationKindWire(wireValue: String?): PresenceMode =
+                when (wireValue?.trim()?.lowercase()) {
+                    AndroidPresenceParticipationKind.FOREGROUND_ENGAGED.wireValue -> FOREGROUND_ENGAGED
+                    AndroidPresenceParticipationKind.BACKGROUND_PARTICIPANT.wireValue -> BACKGROUND_PARTICIPANT
+                    AndroidPresenceParticipationKind.HANDOFF_INTERACTIVE.wireValue -> HANDOFF_INTERACTIVE
+                    AndroidPresenceParticipationKind.ABSENT.wireValue -> ABSENT
+                    else -> UNKNOWN
+                }
+
             fun fromParticipationKind(kind: AndroidPresenceParticipationKind?): PresenceMode =
                 when (kind) {
                     AndroidPresenceParticipationKind.FOREGROUND_ENGAGED -> FOREGROUND_ENGAGED
@@ -134,6 +143,23 @@ object AndroidSubjectFacingForegroundContract {
                     AndroidPresenceParticipationKind.HANDOFF_INTERACTIVE -> HANDOFF_INTERACTIVE
                     AndroidPresenceParticipationKind.ABSENT -> ABSENT
                     null -> UNKNOWN
+                }
+        }
+    }
+
+    enum class ContinuousIngressBehavior(val wireValue: String) {
+        ONE_SHOT_PREPARATION("one_shot_preparation"),
+        CONTINUOUS_CONTEXT_PREPARATION("continuous_context_preparation"),
+        STREAM_FUSED_CONTINUOUS_PREPARATION("stream_fused_continuous_preparation"),
+        NOT_AVAILABLE("not_available");
+
+        companion object {
+            fun fromWireValue(wireValue: String?): ContinuousIngressBehavior =
+                when (wireValue?.trim()?.lowercase()) {
+                    ONE_SHOT_PREPARATION.wireValue -> ONE_SHOT_PREPARATION
+                    CONTINUOUS_CONTEXT_PREPARATION.wireValue -> CONTINUOUS_CONTEXT_PREPARATION
+                    STREAM_FUSED_CONTINUOUS_PREPARATION.wireValue -> STREAM_FUSED_CONTINUOUS_PREPARATION
+                    else -> NOT_AVAILABLE
                 }
         }
     }
@@ -254,7 +280,8 @@ object AndroidSubjectFacingForegroundContract {
         val blockerState: BlockerState,
         val confirmationState: ConfirmationState,
         val resultState: ResultState,
-        val foregroundPrimaryObject: ForegroundPrimaryObject
+        val foregroundPrimaryObject: ForegroundPrimaryObject,
+        val continuousIngressBehavior: ContinuousIngressBehavior = ContinuousIngressBehavior.NOT_AVAILABLE
     ) {
         /**
          * Wire-map representation suitable for embedding in canonical uplink payloads.
@@ -265,6 +292,7 @@ object AndroidSubjectFacingForegroundContract {
             "action_phase" to actionPhase.wireValue,
             "action_phase_is_subject_facing" to actionPhase.isSubjectFacing,
             "presence_mode" to presenceMode.wireValue,
+            "continuous_ingress_behavior" to continuousIngressBehavior.wireValue,
             "current_action_detail" to currentActionDetail,
             "blocker" to mapOf(
                 "is_blocked" to blockerState.isBlocked,
@@ -302,7 +330,26 @@ object AndroidSubjectFacingForegroundContract {
     ): SubjectFacingForegroundCard {
         val stage = surface.stringField("stage")
         val actionPhase = ActionPhase.fromStage(stage)
-        val presenceMode = PresenceMode.fromParticipationKind(presence)
+        val boundaryVisibility = surface.getAsJsonObject("visibility_boundary")
+        val lifecycleBoundaryTier = boundaryVisibility
+            ?.getAsJsonObject("lifecycle_state")
+            .stringField("tier")
+        val presenceModeFromSurface = surface
+            .getAsJsonObject("presence_participation_projection")
+            .stringField("presence_participation_kind")
+            ?.let(PresenceMode::fromParticipationKindWire)
+            ?: PresenceMode.UNKNOWN
+        val presenceModeFromParam = PresenceMode.fromParticipationKind(presence)
+        val presenceMode = if (presenceModeFromParam != PresenceMode.UNKNOWN) {
+            presenceModeFromParam
+        } else {
+            presenceModeFromSurface
+        }
+        val continuousIngressBehavior = ContinuousIngressBehavior.fromWireValue(
+            surface
+                .getAsJsonObject("canonical_continuous_ingress")
+                .stringField("mainline_behavior")
+        )
 
         val blockerObj = surface.getAsJsonObject("blocker")
         val confirmationObj = surface.getAsJsonObject("confirmation")
@@ -344,6 +391,10 @@ object AndroidSubjectFacingForegroundContract {
             !actionPhase.isSubjectFacing -> ForegroundPrimaryObject.CONTROL_PLANE_DEMOTED
             blockerState.isBlocked -> ForegroundPrimaryObject.BLOCKER
             confirmationState.confirmationNeeded -> ForegroundPrimaryObject.CONFIRMATION
+            lifecycleBoundaryTier != null &&
+                !lifecycleBoundaryTier.equals("foreground", ignoreCase = true) &&
+                presenceMode != PresenceMode.UNKNOWN ->
+                ForegroundPrimaryObject.PRESENCE_ONLY
             actionPhase != ActionPhase.UNKNOWN -> ForegroundPrimaryObject.ACTION_PHASE
             resultState.isComplete -> ForegroundPrimaryObject.RESULT
             else -> ForegroundPrimaryObject.PRESENCE_ONLY
@@ -356,7 +407,8 @@ object AndroidSubjectFacingForegroundContract {
             blockerState = blockerState,
             confirmationState = confirmationState,
             resultState = resultState,
-            foregroundPrimaryObject = foregroundPrimaryObject
+            foregroundPrimaryObject = foregroundPrimaryObject,
+            continuousIngressBehavior = continuousIngressBehavior
         )
     }
 

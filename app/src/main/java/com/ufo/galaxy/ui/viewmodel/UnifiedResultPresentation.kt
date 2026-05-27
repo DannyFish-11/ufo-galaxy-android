@@ -194,8 +194,24 @@ data class UnifiedResultPresentation(
                     // text suffixes appended to a summary string.
                     val subjectFacingCard = AndroidSubjectFacingForegroundContract
                         .fromUnifiedLifecycleSurface(lifecycle)
+                    val summaryWithRuntimeCoupling =
+                        if (subjectFacingCard.foregroundPrimaryObject ==
+                            AndroidSubjectFacingForegroundContract.ForegroundPrimaryObject.PRESENCE_ONLY
+                        ) {
+                            when (subjectFacingCard.continuousIngressBehavior) {
+                                AndroidSubjectFacingForegroundContract.ContinuousIngressBehavior
+                                    .STREAM_FUSED_CONTINUOUS_PREPARATION ->
+                                    "任务在后台持续协同中，前台可随时接管"
+                                AndroidSubjectFacingForegroundContract.ContinuousIngressBehavior
+                                    .CONTINUOUS_CONTEXT_PREPARATION ->
+                                    "任务在后台持续准备中"
+                                else -> summary
+                            }
+                        } else {
+                            summary
+                        }
                     return UnifiedResultPresentation(
-                        summary = summary,
+                        summary = summaryWithRuntimeCoupling,
                         isSuccess = isSuccess,
                         outcome = stage,
                         subjectFacingCard = subjectFacingCard
