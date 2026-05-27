@@ -492,8 +492,6 @@ data class ReconciliationSignal(
         const val KEY_IMPLEMENTATION_REALITY_CHECKPOINT =
             AndroidImplementationRealityCheckpoint.KEY_CHECKPOINT
         const val KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE = "unified_action_lifecycle_surface"
-        const val KEY_UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION =
-            "unified_action_lifecycle_schema_version"
         const val UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION = "1.0"
         const val KEY_TASK_ALLOCATION_TRUTH = AndroidParticipantRuntimeTruth.KEY_TASK_ALLOCATION_TRUTH
         const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY =
@@ -847,12 +845,17 @@ data class ReconciliationSignal(
             ) + terminalOutcomePayload + additionalPayload
         }
 
-        private fun boolValue(value: Any?): Boolean = when (value) {
+        private fun toBooleanOrFalse(value: Any?): Boolean = when (value) {
             is Boolean -> value
             is String -> value.equals("true", ignoreCase = true)
             is Number -> value.toInt() != 0
             else -> false
         }
+
+        private fun requiresConfirmation(
+            isTerminal: Boolean,
+            closureReadyForAcceptance: Boolean
+        ): Boolean = isTerminal && !closureReadyForAcceptance
 
         private fun withUnifiedActionLifecycleSurface(
             kind: Kind,
@@ -864,9 +867,10 @@ data class ReconciliationSignal(
             val isTerminal = kind == Kind.TASK_RESULT ||
                 kind == Kind.TASK_CANCELLED ||
                 kind == Kind.TASK_FAILED
-            val resultReturned = boolValue(payload[KEY_RESULT_RETURNED]) || isTerminal
-            val closureReadyForAcceptance = boolValue(payload[KEY_CLOSURE_READY_FOR_ACCEPTANCE])
-            val canonicalClosureBlocked = boolValue(payload[KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED])
+            val resultReturned = toBooleanOrFalse(payload[KEY_RESULT_RETURNED])
+            val closureReadyForAcceptance = toBooleanOrFalse(payload[KEY_CLOSURE_READY_FOR_ACCEPTANCE])
+            val canonicalClosureBlocked =
+                toBooleanOrFalse(payload[KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED])
             val hasFailureBlocker = kind == Kind.TASK_FAILED
             val isBlocked = canonicalClosureBlocked || hasFailureBlocker
             val blockerReason = when {
@@ -874,7 +878,12 @@ data class ReconciliationSignal(
                 hasFailureBlocker -> "execution_failed"
                 else -> null
             }
-            val confirmationNeeded = isTerminal && !closureReadyForAcceptance
+            // Confirmation is required when Android has emitted a terminal lifecycle stage but
+            // canonical closure has not yet been marked ready for acceptance by the boundary.
+            val confirmationNeeded = requiresConfirmation(
+                isTerminal = isTerminal,
+                closureReadyForAcceptance = closureReadyForAcceptance
+            )
             val stage = when (kind) {
                 Kind.TASK_ACCEPTED -> "accepted"
                 Kind.TASK_STATUS_UPDATE -> "executing"
@@ -937,11 +946,7 @@ data class ReconciliationSignal(
                     }
                 )
             )
-            return payload + mapOf(
-                KEY_UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION to
-                    UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION,
-                KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE to surface
-            )
+            return payload + mapOf(KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE to surface)
         }
 
         private fun buildStableDedupeKey(
