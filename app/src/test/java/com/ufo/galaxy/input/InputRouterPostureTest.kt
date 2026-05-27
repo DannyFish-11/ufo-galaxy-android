@@ -12,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.Locale
 import com.ufo.galaxy.local.LocalLoopExecutor
 import com.ufo.galaxy.local.LocalLoopOptions
 import com.ufo.galaxy.local.LocalLoopResult
@@ -319,6 +320,10 @@ class InputRouterPostureTest {
             SourceRuntimePosture.JOIN_RUNTIME,
             canonicalSubjectInput.getJSONObject("deviceContext").getString("sourceRuntimePosture")
         )
+        assertEquals(
+            canonicalSubjectInput.getJSONObject("deviceContext").getString("localeTag"),
+            payload.getJSONObject("context").getString("locale")
+        )
     }
 
     @Test
@@ -335,11 +340,9 @@ class InputRouterPostureTest {
         val modalities = canonicalSubjectInput.getJSONObject("mixedContext").getJSONArray("modalities")
 
         val modalityValues = (0 until modalities.length()).map { modalities.getString(it) }.toSet()
-        assertTrue(modalityValues.contains("android_natural_language"))
-        assertTrue(modalityValues.contains("android_device_context"))
-        assertTrue(modalityValues.contains("android_state_snapshot"))
+        assertEquals(AndroidNlSemanticContract.CANONICAL_MODALITIES.toSet(), modalityValues)
         assertEquals(
-            "android_natural_language,android_device_context,android_state_snapshot",
+            AndroidNlSemanticContract.CANONICAL_MODALITIES.joinToString(separator = ","),
             extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_INPUT_MODALITIES)
         )
     }
@@ -371,6 +374,51 @@ class InputRouterPostureTest {
         assertTrue(joinPayload.getString("session_id").startsWith("android-participant-"))
         assertTrue(controlEnvelope.getString("idempotency_key").startsWith("controlled-handoff-"))
         assertTrue(joinEnvelope.getString("idempotency_key").startsWith("participant-fusion-"))
+    }
+
+    @Test
+    fun `canonical subject input runtimeSessionAttached is false when runtime session id is null`() {
+        val subjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+            text = "open maps",
+            deviceId = "android-test",
+            posture = SourceRuntimePosture.CONTROL_ONLY,
+            crossDeviceEnabled = true,
+            websocketConnected = true,
+            runtimeSessionId = null
+        )
+        assertFalse(subjectInput.stateSnapshot.runtimeSessionAttached)
+    }
+
+    @Test
+    fun `canonical subject input runtimeSessionAttached is true when runtime session id exists`() {
+        val subjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+            text = "open maps",
+            deviceId = "android-test",
+            posture = SourceRuntimePosture.CONTROL_ONLY,
+            crossDeviceEnabled = true,
+            websocketConnected = true,
+            runtimeSessionId = "runtime-session-1"
+        )
+        assertTrue(subjectInput.stateSnapshot.runtimeSessionAttached)
+    }
+
+    @Test
+    fun `canonical subject input falls back to und locale when default locale has no language`() {
+        val original = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale("", ""))
+            val subjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+                text = "open maps",
+                deviceId = "android-test",
+                posture = SourceRuntimePosture.CONTROL_ONLY,
+                crossDeviceEnabled = true,
+                websocketConnected = true,
+                runtimeSessionId = "runtime-session-1"
+            )
+            assertEquals("und", subjectInput.deviceContext.localeTag)
+        } finally {
+            Locale.setDefault(original)
+        }
     }
 
     // ── Local path: posture forwarded in LocalLoopOptions ─────────────────────

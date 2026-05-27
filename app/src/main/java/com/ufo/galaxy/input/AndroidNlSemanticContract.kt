@@ -38,6 +38,14 @@ internal object AndroidNlSemanticContract {
 
     // GoalNormalizer + LocalPlannerService scope: local structuring/decomposition only.
     const val LOCAL_NL_LAYER_ROLE = "normalization_and_task_decomposition_only"
+    const val MODALITY_ANDROID_NATURAL_LANGUAGE = "android_natural_language"
+    const val MODALITY_ANDROID_DEVICE_CONTEXT = "android_device_context"
+    const val MODALITY_ANDROID_STATE_SNAPSHOT = "android_state_snapshot"
+    val CANONICAL_MODALITIES = listOf(
+        MODALITY_ANDROID_NATURAL_LANGUAGE,
+        MODALITY_ANDROID_DEVICE_CONTEXT,
+        MODALITY_ANDROID_STATE_SNAPSHOT
+    )
 
     enum class RequestPackagingStrategy(val wireValue: String) {
         CONTROLLED_HANDOFF_BASELINE("controlled_handoff_baseline"),
@@ -127,7 +135,6 @@ internal object AndroidNlSemanticContract {
         runtimeSessionId: String?
     ): CanonicalSubjectInput {
         val locale = Locale.getDefault().toLanguageTag().ifBlank { "und" }
-        val modalities = listOf("android_natural_language", "android_device_context", "android_state_snapshot")
         return CanonicalSubjectInput(
             schemaVersion = "1",
             naturalLanguage = CanonicalNaturalLanguageInput(
@@ -146,7 +153,7 @@ internal object AndroidNlSemanticContract {
                 runtimeSessionAttached = !runtimeSessionId.isNullOrBlank()
             ),
             mixedContext = CanonicalMixedContextInput(
-                modalities = modalities,
+                modalities = CANONICAL_MODALITIES,
                 participantRole = if (posture == SourceRuntimePosture.JOIN_RUNTIME) {
                     "distributed_runtime_participant"
                 } else {
