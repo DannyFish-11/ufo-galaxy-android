@@ -53,6 +53,14 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
     }
 
     @Test
+    fun `derive returns fully_attached when continuous ingress backbone is absent`() {
+        val state = AndroidAuthoritativeParticipationTruth.derive(
+            baseInput(continuousIngressReady = false)
+        )
+        assertEquals(AndroidAuthoritativeParticipationTruth.State.FULLY_ATTACHED, state)
+    }
+
+    @Test
     fun `derive returns dispatch_eligible when ready and eligible but no active distributed activity`() {
         val state = AndroidAuthoritativeParticipationTruth.derive(
             baseInput(distributedRuntimeActivity = false)
@@ -223,6 +231,7 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
         registrationInFlight: Boolean = false,
         capabilityVisible: Boolean = true,
         readinessSatisfied: Boolean = true,
+        continuousIngressReady: Boolean = true,
         runtimeSessionAvailable: Boolean = true,
         fullyAttached: Boolean = true,
         dispatchEligible: Boolean = true,
@@ -236,6 +245,7 @@ class Pr1AndroidAuthoritativeParticipationTruthTest {
             registrationInFlight = registrationInFlight,
             capabilityVisible = capabilityVisible,
             readinessSatisfied = readinessSatisfied,
+            continuousIngressReady = continuousIngressReady,
             runtimeSessionAvailable = runtimeSessionAvailable,
             fullyAttached = fullyAttached,
             dispatchEligible = dispatchEligible,

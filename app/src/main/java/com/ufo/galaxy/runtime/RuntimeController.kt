@@ -3606,6 +3606,7 @@ class RuntimeController(
     ): AndroidAuthoritativeParticipationTruth.Snapshot {
         val runtimeState = _state.value
         val dispatchReadiness = currentDispatchReadiness()
+        val continuousIngress = webSocketClient.canonicalContinuousIngress.value
         return authoritativeParticipationTracker.evaluate(
             AndroidAuthoritativeParticipationTruth.DerivationInput(
                 crossDeviceEnabled = settings.crossDeviceEnabled,
@@ -3613,6 +3614,7 @@ class RuntimeController(
                 registrationInFlight = runtimeState is RuntimeState.Starting,
                 capabilityVisible = capabilityVisible,
                 readinessSatisfied = readinessSatisfied,
+                continuousIngressReady = continuousIngress.supportsCanonicalCognitionBackbone,
                 runtimeSessionAvailable = _currentRuntimeSessionId != null,
                 fullyAttached = _attachedSession.value?.isAttached == true,
                 dispatchEligible = dispatchReadiness.isEligible,

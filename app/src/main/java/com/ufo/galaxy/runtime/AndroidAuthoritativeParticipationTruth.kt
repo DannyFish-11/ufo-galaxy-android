@@ -39,6 +39,7 @@ object AndroidAuthoritativeParticipationTruth {
         val registrationInFlight: Boolean,
         val capabilityVisible: Boolean,
         val readinessSatisfied: Boolean,
+        val continuousIngressReady: Boolean,
         val runtimeSessionAvailable: Boolean,
         val fullyAttached: Boolean,
         val dispatchEligible: Boolean,
@@ -57,6 +58,8 @@ object AndroidAuthoritativeParticipationTruth {
         REGISTRATION_RESOLVED("registration_resolved"),
         CAPABILITY_VISIBLE("capability_visible"),
         CAPABILITY_LOST("capability_lost"),
+        CONTINUOUS_INGRESS_ESTABLISHED("continuous_ingress_established"),
+        CONTINUOUS_INGRESS_LOST("continuous_ingress_lost"),
         SESSION_ESTABLISHED("session_established"),
         SESSION_BROKEN("session_broken"),
         READINESS_SATISFIED("readiness_satisfied"),
@@ -140,7 +143,9 @@ object AndroidAuthoritativeParticipationTruth {
                 state = nextState,
                 connected = input.wsConnected,
                 attached = input.fullyAttached,
-                canDispatch = input.readinessSatisfied && input.dispatchEligible,
+                canDispatch = input.readinessSatisfied &&
+                    input.dispatchEligible &&
+                    input.continuousIngressReady,
                 distributedParticipant = nextState == State.DISTRIBUTED_PARTICIPANT,
                 transitionSequence = transitionSequence,
                 lastTransitionTrigger = lastTrigger.wireValue,
@@ -170,6 +175,10 @@ object AndroidAuthoritativeParticipationTruth {
                     TransitionTrigger.CAPABILITY_VISIBLE
                 previous.capabilityVisible && !current.capabilityVisible ->
                     TransitionTrigger.CAPABILITY_LOST
+                !previous.continuousIngressReady && current.continuousIngressReady ->
+                    TransitionTrigger.CONTINUOUS_INGRESS_ESTABLISHED
+                previous.continuousIngressReady && !current.continuousIngressReady ->
+                    TransitionTrigger.CONTINUOUS_INGRESS_LOST
                 !previous.runtimeSessionAvailable && current.runtimeSessionAvailable ->
                     TransitionTrigger.SESSION_ESTABLISHED
                 previous.runtimeSessionAvailable && !current.runtimeSessionAvailable ->
@@ -207,7 +216,9 @@ object AndroidAuthoritativeParticipationTruth {
         if (!input.capabilityVisible) return State.CROSS_DEVICE_CAPABLE
         if (!input.runtimeSessionAvailable || !input.continuityIntact) return State.CROSS_DEVICE_ENABLED
         if (!input.fullyAttached) return State.CROSS_DEVICE_ENABLED
-        if (!input.readinessSatisfied || !input.dispatchEligible) return State.FULLY_ATTACHED
+        if (!input.readinessSatisfied || !input.dispatchEligible || !input.continuousIngressReady) {
+            return State.FULLY_ATTACHED
+        }
         if (input.distributedRuntimeActivity) return State.DISTRIBUTED_PARTICIPANT
         return State.DISPATCH_ELIGIBLE
     }
