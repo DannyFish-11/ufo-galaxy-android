@@ -1022,7 +1022,7 @@ class GalaxyConnectionService : Service() {
                 val settings = UFOGalaxyApplication.appSettings
                 settings.accessibilityReady && settings.overlayReady
             }.getOrNull()
-            val enrichedPayload = payload.copy(
+            val canonicalPayload = payload.copy(
                 device_id = payload.device_id.ifBlank { localDeviceId },
                 durable_session_id = durableRecord?.durableSessionId,
                 session_continuity_epoch = durableRecord?.sessionContinuityEpoch,
@@ -1036,24 +1036,27 @@ class GalaxyConnectionService : Service() {
                 goal_execution_eligibility = modeState.goalExecutionEligibility,
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
-            )
+            ).toCanonicalIngressPayload()
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_PERCEPTION_EMISSION,
                 mapOf(
                     "event" to "device_perception_emission_sent",
                     "device_id" to localDeviceId,
-                    "task_id" to enrichedPayload.task_id,
-                    "flow_id" to enrichedPayload.flow_id,
-                    "emission_kind" to enrichedPayload.emission_kind,
-                    "perception_stage" to enrichedPayload.perception_stage,
-                    "participates_in_multimodal_main_chain" to enrichedPayload.participates_in_multimodal_main_chain,
-                    "carrier_semantics" to enrichedPayload.carrier_semantics,
-                    "participation_semantics" to enrichedPayload.participation_semantics,
-                    "trace_id" to (enrichedPayload.trace_id ?: ""),
-                    "dispatch_trace_id" to (enrichedPayload.dispatch_trace_id ?: "")
+                    "task_id" to canonicalPayload.task_id,
+                    "flow_id" to canonicalPayload.flow_id,
+                    "emission_kind" to canonicalPayload.emission_kind,
+                    "perception_stage" to canonicalPayload.perception_stage,
+                    "participates_in_multimodal_main_chain" to canonicalPayload.participates_in_multimodal_main_chain,
+                    "carrier_semantics" to canonicalPayload.carrier_semantics,
+                    "participation_semantics" to canonicalPayload.participation_semantics,
+                    "canonical_ingress_protocol" to (canonicalPayload.canonical_ingress_protocol ?: ""),
+                    "canonical_ingress_target" to (canonicalPayload.canonical_ingress_target ?: ""),
+                    "downstream_consumption_semantics" to (canonicalPayload.downstream_consumption_semantics ?: ""),
+                    "trace_id" to (canonicalPayload.trace_id ?: ""),
+                    "dispatch_trace_id" to (canonicalPayload.dispatch_trace_id ?: "")
                 )
             )
-            webSocketClient.sendDevicePerceptionEmission(enrichedPayload)
+            webSocketClient.sendDevicePerceptionEmission(canonicalPayload)
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_PERCEPTION] sink error task_id=${payload.task_id}: ${e.message}", e)
         }

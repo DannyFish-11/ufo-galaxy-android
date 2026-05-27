@@ -3736,7 +3736,11 @@ data class DevicePerceptionEmissionPayload(
     val cross_device_eligibility: Boolean? = null,
     val goal_execution_eligibility: Boolean? = null,
     val parallel_execution_eligibility: Boolean? = null,
-    val carrier_runtime_state: String? = null
+    val carrier_runtime_state: String? = null,
+    val canonical_ingress_protocol: String? = null,
+    val canonical_ingress_target: String? = null,
+    val downstream_consumption_semantics: String? = null,
+    val canonical_main_chain_eligible: Boolean? = null
 ) {
     /** V2-compatible seconds-epoch timestamp derived from [timestamp_ms]. */
     val event_ts: Double = timestamp_ms / 1000.0
@@ -3754,5 +3758,50 @@ data class DevicePerceptionEmissionPayload(
 
         const val PARTICIPATION_SEMANTICS_ONE_SHOT_REQUEST = "one_shot_request"
         const val PARTICIPATION_SEMANTICS_MAIN_CHAIN_INPUT = "main_chain_input"
+
+        const val CANONICAL_INGRESS_PROTOCOL_ANDROID_PERCEPTION = "android_perception_ingress_contract"
+        const val CANONICAL_INGRESS_TARGET_V2_PERCEPTION_FRAME = "android_bridge_perception_frame_ingress"
+        const val DOWNSTREAM_CONSUMPTION_ROUTE_CONTEXT_PLANNING = "route_context_planning"
+        const val DOWNSTREAM_CONSUMPTION_VISION_PROBE_ONLY = "vision_probe_only"
+    }
+
+    fun toCanonicalIngressPayload(): DevicePerceptionEmissionPayload {
+        val hasGroundingIntent = !grounding_payload?.intent.isNullOrBlank()
+        val hasVisionPrompt = !vision_payload?.prompt_text.isNullOrBlank()
+        val hasPerceptionContext = local_perception_payload?.capture_present == true || hasVisionPrompt
+        val eligibleForMainChain =
+            participates_in_multimodal_main_chain &&
+                participation_semantics == PARTICIPATION_SEMANTICS_MAIN_CHAIN_INPUT &&
+                carrier_semantics == CARRIER_SEMANTICS_MULTIMODAL_MAIN_CHAIN &&
+                hasGroundingIntent &&
+                hasPerceptionContext
+
+        return copy(
+            emission_kind = if (eligibleForMainChain) {
+                EMISSION_KIND_MULTIMODAL_PARTICIPATION_SIGNAL
+            } else {
+                EMISSION_KIND_ONE_SHOT_VISION_REQUEST
+            },
+            perception_stage = if (eligibleForMainChain) STAGE_GROUNDING else STAGE_PLANNING,
+            carrier_semantics = if (eligibleForMainChain) {
+                CARRIER_SEMANTICS_MULTIMODAL_MAIN_CHAIN
+            } else {
+                CARRIER_SEMANTICS_VISION_PROBE
+            },
+            participation_semantics = if (eligibleForMainChain) {
+                PARTICIPATION_SEMANTICS_MAIN_CHAIN_INPUT
+            } else {
+                PARTICIPATION_SEMANTICS_ONE_SHOT_REQUEST
+            },
+            participates_in_multimodal_main_chain = eligibleForMainChain,
+            canonical_ingress_protocol = CANONICAL_INGRESS_PROTOCOL_ANDROID_PERCEPTION,
+            canonical_ingress_target = CANONICAL_INGRESS_TARGET_V2_PERCEPTION_FRAME,
+            downstream_consumption_semantics = if (eligibleForMainChain) {
+                DOWNSTREAM_CONSUMPTION_ROUTE_CONTEXT_PLANNING
+            } else {
+                DOWNSTREAM_CONSUMPTION_VISION_PROBE_ONLY
+            },
+            canonical_main_chain_eligible = eligibleForMainChain
+        )
     }
 }

@@ -2124,32 +2124,35 @@ class GalaxyWebSocketClient(
     fun sendDevicePerceptionEmission(payload: DevicePerceptionEmissionPayload): Boolean {
         return try {
             val deviceId = getDeviceId()
-            val traceId = payload.trace_id?.takeIf { it.isNotBlank() } ?: sessionTraceId
-            val enrichedPayload = payload.copy(
-                device_id = payload.device_id.ifBlank { deviceId },
+            val canonicalPayload = payload.toCanonicalIngressPayload()
+            val traceId = canonicalPayload.trace_id?.takeIf { it.isNotBlank() } ?: sessionTraceId
+            val enrichedPayload = canonicalPayload.copy(
+                device_id = canonicalPayload.device_id.ifBlank { deviceId },
                 trace_id = traceId
             )
             val envelope = AipMessage(
                 type = MsgType.DEVICE_PERCEPTION_EMISSION,
                 payload = enrichedPayload,
                 device_id = deviceId,
-                correlation_id = payload.task_id,
+                correlation_id = enrichedPayload.task_id,
                 trace_id = traceId,
                 runtime_session_id = runtimeSessionId,
-                idempotency_key = payload.emission_id
+                idempotency_key = enrichedPayload.emission_id
             )
             val sent = sendJson(gson.toJson(envelope))
             if (sent) {
                 Log.d(
                     TAG,
-                    "[DEVICE_PERCEPTION] sent emission_id=${payload.emission_id} task_id=${payload.task_id} " +
-                        "kind=${payload.emission_kind} stage=${payload.perception_stage}"
+                    "[DEVICE_PERCEPTION] sent emission_id=${enrichedPayload.emission_id} " +
+                        "task_id=${enrichedPayload.task_id} kind=${enrichedPayload.emission_kind} " +
+                        "stage=${enrichedPayload.perception_stage} " +
+                        "downstream=${enrichedPayload.downstream_consumption_semantics}"
                 )
             } else {
                 Log.w(
                     TAG,
-                    "[DEVICE_PERCEPTION] send blocked/failed emission_id=${payload.emission_id} " +
-                        "task_id=${payload.task_id} kind=${payload.emission_kind}"
+                    "[DEVICE_PERCEPTION] send blocked/failed emission_id=${enrichedPayload.emission_id} " +
+                        "task_id=${enrichedPayload.task_id} kind=${enrichedPayload.emission_kind}"
                 )
             }
             sent
