@@ -95,6 +95,6 @@ object CanonicalContinuousIngressBackboneBuilder {
         vararg entries: CanonicalContinuousIngressEntry?
     ): CanonicalContinuousIngressBackbone =
         CanonicalContinuousIngressBackbone(
-            entries.mapNotNull { entry -> entry?.takeIf { it.isActive } }
+            entries.filterNotNull()
         )
 }

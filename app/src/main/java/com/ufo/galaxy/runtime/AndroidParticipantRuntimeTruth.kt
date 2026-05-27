@@ -459,6 +459,7 @@ data class AndroidParticipantRuntimeTruth(
             inflightContinuityObservedAtMs: Long? = null,
             taskAllocationTruth: AndroidTaskAllocationTruthSnapshot? = null,
             carrierForegroundVisible: Boolean? = null,
+            continuousIngressReady: Boolean = false,
             authoritativeParticipationState: String? = null,
             authoritativeParticipationTransitionSequence: Long? = null,
             authoritativeParticipationTransitionTrigger: String? = null,
@@ -488,6 +489,7 @@ data class AndroidParticipantRuntimeTruth(
                     participationState = descriptor.participationState,
                     healthState = healthState,
                     readinessState = readinessState,
+                    continuousIngressReady = continuousIngressReady,
                     activeTaskId = activeTaskId,
                     activeTaskStatus = activeTaskStatus
                 )
@@ -554,6 +556,7 @@ private fun defaultAuthoritativeParticipationState(
     participationState: RuntimeHostDescriptor.HostParticipationState,
     healthState: ParticipantHealthState,
     readinessState: ParticipantReadinessState,
+    continuousIngressReady: Boolean,
     activeTaskId: String?,
     activeTaskStatus: ActiveTaskStatus?
 ): String =
@@ -565,7 +568,7 @@ private fun defaultAuthoritativeParticipationState(
             capabilityVisible = participationState !=
                 RuntimeHostDescriptor.HostParticipationState.INACTIVE,
             readinessSatisfied = readinessState == ParticipantReadinessState.READY,
-            continuousIngressReady = false,
+            continuousIngressReady = continuousIngressReady,
             runtimeSessionAvailable = sessionState != null,
             fullyAttached = sessionState == AttachedRuntimeSession.State.ATTACHED,
             dispatchEligible = readinessState == ParticipantReadinessState.READY &&

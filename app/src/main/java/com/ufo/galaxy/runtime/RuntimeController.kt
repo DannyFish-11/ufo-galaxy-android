@@ -2948,6 +2948,8 @@ class RuntimeController(
             inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
             taskAllocationTruth = currentTaskAllocationTruthSnapshot(),
             carrierForegroundVisible = appForegroundVisible.value,
+            continuousIngressReady = webSocketClient.canonicalContinuousIngress.value
+                .supportsCanonicalCognitionBackbone,
             authoritativeParticipationState = participationSnapshot.state.wireValue,
             authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
             authoritativeParticipationTransitionTrigger = participationSnapshot.lastTransitionTrigger,
@@ -3174,6 +3176,8 @@ class RuntimeController(
                     inflightContinuitySource = inflightRecovery.source,
                     inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
                     carrierForegroundVisible = appForegroundVisible.value,
+                    continuousIngressReady = webSocketClient.canonicalContinuousIngress.value
+                        .supportsCanonicalCognitionBackbone,
                     authoritativeParticipationState = participationSnapshot.state.wireValue,
                     authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
                     authoritativeParticipationTransitionTrigger = participationSnapshot.lastTransitionTrigger,
