@@ -58,6 +58,7 @@ import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract
 import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
+import com.ufo.galaxy.runtime.AndroidCanonicalOwnershipIngressContract
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
@@ -4022,20 +4023,31 @@ class GalaxyConnectionService : Service() {
      */
     private fun sendReconciliationSignal(signal: ReconciliationSignal) {
         try {
-            val runtimeTruth = signal.runtimeTruth?.toMap()
             val sessionId = UFOGalaxyApplication.runtimeSessionId
             val stableDedupeKey = signal.stableDedupeKey
             val runtimeController = UFOGalaxyApplication.runtimeController
             val ingress = AndroidGovernanceExecutionPolicyIngressContract
                 .classifyReconciliation(signal.kind)
             fun buildReliablePayload(
-                deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+                deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition,
+                ownershipResolution: AndroidCanonicalOwnershipIngressContract.Resolution,
+                runtimeTruthMap: Map<String, Any>?
             ): Map<String, Any?> {
                 val adjustedTruth = AndroidRuntimeEmissionTruthSemantics.TruthSnapshot
                     .fromPayload(signal.payload, signal.isTerminal)
                     ?.withDeliveryDisposition(deliveryDisposition)
                 return signal.payload.toMutableMap().apply {
                     adjustedTruth?.let { putAll(it.toPayloadMap()) }
+                    putAll(ownershipResolution.toWireMap())
+                    if (signal.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT &&
+                        runtimeTruthMap != null &&
+                        !ownershipResolution.isCanonicalizationReady
+                    ) {
+                        put(
+                            AndroidCanonicalOwnershipIngressContract.KEY_PARTICIPANT_LOCAL_RUNTIME_TRUTH,
+                            runtimeTruthMap
+                        )
+                    }
                     put(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY, stableDedupeKey)
                     put(
                         AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION,
@@ -4059,7 +4071,23 @@ class GalaxyConnectionService : Service() {
             fun buildEnvelopeJson(
                 deliveryDisposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
             ): String {
-                val reliablePayload = buildReliablePayload(deliveryDisposition)
+                val runtimeTruthMap = signal.runtimeTruth?.toMap()
+                val ownershipResolution = AndroidCanonicalOwnershipIngressContract.derive(
+                    AndroidCanonicalOwnershipIngressContract.Input(
+                        signalKind = signal.kind,
+                        participantId = signal.participantId,
+                        controlSessionId = sessionId,
+                        durableSessionId = signal.durableSessionId,
+                        sessionContinuityEpoch = signal.sessionContinuityEpoch,
+                        runtimeAttachmentSessionId = signal.runtimeTruth?.sessionId,
+                        deliveryDisposition = deliveryDisposition
+                    )
+                )
+                val reliablePayload = buildReliablePayload(
+                    deliveryDisposition = deliveryDisposition,
+                    ownershipResolution = ownershipResolution,
+                    runtimeTruthMap = runtimeTruthMap
+                )
                 val fallbackRecoveryPhase = runtimeController.unifiedRecoveryPhase.value
                 val fallbackRecoverySource = deriveRecoverySource(
                     phase = fallbackRecoveryPhase,
@@ -4094,7 +4122,11 @@ class GalaxyConnectionService : Service() {
                     durable_session_id = signal.durableSessionId,
                     session_continuity_epoch = signal.sessionContinuityEpoch,
                     payload = reliablePayload,
-                    runtime_truth = runtimeTruth,
+                    runtime_truth = if (ownershipResolution.isCanonicalizationReady) {
+                        runtimeTruthMap
+                    } else {
+                        null
+                    },
                     schema_version = AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
                     completion_closure_contract_version = AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
                     completion_emission_id = signal.signalId,
