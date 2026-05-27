@@ -59,6 +59,7 @@ import com.ufo.galaxy.runtime.AndroidCrossRepoRecoveryStateRoutingContract
 import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
 import com.ufo.galaxy.runtime.AndroidCanonicalOwnershipIngressContract
+import com.ufo.galaxy.runtime.AndroidCanonicalContinuousIngressBackbone
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.AndroidMeshLifecycleEmissionChain
 import com.ufo.galaxy.runtime.FormalParticipantLifecycleState
@@ -1038,6 +1039,18 @@ class GalaxyConnectionService : Service() {
                 parallel_execution_eligibility = modeState.parallelExecutionEligibility,
                 carrier_runtime_state = UFOGalaxyApplication.runtimeController.state.value.wireLabel
             ).toCanonicalIngressPayload()
+            UFOGalaxyApplication.continuousIngressSessionManager.recordAndroidDeviceContinuousStream(
+                canonicalPayload
+            )
+            UFOGalaxyApplication.continuousIngressSessionManager.recordRuntimeStreamingSessionInput(
+                AndroidCanonicalContinuousIngressBackbone.RuntimeStreamingSessionInput(
+                    runtimeState = UFOGalaxyApplication.runtimeController.state.value.wireLabel,
+                    crossDeviceEligible = modeState.crossDeviceEligibility,
+                    hasAttachedSession = attachedSession != null,
+                    durableSessionId = durableRecord?.durableSessionId,
+                    traceId = canonicalPayload.trace_id
+                )
+            )
             GalaxyLogger.log(
                 GalaxyLogger.TAG_DEVICE_PERCEPTION_EMISSION,
                 mapOf(

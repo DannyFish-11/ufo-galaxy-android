@@ -38,6 +38,7 @@ import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.planner.MobileVlmPlanner
 import com.ufo.galaxy.planner.LlamaCppPlannerService
 import com.ufo.galaxy.runtime.RuntimeController
+import com.ufo.galaxy.runtime.AndroidCanonicalContinuousIngressSessionManager
 import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.service.AccessibilityActionExecutor
@@ -156,6 +157,10 @@ class UFOGalaxyApplication : Application() {
         // RuntimeController: manages cross-device ON/OFF lifecycle, registration, and fallback
         lateinit var runtimeController: RuntimeController
             private set
+
+        // Canonical continuous ingress session manager shared by streaming/perception pathways.
+        val continuousIngressSessionManager: AndroidCanonicalContinuousIngressSessionManager =
+            AndroidCanonicalContinuousIngressSessionManager()
 
         // LocalInferenceRuntimeManager: lifecycle authority for the on-device planner+grounding pair
         lateinit var localInferenceRuntimeManager: LocalInferenceRuntimeManager
@@ -563,7 +568,8 @@ class UFOGalaxyApplication : Application() {
             groundingService = groundingService,
             accessibilityExecutor = AccessibilityActionExecutor(),
             imageScaler = AndroidBitmapScaler(),
-            scaledMaxEdge = appSettings.scaledMaxEdge
+            scaledMaxEdge = appSettings.scaledMaxEdge,
+            continuousIngressProvider = { continuousIngressSessionManager.currentSnapshot() }
         )
         val deviceId = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
         localGoalExecutor = LocalGoalExecutor(
