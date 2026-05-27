@@ -479,9 +479,9 @@ class AgentRuntimeBridge(
     }
 
     private data class CanonicalAndroidCognitionInput(
-        val naturalLanguageInput: NaturalLanguageInputFamily,
-        val deviceContextInput: DeviceContextInputFamily,
-        val runtimeStateInput: RuntimeStateInputFamily
+        val naturalLanguageInput: NaturalLanguageInput,
+        val deviceContextInput: DeviceContextInput,
+        val runtimeStateInput: RuntimeStateInput
     ) {
         fun toWireMap(): Map<String, Any> = mapOf(
             "natural_language_input" to naturalLanguageInput.toWireMap(),
@@ -490,7 +490,7 @@ class AgentRuntimeBridge(
         )
     }
 
-    private data class NaturalLanguageInputFamily(
+    private data class NaturalLanguageInput(
         val goal: String,
         val constraints: List<String>
     ) {
@@ -500,7 +500,7 @@ class AgentRuntimeBridge(
         )
     }
 
-    private data class DeviceContextInputFamily(
+    private data class DeviceContextInput(
         val sourceRuntimePosture: String?,
         val mergedContext: Map<String, String>
     ) {
@@ -511,7 +511,7 @@ class AgentRuntimeBridge(
         }
     }
 
-    private data class RuntimeStateInputFamily(
+    private data class RuntimeStateInput(
         val routeMode: String,
         val execMode: String,
         val sessionId: String?,
@@ -552,15 +552,15 @@ class AgentRuntimeBridge(
             }
         }
         return CanonicalAndroidCognitionInput(
-            naturalLanguageInput = NaturalLanguageInputFamily(
+            naturalLanguageInput = NaturalLanguageInput(
                 goal = request.goal,
                 constraints = request.constraints.filter { it.isNotBlank() }
             ),
-            deviceContextInput = DeviceContextInputFamily(
+            deviceContextInput = DeviceContextInput(
                 sourceRuntimePosture = envelope.source_runtime_posture,
                 mergedContext = mergedContext
             ),
-            runtimeStateInput = RuntimeStateInputFamily(
+            runtimeStateInput = RuntimeStateInput(
                 routeMode = request.routeMode,
                 execMode = request.execMode,
                 sessionId = envelope.session_id,
