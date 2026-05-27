@@ -74,7 +74,8 @@ interface AppSettings {
      * prevent unintended local executions in environments where strict cross-device
      * execution semantics are required.
      *
-     * Default: `true` — preserves the prior fallback-always-allowed behaviour.
+     * Default: `false` — canonical runtime defaults to center-delegated execution;
+     * local fallback remains an explicit optional compatibility path.
      */
     var fallbackToLocalAllowed: Boolean
 
@@ -529,9 +530,8 @@ class InMemoryAppSettings(
  * fallback only — they are never the authoritative runtime source.
  *
  * Default values for other settings:
- * - [crossDeviceEnabled]: `false` — device starts in local-only mode until the user
- *   explicitly enables cross-device collaboration via the settings toggle.
- * - [goalExecutionEnabled]: `false`
+ * - [crossDeviceEnabled]: `true` — canonical Android↔V2 cross-device runtime path is enabled by default.
+ * - [goalExecutionEnabled]: `true`
  * - [localModelEnabled]: `false` — updated to `true` by [GalaxyConnectionService] when
  *   both MobileVLM and SeeClick models are successfully loaded.
  * - [parallelExecutionEnabled]: `false`
@@ -570,7 +570,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
     }
 
     override var crossDeviceEnabled: Boolean
-        get() = prefs.getBoolean(KEY_CROSS_DEVICE_ENABLED, false)
+        get() = prefs.getBoolean(KEY_CROSS_DEVICE_ENABLED, DEFAULT_CROSS_DEVICE_ENABLED)
         set(value) { prefs.edit().putBoolean(KEY_CROSS_DEVICE_ENABLED, value).apply() }
 
     override var galaxyGatewayUrl: String
@@ -582,7 +582,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         set(value) { prefs.edit().putString(KEY_REST_BASE_URL, value).apply() }
 
     override var goalExecutionEnabled: Boolean
-        get() = prefs.getBoolean(KEY_GOAL_EXECUTION_ENABLED, false)
+        get() = prefs.getBoolean(KEY_GOAL_EXECUTION_ENABLED, DEFAULT_GOAL_EXECUTION_ENABLED)
         set(value) { prefs.edit().putBoolean(KEY_GOAL_EXECUTION_ENABLED, value).apply() }
 
     // PR-31: Rollout-control flags
@@ -591,7 +591,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         set(value) { prefs.edit().putBoolean(KEY_DELEGATED_EXECUTION_ALLOWED, value).apply() }
 
     override var fallbackToLocalAllowed: Boolean
-        get() = prefs.getBoolean(KEY_FALLBACK_TO_LOCAL_ALLOWED, true)
+        get() = prefs.getBoolean(KEY_FALLBACK_TO_LOCAL_ALLOWED, DEFAULT_FALLBACK_TO_LOCAL_ALLOWED)
         set(value) { prefs.edit().putBoolean(KEY_FALLBACK_TO_LOCAL_ALLOWED, value).apply() }
 
     override var localModelEnabled: Boolean
@@ -716,6 +716,9 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         // PR-31: Rollout-control flag keys
         const val KEY_DELEGATED_EXECUTION_ALLOWED = "delegated_execution_allowed"
         const val KEY_FALLBACK_TO_LOCAL_ALLOWED = "fallback_to_local_allowed"
+        const val DEFAULT_CROSS_DEVICE_ENABLED = true
+        const val DEFAULT_GOAL_EXECUTION_ENABLED = true
+        const val DEFAULT_FALLBACK_TO_LOCAL_ALLOWED = false
         const val KEY_LOCAL_MODEL_ENABLED = "local_model_enabled"
         const val KEY_PARALLEL_EXECUTION_ENABLED = "parallel_execution_enabled"
         const val KEY_DEVICE_ROLE = "device_role"

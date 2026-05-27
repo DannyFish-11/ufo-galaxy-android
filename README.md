@@ -4,8 +4,8 @@
 
 UFO Galaxy Android is an L4-autonomy AI agent client for Android. It operates in two distinct modes:
 
-- **Local-only** (default) — all inference and UI-automation runs entirely on the device.
-- **Cross-device** (opt-in) — the device connects to a Galaxy Gateway and participates in a distributed task network.
+- **Cross-device** (default canonical path) — the device connects to a Galaxy Gateway and participates in a distributed task network.
+- **Local-only** (optional fallback mode) — all inference and UI-automation runs entirely on the device.
 
 The two modes share the same on-device execution engine; only the input-routing and lifecycle layers differ.
 
@@ -47,7 +47,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ### 2. Configure the gateway (cross-device mode only)
 
-The app ships with `cross_device_enabled=false` (local-only mode). If you want to connect to a Galaxy Gateway:
+The app defaults to cross-device runtime (`cross_device_enabled=true`). You can still force local-only mode in settings or config when needed:
 
 **Recommended — in-app settings (no repackaging needed):**
 
@@ -139,7 +139,7 @@ ufo-galaxy-android/
 │   ├── trace/                        # LocalLoopTrace, LocalLoopTraceStore
 │   ├── ui/                           # MainActivity, composables, RegistrationFailureNotifier
 │   └── webrtc/                       # WebRTCSignalingClient, IceCandidateManager, TurnConfig
-├── config.properties                 # Build-time default (cross_device_enabled=false)
+├── config.properties                 # Build-time defaults (runtime values can be overridden in-app)
 ├── build_apk.sh                      # APK build script
 └── docs/                             # Architecture, flow, and maintainer docs
 ```
