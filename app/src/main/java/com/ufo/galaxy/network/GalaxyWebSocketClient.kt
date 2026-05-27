@@ -503,8 +503,7 @@ class GalaxyWebSocketClient(
         runtimeAttachmentSessionId = null
         durableSessionId = null
         sessionContinuityEpoch = null
-        lastContinuousPerceptionIngress = null
-        rebuildCanonicalContinuousIngress()
+        updateContinuousPerceptionIngress(null)
     }
 
     /**
@@ -601,6 +600,11 @@ class GalaxyWebSocketClient(
                 ),
                 lastContinuousPerceptionIngress
             )
+    }
+
+    private fun updateContinuousPerceptionIngress(entry: CanonicalContinuousIngressEntry?) {
+        lastContinuousPerceptionIngress = entry
+        rebuildCanonicalContinuousIngress()
     }
 
     /**
@@ -899,8 +903,7 @@ class GalaxyWebSocketClient(
                 Log.i(TAG, "[WS:DISCONNECT] WebSocket closed: code=$code reason=$reason")
                 GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("code" to code, "reason" to reason, "type" to "closed"))
                 isConnected = false
-                lastContinuousPerceptionIngress = null
-                rebuildCanonicalContinuousIngress()
+                updateContinuousPerceptionIngress(null)
                 stopHeartbeat()
                 listeners.forEach { it.onDisconnected() }
                 
@@ -914,8 +917,7 @@ class GalaxyWebSocketClient(
                 Log.e(TAG, "[WS:DISCONNECT] WebSocket failure: ${t.message}", t)
                 GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("type" to "failure", "error" to (t.message ?: "unknown")))
                 isConnected = false
-                lastContinuousPerceptionIngress = null
-                rebuildCanonicalContinuousIngress()
+                updateContinuousPerceptionIngress(null)
                 stopHeartbeat()
                 listeners.forEach { it.onError(t.message ?: "连接失败") }
                 
@@ -946,8 +948,7 @@ class GalaxyWebSocketClient(
         webSocket?.close(1000, "用户断开")
         webSocket = null
         isConnected = false
-        lastContinuousPerceptionIngress = null
-        rebuildCanonicalContinuousIngress()
+        updateContinuousPerceptionIngress(null)
     }
     
     /**
@@ -2175,11 +2176,11 @@ class GalaxyWebSocketClient(
             )
             val sent = sendJson(gson.toJson(envelope))
             if (sent) {
-                lastContinuousPerceptionIngress =
+                updateContinuousPerceptionIngress(
                     CanonicalContinuousIngressBackboneBuilder
                         .continuousPerceptionSession(enrichedPayload)
                         .takeIf { it.isActive }
-                rebuildCanonicalContinuousIngress()
+                )
                 Log.d(
                     TAG,
                     "[DEVICE_PERCEPTION] sent emission_id=${enrichedPayload.emission_id} " +
@@ -2716,8 +2717,7 @@ class GalaxyWebSocketClient(
      */
     internal fun simulateDisconnected() {
         isConnected = false
-        lastContinuousPerceptionIngress = null
-        rebuildCanonicalContinuousIngress()
+        updateContinuousPerceptionIngress(null)
         listeners.forEach { it.onDisconnected() }
     }
 
@@ -2733,8 +2733,7 @@ class GalaxyWebSocketClient(
      */
     internal fun simulateError(error: String) {
         isConnected = false
-        lastContinuousPerceptionIngress = null
-        rebuildCanonicalContinuousIngress()
+        updateContinuousPerceptionIngress(null)
         listeners.forEach { it.onError(error) }
     }
 }
