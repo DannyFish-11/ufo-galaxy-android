@@ -240,8 +240,6 @@ class InputRouter(
      *                           the outbound payload (metadata drift).
      */
     private fun sendViaWebSocket(text: String, deviceId: String, taskId: String, posture: String, crossDeviceEnabled: Boolean): RouteMode {
-        val conversationSessionId = UUID.randomUUID().toString()
-
         // PR-993: Build Android NL initiation metadata. crossDeviceEnabled is the value already
         // captured in routeInternal (not re-read from settings) to prevent metadata drift.
         val nlInitiation = AndroidNlInitiationContract.build(
@@ -251,7 +249,22 @@ class InputRouter(
             correlationId = taskId
         )
 
-        val contextExtra = AndroidNlSemanticContract.nlInitiationMetadata(posture, nlInitiation)
+        val canonicalSubjectInput = AndroidNlSemanticContract.buildCanonicalSubjectInput(
+            text = text,
+            deviceId = deviceId,
+            posture = posture,
+            crossDeviceEnabled = crossDeviceEnabled,
+            websocketConnected = true,
+            runtimeSessionId = UFOGalaxyApplication.runtimeSessionId
+        )
+        val packagingStrategy = AndroidNlSemanticContract.deriveRequestPackagingStrategy(posture)
+        val conversationSessionId = AndroidNlSemanticContract.deriveConversationSessionId(taskId, packagingStrategy)
+        val contextExtra = AndroidNlSemanticContract.nlInitiationMetadata(posture, nlInitiation) +
+            AndroidNlSemanticContract.canonicalSubjectInputMetadata(
+                subjectInputJson = gson.toJson(canonicalSubjectInput),
+                strategy = packagingStrategy,
+                modalities = canonicalSubjectInput.mixedContext.modalities
+            )
 
         val payload = TaskSubmitPayload(
             task_text = text,
@@ -259,6 +272,7 @@ class InputRouter(
             session_id = conversationSessionId,
             task_id = taskId,
             context = TaskSubmitContext(
+                locale = canonicalSubjectInput.deviceContext.localeTag,
                 extra = contextExtra
             ),
             source_runtime_posture = posture,
@@ -284,7 +298,7 @@ class InputRouter(
             trace_id = taskId,      // use task_id as the initial trace_id for this submission
             route_mode = "cross_device",
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-            idempotency_key = java.util.UUID.randomUUID().toString(),
+            idempotency_key = "${AndroidNlSemanticContract.idempotencyKeyPrefix(packagingStrategy)}-${UUID.randomUUID()}",
             source_runtime_posture = posture
         )
         val json = gson.toJson(envelope)

@@ -295,6 +295,84 @@ class InputRouterPostureTest {
         )
     }
 
+    @Test
+    fun `cross-device route assembles canonical subject input with NL plus device context plus state snapshot`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("open maps and start navigation", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
+
+        val envelope = JSONObject(gateway.sentMessages.first())
+        val payload = envelope.getJSONObject("payload")
+        val extra = payload.getJSONObject("context").getJSONObject("extra")
+        val canonicalSubjectInput = JSONObject(extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_SUBJECT_INPUT))
+
+        assertTrue(canonicalSubjectInput.has("naturalLanguage"))
+        assertTrue(canonicalSubjectInput.has("deviceContext"))
+        assertTrue(canonicalSubjectInput.has("stateSnapshot"))
+        assertTrue(canonicalSubjectInput.has("mixedContext"))
+        assertEquals(
+            "open maps and start navigation",
+            canonicalSubjectInput.getJSONObject("naturalLanguage").getString("text")
+        )
+        assertEquals(
+            SourceRuntimePosture.JOIN_RUNTIME,
+            canonicalSubjectInput.getJSONObject("deviceContext").getString("sourceRuntimePosture")
+        )
+    }
+
+    @Test
+    fun `cross-device route canonical subject input advertises mixed modalities in one unified structure`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("open mail", sourceRuntimePosture = SourceRuntimePosture.CONTROL_ONLY)
+
+        val envelope = JSONObject(gateway.sentMessages.first())
+        val payload = envelope.getJSONObject("payload")
+        val extra = payload.getJSONObject("context").getJSONObject("extra")
+        val canonicalSubjectInput = JSONObject(extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_SUBJECT_INPUT))
+        val modalities = canonicalSubjectInput.getJSONObject("mixedContext").getJSONArray("modalities")
+
+        val modalityValues = (0 until modalities.length()).map { modalities.getString(it) }.toSet()
+        assertTrue(modalityValues.contains("android_natural_language"))
+        assertTrue(modalityValues.contains("android_device_context"))
+        assertTrue(modalityValues.contains("android_state_snapshot"))
+        assertEquals(
+            "android_natural_language,android_device_context,android_state_snapshot",
+            extra.getString(AndroidNlSemanticContract.KEY_CANONICAL_INPUT_MODALITIES)
+        )
+    }
+
+    @Test
+    fun `canonical subject input changes request packaging strategy and downstream request shaping by posture`() {
+        val gateway = FakeGatewayClient()
+        val router = buildCrossDeviceRouter(gateway)
+
+        router.route("execute task", sourceRuntimePosture = SourceRuntimePosture.CONTROL_ONLY)
+        router.route("execute task", sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME)
+
+        val controlEnvelope = JSONObject(gateway.sentMessages[0])
+        val controlPayload = controlEnvelope.getJSONObject("payload")
+        val controlExtra = controlPayload.getJSONObject("context").getJSONObject("extra")
+        val joinEnvelope = JSONObject(gateway.sentMessages[1])
+        val joinPayload = joinEnvelope.getJSONObject("payload")
+        val joinExtra = joinPayload.getJSONObject("context").getJSONObject("extra")
+
+        assertEquals(
+            AndroidNlSemanticContract.RequestPackagingStrategy.CONTROLLED_HANDOFF_BASELINE.wireValue,
+            controlExtra.getString(AndroidNlSemanticContract.KEY_REQUEST_PACKAGING_STRATEGY)
+        )
+        assertEquals(
+            AndroidNlSemanticContract.RequestPackagingStrategy.STATEFUL_PARTICIPANT_FUSION.wireValue,
+            joinExtra.getString(AndroidNlSemanticContract.KEY_REQUEST_PACKAGING_STRATEGY)
+        )
+        assertTrue(controlPayload.getString("session_id").startsWith("android-control-"))
+        assertTrue(joinPayload.getString("session_id").startsWith("android-participant-"))
+        assertTrue(controlEnvelope.getString("idempotency_key").startsWith("controlled-handoff-"))
+        assertTrue(joinEnvelope.getString("idempotency_key").startsWith("participant-fusion-"))
+    }
+
     // ── Local path: posture forwarded in LocalLoopOptions ─────────────────────
 
     @Test

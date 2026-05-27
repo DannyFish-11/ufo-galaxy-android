@@ -1,6 +1,8 @@
 package com.ufo.galaxy.input
 
 import com.ufo.galaxy.runtime.AndroidNlInitiationContract
+import com.ufo.galaxy.runtime.SourceRuntimePosture
+import java.util.Locale
 
 /**
  * Canonical Android-side metadata contract for natural-language input routing.
@@ -21,6 +23,9 @@ internal object AndroidNlSemanticContract {
     const val KEY_NL_PATH = "nl_path"
     const val KEY_SEMANTIC_AUTHORITY = "semantic_authority"
     const val KEY_LOCAL_NL_LAYER_ROLE = "local_nl_layer_role"
+    const val KEY_CANONICAL_SUBJECT_INPUT = "android_canonical_subject_input"
+    const val KEY_REQUEST_PACKAGING_STRATEGY = "android_request_packaging_strategy"
+    const val KEY_CANONICAL_INPUT_MODALITIES = "android_canonical_input_modalities"
 
     const val SOURCE_ANDROID_LOCAL_INPUT = "android_local_input"
     const val CARRIER_ANDROID = "android_device"
@@ -33,6 +38,42 @@ internal object AndroidNlSemanticContract {
 
     // GoalNormalizer + LocalPlannerService scope: local structuring/decomposition only.
     const val LOCAL_NL_LAYER_ROLE = "normalization_and_task_decomposition_only"
+
+    enum class RequestPackagingStrategy(val wireValue: String) {
+        CONTROLLED_HANDOFF_BASELINE("controlled_handoff_baseline"),
+        STATEFUL_PARTICIPANT_FUSION("stateful_participant_fusion")
+    }
+
+    data class CanonicalNaturalLanguageInput(
+        val text: String,
+        val textLength: Int
+    )
+
+    data class CanonicalDeviceContextInput(
+        val deviceId: String,
+        val localeTag: String,
+        val sourceRuntimePosture: String,
+        val runtimeSessionId: String?,
+        val crossDeviceEnabled: Boolean
+    )
+
+    data class CanonicalStateSnapshotInput(
+        val websocketConnected: Boolean,
+        val runtimeSessionAttached: Boolean
+    )
+
+    data class CanonicalMixedContextInput(
+        val modalities: List<String>,
+        val participantRole: String
+    )
+
+    data class CanonicalSubjectInput(
+        val schemaVersion: String,
+        val naturalLanguage: CanonicalNaturalLanguageInput,
+        val deviceContext: CanonicalDeviceContextInput,
+        val stateSnapshot: CanonicalStateSnapshotInput,
+        val mixedContext: CanonicalMixedContextInput
+    )
 
     fun localRouteMetadata(posture: String): Map<String, String> = mapOf(
         KEY_NL_SOURCE to SOURCE_ANDROID_LOCAL_INPUT,
@@ -76,4 +117,71 @@ internal object AndroidNlSemanticContract {
         val base = handoffToV2Metadata(posture)
         return if (initiationMetadata != null) base + initiationMetadata.toWireMap() else base
     }
+
+    fun buildCanonicalSubjectInput(
+        text: String,
+        deviceId: String,
+        posture: String,
+        crossDeviceEnabled: Boolean,
+        websocketConnected: Boolean,
+        runtimeSessionId: String?
+    ): CanonicalSubjectInput {
+        val locale = Locale.getDefault().toLanguageTag().ifBlank { "und" }
+        val modalities = listOf("android_natural_language", "android_device_context", "android_state_snapshot")
+        return CanonicalSubjectInput(
+            schemaVersion = "1",
+            naturalLanguage = CanonicalNaturalLanguageInput(
+                text = text,
+                textLength = text.length
+            ),
+            deviceContext = CanonicalDeviceContextInput(
+                deviceId = deviceId,
+                localeTag = locale,
+                sourceRuntimePosture = posture,
+                runtimeSessionId = runtimeSessionId,
+                crossDeviceEnabled = crossDeviceEnabled
+            ),
+            stateSnapshot = CanonicalStateSnapshotInput(
+                websocketConnected = websocketConnected,
+                runtimeSessionAttached = !runtimeSessionId.isNullOrBlank()
+            ),
+            mixedContext = CanonicalMixedContextInput(
+                modalities = modalities,
+                participantRole = if (posture == SourceRuntimePosture.JOIN_RUNTIME) {
+                    "distributed_runtime_participant"
+                } else {
+                    "controller_handoff_participant"
+                }
+            )
+        )
+    }
+
+    fun deriveRequestPackagingStrategy(posture: String): RequestPackagingStrategy =
+        if (posture == SourceRuntimePosture.JOIN_RUNTIME) {
+            RequestPackagingStrategy.STATEFUL_PARTICIPANT_FUSION
+        } else {
+            RequestPackagingStrategy.CONTROLLED_HANDOFF_BASELINE
+        }
+
+    fun deriveConversationSessionId(taskId: String, strategy: RequestPackagingStrategy): String =
+        when (strategy) {
+            RequestPackagingStrategy.STATEFUL_PARTICIPANT_FUSION -> "android-participant-$taskId"
+            RequestPackagingStrategy.CONTROLLED_HANDOFF_BASELINE -> "android-control-$taskId"
+        }
+
+    fun idempotencyKeyPrefix(strategy: RequestPackagingStrategy): String =
+        when (strategy) {
+            RequestPackagingStrategy.STATEFUL_PARTICIPANT_FUSION -> "participant-fusion"
+            RequestPackagingStrategy.CONTROLLED_HANDOFF_BASELINE -> "controlled-handoff"
+        }
+
+    fun canonicalSubjectInputMetadata(
+        subjectInputJson: String,
+        strategy: RequestPackagingStrategy,
+        modalities: List<String>
+    ): Map<String, String> = mapOf(
+        KEY_CANONICAL_SUBJECT_INPUT to subjectInputJson,
+        KEY_REQUEST_PACKAGING_STRATEGY to strategy.wireValue,
+        KEY_CANONICAL_INPUT_MODALITIES to modalities.joinToString(separator = ",")
+    )
 }
