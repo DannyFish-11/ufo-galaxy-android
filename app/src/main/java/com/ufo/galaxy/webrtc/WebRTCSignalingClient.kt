@@ -3,6 +3,7 @@ package com.ufo.galaxy.webrtc
 import android.util.Log
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.TraceContext
+import com.ufo.galaxy.runtime.AndroidCanonicalContinuousIngressBackbone
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -72,6 +73,7 @@ class WebRTCSignalingClient(
     private val candidateManager: IceCandidateManager = IceCandidateManager(traceId),
     private val deviceId: String = "",
     private val routeMode: String = "",
+    private val continuousIngressRecorder: (AndroidCanonicalContinuousIngressBackbone.ContinuousIngressSignal) -> Unit = {},
     private val onMessage: (SignalingMessage) -> Unit = {},
     private val onConnected: () -> Unit = {},
     private val onDisconnected: () -> Unit = {},
@@ -190,6 +192,9 @@ class WebRTCSignalingClient(
      * Error messages trigger [onError].
      */
     private fun handleMessage(message: SignalingMessage) {
+        AndroidCanonicalContinuousIngressBackbone.fromWebRtcSignaling(message)?.let {
+            continuousIngressRecorder(it)
+        }
         when (message.type) {
             SignalingMessage.TYPE_ICE_CANDIDATE -> {
                 // Legacy single-candidate path – backward compatible.

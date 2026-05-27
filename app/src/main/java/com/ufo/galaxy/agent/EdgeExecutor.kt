@@ -13,6 +13,7 @@ import com.ufo.galaxy.protocol.Snapshot
 import com.ufo.galaxy.protocol.StepResult
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskResultPayload
+import com.ufo.galaxy.runtime.AndroidCanonicalContinuousIngressBackbone
 import com.ufo.galaxy.runtime.DevicePerceptionEmissionSink
 import java.util.Base64
 
@@ -52,7 +53,8 @@ class EdgeExecutor(
     private val accessibilityExecutor: AccessibilityExecutor,
     private val imageScaler: ImageScaler = NoOpImageScaler(),
     private val scaledMaxEdge: Int = 720,
-    private var perceptionEmissionSink: DevicePerceptionEmissionSink? = null
+    private var perceptionEmissionSink: DevicePerceptionEmissionSink? = null,
+    private val continuousIngressProvider: (() -> AndroidCanonicalContinuousIngressBackbone.Snapshot)? = null
 ) {
 
     /**
@@ -179,10 +181,19 @@ class EdgeExecutor(
             )
         )
 
+        val planningBehavior = continuousIngressProvider
+            ?.invoke()
+            ?.mainlineBehavior()
+            ?: AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.ONE_SHOT_PREPARATION
+        val planningConstraints = applyContinuousIngressPlanningConstraints(
+            constraints = taskAssign.constraints,
+            behavior = planningBehavior
+        )
+
         // Initial planning uses the full-resolution screenshot for best context.
         val planResult = plannerService.plan(
             goal = taskAssign.goal,
-            constraints = taskAssign.constraints,
+            constraints = planningConstraints,
             screenshotBase64 = initialBase64
         )
         if (planResult.error != null || planResult.steps.isEmpty()) {
@@ -482,6 +493,30 @@ class EdgeExecutor(
             perceptionEmissionSink?.onEmission(payload)
         } catch (_: Exception) {
         }
+    }
+
+    private fun applyContinuousIngressPlanningConstraints(
+        constraints: List<String>,
+        behavior: AndroidCanonicalContinuousIngressBackbone.MainlineBehavior
+    ): List<String> {
+        val appended = constraints.toMutableList()
+        when (behavior) {
+            AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.ONE_SHOT_PREPARATION -> Unit
+            AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.CONTINUOUS_CONTEXT_PREPARATION -> {
+                if (!appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY)) {
+                    appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY
+                }
+            }
+            AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.STREAM_FUSED_CONTINUOUS_PREPARATION -> {
+                if (!appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY)) {
+                    appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY
+                }
+                if (!appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_STREAM_FUSION_READY)) {
+                    appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_STREAM_FUSION_READY
+                }
+            }
+        }
+        return appended
     }
 
     private fun buildResult(
