@@ -108,7 +108,7 @@ object AndroidCanonicalContinuousIngressBackbone {
             SignalingMessage.TYPE_OFFER,
             SignalingMessage.TYPE_ANSWER -> true
             SignalingMessage.TYPE_ICE_CANDIDATE,
-            SignalingMessage.TYPE_ICE_CANDIDATES -> message.hasAnyCandidates
+            SignalingMessage.TYPE_ICE_CANDIDATES -> message.allCandidates.isNotEmpty()
             else -> false
         }
         if (!planningRelevant) return null
@@ -124,8 +124,16 @@ object AndroidCanonicalContinuousIngressBackbone {
 }
 
 class AndroidCanonicalContinuousIngressSessionManager(
-    private val maxSignals: Int = 32
+    private val maxSignals: Int = DEFAULT_MAX_SIGNALS
 ) {
+    companion object {
+        /**
+         * Keep only a small, recent ingress window so planning preparation can reflect
+         * current stream posture without retaining long-lived historical noise.
+         */
+        const val DEFAULT_MAX_SIGNALS: Int = 32
+    }
+
     private val lock = Any()
     private val signals = ArrayDeque<AndroidCanonicalContinuousIngressBackbone.ContinuousIngressSignal>()
 
@@ -153,7 +161,7 @@ class AndroidCanonicalContinuousIngressSessionManager(
             AndroidCanonicalContinuousIngressBackbone.assemble(signals.toList())
         }
 
-    fun clearForTest() {
+    internal fun clearForTest() {
         synchronized(lock) {
             signals.clear()
         }

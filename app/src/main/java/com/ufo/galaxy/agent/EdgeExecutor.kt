@@ -181,9 +181,8 @@ class EdgeExecutor(
             )
         )
 
-        val planningBehavior = continuousIngressProvider
-            ?.invoke()
-            ?.mainlineBehavior()
+        val ingressSnapshot = continuousIngressProvider?.invoke()
+        val planningBehavior = ingressSnapshot?.mainlineBehavior()
             ?: AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.ONE_SHOT_PREPARATION
         val planningConstraints = applyContinuousIngressPlanningConstraints(
             constraints = taskAssign.constraints,
@@ -499,24 +498,21 @@ class EdgeExecutor(
         constraints: List<String>,
         behavior: AndroidCanonicalContinuousIngressBackbone.MainlineBehavior
     ): List<String> {
-        val appended = constraints.toMutableList()
-        when (behavior) {
-            AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.ONE_SHOT_PREPARATION -> Unit
-            AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.CONTINUOUS_CONTEXT_PREPARATION -> {
-                if (!appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY)) {
-                    appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY
-                }
-            }
-            AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.STREAM_FUSED_CONTINUOUS_PREPARATION -> {
-                if (!appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY)) {
-                    appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY
-                }
-                if (!appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_STREAM_FUSION_READY)) {
-                    appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_STREAM_FUSION_READY
-                }
-            }
+        val appended = LinkedHashSet(constraints)
+        val requiresContinuousContext =
+            behavior == AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.CONTINUOUS_CONTEXT_PREPARATION ||
+                behavior == AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.STREAM_FUSED_CONTINUOUS_PREPARATION
+        if (requiresContinuousContext &&
+            !appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY)
+        ) {
+            appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_CONTINUOUS_INGRESS_CONTEXT_READY
         }
-        return appended
+        if (behavior == AndroidCanonicalContinuousIngressBackbone.MainlineBehavior.STREAM_FUSED_CONTINUOUS_PREPARATION &&
+            !appended.contains(AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_STREAM_FUSION_READY)
+        ) {
+            appended += AndroidCanonicalContinuousIngressBackbone.CONSTRAINT_STREAM_FUSION_READY
+        }
+        return appended.toList()
     }
 
     private fun buildResult(

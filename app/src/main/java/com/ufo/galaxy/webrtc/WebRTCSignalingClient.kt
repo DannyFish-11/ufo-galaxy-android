@@ -73,7 +73,7 @@ class WebRTCSignalingClient(
     private val candidateManager: IceCandidateManager = IceCandidateManager(traceId),
     private val deviceId: String = "",
     private val routeMode: String = "",
-    private val continuousIngressRecorder: (AndroidCanonicalContinuousIngressBackbone.ContinuousIngressSignal) -> Unit = {},
+    private val onIngressSignal: (AndroidCanonicalContinuousIngressBackbone.ContinuousIngressSignal) -> Unit = {},
     private val onMessage: (SignalingMessage) -> Unit = {},
     private val onConnected: () -> Unit = {},
     private val onDisconnected: () -> Unit = {},
@@ -193,7 +193,7 @@ class WebRTCSignalingClient(
      */
     private fun handleMessage(message: SignalingMessage) {
         AndroidCanonicalContinuousIngressBackbone.fromWebRtcSignaling(message)?.let {
-            continuousIngressRecorder(it)
+            onIngressSignal(it)
         }
         when (message.type) {
             SignalingMessage.TYPE_ICE_CANDIDATE -> {
