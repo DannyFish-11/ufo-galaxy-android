@@ -282,6 +282,8 @@ class AgentRuntimeBridgeTest {
         assertEquals("open WeChat", obj.getString("goal"))
         assertEquals("task_execution", obj.getString("capability"))
         assertEquals("session-001", obj.getString("session_id"))
+        assertTrue("canonical cognition input must be present", obj.has("canonical_android_cognition_input"))
+        assertTrue("execution planning profile must be present", obj.has("execution_planning_profile"))
         assertTrue("context field must be present", obj.has("context"))
         assertTrue("constraints field must be present", obj.has("constraints"))
     }
@@ -302,6 +304,53 @@ class AgentRuntimeBridgeTest {
         assertFalse("session_id must be absent when null", obj.has("session_id"))
         assertFalse("context must be absent when empty", obj.has("context"))
         assertFalse("constraints must be absent when empty", obj.has("constraints"))
+        assertEquals("direct_execution", obj.getString("orchestration_stage"))
+    }
+
+    @Test
+    fun `buildBridgeJson derives confirmation-first planning from unified cognition inputs`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-confirm",
+            taskId = "task-confirm",
+            goal = "Delete old backups",
+            constraints = listOf("require approval before deletion")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+        val planningProfile = obj.getJSONObject("execution_planning_profile")
+
+        assertEquals("confirmation_first", planningProfile.getString("planning_mode"))
+        assertTrue(planningProfile.getBoolean("requires_confirmation"))
+        assertEquals("task_confirmation", obj.getString("dispatch_intent"))
+        assertEquals("confirmation_first", obj.getString("orchestration_stage"))
+    }
+
+    @Test
+    fun `buildBridgeJson derives recovery-resume planning when resumable recovery context exists`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-recovery",
+            taskId = "task-recovery",
+            goal = "Continue task",
+            isResumable = true,
+            interruptionReason = "network_disconnect",
+            recoveryContext = mapOf("resume_from" to "step_3")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+        val planningProfile = obj.getJSONObject("execution_planning_profile")
+        val cognition = obj.getJSONObject("canonical_android_cognition_input")
+
+        assertEquals("recovery_resume", planningProfile.getString("planning_mode"))
+        assertTrue(planningProfile.getBoolean("has_recovery_signal"))
+        assertEquals("task_resume", obj.getString("dispatch_intent"))
+        assertTrue(
+            cognition
+                .getJSONObject("device_context_input")
+                .getJSONObject("merged_context")
+                .getBoolean("is_resumable")
+        )
     }
 
     @Test

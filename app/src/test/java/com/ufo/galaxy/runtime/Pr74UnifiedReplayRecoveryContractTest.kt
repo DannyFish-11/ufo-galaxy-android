@@ -281,7 +281,8 @@ class Pr74UnifiedReplayRecoveryContractTest {
     fun `matching sessionTag produces SAME_SESSION_REPLAY_ALLOWED`() {
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "goal_execution_result",
-            json = "{}",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
             sessionTag = "session-A"
         )
         val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
@@ -321,6 +322,21 @@ class Pr74UnifiedReplayRecoveryContractTest {
         )
         assertEquals(
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.NO_CURRENT_AUTHORITY_BLOCKED,
+            decision
+        )
+        assertFalse(decision.isReplayAllowed)
+    }
+
+    @Test
+    fun `ownership unspecified authority-sensitive replay is blocked even with matched session tag`() {
+        val msg = OfflineTaskQueue.QueuedMessage(
+            type = "goal_execution_result",
+            json = """{"type":"goal_execution_result","payload":{"task_id":"t-1"}}""",
+            sessionTag = "session-A"
+        )
+        val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
+        assertEquals(
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED,
             decision
         )
         assertFalse(decision.isReplayAllowed)

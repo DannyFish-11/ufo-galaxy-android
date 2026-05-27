@@ -425,6 +425,11 @@ class AgentRuntimeBridge(
      */
     internal fun buildBridgeJson(request: HandoffRequest): String {
         val env = request.toEnvelopeV2()
+        val canonicalCognitionInput = buildCanonicalAndroidCognitionInput(request = request, envelope = env)
+        val planningProfile = deriveExecutionPlanningProfile(
+            cognitionInput = canonicalCognitionInput,
+            envelope = env
+        )
         return JSONObject().apply {
             put("type", MSG_TYPE_BRIDGE_HANDOFF)
             put("trace_id", env.trace_id)
@@ -432,6 +437,14 @@ class AgentRuntimeBridge(
             put("exec_mode", env.exec_mode)
             put("route_mode", env.route_mode)
             put("goal", env.goal)
+            put(
+                "canonical_android_cognition_input",
+                JSONObject(canonicalCognitionInput.toWireMap())
+            )
+            put(
+                "execution_planning_profile",
+                JSONObject(planningProfile.toWireMap())
+            )
             if (!env.capability.isNullOrBlank()) put("capability", env.capability)
             if (!env.session_id.isNullOrBlank()) put("session_id", env.session_id)
             if (!env.runtime_session_id.isNullOrBlank()) put("runtime_session_id", env.runtime_session_id)
@@ -444,9 +457,16 @@ class AgentRuntimeBridge(
                 put("constraints", arr)
             }
             // ── PR-D: V2 source dispatch metadata (omitted when null/empty) ──────────
-            if (!env.dispatch_intent.isNullOrBlank()) put("dispatch_intent", env.dispatch_intent)
+            val effectiveDispatchIntent = resolveDispatchIntent(
+                explicitDispatchIntent = env.dispatch_intent,
+                planningMode = planningProfile.planningMode
+            )
+            if (!effectiveDispatchIntent.isNullOrBlank()) put("dispatch_intent", effectiveDispatchIntent)
             if (!env.dispatch_origin.isNullOrBlank()) put("dispatch_origin", env.dispatch_origin)
-            if (!env.orchestration_stage.isNullOrBlank()) put("orchestration_stage", env.orchestration_stage)
+            put(
+                "orchestration_stage",
+                env.orchestration_stage ?: planningProfile.planningMode
+            )
             if (env.execution_context.isNotEmpty()) put("execution_context", JSONObject(env.execution_context as Map<*, *>))
             // ── PR-E: V2 explicit executor target typing (omitted when null) ──────────
             if (!env.executor_target_type.isNullOrBlank()) put("executor_target_type", env.executor_target_type)
@@ -456,6 +476,135 @@ class AgentRuntimeBridge(
             if (env.is_resumable != null) put("is_resumable", env.is_resumable)
             if (!env.interruption_reason.isNullOrBlank()) put("interruption_reason", env.interruption_reason)
         }.toString()
+    }
+
+    private data class CanonicalAndroidCognitionInput(
+        val naturalLanguageInput: NaturalLanguageInputFamily,
+        val deviceContextInput: DeviceContextInputFamily,
+        val runtimeStateInput: RuntimeStateInputFamily
+    ) {
+        fun toWireMap(): Map<String, Any> = mapOf(
+            "natural_language_input" to naturalLanguageInput.toWireMap(),
+            "device_context_input" to deviceContextInput.toWireMap(),
+            "runtime_state_input" to runtimeStateInput.toWireMap()
+        )
+    }
+
+    private data class NaturalLanguageInputFamily(
+        val goal: String,
+        val constraints: List<String>
+    ) {
+        fun toWireMap(): Map<String, Any> = mapOf(
+            "goal" to goal,
+            "constraints" to constraints
+        )
+    }
+
+    private data class DeviceContextInputFamily(
+        val sourceRuntimePosture: String?,
+        val mergedContext: Map<String, String>
+    ) {
+        fun toWireMap(): Map<String, Any> = buildMap {
+            sourceRuntimePosture?.let { put("source_runtime_posture", it) }
+            put("merged_context", mergedContext)
+            put("merged_context_keys", mergedContext.keys.toList())
+        }
+    }
+
+    private data class RuntimeStateInputFamily(
+        val routeMode: String,
+        val execMode: String,
+        val sessionId: String?,
+        val runtimeSessionId: String?
+    ) {
+        fun toWireMap(): Map<String, Any> = buildMap {
+            put("route_mode", routeMode)
+            put("exec_mode", execMode)
+            sessionId?.let { put("session_id", it) }
+            runtimeSessionId?.let { put("runtime_session_id", it) }
+        }
+    }
+
+    private data class ExecutionPlanningProfile(
+        val planningMode: String,
+        val requiresConfirmation: Boolean,
+        val hasRecoverySignal: Boolean
+    ) {
+        fun toWireMap(): Map<String, Any> = mapOf(
+            "planning_mode" to planningMode,
+            "requires_confirmation" to requiresConfirmation,
+            "has_recovery_signal" to hasRecoverySignal
+        )
+    }
+
+    private fun buildCanonicalAndroidCognitionInput(
+        request: HandoffRequest,
+        envelope: HandoffEnvelopeV2
+    ): CanonicalAndroidCognitionInput {
+        val mergedContext = linkedMapOf<String, String>().apply {
+            putAll(envelope.context)
+            putAll(envelope.execution_context)
+            if (envelope.is_resumable != null) {
+                put("is_resumable", envelope.is_resumable.toString())
+            }
+            envelope.interruption_reason?.takeIf { it.isNotBlank() }?.let {
+                put("interruption_reason", it)
+            }
+        }
+        return CanonicalAndroidCognitionInput(
+            naturalLanguageInput = NaturalLanguageInputFamily(
+                goal = request.goal,
+                constraints = request.constraints.filter { it.isNotBlank() }
+            ),
+            deviceContextInput = DeviceContextInputFamily(
+                sourceRuntimePosture = envelope.source_runtime_posture,
+                mergedContext = mergedContext
+            ),
+            runtimeStateInput = RuntimeStateInputFamily(
+                routeMode = request.routeMode,
+                execMode = request.execMode,
+                sessionId = envelope.session_id,
+                runtimeSessionId = envelope.runtime_session_id
+            )
+        )
+    }
+
+    private fun deriveExecutionPlanningProfile(
+        cognitionInput: CanonicalAndroidCognitionInput,
+        envelope: HandoffEnvelopeV2
+    ): ExecutionPlanningProfile {
+        val lowerConstraints = cognitionInput.naturalLanguageInput.constraints.map { it.lowercase() }
+        val requiresConfirmationFromConstraints = lowerConstraints.any {
+            it.contains("confirm") || it.contains("approval") || it.contains("sensitive")
+        }
+        val requiresConfirmationFromContext = cognitionInput
+            .deviceContextInput
+            .mergedContext["requires_user_confirmation"]
+            ?.equals("true", ignoreCase = true) == true
+        val hasRecoverySignal = envelope.is_resumable == true ||
+            !envelope.interruption_reason.isNullOrBlank() ||
+            envelope.recovery_context.isNotEmpty()
+        val planningMode = when {
+            requiresConfirmationFromConstraints || requiresConfirmationFromContext ->
+                "confirmation_first"
+            hasRecoverySignal -> "recovery_resume"
+            lowerConstraints.isNotEmpty() -> "constraint_guided"
+            else -> "direct_execution"
+        }
+        return ExecutionPlanningProfile(
+            planningMode = planningMode,
+            requiresConfirmation = requiresConfirmationFromConstraints || requiresConfirmationFromContext,
+            hasRecoverySignal = hasRecoverySignal
+        )
+    }
+
+    private fun resolveDispatchIntent(
+        explicitDispatchIntent: String?,
+        planningMode: String
+    ): String? = explicitDispatchIntent ?: when (planningMode) {
+        "confirmation_first" -> "task_confirmation"
+        "recovery_resume" -> "task_resume"
+        else -> null
     }
 
     /** Returns an [HandoffResult] that indicates local execution should be used. */

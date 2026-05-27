@@ -269,6 +269,14 @@ class OfflineTaskQueue(
                 shouldForward = false,
                 reason = "rejected_non_canonical_divergence"
             )
+            UnifiedReplayRecoveryContract.MessageAuthorityDecision.OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED ->
+            ReplayGovernanceDecision(
+                message = message,
+                disposition = AndroidContinuityIntegration.ContinuityDisposition.ATTACHMENT_ONLY_RECOVERY,
+                action = AndroidContinuityIntegration.ContinuityGovernanceAction.REQUIRE_V2_REVALIDATION,
+                shouldForward = false,
+                reason = "ownership_unspecified_not_canonical_replay_eligible"
+            )
             UnifiedReplayRecoveryContract.MessageAuthorityDecision.STALE_SESSION_BLOCKED ->
             ReplayGovernanceDecision(
                 message = message,

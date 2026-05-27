@@ -111,10 +111,12 @@ data class UnifiedResultPresentation(
                     val blocker = lifecycle.getAsJsonObject("blocker")
                     val confirmation = lifecycle.getAsJsonObject("confirmation")
                     val execution = lifecycle.getAsJsonObject("execution")
+                    val recovery = lifecycle.getAsJsonObject("recovery")
                     val blockerReason = stringField(blocker, "reason")
                     val isBlocked = booleanField(blocker, "is_blocked")
                     val confirmationNeeded = booleanField(confirmation, "confirmation_needed")
                     val progressDetail = stringField(execution, "progress_detail")
+                    val recoveryPhase = stringField(recovery, "phase")
                     val summaryFromPayload = firstNonBlank(
                         stringField(root, "result_summary"),
                         stringField(firstLevelPayload, "result_summary"),
@@ -135,8 +137,18 @@ data class UnifiedResultPresentation(
                         "failed" -> summaryFromPayload ?: "任务执行失败"
                         "cancelled" -> "任务已取消"
                         "reconciliation_snapshot" -> "任务状态已同步"
+                        "recovery_replaying" -> "恢复中：正在重放会话状态"
+                        "recovery_recovered" -> "恢复完成，任务状态已同步"
+                        "recovery_failed" -> "恢复失败，等待重新同步"
+                        "recovery_reconciliation_pending" -> "恢复完成，等待主链对齐"
                         "participant_state" -> "运行时状态已更新"
-                        else -> summaryFromPayload ?: "任务状态已更新"
+                        else -> when (recoveryPhase) {
+                            "recovering" -> "恢复中：正在重放会话状态"
+                            "recovered-inflight", "resumed-cleanly" -> "恢复完成，任务状态已同步"
+                            "recovery-failed" -> "恢复失败，等待重新同步"
+                            "requires-reconciliation" -> "恢复完成，等待主链对齐"
+                            else -> summaryFromPayload ?: "任务状态已更新"
+                        }
                     }
                     val suffixes = buildList {
                         if (isBlocked && !blockerReason.isNullOrBlank()) {
@@ -151,7 +163,9 @@ data class UnifiedResultPresentation(
                     } else {
                         "$baseSummary（${suffixes.joinToString("，")}）"
                     }
-                    val isSuccess = stage == "result_emitted" && !isBlocked && !confirmationNeeded
+                    val isSuccess = (stage == "result_emitted" || stage == "recovery_recovered") &&
+                        !isBlocked &&
+                        !confirmationNeeded
                     return UnifiedResultPresentation(
                         summary = summary,
                         isSuccess = isSuccess,
