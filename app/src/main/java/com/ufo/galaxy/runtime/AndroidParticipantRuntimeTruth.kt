@@ -81,6 +81,10 @@ package com.ufo.galaxy.runtime
  * @property inflightContinuityTaskId Task identifier referenced by [inflightContinuityState], when any.
  * @property inflightContinuityObservedAtMs Timestamp when Android produced the local continuity classification.
  * @property taskAllocationTruth    Android-local authoritative task allocation truth snapshot.
+ * @property carrierForegroundVisible Real Android foreground-engagement signal used to project
+ *                                   manifest vs liminal presence participation.
+ * @property interactionSurfaceReady Real Android interaction/handoff readiness signal derived
+ *                                   from overlay + accessibility capability availability.
  * @property reportedAtMs            Epoch-millisecond timestamp when this snapshot was created.
  * @property reconciliationEpoch     Monotonically increasing snapshot epoch for V2 staleness detection.
  */
@@ -104,6 +108,8 @@ data class AndroidParticipantRuntimeTruth(
     val inflightContinuitySource: String? = null,
     val inflightContinuityObservedAtMs: Long? = null,
     val taskAllocationTruth: AndroidTaskAllocationTruthSnapshot? = null,
+    val carrierForegroundVisible: Boolean? = null,
+    val interactionSurfaceReady: Boolean? = null,
     val authoritativeParticipationState: String = defaultAuthoritativeParticipationState(
         sourceRuntimePosture = sourceRuntimePosture,
         sessionState = sessionState,
@@ -245,6 +251,17 @@ data class AndroidParticipantRuntimeTruth(
     val runtimeParticipationTopology: AndroidRuntimeParticipationTopology
         get() = AndroidRuntimeParticipationTopology.from(this)
 
+    val presenceParticipationProjection: AndroidPresenceParticipationProjection
+        get() = AndroidPresenceParticipationProjection.from(
+            manifestationParticipationState = runtimeNodeIdentity?.manifestationParticipationState
+                ?: deriveManifestationParticipationState(),
+            executionParticipationState = runtimeNodeIdentity?.executionParticipationState
+                ?: deriveExecutionParticipationState(),
+            collaborationParticipationState = runtimeNodeIdentity?.collaborationParticipationState
+                ?: deriveCollaborationParticipationState(),
+            interactionSurfaceReady = interactionSurfaceReady == true
+        )
+
     // ── Wire serialization ────────────────────────────────────────────────────
 
     /**
@@ -277,6 +294,9 @@ data class AndroidParticipantRuntimeTruth(
         inflightContinuitySource?.let { put(KEY_INFLIGHT_CONTINUITY_SOURCE, it) }
         inflightContinuityObservedAtMs?.let { put(KEY_INFLIGHT_CONTINUITY_OBSERVED_AT_MS, it) }
         taskAllocationTruth?.let { put(KEY_TASK_ALLOCATION_TRUTH, it.toMap()) }
+        carrierForegroundVisible?.let { put(KEY_CARRIER_FOREGROUND_VISIBLE, it) }
+        interactionSurfaceReady?.let { put(KEY_INTERACTION_SURFACE_READY, it) }
+        put(KEY_PRESENCE_PARTICIPATION_PROJECTION, presenceParticipationProjection.toMap())
         put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, runtimeParticipationTopology.toMap())
         put(KEY_AUTHORITATIVE_PARTICIPATION_STATE, authoritativeParticipationState)
         authoritativeParticipationTransitionSequence?.let {
@@ -383,6 +403,9 @@ data class AndroidParticipantRuntimeTruth(
 
         /** Wire key for [taskAllocationTruth]; absent when null. */
         const val KEY_TASK_ALLOCATION_TRUTH = "task_allocation_truth"
+        const val KEY_CARRIER_FOREGROUND_VISIBLE = "carrier_foreground_visible"
+        const val KEY_INTERACTION_SURFACE_READY = "interaction_surface_ready"
+        const val KEY_PRESENCE_PARTICIPATION_PROJECTION = "presence_participation_projection"
         const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY = "runtime_participation_topology"
 
         /** Wire key for [authoritativeParticipationState]. */
@@ -459,6 +482,7 @@ data class AndroidParticipantRuntimeTruth(
             inflightContinuityObservedAtMs: Long? = null,
             taskAllocationTruth: AndroidTaskAllocationTruthSnapshot? = null,
             carrierForegroundVisible: Boolean? = null,
+            interactionSurfaceReady: Boolean? = null,
             authoritativeParticipationState: String? = null,
             authoritativeParticipationTransitionSequence: Long? = null,
             authoritativeParticipationTransitionTrigger: String? = null,
@@ -513,6 +537,8 @@ data class AndroidParticipantRuntimeTruth(
                 inflightContinuitySource = inflightContinuitySource,
                 inflightContinuityObservedAtMs = inflightContinuityObservedAtMs,
                 taskAllocationTruth = taskAllocationTruth,
+                carrierForegroundVisible = carrierForegroundVisible,
+                interactionSurfaceReady = interactionSurfaceReady,
                 authoritativeParticipationState = derivedParticipationState,
                 runtimeNodeIdentity = AndroidRuntimeNodeIdentity.from(
                     descriptor = descriptor,
@@ -545,6 +571,45 @@ data class AndroidParticipantRuntimeTruth(
             return snapshot
         }
 
+    }
+}
+
+private fun AndroidParticipantRuntimeTruth.deriveManifestationParticipationState():
+    RuntimeNodeManifestationParticipationState =
+    when {
+        sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME ->
+            RuntimeNodeManifestationParticipationState.CONTROL_ONLY
+        carrierForegroundVisible == true ->
+            RuntimeNodeManifestationParticipationState.INTERACTIVE_FOREGROUND
+        else ->
+            RuntimeNodeManifestationParticipationState.BACKGROUND_CARRIER
+    }
+
+private fun AndroidParticipantRuntimeTruth.deriveExecutionParticipationState(): RuntimeNodeExecutionParticipationState {
+    if (participationState != RuntimeHostDescriptor.HostParticipationState.ACTIVE ||
+        sessionState != AttachedRuntimeSession.State.ATTACHED
+    ) {
+        return RuntimeNodeExecutionParticipationState.BLOCKED
+    }
+    return if (healthState == ParticipantHealthState.HEALTHY &&
+        readinessState == ParticipantReadinessState.READY
+    ) {
+        RuntimeNodeExecutionParticipationState.ELIGIBLE
+    } else {
+        RuntimeNodeExecutionParticipationState.DEGRADED
+    }
+}
+
+private fun AndroidParticipantRuntimeTruth.deriveCollaborationParticipationState(): RuntimeNodeCollaborationParticipationState {
+    if (participationState == RuntimeHostDescriptor.HostParticipationState.INACTIVE ||
+        sessionState == null
+    ) {
+        return RuntimeNodeCollaborationParticipationState.INACTIVE
+    }
+    return if (coordinationRole == ParticipantCoordinationRole.COORDINATOR) {
+        RuntimeNodeCollaborationParticipationState.COORDINATING
+    } else {
+        RuntimeNodeCollaborationParticipationState.PARTICIPATING
     }
 }
 
