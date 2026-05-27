@@ -2896,6 +2896,37 @@ object StabilizationBaseline {
                 "regression anchors. " +
                 "Test: Pr128AndroidDualRepoHiddenVisibleBoundaryContractTest.",
             introducedPr = 128
+        ),
+
+        // ── PR-129: Android subject-facing foreground contract ─────────────────
+
+        BaselineSurfaceEntry(
+            surfaceId = "android-subject-facing-foreground-contract",
+            displayName = "AndroidSubjectFacingForegroundContract",
+            packagePath = "com.ufo.galaxy.runtime.AndroidSubjectFacingForegroundContract",
+            stability = SurfaceStability.CANONICAL_STABLE,
+            extensionGuidance = ExtensionGuidance.EXTEND,
+            rationale =
+                "PR-129 — Android subject-facing foreground contract. " +
+                "Advances the Android default foreground path from control-plane / " +
+                "scattered-response organisation to subject-facing foreground: " +
+                "SubjectFacingForegroundCard becomes the primary foreground object " +
+                "organised around ActionPhase, PresenceMode, BlockerState, " +
+                "ConfirmationState, and ResultState — not a flat text payload. " +
+                "ForegroundPrimaryObject declares which subject dimension drives the foreground " +
+                "(priority: BLOCKER > CONFIRMATION > ACTION_PHASE > RESULT > PRESENCE_ONLY). " +
+                "Control-plane/operator stages (reconciliation_snapshot, participant_state, " +
+                "recovery_replaying, recovery_reconciliation_pending) are demoted to " +
+                "CONTROL_PLANE_DEMOTED and do not become a subject-facing primary dimension. " +
+                "UnifiedResultPresentation.fromServerMessage now builds a subjectFacingCard " +
+                "from fromUnifiedLifecycleSurface() when a unified_action_lifecycle_surface " +
+                "is present; the card is the new primary foreground object and replaces " +
+                "scattered text suffixes as the foreground backbone. " +
+                "SUBJECT_FOREGROUND_INVARIANTS (10 entries) provide machine-verifiable anchors. " +
+                "V2_SUBJECT_FOREGROUND_ALIGNMENT_MAP maps each ForegroundPrimaryObject to the " +
+                "V2-side foreground handling path. " +
+                "Test: Pr129AndroidSubjectFacingForegroundContractTest.",
+            introducedPr = 129
         )
     )
 

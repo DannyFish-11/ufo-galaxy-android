@@ -4,10 +4,11 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.ufo.galaxy.local.LocalLoopResult
+import com.ufo.galaxy.runtime.AndroidSubjectFacingForegroundContract
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 
 /**
- * PR-26: Unified result presentation for all Android execution paths.
+ * PR-26 / PR-129: Unified result presentation for all Android execution paths.
  *
  * Normalizes the user-facing result summary across local execution, cross-device
  * execution, delegated execution, and fallback paths so that presentation consumers
@@ -19,12 +20,32 @@ import com.ufo.galaxy.runtime.TakeoverFallbackEvent
  * [LocalLoopResult.status] strings or [TakeoverFallbackEvent.cause] values to build its
  * own summary; all formatting logic lives here.
  *
+ * ## PR-129: Subject-facing foreground card (default foreground path advancement)
+ *
+ * When a `unified_action_lifecycle_surface` is present in a server message,
+ * [fromServerMessage] now produces a [subjectFacingCard] — an
+ * [AndroidSubjectFacingForegroundContract.SubjectFacingForegroundCard] that organises the
+ * foreground around subject dimensions (action phase, blocker, confirmation, result,
+ * presence) rather than scattered text suffixes.
+ *
+ * The [subjectFacingCard] is the **primary foreground object** for the server-message /
+ * cross-device path; the [summary] field is retained for backward-compatible display but
+ * is no longer the organisational backbone of the foreground composition.
+ *
+ * Control-plane / operator-heavy stages (reconciliation_snapshot, participant_state,
+ * recovery_replaying, recovery_reconciliation_pending) are demoted from the primary
+ * foreground dimension: the [subjectFacingCard] flags them as
+ * [AndroidSubjectFacingForegroundContract.ForegroundPrimaryObject.CONTROL_PLANE_DEMOTED].
+ *
  * @property summary   Human-readable summary suitable for display in the chat message list
  *                     or floating-window status label.  Does **not** mention which internal
  *                     execution path produced the result.
  * @property isSuccess True when the result represents a successful outcome.
  * @property outcome   Wire-level outcome string used for diagnostics and task-ledger entries
  *                     (e.g. [LocalLoopResult.STATUS_SUCCESS], [TakeoverFallbackEvent.Cause.wireValue]).
+ * @property subjectFacingCard Primary subject-facing foreground object, present for
+ *                     server-message paths that carry a unified_action_lifecycle_surface.
+ *                     Null for local-only and fallback paths (no lifecycle surface available).
  * @property uiConsumptionClass Declares this payload as UI-visible consumption only.
  * @property authorityBoundaryClass Declares this payload is projection-only, never authority.
  */
@@ -32,6 +53,7 @@ data class UnifiedResultPresentation(
     val summary: String,
     val isSuccess: Boolean,
     val outcome: String,
+    val subjectFacingCard: AndroidSubjectFacingForegroundContract.SubjectFacingForegroundCard? = null,
     val uiConsumptionClass: UiConsumptionClass = UiConsumptionClass.UI_VISIBLE_SUMMARY_DIAGNOSTICS,
     val authorityBoundaryClass: AuthorityBoundaryClass =
         AuthorityBoundaryClass.PROJECTION_ONLY_NOT_AUTHORITY,
@@ -166,10 +188,17 @@ data class UnifiedResultPresentation(
                     val isSuccess = (stage == "result_emitted" || stage == "recovery_recovered") &&
                         !isBlocked &&
                         !confirmationNeeded
+                    // PR-129: Build the subject-facing foreground card from the lifecycle surface.
+                    // This becomes the primary foreground object; the subject's action phase,
+                    // blocker state, and confirmation state are first-class dimensions instead of
+                    // text suffixes appended to a summary string.
+                    val subjectFacingCard = AndroidSubjectFacingForegroundContract
+                        .fromUnifiedLifecycleSurface(lifecycle)
                     return UnifiedResultPresentation(
                         summary = summary,
                         isSuccess = isSuccess,
-                        outcome = stage
+                        outcome = stage,
+                        subjectFacingCard = subjectFacingCard
                     )
                 }
                 val plainSummary = firstNonBlank(
