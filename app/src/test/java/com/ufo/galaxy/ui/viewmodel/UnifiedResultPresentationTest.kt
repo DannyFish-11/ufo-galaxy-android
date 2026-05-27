@@ -226,6 +226,72 @@ class UnifiedResultPresentationTest {
         assertTrue(p.isSuccess)
     }
 
+    @Test
+    fun `server lifecycle executing summary is derived from unified lifecycle surface`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            """
+            {
+              "kind": "task_status_update",
+              "payload": {
+                "unified_action_lifecycle_surface": {
+                  "stage": "executing",
+                  "execution": { "progress_detail": "步骤 2/5" },
+                  "blocker": { "is_blocked": false },
+                  "confirmation": { "confirmation_needed": false }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+        assertEquals("任务执行中：步骤 2/5", p.summary)
+        assertEquals("executing", p.outcome)
+        assertFalse(p.isSuccess)
+    }
+
+    @Test
+    fun `server lifecycle acceptance summary is derived from unified lifecycle surface`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            """
+            {
+              "payload": {
+                "unified_action_lifecycle_surface": {
+                  "stage": "accepted",
+                  "blocker": { "is_blocked": false },
+                  "confirmation": { "confirmation_needed": false }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+        assertEquals("任务已被接受，开始执行", p.summary)
+        assertEquals("accepted", p.outcome)
+    }
+
+    @Test
+    fun `server lifecycle blocker and confirmation are reflected in summary`() {
+        val p = UnifiedResultPresentation.fromServerMessage(
+            """
+            {
+              "payload": {
+                "result_summary": "任务结果已生成",
+                "unified_action_lifecycle_surface": {
+                  "stage": "result_emitted",
+                  "blocker": {
+                    "is_blocked": true,
+                    "reason": "canonical_closure_blocked"
+                  },
+                  "confirmation": { "confirmation_needed": true }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+        assertTrue(p.summary.contains("阻塞：canonical_closure_blocked"))
+        assertTrue(p.summary.contains("等待确认"))
+        assertFalse(p.isSuccess)
+        assertEquals("result_emitted", p.outcome)
+    }
+
     // ── Fallback (TakeoverFallbackEvent) normalization ────────────────────────
 
     @Test

@@ -2270,6 +2270,11 @@ class GalaxyWebSocketClient(
                     Log.i(TAG, "[WS:DOWNLINK] type=operator_action_request action_id=$actionId trace_id=$traceId")
                     listeners.forEach { it.onOperatorAction(actionId, payloadJson, traceId) }
                 }
+                "goal_execution_result", "task_result", "reconciliation_signal" -> {
+                    val payloadObj = json.getAsJsonObject("payload")
+                    val payloadJson = payloadObj?.toString() ?: "{}"
+                    listeners.forEach { it.onMessage(payloadJson) }
+                }
                 "response" -> {
                     val content = json.getAsJsonObject("payload")
                         ?.get("content")?.asString ?: text

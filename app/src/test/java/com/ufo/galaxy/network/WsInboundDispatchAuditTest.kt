@@ -348,6 +348,55 @@ class WsInboundDispatchAuditTest {
         assertEquals(0, captured.unknownMessageCalls)
     }
 
+    @Test
+    fun `goal_execution_result dispatches payload json to onMessage`() {
+        dispatch(
+            """
+            {
+              "type": "goal_execution_result",
+              "payload": {
+                "status": "success",
+                "result_summary": "任务完成",
+                "unified_action_lifecycle_surface": {
+                  "stage": "result_emitted"
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(1, captured.messageCalls)
+        assertTrue(captured.lastMessage!!.contains("\"result_summary\":\"任务完成\""))
+        assertTrue(captured.lastMessage!!.contains("unified_action_lifecycle_surface"))
+        assertEquals(0, captured.unknownMessageCalls)
+        assertEquals(0, captured.advancedMessageCalls)
+    }
+
+    @Test
+    fun `reconciliation_signal dispatches payload json to onMessage`() {
+        dispatch(
+            """
+            {
+              "type": "reconciliation_signal",
+              "payload": {
+                "kind": "task_status_update",
+                "payload": {
+                  "unified_action_lifecycle_surface": {
+                    "stage": "executing"
+                  }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(1, captured.messageCalls)
+        assertTrue(captured.lastMessage!!.contains("\"kind\":\"task_status_update\""))
+        assertTrue(captured.lastMessage!!.contains("unified_action_lifecycle_surface"))
+        assertEquals(0, captured.unknownMessageCalls)
+        assertEquals(0, captured.advancedMessageCalls)
+    }
+
     // ── error type → onError ───────────────────────────────────────────────────
 
     @Test
