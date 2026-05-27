@@ -1502,6 +1502,10 @@ data class ReconciliationSignal(
                     truth.taskAllocationTruth?.let {
                         put(KEY_TASK_ALLOCATION_TRUTH, it.toMap())
                     }
+                    put(
+                        AndroidParticipantRuntimeTruth.KEY_PRESENCE_PARTICIPATION_PROJECTION,
+                        truth.presenceParticipationProjection.toMap()
+                    )
                     put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, truth.runtimeParticipationTopology.toMap())
                     truth.runtimeNodeIdentity?.let {
                         put(KEY_AUTONOMY_RUNTIME_EVIDENCE, it.autonomyEvidence.toMap())
