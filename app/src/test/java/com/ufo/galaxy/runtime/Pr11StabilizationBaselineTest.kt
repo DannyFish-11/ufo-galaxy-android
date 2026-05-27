@@ -114,6 +114,7 @@ import org.junit.Test
  * (Updated by PR-124: CANONICAL_STABLE=147, total=153, EXTEND=147.)
  * (Updated by PR-125: CANONICAL_STABLE=148, total=154, EXTEND=148.)
  * (Updated by PR-128: CANONICAL_STABLE=149, total=155, EXTEND=149.)
+ * (Updated by PR-129: CANONICAL_STABLE=150, total=156, EXTEND=150.)
  *
  * ### StabilizationBaseline — data integrity
  *  - all entries have non-blank surfaceId
@@ -466,11 +467,28 @@ class Pr11StabilizationBaselineTest {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // 11c. PR-129 subject-facing foreground contract surface
+    // ══════════════════════════════════════════════════════════════════════════
+
+    @Test fun `android-subject-facing-foreground-contract is registered and CANONICAL_STABLE with EXTEND guidance`() {
+        val e = StabilizationBaseline.forId("android-subject-facing-foreground-contract")
+        assertNotNull(e)
+        assertEquals(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE, e!!.stability)
+        assertEquals(StabilizationBaseline.ExtensionGuidance.EXTEND, e.extensionGuidance)
+    }
+
+    @Test fun `android-subject-facing-foreground-contract was introduced in PR-129`() {
+        val e = StabilizationBaseline.forId("android-subject-facing-foreground-contract")
+        assertNotNull(e)
+        assertEquals(129, e!!.introducedPr)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // 12. Tier and guidance counts
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `CANONICAL_STABLE count is 149`() {
-        assertEquals(149, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
+    @Test fun `CANONICAL_STABLE count is 150`() {
+        assertEquals(150, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test fun `CANONICAL_FROZEN count is 1`() {
@@ -485,12 +503,12 @@ class Pr11StabilizationBaselineTest {
         assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 155`() {
-        assertEquals(155, StabilizationBaseline.entries.size)
+    @Test fun `total entry count is 156`() {
+        assertEquals(156, StabilizationBaseline.entries.size)
     }
 
-    @Test fun `EXTEND guidance count is 149`() {
-        assertEquals(149, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
+    @Test fun `EXTEND guidance count is 150`() {
+        assertEquals(150, StabilizationBaseline.byGuidance(StabilizationBaseline.ExtensionGuidance.EXTEND).size)
     }
 
     @Test fun `CONVERGE guidance count is 3`() {
