@@ -1,5 +1,6 @@
 package com.ufo.galaxy.shared.protocol
 
+import com.google.gson.annotations.SerializedName
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -30,10 +31,10 @@ import kotlinx.serialization.Serializable
 data class AuthMessage(
     val type: String = "auth",
     val token: String = "",
-    @SerialName("device_id") val deviceId: String,
-    @SerialName("device_type") val deviceType: String,
-    @SerialName("protocol_version") val protocolVersion: String = "3.0",
-    val protocol: String = "AIP/1.0"
+    @SerialName("device_id") @SerializedName("device_id") val deviceId: String,
+    @SerialName("device_type") @SerializedName("device_type") val deviceType: String,
+    @SerialName("protocol_version") @SerializedName("protocol_version") val protocolVersion: String = "3.0",
+    @SerializedName("protocol") val protocol: String = "AIP/1.0"
 ) {
     companion object {
         /** Device type value for Android phones / tablets. */
@@ -63,9 +64,4 @@ data class AuthMessage(
         }
         return AipMessage(
             type = MsgType.AUTH,
-            payload = payload,
-            deviceId = deviceId,
-            traceId = "auth_${System.currentTimeMillis()}"
-        )
-    }
-}
+            paylo
