@@ -1,0 +1,304 @@
+package com.ufo.galaxy.runtime
+
+/**
+ * **Canonical attached runtime host-session snapshot / projection** (PR-19, post-#533
+ * dual-repo runtime unification master plan — Canonical Attached Runtime Host-Session
+ * Snapshot Projection, Android side).
+ *
+ * [AttachedRuntimeHostSessionSnapshot] is the authoritative, semantically stable output
+ * envelope that the Android attached runtime emits to the main-repository authoritative
+ * session registry.  It collapses all relevant runtime-session state into a single,
+ * field-consistent, state-transition-coherent record so that the host registry can
+ * consume Android session truth without inferring state from scattered fields.
+ *
+ * ## Why a separate snapshot type is needed
+ *
+ * [AttachedRuntimeSession] + [RuntimeHostDescriptor] together hold all necessary runtime
+ * state, but their fields are spread across two models that evolve independently.  The
+ * host registry needs a **stable, versioned projection** whose field set and state
+ * semantics are guaranteed not to change between attach / detach / reconnect / invalidate
+ * events — only the values change, never the keys.
+ *
+ * ## Nine canonical fields plus explicit outward truth metadata and optional durable
+ * session continuity fields (PR-1)
+ *
+ * Every snapshot always contains all nine base fields.  [invalidationReason] is the sole
+ * conditional field among them — it is non-`null` only when [attachmentState] is
+ * `"detached"` and the session was closed via
+ * [AttachedRuntimeSession.DetachCause.INVALIDATION].
+ *
+ * Two additional optional fields are populated when a [DurableSessionContinuityRecord] is
+ * available (i.e., when the runtime has an active durable session era):
+ * [durableSessionId] and [sessionContinuityEpoch].
+ *
+ * | Field                    | Wire key                              | Always present? |
+ * |--------------------------|---------------------------------------|-----------------|
+ * | [sessionId]              | [KEY_SESSION_ID]                      | yes             |
+ * | [deviceId]               | [KEY_DEVICE_ID]                       | yes             |
+ * | [runtimeSessionId]       | [KEY_RUNTIME_SESSION_ID]              | yes             |
+ * | [attachmentState]        | [KEY_ATTACHMENT_STATE]                | yes             |
+ * | [isReuseValid]           | [KEY_IS_REUSE_VALID]                  | yes             |
+ * | [delegatedExecutionCount]| [KEY_DELEGATED_EXECUTION_COUNT]       | yes             |
+ * | [invalidationReason]     | [KEY_INVALIDATION_REASON]             | conditional     |
+ * | [hostRole]               | [KEY_HOST_ROLE]                       | yes             |
+ * | [posture]                | [KEY_POSTURE]                         | yes             |
+ * | [durableSessionId]       | [KEY_DURABLE_SESSION_ID]              | conditional     |
+ * | [sessionContinuityEpoch] | [KEY_SESSION_CONTINUITY_EPOCH]        | with durable    |
+ *
+ * ## State-transition semantics
+ *
+ * The projection is designed so that the host can perform correct session-lifecycle
+ * decisions purely from these fields, for all four transition scenarios:
+ *
+ * - **attach** → [attachmentState]`=attached`, [isReuseValid]`=true`,
+ *   [invalidationReason]`=null`, [posture]`=join_runtime`,
+ *   [durableSessionId] populated at epoch 0 if a durable record exists.
+ * - **detach** → [attachmentState]`=detached`, [isReuseValid]`=false`,
+ *   [invalidationReason]`=null`, [posture]`=control_only`
+ * - **reconnect** → new [runtimeSessionId], [attachmentState]`=attached`,
+ *   [isReuseValid]`=true`, [posture]`=join_runtime`,
+ *   same [durableSessionId] with incremented [sessionContinuityEpoch].
+ * - **invalidate** → [attachmentState]`=detached`, [isReuseValid]`=false`,
+ *   [invalidationReason]`="invalidation"`, [posture]`=control_only`,
+ *   [durableSessionId]`=null` (durable era terminated).
+ *
+ * ## Obtaining an instance
+ *
+ * Use [RuntimeController.currentHostSessionSnapshot]; do not construct directly.
+ *
+ * @property sessionId                Stable UUID identifying this [AttachedRuntimeSession].
+ *                                    New for each attach event; constant across transitions.
+ * @property deviceId                 Hardware device identifier from [RuntimeHostDescriptor.deviceId].
+ * @property runtimeSessionId         Per-connection UUID, regenerated each time a new
+ *                                    [AttachedRuntimeSession] is opened by [RuntimeController].
+ *                                    Distinct from [sessionId]; useful for distinguishing
+ *                                    reconnect events on the host side.
+ * @property attachmentState          [AttachedRuntimeSession.State.wireValue] of the current state.
+ * @property isReuseValid             `true` when [attachmentState]`==attached`; equivalent to
+ *                                    [AttachedRuntimeSession.isReuseValid].
+ * @property delegatedExecutionCount  Running count of delegated tasks accepted under this session.
+ * @property invalidationReason       Non-`null` only when the session was closed via
+ *                                    [AttachedRuntimeSession.DetachCause.INVALIDATION].
+ *                                    Contains the [AttachedRuntimeSession.DetachCause.wireValue].
+ * @property hostRole                 [RuntimeHostDescriptor.FormationRole.wireValue] of this host.
+ * @property posture                  [SourceRuntimePosture.JOIN_RUNTIME] when [isReuseValid];
+ *                                    [SourceRuntimePosture.CONTROL_ONLY] otherwise.
+ * @property durableSessionId         Stable UUID of the current durable session era (PR-1).
+ *                                    Non-`null` while a [DurableSessionContinuityRecord] exists;
+ *                                    `null` when no durable record is present or after invalidation/stop.
+ *                                    Constant across reconnects within the same era.
+ * @property sessionContinuityEpoch   Monotone reconnect counter within the durable session era (PR-1).
+ *                                    `0` at first attach; increments on each transparent reconnect.
+ *                                    Meaningful only when [durableSessionId] is non-`null`.
+ */
+data class AttachedRuntimeHostSessionSnapshot(
+    val sessionId: String,
+    val deviceId: String,
+    val runtimeSessionId: String,
+    val attachmentState: String,
+    val isReuseValid: Boolean,
+    val delegatedExecutionCount: Int,
+    val invalidationReason: String?,
+    val hostRole: String,
+    val posture: String,
+    val durableSessionId: String? = null,
+    val sessionContinuityEpoch: Int = 0
+) {
+
+    val outwardTruthSemantics: AndroidOutwardTruthSurfaceSemantics.SurfaceSemantics
+        get() = AndroidOutwardTruthSurfaceSemantics.runtimeVisibleSnapshot(
+            RuntimeTruthPrecedenceRules.TruthTier.SNAPSHOT
+        )
+
+    val outwardTruthSurfaceClass: String
+        get() = outwardTruthSemantics.outwardTruthSurfaceClass.wireValue
+
+    val truthTier: String
+        get() = outwardTruthSemantics.truthTier.wireValue
+
+    val sourceAuthorityClass: String
+        get() = outwardTruthSemantics.sourceAuthorityClass
+
+    val isV2ConfirmedCanonicalTruth: Boolean
+        get() = outwardTruthSemantics.isV2ConfirmedCanonicalTruth
+
+    // ── Serialisation ─────────────────────────────────────────────────────────
+
+    /**
+     * Builds the canonical wire map for this snapshot.
+     *
+     * All always-present snapshot and outward-truth keys are included in the returned map.
+     * [KEY_INVALIDATION_REASON] is included **only** when [invalidationReason] is non-`null`.
+     * When a durable session era is active, [KEY_DURABLE_SESSION_ID] and
+     * [KEY_SESSION_CONTINUITY_EPOCH] are also included.
+     * This keeps the wire format lean for the common non-invalidation case while giving the
+     * host a stable, discoverable key for invalidation scenarios.
+     *
+     * @return An immutable [Map] suitable for merging into AIP v3 metadata payloads or for
+     *         transmission to the main-repo authoritative session registry.
+     */
+    fun toMap(): Map<String, Any> = buildMap {
+        put(KEY_SESSION_ID, sessionId)
+        put(KEY_DEVICE_ID, deviceId)
+        put(KEY_RUNTIME_SESSION_ID, runtimeSessionId)
+        put(KEY_ATTACHMENT_STATE, attachmentState)
+        put(KEY_IS_REUSE_VALID, isReuseValid)
+        put(KEY_DELEGATED_EXECUTION_COUNT, delegatedExecutionCount)
+        invalidationReason?.let { put(KEY_INVALIDATION_REASON, it) }
+        put(KEY_HOST_ROLE, hostRole)
+        put(KEY_POSTURE, posture)
+        durableSessionId?.let {
+            put(KEY_DURABLE_SESSION_ID, it)
+            put(KEY_SESSION_CONTINUITY_EPOCH, sessionContinuityEpoch)
+        }
+        putAll(outwardTruthSemantics.toMap())
+    }
+
+    // ── Companion / factory ───────────────────────────────────────────────────
+
+    companion object {
+
+        // ── Wire key constants ────────────────────────────────────────────────
+
+        /** Wire key for [sessionId]. */
+        const val KEY_SESSION_ID = "snapshot_session_id"
+
+        /** Wire key for [deviceId]. */
+        const val KEY_DEVICE_ID = "snapshot_device_id"
+
+        /** Wire key for [runtimeSessionId]. */
+        const val KEY_RUNTIME_SESSION_ID = "snapshot_runtime_session_id"
+
+        /** Wire key for [attachmentState] ([AttachedRuntimeSession.State.wireValue]). */
+        const val KEY_ATTACHMENT_STATE = "snapshot_attachment_state"
+
+        /** Wire key for [isReuseValid]. */
+        const val KEY_IS_REUSE_VALID = "snapshot_is_reuse_valid"
+
+        /** Wire key for [delegatedExecutionCount]. */
+        const val KEY_DELEGATED_EXECUTION_COUNT = "snapshot_delegated_execution_count"
+
+        /**
+         * Wire key for [invalidationReason].
+         * Present in [toMap] output **only** when [invalidationReason] is non-`null`.
+         */
+        const val KEY_INVALIDATION_REASON = "snapshot_invalidation_reason"
+
+        /** Wire key for [hostRole] ([RuntimeHostDescriptor.FormationRole.wireValue]). */
+        const val KEY_HOST_ROLE = "snapshot_host_role"
+
+        /** Wire key for [posture] ([SourceRuntimePosture] string). */
+        const val KEY_POSTURE = "snapshot_posture"
+
+        /** Wire key for [outwardTruthSurfaceClass]. */
+        const val KEY_OUTWARD_TRUTH_SURFACE_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_OUTWARD_TRUTH_SURFACE_CLASS
+
+        /** Wire key for [truthTier]. */
+        const val KEY_TRUTH_TIER = AndroidOutwardTruthSurfaceSemantics.KEY_TRUTH_TIER
+
+        /** Wire key for [sourceAuthorityClass]. */
+        const val KEY_SOURCE_AUTHORITY_CLASS =
+            AndroidOutwardTruthSurfaceSemantics.KEY_SOURCE_AUTHORITY_CLASS
+
+        /** Wire key for [isV2ConfirmedCanonicalTruth]. */
+        const val KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH =
+            AndroidOutwardTruthSurfaceSemantics.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH
+
+        /**
+         * Wire key for [durableSessionId] (PR-1 — durable session continuity).
+         * Present in [toMap] output **only** when [durableSessionId] is non-`null`.
+         *
+         * Aligns with `durable_session_id` in the center-side durable mesh/session contracts.
+         */
+        const val KEY_DURABLE_SESSION_ID = "snapshot_durable_session_id"
+
+        /**
+         * Wire key for [sessionContinuityEpoch] (PR-1 — durable session continuity).
+         * Present in [toMap] output alongside [KEY_DURABLE_SESSION_ID] when the durable
+         * session era is active.  `0` at first attach; incremented on each reconnect.
+         */
+        const val KEY_SESSION_CONTINUITY_EPOCH = "snapshot_session_continuity_epoch"
+
+        // ── All nine required keys — useful in tests ──────────────────────────
+
+        /**
+         * The keys that are **always** present in [toMap] output, regardless of
+         * session state. [KEY_INVALIDATION_REASON], [KEY_DURABLE_SESSION_ID], and
+         * [KEY_SESSION_CONTINUITY_EPOCH] are excluded because they are conditional.
+         */
+        val ALWAYS_PRESENT_KEYS: Set<String> = setOf(
+            KEY_SESSION_ID,
+            KEY_DEVICE_ID,
+            KEY_RUNTIME_SESSION_ID,
+            KEY_ATTACHMENT_STATE,
+            KEY_IS_REUSE_VALID,
+            KEY_DELEGATED_EXECUTION_COUNT,
+            KEY_HOST_ROLE,
+            KEY_POSTURE,
+            KEY_OUTWARD_TRUTH_SURFACE_CLASS,
+            KEY_TRUTH_TIER,
+            KEY_SOURCE_AUTHORITY_CLASS,
+            KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH
+        )
+
+        // ── Factory ───────────────────────────────────────────────────────────
+
+        /**
+         * Builds an [AttachedRuntimeHostSessionSnapshot] from the current state of
+         * [session] and the supplied [runtimeSessionId] / [hostRole].
+         *
+         * This is the **canonical construction path** used by [RuntimeController].
+         * Direct callers outside [RuntimeController] should use
+         * [RuntimeController.currentHostSessionSnapshot] instead.
+         *
+         * **Projection rules applied here:**
+         *  - [posture] → `join_runtime` when [AttachedRuntimeSession.isReuseValid];
+         *    `control_only` otherwise.
+         *  - [invalidationReason] → [AttachedRuntimeSession.DetachCause.wireValue] when
+         *    [AttachedRuntimeSession.detachCause] is
+         *    [AttachedRuntimeSession.DetachCause.INVALIDATION]; `null` otherwise.
+         *  - [durableSessionId] and [sessionContinuityEpoch] — projected from
+         *    [durableRecord] when non-`null`; both default to absent/0 otherwise.
+         *
+         * @param session          Current [AttachedRuntimeSession] to project.
+         * @param runtimeSessionId Per-connection UUID managed by [RuntimeController].
+         * @param hostRole         [RuntimeHostDescriptor.FormationRole.wireValue] of this host.
+         * @param durableRecord    Optional [DurableSessionContinuityRecord] from [RuntimeController];
+         *                         `null` when no durable era is active (e.g. immediately after stop).
+         * @return A fully populated [AttachedRuntimeHostSessionSnapshot].
+         */
+        fun from(
+            session: AttachedRuntimeSession,
+            runtimeSessionId: String,
+            hostRole: String,
+            durableRecord: DurableSessionContinuityRecord? = null
+        ): AttachedRuntimeHostSessionSnapshot {
+            val posture = if (session.isReuseValid) {
+                SourceRuntimePosture.JOIN_RUNTIME
+            } else {
+                SourceRuntimePosture.CONTROL_ONLY
+            }
+            val invalidationReason = if (
+                session.detachCause == AttachedRuntimeSession.DetachCause.INVALIDATION
+            ) {
+                session.detachCause.wireValue
+            } else {
+                null
+            }
+            return AttachedRuntimeHostSessionSnapshot(
+                sessionId = session.sessionId,
+                deviceId = session.deviceId,
+                runtimeSessionId = runtimeSessionId,
+                attachmentState = session.state.wireValue,
+                isReuseValid = session.isReuseValid,
+                delegatedExecutionCount = session.delegatedExecutionCount,
+                invalidationReason = invalidationReason,
+                hostRole = hostRole,
+                posture = posture,
+                durableSessionId = durableRecord?.durableSessionId,
+                sessionContinuityEpoch = durableRecord?.sessionContinuityEpoch ?: 0
+            )
+        }
+    }
+}

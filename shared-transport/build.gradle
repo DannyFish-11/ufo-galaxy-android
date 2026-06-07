@@ -1,0 +1,41 @@
+// Shared Transport Module — UFO Galaxy Android
+// Extracted from :app to enable reuse by Wear OS and other subsystems.
+// Contains: GatewayClient interface, AipTransportManager, and transport adapters.
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.ufo.galaxy.transport'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 26
+        targetSdk 35
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    // Shared protocol module (AipMessage, AuthMessage, MsgType)
+    api project(':shared-protocol')
+
+    // Kotlin coroutines (for CancellationException handling)
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // AndroidX Core (for Log)
+    implementation 'androidx.core:core-ktx:1.12.0'
+}

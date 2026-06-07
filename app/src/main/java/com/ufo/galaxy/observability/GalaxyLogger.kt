@@ -1,0 +1,926 @@
+package com.ufo.galaxy.observability
+
+import android.content.Context
+import android.util.Log
+import org.json.JSONObject
+import java.io.File
+import java.io.FileWriter
+import java.io.IOException
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+
+/**
+ * Device-side structured logger for key lifecycle events.
+ *
+ * Each entry is a single-line JSON object written to [LOG_FILE_NAME] inside the
+ * app's private `filesDir`.  An in-memory ring buffer of [MAX_MEMORY_ENTRIES]
+ * entries is also maintained so that the diagnostics screen can display recent
+ * activity without reading from disk.
+ *
+ * ## Stable log tags
+ *
+ * | Tag                       | Meaning                                                     |
+ * |---------------------------|-------------------------------------------------------------|
+ * | `GALAXY:CONNECT`          | WebSocket connection established                            |
+ * | `GALAXY:DISCONNECT`       | WebSocket disconnected (with reason / close code)           |
+ * | `GALAXY:RECONNECT`        | Reconnect attempt scheduled or in progress                  |
+ * | `GALAXY:TASK:RECV`        | `task_assign` or `goal_execution` message received          |
+ * | `GALAXY:TASK:EXEC`        | Task execution started by EdgeExecutor                      |
+ * | `GALAXY:TASK:RETURN`      | Task result returned (status + task_id)                     |
+ * | `GALAXY:READINESS`        | Readiness self-check completed                              |
+ * | `GALAXY:DEGRADED`         | Device entered or exited degraded mode                      |
+ * | `GALAXY:TASK:TIMEOUT`     | Running task exceeded configured timeout budget             |
+ * | `GALAXY:TASK:CANCEL`      | task_cancel instruction received and processed              |
+ * | `GALAXY:SIGNAL:START`     | WebRTC signaling session started (WS connect + offer sent)  |
+ * | `GALAXY:SIGNAL:STOP`      | WebRTC signaling session stopped (WS close / disconnect)    |
+ * | `GALAXY:DISPATCHER:SELECT`| Dispatcher selection for a task (route_mode + exec_mode)    |
+ * | `GALAXY:BRIDGE:HANDOFF`   | Bridge handoff to Agent Runtime initiated                   |
+ * | `GALAXY:WEBRTC:TURN`      | TURN server config received or relay candidate applied      |
+ * | `GALAXY:ERROR`            | Error event; always includes `trace_id` and `cause`        |
+ * | `GALAXY:LOCAL_LOOP:START` | Local-loop goal session started                             |
+ * | `GALAXY:LOCAL_LOOP:STEP`  | Single step completed within a local-loop session           |
+ * | `GALAXY:LOCAL_LOOP:PLAN`  | Planner produced an initial plan or replan                  |
+ * | `GALAXY:LOCAL_LOOP:DONE`  | Local-loop goal session ended (success / failure / cancel)  |
+ * | `GALAXY:EXEC:ROUTE`       | Execution route decision recorded (PR-30)                   |
+ * | `GALAXY:SETUP:RECOVERY`   | Recovery attempt after setup/registration failure (PR-30)   |
+ * | `GALAXY:RECONNECT:OUTCOME`| Reconnect attempt concluded with success or failure (PR-30) |
+ * | `GALAXY:FALLBACK:DECISION`| Fallback path finalised after delegated failure (PR-30)     |
+ * | `GALAXY:ROLLOUT:CONTROL`  | Rollout-control flag changed at runtime (PR-31)             |
+ * | `GALAXY:KILL:SWITCH`      | Kill-switch activated — all remote paths disabled (PR-31)   |
+ * | `GALAXY:STAGED:MESH`      | Staged-mesh target execution event (PR-32)                  |
+ * | `GALAXY:RECONNECT:RECOVERY`| Reconnect recovery state transition (PR-33)                |
+ * | `GALAXY:SESSION:AXIS`      | Session-axis boundary event for cross-repo reconciliation (PR-3) |
+ * | `GALAXY:LONG_TAIL:COMPAT` | Long-tail compatibility path exercised (PR-35)              |
+ * | `GALAXY:PEER:EXCHANGE`    | PEER_EXCHANGE received and processed (PR-35)                |
+ * | `GALAXY:PEER:ANNOUNCE`    | PEER_ANNOUNCE received and processed (PR-36)                |
+ * | `GALAXY:MESH:TOPOLOGY`    | MESH_TOPOLOGY received and processed (PR-35)                |
+ * | `GALAXY:COORD:SYNC`       | COORD_SYNC ack sent with sequence-aware payload (PR-35)     |
+ * | `GALAXY:INTERACTION:ACCEPTANCE` | Product-grade interaction acceptance checkpoint (PR-34) |
+ * | `GALAXY:COMPAT:SURFACE`   | Compatibility surface exercised at runtime (PR-10)          |
+ * | `GALAXY:FORMATION:REBALANCE` | Formation rebalance event evaluated or emitted (PR-2)  |
+ * | `GALAXY:FORMATION:ROLE`  | Formation role reassignment decision (PR-2)                 |
+ * | `GALAXY:FORMATION:HEALTH`| Participant health state change processed (PR-2)            |
+ * | `GALAXY:RUNTIME:LIFECYCLE` | Runtime lifecycle state transition event (PR-37)          |
+ * | `GALAXY:PROTOCOL:CONVERGENCE` | Protocol convergence boundary enforcement event (PR-38) |
+ * | `GALAXY:V2:LIFECYCLE`        | V2 multi-device runtime lifecycle event (PR-43)         |
+ * | `GALAXY:DISPATCH:DECISION`   | Android dispatch decision with observability context (PR-G) |
+ * | `GALAXY:LIFECYCLE:OBSERVE`   | Device lifecycle event forwarded to V2 observability model (PR-G) |
+ * | `GALAXY:RECOVERY:OBSERVE`    | Recovery execution event with cross-system tracing context (PR-G) |
+ * | `GALAXY:DEVICE:STATE:SNAPSHOT` | Android runtime-state snapshot emitted to V2 (PR-RT)       |
+ *
+ * ## Log-entry format (one JSON object per line)
+ * ```json
+ * {"ts":1710000000000,"tag":"GALAXY:CONNECT","fields":{"url":"ws://host:8080","attempt":0}}
+ * ```
+ *
+ * ## Usage
+ * ```kotlin
+ * // In Application.onCreate():
+ * GalaxyLogger.init(applicationContext)
+ *
+ * // Anywhere:
+ * GalaxyLogger.log(GalaxyLogger.TAG_CONNECT, mapOf("url" to url, "attempt" to attempt))
+ * ```
+ */
+object GalaxyLogger {
+
+    // ── Stable tag constants ──────────────────────────────────────────────────
+
+    const val TAG_CONNECT    = "GALAXY:CONNECT"
+    const val TAG_DISCONNECT = "GALAXY:DISCONNECT"
+    const val TAG_RECONNECT  = "GALAXY:RECONNECT"
+    const val TAG_TASK_RECV  = "GALAXY:TASK:RECV"
+    const val TAG_TASK_EXEC  = "GALAXY:TASK:EXEC"
+    const val TAG_TASK_RETURN = "GALAXY:TASK:RETURN"
+    const val TAG_READINESS  = "GALAXY:READINESS"
+    const val TAG_DEGRADED   = "GALAXY:DEGRADED"
+    /** Fired when a running task exceeds its configured timeout budget. */
+    const val TAG_TASK_TIMEOUT = "GALAXY:TASK:TIMEOUT"
+    /** Fired when a task_cancel instruction is received and processed. */
+    const val TAG_TASK_CANCEL  = "GALAXY:TASK:CANCEL"
+    /** Fired when a WebRTC signaling session starts (WS connected, offer sent). */
+    const val TAG_SIGNAL_START = "GALAXY:SIGNAL:START"
+    /** Fired when a WebRTC signaling session stops (WS closed or failed). */
+    const val TAG_SIGNAL_STOP  = "GALAXY:SIGNAL:STOP"
+    /** Fired when a dispatcher is selected for a task (route_mode + exec_mode resolved). */
+    const val TAG_DISPATCHER_SELECT = "GALAXY:DISPATCHER:SELECT"
+    /** Fired when a bridge handoff to Agent Runtime is initiated. */
+    const val TAG_BRIDGE_HANDOFF = "GALAXY:BRIDGE:HANDOFF"
+    /** Fired when TURN server config is received or relay candidates are applied. */
+    const val TAG_WEBRTC_TURN = "GALAXY:WEBRTC:TURN"
+    /**
+     * Fired for any error event.  Fields MUST include `trace_id` and `cause`.
+     * Optional fields: `task_id`, `session_id`, `device_id`.
+     */
+    const val TAG_ERROR = "GALAXY:ERROR"
+
+    // ── Local-loop lifecycle tags ─────────────────────────────────────────────
+
+    /** Fired when a local-loop goal session starts (instruction received). */
+    const val TAG_LOCAL_LOOP_START = "GALAXY:LOCAL_LOOP:START"
+
+    /** Fired after each completed step in the local loop (action dispatched + observed). */
+    const val TAG_LOCAL_LOOP_STEP = "GALAXY:LOCAL_LOOP:STEP"
+
+    /** Fired when the local loop produces a plan or replan output. */
+    const val TAG_LOCAL_LOOP_PLAN = "GALAXY:LOCAL_LOOP:PLAN"
+
+    /** Fired when a local-loop goal session ends (success, failure, or cancel). */
+    const val TAG_LOCAL_LOOP_DONE = "GALAXY:LOCAL_LOOP:DONE"
+
+    // ── PR-30: Execution-path observability tags ──────────────────────────────
+
+    /**
+     * PR-30 — Fired whenever an execution route decision is recorded.
+     *
+     * Required fields: `route` (wire value from [com.ufo.galaxy.runtime.ExecutionRouteTag]),
+     * `task_id` (or session id when no task id is available).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:EXEC:ROUTE","fields":{"route":"local","task_id":"sess-abc"}}
+     * ```
+     */
+    const val TAG_EXEC_ROUTE = "GALAXY:EXEC:ROUTE"
+
+    /**
+     * PR-30 — Fired when a recovery attempt is initiated after a setup / registration failure.
+     *
+     * Required fields: `category` (wire value from
+     * [com.ufo.galaxy.runtime.CrossDeviceSetupError.Category]), `action`
+     * (one of `"retry_connect"`, `"open_settings"`, `"open_permissions"`).
+     */
+    const val TAG_SETUP_RECOVERY = "GALAXY:SETUP:RECOVERY"
+
+    /**
+     * PR-30 — Fired when a reconnect attempt concludes (success or failure).
+     *
+     * Fields: `outcome` (`"success"` or `"failure"`), `state` (the [RuntimeController.RuntimeState]
+     * simple class name after the attempt).
+     */
+    const val TAG_RECONNECT_OUTCOME = "GALAXY:RECONNECT:OUTCOME"
+
+    /**
+     * PR-30 — Fired when a fallback path decision is finalised after a delegated-takeover
+     * failure.  Provides richer operator context alongside the existing
+     * [GALAXY:TASK:RETURN] / takeover failure events.
+     *
+     * Required fields: `takeover_id`, `task_id`, `cause` (wire value from
+     * [com.ufo.galaxy.runtime.TakeoverFallbackEvent.Cause]), `reason`.
+     */
+    const val TAG_FALLBACK_DECISION = "GALAXY:FALLBACK:DECISION"
+
+    // ── PR-31: Rollout-control and kill-switch tags ───────────────────────────
+
+    /**
+     * PR-31 — Fired when any rollout-control flag changes at runtime.
+     *
+     * Required fields: `flag` (wire key from [com.ufo.galaxy.runtime.RolloutControlSnapshot]),
+     * `value` (`true` or `false`), `source` (caller that triggered the change, e.g.
+     * `"kill_switch"`, `"settings"`, `"operator"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:ROLLOUT:CONTROL","fields":{"flag":"cross_device_allowed","value":false,"source":"kill_switch"}}
+     * ```
+     */
+    const val TAG_ROLLOUT_CONTROL = "GALAXY:ROLLOUT:CONTROL"
+
+    /**
+     * PR-31 — Fired when the kill-switch is activated via
+     * [com.ufo.galaxy.runtime.RuntimeController.applyKillSwitch].
+     *
+     * Indicates that all remote execution paths (cross-device, delegated, goal execution)
+     * have been atomically disabled.  No required fields beyond the stable tag; optional
+     * field `reason` may be included by the caller for operator traceability.
+     */
+    const val TAG_KILL_SWITCH = "GALAXY:KILL:SWITCH"
+
+    // ── PR-32: Staged-mesh target execution tag ───────────────────────────────
+
+    /**
+     * PR-32 — Fired for key events in the staged-mesh target execution path.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.StagedMeshExecutionTarget] for:
+     * - `staged_mesh_accept`  — subtask accepted and dispatched to the pipeline.
+     * - `staged_mesh_blocked` — subtask rejected by a rollout-control gate.
+     * - `staged_mesh_result`  — subtask execution completed (success, failure, or cancelled).
+     *
+     * Required fields: `event`, `mesh_id`, `subtask_id`, `task_id`.
+     * Result events additionally include: `status`, `step_count`, `latency_ms`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:STAGED:MESH","fields":{"event":"staged_mesh_result","mesh_id":"sm-1","subtask_id":"sub-0","task_id":"t-abc","status":"success","step_count":3,"latency_ms":1200}}
+     * ```
+     */
+    const val TAG_STAGED_MESH = "GALAXY:STAGED:MESH"
+
+    // ── PR-33: Reconnect resilience and recovery tag ──────────────────────────
+
+    /**
+     * PR-33 — Fired when the reconnect recovery state transitions between phases.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.RuntimeController]'s permanent WS listener
+     * on each [com.ufo.galaxy.runtime.ReconnectRecoveryState] transition:
+     *
+     * - `idle→recovering`        — WS dropped while Active; reconnect started.
+     * - `recovering→recovered`   — WS reconnect succeeded; session resumed.
+     * - `recovering→failed`      — WS error or max attempts exhausted.
+     *
+     * Required fields: `transition` (e.g. `"idle→recovering"`),
+     * `trigger` (e.g. `"ws_disconnect_active"`).
+     * Error transitions additionally include: `error`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RECONNECT:RECOVERY","fields":{"transition":"recovering→recovered","trigger":"ws_reconnected_active"}}
+     * ```
+     */
+    const val TAG_RECONNECT_RECOVERY = "GALAXY:RECONNECT:RECOVERY"
+
+    // ── PR-3: Canonical session axis observability tag ────────────────────────
+
+    /**
+     * PR-3 — Fired when a session-axis boundary event is detected or logged for
+     * diagnostic and cross-repo reconciliation purposes.
+     *
+     * Emitted when a session family transition occurs at a tracked axis boundary:
+     *
+     * - `attach`        — A new [com.ufo.galaxy.runtime.AttachedRuntimeSession] was opened.
+     * - `detach`        — An [com.ufo.galaxy.runtime.AttachedRuntimeSession] was detached.
+     * - `reconnect`     — An attached session was reopened after a WS reconnect.
+     * - `transfer_open` — A delegation/transfer session lifecycle started (ACK emitted).
+     * - `transfer_close`— A delegation/transfer session lifecycle ended (RESULT emitted).
+     *
+     * Required fields: `event`, `session_family`
+     * (wire value from [com.ufo.galaxy.runtime.CanonicalSessionFamily.canonicalTerm]).
+     *
+     * Optional fields: `session_id`, `runtime_session_id`, `attached_session_id`,
+     * `detach_cause`, `continuity_behavior`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:SESSION:AXIS","fields":{"event":"attach","session_family":"attached_runtime_session_id","session_id":"s-1","runtime_session_id":"r-1"}}
+     * ```
+     */
+    const val TAG_SESSION_AXIS = "GALAXY:SESSION:AXIS"
+
+    // ── PR-34: Runtime and interaction acceptance tag ─────────────────────────
+
+    /**
+     * PR-34 — Fired at key acceptance checkpoints across the runtime and interaction surfaces.
+     *
+     * Emitted when a product-grade acceptance boundary is exercised:
+     *
+     * - `text_input_submitted`    — user text input was accepted and routed.
+     * - `voice_input_submitted`   — voice transcript was accepted and routed.
+     * - `floating_entry_invoked`  — floating secondary entry point was activated.
+     * - `cross_device_toggled`    — cross-device mode was enabled or disabled by the user.
+     * - `delegated_target_evaluated` — delegated target suitability was projected.
+     * - `result_presented`        — unified result was presented to a surface layer.
+     *
+     * Required fields: `event`, `route` (one of `"local"`, `"cross_device"`, `"delegated"`,
+     * `"fallback"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:INTERACTION:ACCEPTANCE","fields":{"event":"text_input_submitted","route":"local"}}
+     * ```
+     */
+    const val TAG_INTERACTION_ACCEPTANCE = "GALAXY:INTERACTION:ACCEPTANCE"
+
+    // ── PR-35: Long-tail compatibility surface observability tags ─────────────
+
+    /**
+     * Emitted by [com.ufo.galaxy.service.GalaxyConnectionService] when any minimal-compat
+     * long-tail path is exercised.  Helps operators identify which transitional surfaces
+     * are still being used in production.
+     *
+     * Required fields: `event`, `type` (MsgType wire value), `tier`
+     * (one of `"promoted"`, `"transitional"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:LONG_TAIL:COMPAT","fields":{"event":"transitional_path_exercised","type":"relay","tier":"transitional"}}
+     * ```
+     */
+    const val TAG_LONG_TAIL_COMPAT = "GALAXY:LONG_TAIL:COMPAT"
+
+    /**
+     * Emitted by the dedicated PEER_EXCHANGE handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `source_device_id`, `exchange_id`, `capability_count`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:PEER:EXCHANGE","fields":{"event":"peer_exchange_received","source_device_id":"Pixel_8","capability_count":3}}
+     * ```
+     */
+    const val TAG_PEER_EXCHANGE = "GALAXY:PEER:EXCHANGE"
+
+    /**
+     * Emitted by the dedicated PEER_ANNOUNCE handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `peer_device_id`, `announce_seq`.
+     * Optional fields: `peer_role`, `session_id`, `known_peer_count`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:PEER:ANNOUNCE","fields":{"event":"peer_announce_received","peer_device_id":"Pixel_7","announce_seq":1,"known_peer_count":2}}
+     * ```
+     */
+    const val TAG_PEER_ANNOUNCE = "GALAXY:PEER:ANNOUNCE"
+
+    /**
+     * Emitted by the dedicated MESH_TOPOLOGY handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `mesh_id`, `node_count`, `topology_seq`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:MESH:TOPOLOGY","fields":{"event":"mesh_topology_received","mesh_id":"mesh-1","node_count":3,"topology_seq":5}}
+     * ```
+     */
+    const val TAG_MESH_TOPOLOGY = "GALAXY:MESH:TOPOLOGY"
+
+    /**
+     * Emitted by the dedicated COORD_SYNC handler in
+     * [com.ufo.galaxy.service.GalaxyConnectionService].
+     *
+     * Required fields: `event`, `sync_id`, `sync_seq`, `tick_count`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:COORD:SYNC","fields":{"event":"coord_sync_ack_sent","sync_id":"s1","tick_count":4}}
+     * ```
+     */
+    const val TAG_COORD_SYNC = "GALAXY:COORD:SYNC"
+
+    // ── PR-10: Compatibility surface retirement observability tag ─────────────
+
+    /**
+     * PR-10 — Emitted when a high-risk or retiring compatibility surface is exercised
+     * at runtime.  Helps operators identify which compatibility surfaces remain in active
+     * use, supporting evidence-based retirement sequencing.
+     *
+     * Required fields: `event`, `surface_id`
+     * ([com.ufo.galaxy.runtime.CompatibilitySurfaceRetirementRegistry.CompatibilitySurfaceEntry.surfaceId]),
+     * `tier` (lowercase retirement tier name: `"high_risk_active"`, `"retire_after_migration"`,
+     * `"retire_after_coordination"`, or `"decommission_candidate"`).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:COMPAT:SURFACE","fields":{"event":"compat_surface_exercised","surface_id":"runtime_registration_error_string_bridge","tier":"high_risk_active"}}
+     * ```
+     */
+    const val TAG_COMPAT_SURFACE = "GALAXY:COMPAT:SURFACE"
+
+    /**
+     * PR-11 — Architecture stabilization baseline.
+     *
+     * Marks log events that record stabilization-baseline governance decisions:
+     * which surfaces are considered canonically stable, which remain transitional,
+     * and where future contributors should extend versus converge.
+     */
+    const val TAG_STABILIZATION_BASELINE = "GALAXY:STABILIZATION:BASELINE"
+
+    // ── PR-2: Formation rebalance and recovery hooks tags ─────────────────────
+
+    /**
+     * PR-2 — Fired when a formation rebalance event is evaluated or emitted.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.FormationParticipationRebalancer] and
+     * [com.ufo.galaxy.coordination.FormationCoordinationSurface] on all formation
+     * rebalance and recovery-related events:
+     *
+     * - `formation_readiness_changed`          — participant readiness/participation state changed.
+     * - `formation_participant_lost`           — a formation participant became unreachable.
+     * - `formation_participant_rejoined`       — a lost participant rejoined the formation.
+     * - `formation_role_reassignment_requested`— role reassignment was proposed.
+     * - `formation_degraded_detected`          — formation is operating below full capacity.
+     * - `formation_recovery_completed`         — a prior degraded state was resolved.
+     *
+     * Required fields: `event` (wire value from [com.ufo.galaxy.runtime.FormationRebalanceEvent]),
+     * `rationale`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:FORMATION:REBALANCE","fields":{"event":"formation_readiness_changed","trigger":"ws_reconnect_in_progress","rationale":"WS reconnect in progress"}}
+     * ```
+     */
+    const val TAG_FORMATION_REBALANCE = "GALAXY:FORMATION:REBALANCE"
+
+    /**
+     * PR-2 — Fired when role reassignment evaluation produces a decision.
+     *
+     * Emitted by [com.ufo.galaxy.runtime.FormationParticipationRebalancer.evaluateRoleReassignment]
+     * on every role reassignment evaluation:
+     *
+     * - `role_reassignment_accepted`  — role change was accepted; descriptor will be updated.
+     * - `role_reassignment_declined`  — role change was declined; current role preserved.
+     * - `role_reassignment_deferred`  — role change could not be applied now but may be re-attempted.
+     *
+     * Required fields: `event`, `previous_role`, `requested_role`.
+     * Optional fields: `decline_reason`, `deferrable`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:FORMATION:ROLE","fields":{"event":"role_reassignment_declined","previous_role":"primary","requested_role":"secondary","decline_reason":"ws_reconnect_in_progress"}}
+     * ```
+     */
+    const val TAG_FORMATION_ROLE = "GALAXY:FORMATION:ROLE"
+
+    /**
+     * PR-2 — Fired when [com.ufo.galaxy.coordination.FormationCoordinationSurface] processes
+     * a participant health state change.
+     *
+     * Required fields: `event`, `health_state`, `continuation_mode`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:FORMATION:HEALTH","fields":{"event":"participant_health_changed","health_state":"degraded","continuation_mode":"degraded_continuation"}}
+     * ```
+     */
+    const val TAG_FORMATION_HEALTH = "GALAXY:FORMATION:HEALTH"
+
+    /**
+     * PR-37 — Fired on every runtime lifecycle state transition managed by
+     * [com.ufo.galaxy.runtime.RuntimeController.transitionState].
+     *
+     * Covers both governed transitions (expected, matching the canonical state machine)
+     * and unexpected transitions (potential race conditions or lifecycle ordering issues).
+     *
+     * Required fields: `event`, `from`, `to`, `trigger`.
+     * Conditional field (`runtime_unexpected_state_transition` events only): `reason`.
+     *
+     * Example (governed):
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RUNTIME:LIFECYCLE","fields":{"event":"runtime_state_transition","from":"starting","to":"active","trigger":"ws_connected"}}
+     * ```
+     *
+     * Example (unexpected):
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RUNTIME:LIFECYCLE","fields":{"event":"runtime_unexpected_state_transition","from":"local_only","to":"active","trigger":"ws_connected","reason":"transition_not_in_allowed_set"}}
+     * ```
+     */
+    const val TAG_RUNTIME_LIFECYCLE = "GALAXY:RUNTIME:LIFECYCLE"
+
+    // ── PR-38: Protocol convergence boundary observability tag ────────────────
+
+    /**
+     * PR-38 — Fired when a protocol convergence boundary enforcement event occurs.
+     *
+     * Emitted when the [com.ufo.galaxy.runtime.ProtocolConvergenceBoundary] or a
+     * convergence-aware component detects that a protocol/runtime interaction surface
+     * is being accessed in a way that requires convergence tracking.
+     *
+     * Event vocabulary:
+     * - `isolated_surface_accessed`  — an [ProtocolConvergenceBoundary.SurfaceConvergenceStatus.ISOLATED]
+     *   surface was exercised; serves as an observability signal for remaining transitional usage.
+     * - `converging_surface_accessed`— a [ProtocolConvergenceBoundary.SurfaceConvergenceStatus.CONVERGING]
+     *   surface was exercised; tracks how frequently the transitional paths are hit.
+     * - `canonical_path_confirmed`   — the canonical protocol interaction path was confirmed
+     *   at a boundary check point.
+     *
+     * Required fields: `event`, `surface_id`
+     * ([com.ufo.galaxy.runtime.ProtocolConvergenceBoundary.ProtocolSurfaceConvergenceEntry.surfaceId]),
+     * `status` (wire value from
+     * [com.ufo.galaxy.runtime.ProtocolConvergenceBoundary.SurfaceConvergenceStatus.wireValue]).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:PROTOCOL:CONVERGENCE","fields":{"event":"isolated_surface_accessed","surface_id":"long-tail-relay-isolated","status":"isolated"}}
+     * ```
+     */
+    const val TAG_PROTOCOL_CONVERGENCE = "GALAXY:PROTOCOL:CONVERGENCE"
+
+    // ── PR-43: V2 multi-device lifecycle observability tag ────────────────────
+
+    /**
+     * PR-43 — Fired for every [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent] emitted
+     * on [com.ufo.galaxy.runtime.RuntimeController.v2LifecycleEvents].
+     *
+     * Provides a V2-consumable structured log entry for all Android device lifecycle
+     * transitions relevant to the V2 multi-device runtime harness hook integration.
+     *
+     * Event vocabulary (matches [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent] wire values):
+     * - `v2_device_connected`              — device attached / activated.
+     * - `v2_device_reconnected`            — device reconnected after a transparent WS drop.
+     * - `v2_device_disconnected`           — device detached (disconnect, disable, or invalidation).
+     * - `v2_device_degraded`               — device entered a degraded/unavailable state.
+     * - `v2_device_health_changed`         — explicit execution-environment health state change.
+     * - `v2_participant_readiness_changed` — participant readiness/participation state changed.
+     *
+     * Required fields: `event` (wire value from
+     * [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent]), `device_id`.
+     *
+     * Conditional fields vary by event type; always include at least `session_id` when available.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:V2:LIFECYCLE","fields":{"event":"v2_device_connected","device_id":"Pixel_8","session_id":"s-1","runtime_session_id":"r-abc","open_source":"user_activation"}}
+     * ```
+     */
+    const val TAG_V2_LIFECYCLE = "GALAXY:V2:LIFECYCLE"
+
+    // ── PR-G: Production-grade runtime observability tags ─────────────────────
+
+    /**
+     * PR-G (PR-47) — Fired when an Android-side dispatch decision is recorded with
+     * full observability/tracing context for cross-system V2 correlation.
+     *
+     * Emitted when the Android runtime selects an execution route and target for
+     * an inbound command, capturing the dispatch chain identifiers so they can
+     * be correlated in V2 observability pipelines.
+     *
+     * Required fields: `event` (one of
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.EVENT_DISPATCH_DECISION_RECORDED]),
+     * `task_id`, `route` (execution route wire value).
+     *
+     * Optional fields: `dispatch_trace_id`, `executor_target_type`, `session_id`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:DISPATCH:DECISION","fields":{"event":"dispatch_decision_recorded","task_id":"t-1","route":"local","dispatch_trace_id":"dt-abc","executor_target_type":"android_device"}}
+     * ```
+     */
+    const val TAG_DISPATCH_DECISION = "GALAXY:DISPATCH:DECISION"
+
+    /**
+     * PR-G (PR-47) — Fired when a device lifecycle observability event is emitted into
+     * the V2 observability model.
+     *
+     * Emitted when a [com.ufo.galaxy.runtime.V2MultiDeviceLifecycleEvent] is forwarded
+     * to V2 with richer observability context (session correlation, lifecycle event IDs).
+     * Provides a dedicated tag so operators can filter lifecycle-specific observability
+     * events separately from raw V2 lifecycle events.
+     *
+     * Required fields: `event` (one of
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.EVENT_LIFECYCLE_OBSERVE_EMITTED]),
+     * `lifecycle_kind` (wire value from
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.LifecycleObservabilityKind]),
+     * `device_id`.
+     *
+     * Optional fields: `session_id`, `lifecycle_event_id`, `session_correlation_id`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:LIFECYCLE:OBSERVE","fields":{"event":"lifecycle_observe_emitted","lifecycle_kind":"device_attach","device_id":"Pixel_8","session_id":"s-1"}}
+     * ```
+     */
+    const val TAG_LIFECYCLE_OBSERVE = "GALAXY:LIFECYCLE:OBSERVE"
+
+    /**
+     * PR-G (PR-47) — Fired when a recovery-related execution event is recorded with
+     * full cross-system tracing context for V2 observability correlation.
+     *
+     * Emitted when an execution that carries recovery/continuity metadata
+     * (from [com.ufo.galaxy.runtime.ContinuityRecoveryContext]) completes or is
+     * interrupted, capturing dispatch trace and continuity identifiers so recovery
+     * events can be traced end-to-end across the V2 system.
+     *
+     * Required fields: `event` (one of
+     * [com.ufo.galaxy.runtime.RuntimeObservabilityMetadata.EVENT_RECOVERY_OBSERVE_RECORDED]),
+     * `task_id`.
+     *
+     * Optional fields: `dispatch_trace_id`, `continuity_token`, `interruption_reason`,
+     * `is_resumable`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:RECOVERY:OBSERVE","fields":{"event":"recovery_observe_recorded","task_id":"t-1","dispatch_trace_id":"dt-abc","continuity_token":"ct-xyz","is_resumable":true}}
+     * ```
+     */
+    const val TAG_RECOVERY_OBSERVE = "GALAXY:RECOVERY:OBSERVE"
+
+    // ── PR-60: App lifecycle and hybrid-participant observability tags ─────────
+
+    /**
+     * PR-60 — Fired when an [com.ufo.galaxy.runtime.AndroidAppLifecycleTransition] is
+     * handled by [com.ufo.galaxy.runtime.RuntimeController.onAppLifecycleTransition].
+     *
+     * Makes app-level lifecycle transitions explicit and auditable in the log stream.
+     * Each entry carries the transition wire value and the resulting runtime action.
+     *
+     * Required fields: `event` (`"app_lifecycle_transition"`), `transition` (wire value
+     * from [com.ufo.galaxy.runtime.AndroidAppLifecycleTransition.wireValue]).
+     *
+     * Optional fields: `runtime_state` (current [com.ufo.galaxy.runtime.RuntimeController.RuntimeState]).
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:APP:LIFECYCLE","fields":{"event":"app_lifecycle_transition","transition":"foreground","runtime_state":"LocalOnly"}}
+     * ```
+     */
+    const val TAG_APP_LIFECYCLE = "GALAXY:APP:LIFECYCLE"
+
+    /**
+     * PR-60 — Fired when a [com.ufo.galaxy.runtime.HybridParticipantCapability] limitation
+     * is reported in response to a hybrid/distributed execution request.
+     *
+     * Provides a structured, non-silent record for every case where Android responds to a
+     * hybrid execution request with a degrade or limitation reply.  V2 consumers can filter
+     * by this tag to identify which hybrid capabilities are triggering limitations.
+     *
+     * Required fields: `event` (`"hybrid_capability_limitation"`), `capability` (wire value
+     * from [com.ufo.galaxy.runtime.HybridParticipantCapability.wireValue]), `support_level`
+     * (wire value from [com.ufo.galaxy.runtime.HybridParticipantCapability.SupportLevel.wireValue]).
+     *
+     * Optional fields: `task_id`, `reason`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:HYBRID:PARTICIPANT","fields":{"event":"hybrid_capability_limitation","capability":"hybrid_execute_full","support_level":"not_yet_implemented","task_id":"t-1"}}
+     * ```
+     */
+    const val TAG_HYBRID_PARTICIPANT = "GALAXY:HYBRID:PARTICIPANT"
+
+    /**
+     * PR-62 — Fired for every live participant execution surface event: task accepted,
+     * status update, result, cancellation, failure, and interruption (task lost on
+     * disconnect).
+     *
+     * This tag provides a single filter path for tracing Android participant truth
+     * through live execution, lifecycle, and protocol surfaces.
+     *
+     * Required fields: `event`, `task_id`.
+     * Optional fields: `participant_id`, `status`, `progress_detail`, `error_detail`,
+     * `interrupted_by`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:LIVE:EXECUTION","fields":{"event":"task_status_update","task_id":"t-1","participant_id":"p-1","status":"in_progress","progress_detail":"step 2 of 5"}}
+     * ```
+     */
+    const val TAG_LIVE_EXECUTION = "GALAXY:LIVE:EXECUTION"
+
+    // ── PR-RT: Device runtime-state snapshot observability tag ───────────────
+
+    /**
+     * PR-RT — Fired when a [com.ufo.galaxy.protocol.DeviceStateSnapshotPayload] is built and
+     * sent to V2 on the canonical Android→V2 control-plane WebSocket path.
+     *
+     * Emitted by [com.ufo.galaxy.service.GalaxyConnectionService.sendDeviceStateSnapshot] at
+     * every real lifecycle point: service start (baseline), WS reconnect/recovery, and any
+     * explicit state refresh requested by runtime transitions.
+     *
+     * Required fields: `event` (one of `"device_state_snapshot_sent"`,
+     * `"device_state_snapshot_send_failed"`, `"device_state_snapshot_error"`),
+     * `device_id`.
+     *
+     * Optional fields: `model_ready`, `accessibility_ready`, `overlay_ready`,
+     * `local_loop_ready`, `active_runtime_type`, `offline_queue_depth`,
+     * `current_fallback_tier`, `planner_fallback_tier`, `grounding_fallback_tier`,
+     * `warmup_result`, `sent`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:DEVICE:STATE:SNAPSHOT","fields":{"event":"device_state_snapshot_sent","device_id":"Pixel_8","model_ready":true,"active_runtime_type":"LLAMA_CPP","sent":true}}
+     * ```
+     */
+    const val TAG_DEVICE_STATE_SNAPSHOT = "GALAXY:DEVICE:STATE:SNAPSHOT"
+
+    // ── PR-2 (Android): Device execution-event emission observability tag ─────
+
+    /**
+     * PR-2 (Android) — Fired when a [com.ufo.galaxy.protocol.DeviceExecutionEventPayload] is
+     * built and sent to V2 on the canonical Android→V2 control-plane WebSocket path.
+     *
+     * Emitted by [com.ufo.galaxy.service.GalaxyConnectionService] at every real execution
+     * lifecycle point: execution_started, execution_progress, completed, failed,
+     * stagnation_detected, cancelled, fallback_transition, and takeover_milestone.
+     *
+     * Required fields: `event` (one of `"device_execution_event_sent"`,
+     * `"device_execution_event_send_failed"`, `"device_execution_event_error"`),
+     * `device_id`, `task_id`, `phase`.
+     *
+     * Optional fields: `flow_id`, `step_index`, `is_blocking`, `blocking_reason`,
+     * `stagnation_detected`, `fallback_tier`, `sent`.
+     *
+     * Example:
+     * ```json
+     * {"ts":…,"tag":"GALAXY:DEVICE:EXEC:EVENT","fields":{"event":"device_execution_event_sent","device_id":"Pixel_8","task_id":"t-1","phase":"completed","step_index":3,"sent":true}}
+     * ```
+     */
+    const val TAG_DEVICE_EXECUTION_EVENT = "GALAXY:DEVICE:EXEC:EVENT"
+
+    /** Fired when Android emits a structured perception payload toward V2 multimodal ingress. */
+    const val TAG_DEVICE_PERCEPTION_EMISSION = "GALAXY:DEVICE:PERCEPTION"
+
+    private const val ANDROID_TAG     = "GalaxyLogger"
+    const val LOG_FILE_NAME           = "galaxy_observability.log"
+    private const val MAX_MEMORY_ENTRIES = 500
+    /** Maximum log file size (bytes) before the file is rotated (truncated). */
+    private const val MAX_FILE_BYTES  = 2 * 1024 * 1024L   // 2 MB
+
+    /** Keys whose values are redacted to "***" before logging to prevent credential leakage. */
+    private val SENSITIVE_KEYS = setOf(
+        "token", "gateway_token", "password", "passwd", "pwd",
+        "secret", "api_key", "apikey", "key", "auth", "authorization",
+        "credential", "credentials", "bearer", "access_token", "refresh_token"
+    )
+
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    @Volatile private var logFile: File? = null
+    private val fileLock = ReentrantLock()
+
+    /**
+     * Active sampling configuration.  Defaults to [SamplingConfig.debug] (all events
+     * logged).  Override in [android.app.Application.onCreate] before any log calls:
+     * ```kotlin
+     * GalaxyLogger.samplingConfig = if (BuildConfig.DEBUG) SamplingConfig.debug()
+     *                               else SamplingConfig.production()
+     * ```
+     */
+    @Volatile
+    var samplingConfig: SamplingConfig = SamplingConfig.debug()
+
+    /**
+     * In-memory ring buffer holding the latest [MAX_MEMORY_ENTRIES] log entries.
+     * Using [LinkedBlockingDeque] so that older entries can be polled from the
+     * front when the buffer is full.
+     */
+    private val memoryBuffer = LinkedBlockingDeque<LogEntry>(MAX_MEMORY_ENTRIES)
+
+    // ── Data model ────────────────────────────────────────────────────────────
+
+    /**
+     * A single structured log entry.
+     *
+     * @param ts     Unix timestamp in milliseconds.
+     * @param tag    Stable tag constant (e.g. [TAG_CONNECT]).
+     * @param fields Arbitrary key→value pairs providing event context.
+     */
+    data class LogEntry(
+        val ts: Long,
+        val tag: String,
+        val fields: Map<String, Any?>
+    ) {
+        /** Serialises this entry to a compact single-line JSON string. */
+        fun toJsonLine(): String {
+            val obj = JSONObject()
+            obj.put("ts", ts)
+            obj.put("tag", tag)
+            val fieldsObj = JSONObject()
+            fields.forEach { (k, v) -> fieldsObj.put(k, v) }
+            obj.put("fields", fieldsObj)
+            return obj.toString()
+        }
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * Initialises the logger.  Must be called once from [android.app.Application.onCreate]
+     * before any [log] calls that should persist to disk.
+     *
+     * Safe to call multiple times; subsequent calls update [logFile] only.
+     * Safe to skip in unit tests — all [log] calls will still populate the in-memory
+     * buffer and emit Android log lines; only file writes are skipped when [context]
+     * has not been provided.
+     */
+    fun init(context: Context) {
+        logFile = File(context.filesDir, LOG_FILE_NAME)
+        Log.d(ANDROID_TAG, "GalaxyLogger initialised – log file: ${logFile?.absolutePath}")
+    }
+
+    /**
+     * Records a structured log entry (same as [log]).
+     *
+     * - Always writes to the Android logcat.
+     * - Always adds the entry to the in-memory ring buffer (dropping the oldest when full).
+     * - Writes to the log file if [init] was called (best-effort; errors are swallowed).
+     *
+     * Thread-safe; may be called from any thread.
+     *
+     * @param tag    One of the `TAG_*` constants defined in this object.
+     * @param fields Map of key→value pairs to include in the `fields` JSON object.
+     */
+    fun log(tag: String, fields: Map<String, Any?> = emptyMap()) {
+        val redactedFields = redactSensitive(fields)
+        val entry = LogEntry(ts = System.currentTimeMillis(), tag = tag, fields = redactedFields)
+        val line = entry.toJsonLine()
+
+        // 1. Logcat
+        Log.i(ANDROID_TAG, "[$tag] $line")
+
+        // 2. In-memory ring buffer — drop oldest entry when full
+        if (!memoryBuffer.offer(entry)) {
+            memoryBuffer.poll()
+            memoryBuffer.offer(entry)
+        }
+
+        // 3. File (best-effort)
+        writeToFile(line)
+    }
+
+    /**
+     * Returns a new map where any key matching [SENSITIVE_KEYS] has its value
+     * replaced with "***".  Nested maps are recursively redacted.
+     */
+    private fun redactSensitive(fields: Map<String, Any?>): Map<String, Any?> =
+        fields.mapValues { (key, value) ->
+            when {
+                SENSITIVE_KEYS.any { it.equals(key, ignoreCase = true) } -> "***"
+                value is Map<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    redactSensitive(value as Map<String, Any?>)
+                }
+                else -> value
+            }
+        }
+
+    /**
+     * Returns all entries currently held in the in-memory ring buffer, ordered
+     * oldest-first.  The returned list is a snapshot; subsequent [log] calls do
+     * not affect it.
+     */
+    fun getEntries(): List<LogEntry> = memoryBuffer.toList()
+
+    /**
+     * Records a structured log entry **only** when [SamplingConfig.shouldSample]
+     * returns `true` for [tag].  Use this for high-frequency events where sampling
+     * is desirable.
+     *
+     * Error events ([TAG_ERROR]) are always written regardless of sampling rate.
+     *
+     * @param tag    One of the `TAG_*` constants defined in this object.
+     * @param fields Map of key→value pairs to include in the `fields` JSON object.
+     */
+    fun logSampled(tag: String, fields: Map<String, Any?> = emptyMap()) {
+        if (tag == TAG_ERROR || samplingConfig.shouldSample(tag)) {
+            log(tag, fields)
+        }
+    }
+
+    /**
+     * Convenience helper for error events.
+     *
+     * Calls [log] with [TAG_ERROR] and always includes `trace_id` and `cause` in
+     * `fields`.  Additional context fields may be passed via [extraFields].
+     *
+     * @param traceId    Current trace identifier from [TraceContext.currentTraceId].
+     * @param cause      Human-readable error description.
+     * @param extraFields Optional additional context (e.g. `task_id`, `session_id`).
+     */
+    fun logError(
+        traceId: String,
+        cause: String,
+        extraFields: Map<String, Any?> = emptyMap()
+    ) {
+        log(
+            TAG_ERROR,
+            buildMap {
+                put("trace_id", traceId)
+                put("cause", cause)
+                putAll(extraFields)
+            }
+        )
+    }
+
+    /**
+     * Returns the log file if it exists and has been initialised via [init].
+     * Returns `null` when [init] was not called (e.g. in unit tests).
+     *
+     * Callers should use this method to obtain the [File] reference when building
+     * a share [android.content.Intent].
+     */
+    fun getLogFile(): File? = logFile?.takeIf { it.exists() }
+
+    /**
+     * Clears the in-memory ring buffer and deletes the log file.
+     * Useful for "Clear logs" actions in a debug/settings screen.
+     */
+    fun clear() {
+        memoryBuffer.clear()
+        fileLock.withLock {
+            try { logFile?.delete() } catch (e: IOException) { Log.w(ANDROID_TAG, "Failed to delete log file: ${e.message}") }
+        }
+        Log.d(ANDROID_TAG, "GalaxyLogger cleared")
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private fun writeToFile(line: String) {
+        val file = logFile ?: return
+        fileLock.withLock {
+            try {
+                // Rotate if the file is too large
+                if (file.exists() && file.length() > MAX_FILE_BYTES) {
+                    file.delete()
+                }
+                FileWriter(file, /* append = */ true).use { fw ->
+                    fw.appendLine(line)
+                }
+            } catch (e: IOException) {
+                Log.w(ANDROID_TAG, "Failed to write log entry to file: ${e.message}")
+            }
+        }
+    }
+}

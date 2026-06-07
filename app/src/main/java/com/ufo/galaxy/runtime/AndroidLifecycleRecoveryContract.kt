@@ -1,0 +1,246 @@
+package com.ufo.galaxy.runtime
+
+/**
+ * PR-60 — Android lifecycle and recovery responsibility boundary contract.
+ *
+ * This object is the **canonical reference for what Android can recover locally**
+ * vs **what must be re-synchronized from V2** after various lifecycle disruptions.
+ *
+ * It serves as the authoritative documentation anchor for reviewers to determine:
+ *  1. How Android behaves across lifecycle changes and reconnect scenarios.
+ *  2. What Android can recover locally vs what must be re-synchronized from V2.
+ *  3. Whether remaining limitations are intentional or accidental.
+ *
+ * ## Android recovery role
+ *
+ * Android is a **recovery participant**, not a recovery coordinator.  All recovery
+ * decisions (session resumption, task retry, barrier re-evaluation) belong to V2.
+ * Android's only recovery duties are:
+ *  1. Re-establishing WS connectivity.
+ *  2. Emitting appropriate [V2MultiDeviceLifecycleEvent] signals.
+ *  3. Reporting updated [DurableSessionContinuityRecord] state on reconnect.
+ *
+ * See also [ContinuityRecoveryContext.ANDROID_RECOVERY_ROLE].
+ *
+ * ## Lifecycle disruption taxonomy
+ *
+ * | Disruption | In-memory state lost? | Settings preserved? | Durable session preserved? | V2 event |
+ * |---|---|---|---|---|
+ * | Transient WS disconnect (auto-reconnect) | No | Yes | Yes (epoch++) | [V2MultiDeviceLifecycleEvent.DeviceReconnected] |
+ * | Reconnect failure (exhausted) | No | Yes | Yes (but era ends on next stop()) | [V2MultiDeviceLifecycleEvent.DeviceDisconnected] |
+ * | App backgrounded | No | Yes | Yes | None (connection preserved) |
+ * | App foregrounded | No | Yes | Yes | None (or DeviceConnected if reconnecting) |
+ * | Activity config change | No | Yes | Yes | None (RuntimeController survives) |
+ * | Explicit stop (user-initiated) | Yes | Yes (crossDeviceEnabled=false) | Reset | [V2MultiDeviceLifecycleEvent.DeviceDisconnected] |
+ * | Process recreation (low-memory kill) | Yes (all) | Yes (SharedPrefs) | Reset | [V2MultiDeviceLifecycleEvent.DeviceConnected] (new era) |
+ *
+ * ## Process recreation boundary
+ *
+ * Process recreation is the most disruptive case.  [PROCESS_RECREATION_BOUNDARY]
+ * enumerates exactly what survives and what is lost.
+ */
+object AndroidLifecycleRecoveryContract {
+
+    // ── Process recreation boundary ───────────────────────────────────────────
+
+    /**
+     * Wire key for the list of state that **survives** an Android process recreation.
+     *
+     * These fields are read from [com.ufo.galaxy.data.AppSettings] (SharedPreferences)
+     * on process restart, so they are effectively durable across process death.
+     */
+    const val SURVIVES_PROCESS_RECREATION = "survives_process_recreation"
+
+    /**
+     * Wire key for the list of state that is **lost** on Android process recreation.
+     *
+     * These fields are held in process memory and must be rebuilt from V2 after restart.
+     */
+    const val LOST_ON_PROCESS_RECREATION = "lost_on_process_recreation"
+
+    /**
+     * The complete process-recreation boundary declaration.
+     *
+     * ## What survives process recreation (persisted in SharedPreferences)
+     *
+     * - `crossDeviceEnabled` — Android will attempt to reconnect on restart if this was true
+     * - `gatewayHost` / `gatewayPort` / `useTls` — connection configuration
+     * - `deviceId` — stable hardware identity
+     * - `gatewayToken` — auth token
+     * - All other [com.ufo.galaxy.data.AppSettings] fields
+     *
+     * ## What is lost on process recreation (in-memory only)
+     *
+     * - [DurableSessionContinuityRecord] — process-scoped; a new era starts on restart.
+     *   V2 will see a fresh [V2MultiDeviceLifecycleEvent.DeviceConnected] event (not
+     *   DeviceReconnected) because `runtime_attachment_session_id` is regenerated.
+     * - `_runtimeAttachmentSessionId` — regenerated fresh each time
+     * - [ReconnectRecoveryState] — resets to IDLE
+     * - [RuntimeController.RuntimeState] — resets to Idle / Starting
+     * - [AttachedRuntimeSession] — closed; new session opened on reconnect
+     * - `_reconciliationEpoch` counter — resets to 0 (process-scoped; V2 detects this
+     *   as a new epoch sequence when participantId appears fresh)
+     * - Any in-flight task state — lost; V2 must handle this via its own task timeout/retry
+     *
+     * ## V2 re-synchronization responsibilities
+     *
+     * After Android process recreation, V2 is responsible for:
+     * - Treating the new `runtime_attachment_session_id` as a new attachment era
+     * - Not attempting to resume tasks that were in-flight before the process death
+     * - Re-evaluating participant readiness from the fresh DeviceConnected event
+     * - Re-dispatching any tasks that need to continue (based on V2's own task state)
+     */
+    val PROCESS_RECREATION_BOUNDARY = mapOf(
+        SURVIVES_PROCESS_RECREATION to listOf(
+            "crossDeviceEnabled (AppSettings/SharedPreferences)",
+            "gatewayHost/gatewayPort/useTls/allowSelfSigned (AppSettings/SharedPreferences)",
+            "deviceId (AppSettings/SharedPreferences)",
+            "gatewayToken (AppSettings/SharedPreferences)",
+            "goalExecutionEnabled and other feature flags (AppSettings/SharedPreferences)",
+            "lastDurableSessionId (AppSettings/SharedPreferences — PR-7 prior-session continuity hint)"
+        ),
+        LOST_ON_PROCESS_RECREATION to listOf(
+            "DurableSessionContinuityRecord live record (process-scoped; new era on restart; " +
+                "prior durableSessionId is persisted in AppSettings.lastDurableSessionId as hint)",
+            "_runtimeAttachmentSessionId (regenerated fresh; new attachment era)",
+            "ReconnectRecoveryState (resets to IDLE)",
+            "RuntimeController.RuntimeState (resets to Idle)",
+            "AttachedRuntimeSession (new session on reconnect; V2 sees DeviceConnected)",
+            "_reconciliationEpoch counter (resets to 0; process-scoped)",
+            "in-flight task state (lost; V2 must handle via timeout/retry policy)"
+        )
+    )
+
+    // ── Transient WS disconnect recovery ─────────────────────────────────────
+
+    /**
+     * What Android can recover locally after a **transient WS disconnect** (auto-reconnect).
+     *
+     * After a transparent reconnect, Android re-establishes the session identity using the
+     * preserved `_runtimeAttachmentSessionId` and increments the `sessionContinuityEpoch`.
+     * V2 receives [V2MultiDeviceLifecycleEvent.DeviceReconnected] and can correlate the
+     * returning device to its prior session using [DurableSessionContinuityRecord.durableSessionId].
+     *
+     * **Android recovers locally (no V2 re-sync required)**:
+     *  - Session attachment (re-opened with same `runtime_attachment_session_id`)
+     *  - Durable session continuity (same `durableSessionId`, incremented epoch)
+     *  - Participant identity and health state
+     *  - Rollout control and readiness flags
+     *
+     * **V2 must handle** (cannot be recovered by Android alone):
+     *  - Any task that was in-flight at disconnect time (Android does not know if it completed)
+     *  - Barrier/merge coordination state for any interrupted tasks
+     *  - Re-dispatch decisions for interrupted tasks
+     */
+    val TRANSIENT_DISCONNECT_RECOVERY = mapOf(
+        "android_recovers_locally" to listOf(
+            "WS connection (auto-reconnect, no user action required)",
+            "runtime_attachment_session_id (preserved across reconnects within same era)",
+            "DurableSessionContinuityRecord (same durableSessionId; sessionContinuityEpoch incremented)",
+            "participant identity (deviceId, hostId, participantId unchanged)",
+            "attached session (reopened in ATTACHED state with RECONNECT_RECOVERY source)",
+            "reconnectRecoveryState (transitions RECOVERING → RECOVERED)"
+        ),
+        "v2_must_handle" to listOf(
+            "in-flight task outcome (was task completed before disconnect? V2 must check)",
+            "barrier/merge state for any interrupted tasks",
+            "re-dispatch decisions for interrupted multi-step tasks",
+            "canonical session truth update (V2 reconciles on DeviceReconnected)"
+        )
+    )
+
+    // ── Reconnect failure recovery ────────────────────────────────────────────
+
+    /**
+     * What happens when WS reconnect **attempts** reach the ceiling (PR-Block1 update).
+     *
+     * When the ceiling is reached, [ReconnectRecoveryState.FAILED] is set transiently so the
+     * UI can show a "connection failed — retrying…" message.  However, Android immediately
+     * enters a **perpetual watchdog cycle**:
+     *  - [GalaxyWebSocketClient] resets the attempt counter to 0 and schedules a new reconnect
+     *    attempt at the capped 30 s + jitter interval — reconnect attempts never stop.
+     *  - [RuntimeController] launches a watchdog job that re-enters [ReconnectRecoveryState.RECOVERING]
+     *    after [RuntimeController.WATCHDOG_RECOVERY_REENTRY_DELAY_MS] (~35 s) so the state
+     *    machine tracks the next watchdog attempt cycle.
+     *  - When the watchdog reconnect succeeds, the runtime transitions to
+     *    [ReconnectRecoveryState.RECOVERED] and the attached session is re-established.
+     *
+     * **No user action is required** to continue recovery.  The participant will keep trying
+     * over any period of gateway unavailability.  An explicit [RuntimeController.stop] call
+     * (or the user toggling cross-device off) is the only way to halt the watchdog cycle.
+     */
+    const val RECONNECT_FAILURE_BEHAVIOR =
+        "Android enters a perpetual watchdog recovery cycle after the reconnect-attempt ceiling " +
+            "is reached (PR-Block1).  Reconnect attempts never stop permanently; V2 will eventually " +
+            "observe DeviceReconnected when the gateway becomes available again."
+
+    // ── Hybrid participant limitations ────────────────────────────────────────
+
+    /**
+     * PR-7 — Process-recreation re-attach semantics summary.
+     *
+     * After Android process recreation, Android presents a [ProcessRecreatedReattachHint]
+     * carrying the prior [DurableSessionContinuityRecord.durableSessionId] to V2 via the
+     * `DeviceConnected` event metadata.  This allows V2 to optionally correlate the
+     * returning device with its prior session, rather than treating it as an unrecognised
+     * new device.
+     *
+     * ## What Android does in a process-recreation re-attach
+     *
+     * 1. Reads [AppSettings.lastDurableSessionId] from SharedPreferences.
+     * 2. If non-blank: constructs a [ProcessRecreatedReattachHint] with the prior session ID
+     *    and the stable [AppSettings.deviceId].
+     * 3. Emits `DeviceConnected` with [ParticipantAttachmentTransitionSemantics.AttachmentRecoverySemantics.PROCESS_RECREATED_REATTACH]
+     *    semantics and the hint metadata (attachment_recovery_reason = "process_recreation",
+     *    prior_durable_session_id = <prior ID>).
+     * 4. Generates a fresh [DurableSessionContinuityRecord] for the new activation era.
+     *
+     * ## What Android does NOT do
+     *
+     * - Android does NOT self-authorize session continuation.
+     * - Android does NOT attempt to restore in-flight task state.
+     * - Android does NOT modify V2-managed tokens ([ContinuityRecoveryContext.CONTINUITY_TOKEN_WIRE_FIELD]).
+     *
+     * ## V2 re-synchronization responsibilities
+     *
+     * V2 decides whether to restore participant state based on:
+     * - The presence of [ProcessRecreatedReattachHint.KEY_PRIOR_DURABLE_SESSION_ID] in
+     *   the `DeviceConnected` event metadata.
+     * - V2's own participant-loss timeout policy for the prior session.
+     * - Whether the [AppSettings.deviceId] matches the expected device identity.
+     */
+    const val PROCESS_RECREATED_REATTACH_NOTE =
+        "PR-7: Android now persists lastDurableSessionId in SharedPreferences and presents a " +
+            "ProcessRecreatedReattachHint in DeviceConnected events after process recreation. " +
+            "V2 may use this hint to optionally correlate the returning device with its prior session. " +
+            "Android does not self-authorize session continuation — only V2 decides."
+
+    /**
+     * Summary of Android-side hybrid participant capability notes for V2 reference.
+     *
+     * Updated in PR-A1: [HybridParticipantCapability.HYBRID_EXECUTE_FULL] and
+     * [HybridParticipantCapability.BARRIER_COORDINATION] are now
+     * [HybridParticipantCapability.SupportLevel.AVAILABLE] and are no longer deferrals.
+     * Entries are retained to document lifecycle and continuity considerations that
+     * V2 should still be aware of even for implemented capabilities.
+     *
+     * See [HybridParticipantCapability.deferredCapabilities] for the machine-readable
+     * list of any remaining not-yet-implemented capabilities.
+     */
+    val HYBRID_LIMITATIONS = mapOf(
+        HybridParticipantCapability.HYBRID_EXECUTE_FULL.wireValue to (
+            "Full hybrid_execute implemented by HybridExecuteFullCoordinator (PR-A1). " +
+                "Android executes local steps; V2 coordinates remote steps. " +
+                "If interrupted mid-execution, V2 must re-dispatch or apply fallback."
+        ),
+        HybridParticipantCapability.WEBRTC_PEER_TRANSPORT.wireValue to (
+            "WebRTC peer transport has minimal-compat stubs only; not production-ready. " +
+                "V2 must not rely on WebRTC for correctness-critical flows."
+        ),
+        HybridParticipantCapability.BARRIER_COORDINATION.wireValue to (
+            "Barrier coordination implemented by BarrierCoordinationParticipant (PR-A1). " +
+                "Android participates as a barrier responder; V2 retains barrier authority. " +
+                "Android reports WAITING/RELEASED/TIMED_OUT state via DeviceStateSnapshotPayload."
+        )
+    )
+}

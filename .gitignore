@@ -1,0 +1,33 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Android Studio
+*.iml
+.idea/
+*.swp
+*.swo
+
+# APKs and build outputs
+*.apk
+*.aab
+app/build/
+
+# Keystore files and signing secrets — never commit these
+*.jks
+*.keystore
+keystore.env
+signing.properties
+
+# NDK / native build
+.cxx/
+.externalNativeBuild/
+
+# Profiling / captures
+*.hprof
+captures/
+META-INF/
+# compiled .class file output from kotlinc (project-root temporary output, not source)
+/com/
+*.whl

@@ -1,0 +1,23 @@
+// UFO Galaxy Android - settings.gradle
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // JitPack: provides prebuilt AAR for llama.cpp Android JNI bindings
+        maven { url "https://jitpack.io" }
+    }
+}
+
+rootProject.name = "UFO Galaxy"
+include ':app'
+include ':shared-transport'
+include ':shared-protocol'

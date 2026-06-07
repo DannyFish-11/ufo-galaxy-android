@@ -1,0 +1,446 @@
+# UFO Galaxy Android — Architecture
+
+This document describes the canonical architecture of UFO Galaxy Android as of the v3.0.0 documentation baseline. The current Android app `versionName` in `app/build.gradle` is `2.0.1`. This document remains the authoritative reference for component roles, package ownership, and authority boundaries.
+
+For Android-side UGCP Runtime WS Profile declaration, constitution, and canonical control-plane vocabulary alignment, see
+[`docs/ugcp/ANDROID_UGCP_CONSTITUTION.md`](ugcp/ANDROID_UGCP_CONSTITUTION.md).
+
+---
+
+## System overview
+
+UFO Galaxy Android is an on-device AI agent that can execute natural-language goals autonomously using local ML models (MobileVLM 1.7B planner + SeeClick grounding) and Android AccessibilityService. Optionally, it participates in a distributed Galaxy Gateway network where tasks may be assigned by the server or delegated to Agent Runtime.
+
+### Two operating chains
+
+| Chain | Trigger | Task source | Result destination |
+|-------|---------|-------------|-------------------|
+| **Local** | User text/voice input with `cross_device_enabled=false` | InputRouter → local pipeline | UI (MainViewModel / FloatingService) |
+| **Cross-device** | Any of: user input with WS connected; gateway `task_assign`; gateway `goal_execution` | InputRouter → gateway uplink *or* GalaxyConnectionService ← WS | Gateway via WS |
+
+Both chains use the same on-device execution engine (`EdgeExecutor`). Only the entry point and result routing differ.
+
+---
+
+## Canonical component index
+
+### Input and routing layer
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `NaturalLanguageInputManager` | `speech` | Collects text/voice input; forwards to `InputRouter`. Makes no routing decisions. |
+| `InputRouter` | `input` | **Sole user-input dispatch gate.** Decides local vs cross-device routing for every user-initiated task. |
+
+### Local execution pipeline
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `LocalLoopExecutor` | `local` | Public entry point for local execution. Wraps `LoopController`; exposes stable `LocalLoopResult`. |
+| `LoopController` | `loop` | Orchestrates the full local closed-loop: screenshot → MobileVLM planner → stagnation guard → SeeClick grounding → AccessibilityService → repeat. |
+| `EdgeExecutor` | `agent` | On-device AIP v3 task execution pipeline. Also used by the cross-device inbound path. |
+| `LocalGoalExecutor` | `agent` | Wraps `EdgeExecutor` for `goal_execution` / `parallel_subtask` payloads from the gateway. |
+| `LocalLoopConfig` | `config` | Configuration model (timeouts, step budget, planner/grounding params) sourced from `AppSettings`. |
+
+### Cross-device / gateway layer
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `GalaxyWebSocketClient` | `network` | **Sole cross-device uplink backbone.** Manages WS lifecycle, handshake, heartbeats, offline replay, reconnect backoff. |
+| `GatewayClient` | `network` | Thin wrapper around `GalaxyWebSocketClient.sendJson`. Used by `InputRouter` for task-submit uplink. |
+| `GalaxyConnectionService` | `service` | Android `Service` that owns the inbound WS message loop. Dispatches `task_assign`, `goal_execution`, `parallel_subtask`, `task_cancel` from the gateway. |
+| `AgentRuntimeBridge` | `agent` | Bridges eligible tasks to Agent Runtime / OpenClawd when `crossDeviceEnabled=true` and `exec_mode` is remote/both. Idempotent with a 200-entry cache. |
+| `RuntimeController` | `runtime` | **Sole cross-device lifecycle authority.** All WS connect/disconnect and `crossDeviceEnabled` toggle decisions must go through this class. |
+| `RegistrationFailureNotifier` | `ui` | Singleton `SharedFlow` that surfaces registration errors as dialogs in MainActivity and EnhancedFloatingService. |
+
+### Observability
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `GalaxyLogger` | `observability` | Structured ring-buffer logger (500 entries) + file sink (`galaxy_observability.log`, 2 MB cap). |
+| `MetricsRecorder` | `observability` | In-process counters and latency lists. Optional POST to `metricsEndpoint`. Logs every 5 min. |
+| `TraceContext` | `observability` | Carries `trace_id` / `span_id` for end-to-end log correlation. |
+| `SamplingConfig` | `observability` | Per-tag sample rates; ships `debug` and `production` presets. |
+| `TelemetryExporter` | `observability` | Pluggable export interface (default: `NoOpTelemetryExporter`). |
+
+### Debug tooling
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `LocalLoopDebugState` / `LocalLoopDebugViewModel` | `debug` | In-process trace viewer state for the developer panel. |
+| `LocalLoopTrace` / `LocalLoopTraceStore` | `trace` | Per-step trace records; ring-buffer store for the debug panel. |
+| `SessionHistoryStore` | `history` | Persists completed-session summaries for the history panel. |
+| `DiagnosticsScreen` | `ui/components` | Composable showing connection state, readiness flags, offline queue size. Opened via ⓘ icon. |
+| `LocalLoopDebugPanel` | `ui/components` | Composable showing local-loop traces and session history. Opened via 🐛 icon. |
+
+### Service / system layer
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `EnhancedFloatingService` | `service` | Persistent overlay entry point; observes `RegistrationFailureNotifier`. |
+| `ReadinessChecker` | `service` | Checks model-files-on-disk, AccessibilityService enabled, and overlay permission; produces `ReadinessState`. |
+| `BootReceiver` | `service` | Starts `GalaxyConnectionService` (and cross-device restore if enabled) on device boot. |
+| `NetworkDiagnostics` | `network` | DNS / HTTP / WS / AIP connectivity checks. |
+| `OfflineTaskQueue` | `network` | Buffers `task_result` / `goal_result` envelopes (max 50, 24 h TTL) for replay on reconnect. |
+| `TailscaleAdapter` | `network` | Detects local Tailscale IP via `NetworkInterface.getNetworkInterfaces()`. |
+
+### WebRTC / signaling
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `WebRTCSignalingClient` | `webrtc` | Signaling channel; accepts server `trace_id` and `span_id`. |
+| `IceCandidateManager` | `webrtc` | Dedup, relay > srflx > host ordering, TURN fallback. |
+| `TurnConfig` | `webrtc` | TURN server configuration model. |
+
+---
+
+## Authority boundaries
+
+### Input authority
+
+`InputRouter` is the **single point** where the local-vs-cross-device routing decision is made for user-initiated tasks. No component may bypass it to call `LocalLoopExecutor.execute` or `GatewayClient.sendJson` directly for user input.
+
+### Lifecycle authority
+
+`RuntimeController` is the **sole authority** for WS connect/disconnect and `AppSettings.crossDeviceEnabled` mutations. No other component should call `GalaxyWebSocketClient.connect`, `GalaxyWebSocketClient.disconnect`, or toggle `crossDeviceEnabled` directly.
+
+#### Runtime-host lifecycle transition governance (Android)
+
+`RuntimeController` also owns attached runtime-host session transitions and host participation-state synchronization.
+
+| Lifecycle trigger | Session transition | Host participation state | Ownership note |
+|---|---|---|---|
+| User enable / `start()` success | create/attach new session (`SessionOpenSource.USER_ACTIVATION`) | `INACTIVE → ACTIVE` | Canonical activation path |
+| Background restore / `connectIfEnabled()` success | create/attach new session (`SessionOpenSource.BACKGROUND_RESTORE`) | `INACTIVE → ACTIVE` | Restore path; no independent authority outside controller |
+| Active WS disconnect | detach existing session (`DetachCause.DISCONNECT`) | `ACTIVE → INACTIVE` | Recovery phase begins |
+| Active WS reconnect | replace detached session with fresh attach (`SessionOpenSource.RECONNECT_RECOVERY`) | `INACTIVE → ACTIVE` | Canonical reconnect replacement semantics |
+| Explicit stop | detach session (`DetachCause.DISABLE`) | `ACTIVE/other → INACTIVE` | Canonical retirement path |
+| Explicit invalidate | detach session (`DetachCause.INVALIDATION`) | `ACTIVE/other → INACTIVE` | Trust reset without changing runtime authority owner |
+| Registration/start failure fallback | detach session (`DetachCause.DISCONNECT`) + fallback local-only | `ACTIVE/other → INACTIVE` | Failure recovery remains controller-owned |
+
+### Uplink authority
+
+`GalaxyWebSocketClient` is the **sole cross-device uplink**. All outbound cross-device messages — device registration, capability reports, heartbeats, task results, goal results, cancel results — flow through this class. Use `GatewayClient` (the thin wrapper) for task-submit calls.
+
+### Formal Android bounded-subject runtime boundary
+
+`AndroidBoundedSubjectRuntimeContract` (`app/src/main/java/com/ufo/galaxy/runtime/AndroidBoundedSubjectRuntimeContract.kt`) is the canonical role-boundary declaration for Android in dual-repo governance.
+
+Android is formally fixed as:
+
+- bounded relative subject runtime
+- local runtime host
+- local continuity holder
+- local execution policy participant
+- local AI consumer host
+- distributed participant
+
+This contract explicitly enforces:
+
+- Android is **not** a passive endpoint/UI shell.
+- Android is **not** a parallel canonical center.
+- Android may decide local runtime mode/continuity/AI-consumption execution, but cannot finalize global truth/dispatch/closure.
+
+#### Unified cross-repo glossary
+
+| Term | Boundary meaning |
+|------|------------------|
+| center | V2 canonical governance center with final dispatch/truth/closure authority |
+| subject | bounded runtime主体 with local lifecycle and local execution judgment |
+| participant | subject instance enrolled in distributed collaboration |
+| target | routed execution target, not authority owner |
+| truth | Android publishes participant truth; center performs final convergence |
+| dispatch | center-owned final arbitration |
+| continuity | reconnect/replay/recovery/handoff/takeover continuity semantics |
+| closure | Android contributes evidence; center produces canonical closure verdict |
+| bounded authority | Android has local decision scope but no global finalization authority |
+
+#### Android uplink semantic layers
+
+| Layer | Representative uplink message types | Governance interpretation |
+|-------|-------------------------------------|---------------------------|
+| participant truth uplink | `device_register`, `capability_report`, `device_readiness_report`, `device_governance_report`, `device_acceptance_report` | participant identity/readiness/truth contribution |
+| runtime state uplink | `heartbeat`, `heartbeat_ack`, `device_state_snapshot` | runtime liveness/state contribution |
+| execution result uplink | `task_result`, `cancel_result`, `goal_result`, `goal_execution_result`, `device_execution_event` | execution evidence/result contribution |
+| diagnostics uplink | `diagnostics_payload`, `device_audit_report` | diagnostics/audit visibility (non-closure authority) |
+| compat/minimal uplink | `relay` and other minimal-compat channels | explicit compatibility path, not canonical authority path |
+
+#### Android local AI consumer flow ↔ canonical arbitration alignment
+
+`AndroidBoundedSubjectRuntimeContract.LOCAL_AI_CONSUMER_FLOW_BOUNDARIES` fixes the local AI consumer flow to real modules and explicit arbitration boundaries:
+
+1. `RuntimeController` / `LocalExecutionModeGate`: local runtime/mode decision (bounded local authority).
+2. `GalaxyConnectionService` / `AutonomousExecutionPipeline` / `LocalLoopExecutor`: local policy routing + local execution consumption.
+3. `AndroidContinuityIntegration` / `OfflineTaskQueue`: local continuity/recovery/replay handling with canonical uplink obligation.
+4. `GalaxyWebSocketClient`: canonical uplink transport; center remains canonical arbitration/truth/closure authority.
+
+Visibility, diagnostics/evidence, and uplink boundaries are explicit in the same contract:
+
+- local-visible / runtime-visible / product-visible / diagnostics-visible stay as local consumption classes;
+- `participant_truth_uplink`, `execution_result_uplink`, and `continuity_state_uplink` are canonical-participant uplinks into V2 truth/closure convergence chain;
+- diagnostics/evidence outputs are bounded: local diagnostics are local-facing evidence, while canonical uplink evidence remains participant contribution and never final authority;
+- diagnostics uplink remains diagnostics-only and does not claim canonical closure authority.
+
+`AndroidFinalSurfaceConvergenceContract` further locks the final outward composition boundary:
+
+- center authority (final truth/dispatch/closure) remains V2 canonical center authority;
+- Android bounded runtime authority remains local runtime/continuity/execution bounded authority;
+- distributed subject contract anchor remains a canonical contract boundary (not a local-facing authority facade);
+- canonical truth/result/continuity alignment is only via canonical uplink contract surfaces;
+- local-facing / product-facing / operator-facing / diagnostics-facing surfaces are consumption-only and must not reassemble authority truth/state/dispatch.
+
+### Android bounded subject platform boundary (PR-13Android)
+
+`AndroidBoundedSubjectPlatformBoundaryContract` (`app/src/main/java/com/ufo/galaxy/runtime/AndroidBoundedSubjectPlatformBoundaryContract.kt`) is the final convergence anchor that locks the dual-repo quasi-platform state and prevents boundary drift.
+
+#### Formal dual-repo quasi-platform state definition
+
+> **dual-repo quasi-platform state**: center-governed multi-relative-subject distributed AI runtime where Android is fixed as `bounded_relative_subject_runtime / local_ai_consumer_host / canonical_aligned_participant_runtime`, V2 holds canonical authority / truth convergence / closure, and outward consumers are strictly consumption-only.
+
+#### Android formal definition
+
+> **Android bounded relative subject runtime**: local AI consumer host, canonical-aligned participant runtime, bounded execution participant — not a parallel canonical center.
+
+#### Five non-overlapping boundary classes
+
+| Boundary class | Scope | Authority level |
+|----------------|-------|-----------------|
+| `BOUNDED_RUNTIME_BOUNDARY` | Local execution, continuity, recovery, participant lifecycle | Bounded to Android; V2 retains final truth convergence |
+| `LOCAL_AI_CONSUMER_BOUNDARY` | On-device ML inference, local result production | Local consumption only; does not re-dispatch as canonical truth |
+| `PARTICIPANT_TRUTH_UPLINK_BOUNDARY` | `goal_execution_result` / `device_execution_event` / `device_state_snapshot` uplinks | Participant contribution uplink via canonical contracts; V2 owns acceptance / closure |
+| `OBSERVABILITY_DIAGNOSTICS_EVIDENCE_BOUNDARY` | Diagnostics payloads, evidence projections, operator-visible summaries | Consumption-only; must not be elevated to canonical truth |
+| `OUTWARD_CONSUMPTION_BOUNDARY` | UI-visible, product-facing, operator-facing, local-facing surfaces | Consumption of bounded/canonical outputs only; no authority re-assembly |
+
+#### Three-way final relationship
+
+```
+Android bounded runtime  →(uplink only)→  V2 canonical center  →(consumption only)→  outward consumers
+```
+
+- Android does NOT finalize truth, arbitrate dispatch, or own closure.
+- V2 canonical center is the sole authority for truth convergence, dispatch arbitration, and closure.
+- Outward consumers (UI/product/operator/diagnostics layers) do NOT re-assemble authority, truth, dispatch, or closure.
+
+#### Hard constraints enforced by this contract
+
+1. No boundary entry may re-assemble canonical authority, finalize truth, arbitrate dispatch, or own closure.
+2. Android runtime boundary anchors must include `AndroidBoundedSubjectRuntimeContract` and `RuntimeController`.
+3. Participant truth uplink boundary must anchor through `AndroidResultUplinkBoundaryContract`, `AndroidDistributedTruthOwnershipUplinkContract`, `AndroidCompletionClosureUplinkContract`.
+4. Observability/diagnostics/evidence boundary is consumption-only.
+5. Outward consumption boundary must anchor through `AndroidFinalSurfaceConvergenceContract`.
+
+#### Formal boundary summary schema (runtime-assertable)
+
+`AndroidBoundedSubjectRuntimeContract.FORMAL_BOUNDARY_SUMMARY_ENTRIES` (`FORMAL_BOUNDARY_SUMMARY_SCHEMA_VERSION=1.0`) fixes six Android-side boundary summaries as long-term reference surfaces and testable runtime assertions:
+
+| Summary class | Fixed boundary meaning |
+|---------------|------------------------|
+| `ANDROID_BOUNDED_SUBJECT_RUNTIME` | Android is bounded relative subject runtime (local host + continuity holder + participant), not canonical center |
+| `LOCAL_VISIBLE_VS_CANONICAL_VISIBLE` | local/runtime/product/diagnostics visibility is local-facing; canonical visibility only through participant uplinks |
+| `CONTINUITY_RESTORE` | continuity/restore/replay are locally handled with canonical continuity uplink obligation |
+| `UPLINK_INGRESS_CONTRACT` | uplink/ingress are participant contracts into V2 canonical governance/truth/closure chain |
+| `OUTWARD_UI_CONSUMPTION` | outward/UI/operator/product/diagnostics layers are consumption-only |
+| `NON_SOVEREIGN_ROLE` | Android is explicitly non-sovereign: no canonical truth convergence, no final closure adjudication, no platform sovereignty |
+
+Validation helpers and tests:
+
+- `AndroidBoundedSubjectRuntimeContract.validateFormalBoundarySummaryCoverage()`
+- `Pr10v2AndroidBoundedSubjectRuntimeContractTest` (`formal boundary summary...` assertions)
+
+### Formal boundary summary output (PR-25Android)
+
+`AndroidFormalBoundarySummaryOutputContract` (`app/src/main/java/com/ufo/galaxy/runtime/AndroidFormalBoundarySummaryOutputContract.kt`) is the canonical, long-term-referenceable formal boundary summary output for the Android bounded relative subject runtime.  It consolidates role declarations, is/is-not statements, boundary summaries, restore/replay sub-boundaries, anti-drift invariants, and V2 alignment into a single stable, testable surface.
+
+#### Android system role (what Android IS)
+
+| Role class | Wire value | Canonical anchor |
+|---|---|---|
+| bounded relative subject runtime | `bounded_relative_subject_runtime` | `AndroidBoundedSubjectRuntimeContract.FormalRole.BOUNDED_RELATIVE_SUBJECT_RUNTIME` |
+| local runtime host | `local_runtime_host` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_RUNTIME_HOST` |
+| local continuity holder | `local_continuity_holder` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_CONTINUITY_HOLDER` |
+| local execution policy participant | `local_execution_policy_participant` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_EXECUTION_POLICY_PARTICIPANT` |
+| local AI consumer host | `local_ai_consumer_host` | `AndroidBoundedSubjectRuntimeContract.FormalRole.LOCAL_AI_CONSUMER_HOST` |
+| distributed participant | `distributed_participant` | `AndroidBoundedSubjectRuntimeContract.FormalRole.DISTRIBUTED_PARTICIPANT` |
+
+#### What Android is NOT
+
+| Non-role | Authority that IS held |
+|---|---|
+| parallel canonical center | V2 canonical center |
+| fully sovereign distributed authority node | bounded local scope only |
+| final closure adjudicator | V2 canonical center |
+| canonical truth finalizer | V2 canonical center |
+| dispatch arbitrator | V2 canonical center |
+| platform sovereign | V2-governed quasi-platform state |
+
+#### Six boundary summary classes (consolidated output)
+
+| `BoundarySummaryClass` | Wire value | Module anchors |
+|---|---|---|
+| `ANDROID_BOUNDED_SUBJECT_RUNTIME` | `android_bounded_subject_runtime_boundary` | `AndroidBoundedSubjectRuntimeContract`, `RuntimeController`, `GalaxyConnectionService` |
+| `LOCAL_VISIBLE_VS_CANONICAL_VISIBLE` | `local_visible_vs_canonical_visible_boundary` | `AndroidBoundedSubjectRuntimeContract.LocalVisibleClass`, `OBSERVABILITY_BOUNDARY_ENTRIES` |
+| `CONTINUITY_RESTORE_REPLAY` | `continuity_restore_replay_boundary` | `AndroidContinuityIntegration`, `UnifiedReplayRecoveryContract`, `OfflineQueueReplayPolicy` |
+| `UPLINK_INGRESS_CONTRACT` | `uplink_ingress_contract_boundary` | `AndroidGovernanceExecutionPolicyIngressContract`, result/ownership/closure/tool/diagnostics uplink contracts |
+| `OUTWARD_UI_CONSUMPTION` | `outward_ui_consumption_boundary` | `AndroidFinalSurfaceConvergenceContract`, `MainUiState`, `MainViewModel` |
+| `NON_SOVEREIGN_ROLE` | `non_sovereign_role_boundary` | `AndroidBoundedSubjectPlatformBoundaryContract.QUASI_PLATFORM_STATE_DEFINITION` |
+
+#### restore / replay sub-boundary summaries
+
+| Sub-boundary | Android owns | V2 canonical authority |
+|---|---|---|
+| `offline-queue-replay` | ✓ — bounded local replay | ✗ |
+| `continuity-restore` | ✓ — bounded local state restore | ✗ |
+| `lifecycle-recovery` | ✓ — bounded local recovery decision | ✗ |
+| `continuity-state-uplink` | ✗ | ✓ — V2 canonical continuity legality |
+
+#### Anti-drift invariants (9)
+
+Nine machine-assertable invariants in `ANTI_DRIFT_INVARIANTS` prevent future Android-side authority drift.  Key invariants:
+
+- No boundary summary output entry may set `allowsCanonicalTruthConvergence`, `allowsFinalClosureAdjudication`, or `allowsPlatformSovereignty` to `true`.
+- `CONTINUITY_RESTORE_REPLAY` must anchor `AndroidContinuityIntegration` or `UnifiedReplayRecoveryContract`.
+- `UPLINK_INGRESS_CONTRACT` must anchor `AndroidGovernanceExecutionPolicyIngressContract` and at least one uplink contract.
+- `OUTWARD_UI_CONSUMPTION` must anchor `AndroidFinalSurfaceConvergenceContract`.
+- `NON_SOVEREIGN_ROLE` must anchor `QUASI_PLATFORM_STATE_DEFINITION`.
+
+#### Validation helpers and tests
+
+- `AndroidFormalBoundarySummaryOutputContract.validateCompleteFormalBoundarySummary()`
+- `AndroidFormalBoundarySummaryOutputContract.validateAllSystemRolesActive()`
+- `AndroidFormalBoundarySummaryOutputContract.validateAllIsNotStatementsNonBlank()`
+- `AndroidFormalBoundarySummaryOutputContract.validateAntiDriftInvariantCoverage()`
+- `Pr25AndroidFormalBoundarySummaryOutputContractTest`
+
+### Truth vs projection boundary (Android-side)
+
+Android runtime-host surfaces intentionally include both authoritative lifecycle truth and additive projections/read-models:
+
+| Surface | Kind | Ownership note |
+|---------|------|----------------|
+| `RuntimeController.hostSessionSnapshot` | authoritative host-facing truth projection | Canonical Android attached-session truth surface for host/session continuity semantics. |
+| `RuntimeController.targetReadinessProjection` | authoritative host-facing truth projection | Canonical Android delegated-selection/readiness truth surface. |
+| `RuntimeController.reconnectRecoveryState` | authoritative runtime lifecycle truth | Canonical Android reconnect recovery state surface. |
+| `CanonicalParticipantModel` / `CanonicalDeviceModel` / `CanonicalCapabilityProviderModel` | additive projection/read-model contracts | Compatibility-safe convergence models; **not** lifecycle truth owners. They must not be treated as session/reconnect/readiness authorities. |
+
+### Identity-linkage contract (Android runtime-host side)
+
+To keep participant/device/capability identity boundaries easy to scan, Android runtime-host
+identity composition is centralized in
+`app/src/main/java/com/ufo/galaxy/runtime/RuntimeIdentityContracts.kt`:
+
+| Contract | Canonical format | Used by |
+|---------|------------------|---------|
+| Participant/node identity | `device_id:runtime_host_id` | `CanonicalParticipantModel.participantId`, `CanonicalDeviceModel.linkedParticipantId` |
+| Capability-provider reference | `capability_provider:<device_id:runtime_host_id>` | `CanonicalCapabilityProviderModel.providerId` |
+
+---
+
+## Legacy / compatibility components
+
+These components are present in the codebase for backward compatibility or diagnostic use only. New code must not depend on them for primary functionality.
+
+| Component | Package | Status | Notes |
+|-----------|---------|--------|-------|
+| `GalaxyApiClient.registerDevice` | `api` | `@Deprecated` | REST-based device registration; superseded by WS `capability_report` on connect. Retained for diagnostic REST endpoint checks only. |
+| `GalaxyApiClient.sendHeartbeat` | `api` | `@Deprecated` | REST heartbeat; superseded by WS `heartbeat` messages every 30 s. |
+| `MessageRouter` | `network` | Removed | Was superseded by `InputRouter`; no longer present in the codebase. |
+
+If you encounter code that calls these deprecated methods for anything other than diagnostics, prefer the canonical WS-based paths documented above.
+
+---
+
+## Media transport and task-lifecycle convergence (PR-40)
+
+### Transport condition → lifecycle adaptation integration
+
+`MediaTransportLifecycleBridge` is the canonical model governing how Android-side
+media/session transport conditions map to task/runtime lifecycle adaptations.
+
+| Transport condition | Lifecycle adaptation | Dispatch impact | Recovery path |
+|---------------------|---------------------|-----------------|---------------|
+| `STABLE` | `NONE` | No restriction | No recovery needed |
+| `DEGRADED` | `ADVISORY` | Advisory telemetry; cross-device paths remain open | Transport layer monitors quality; re-enable on stabilisation |
+| `INTERRUPTED` | `TERMINATE_ACTIVE_TASKS` | Cross-device paths suppressed | WS reconnect → `openAttachedSession(RECONNECT_RECOVERY)` |
+| `SUSPENDED` | `TERMINATE_ACTIVE_TASKS` | Cross-device paths suppressed | Explicit re-enable via `RuntimeController.start()` |
+
+All adaptations are applied exclusively through `RuntimeController`.  No transport-layer
+component may independently modify runtime or session state in response to a transport
+condition change.
+
+### Transport continuity anchor
+
+`TransportContinuityAnchor` declares the canonical continuity policy for each transport
+lifecycle event, making session continuity behavior explicit and machine-readable.
+
+| Event | Continuity policy | Durable era | Post-event session state |
+|-------|-------------------|-------------|--------------------------|
+| `ATTACH` | `PERSIST` | Retained | `ATTACHED` |
+| `DETACH` | `TERMINATES` | Cleared | `DETACHED` |
+| `RECONNECT` | `RESHAPES` | Retained (epoch++) | `REATTACHED` |
+| `DEGRADATION` | `SUSPENDS` | Retained | `ATTACHED` |
+| `RECOVERY` | `PERSIST` | Retained | `ATTACHED` |
+
+**Key invariant**: `DurableSessionContinuityRecord` must be retained on `RECONNECT`;
+only `sessionContinuityEpoch` increments.  `RuntimeController` is the sole authority
+for applying all continuity policy transitions.
+
+### Transport-aware dispatch path resolution
+
+`CanonicalDispatchChain.resolveTransportAdaptedPaths()` extends
+`resolveEligiblePathsForState()` with a transport-condition filter:
+
+- `STABLE` / `DEGRADED` → same paths as `resolveEligiblePathsForState()`.
+- `INTERRUPTED` / `SUSPENDED` → cross-device path modes (`CANONICAL`, `STAGED_MESH`,
+  `DELEGATED`) are suppressed; `LOCAL`, `FALLBACK`, and `COMPATIBILITY` remain eligible.
+
+### Session family transport continuity bindings
+
+`CanonicalSessionAxis.transportContinuityBindings` classifies each session family by
+how transport lifecycle events affect its continuity:
+
+| Session family | Affected by interruption | Survives reconnect |
+|---|---|---|
+| `CONTROL_SESSION` | No | Yes |
+| `RUNTIME_SESSION` | Yes | No |
+| `ATTACHED_RUNTIME_SESSION` | Yes | No |
+| `DELEGATION_TRANSFER_SESSION` | Yes | No |
+| `CONVERSATION_SESSION` | No | Yes |
+| `MESH_SESSION` | Yes | No |
+| `DURABLE_RUNTIME_SESSION` | No | Yes |
+
+---
+
+## Package map
+
+```
+com.ufo.galaxy
+├── agent/          EdgeExecutor, LocalGoalExecutor, AgentRuntimeBridge, TaskCancelRegistry
+├── api/            GalaxyApiClient [LEGACY – diagnostic only]
+├── config/         LocalLoopConfig
+├── coordination/   (coordination support types)
+├── data/           AppSettings, protocol data models
+├── debug/          LocalLoopDebugState, LocalLoopDebugViewModel
+├── grounding/      Grounding support types
+├── history/        SessionHistorySummary, SessionHistoryStore
+├── inference/      LocalPlannerService, LocalGroundingService
+├── input/          InputRouter ← canonical user-input gate
+├── integration/    Integration support
+├── local/          LocalLoopExecutor, LocalLoopResult, LocalLoopOptions
+├── loop/           LoopController
+├── memory/         OpenClawdMemoryBackflow
+├── model/          ModelAssetManager, ModelDownloader
+├── network/        GalaxyWebSocketClient, GatewayClient, OfflineTaskQueue,
+│                   NetworkDiagnostics, TailscaleAdapter
+├── nlp/            GoalNormalizer
+├── observability/  GalaxyLogger, MetricsRecorder, TraceContext, SamplingConfig,
+│                   TelemetryExporter
+├── planner/        Planner support types
+├── protocol/       AipModels (AIP v3.0 message types)
+├── runtime/        RuntimeController ← cross-device lifecycle authority
+├── service/        GalaxyConnectionService, EnhancedFloatingService, ReadinessChecker,
+│                   BootReceiver
+├── speech/         NaturalLanguageInputManager
+├── trace/          LocalLoopTrace, LocalLoopTraceStore
+├── ui/             MainActivity, MainViewModel, RegistrationFailureNotifier,
+│                   composables (DiagnosticsScreen, LocalLoopDebugPanel, …)
+└── webrtc/         WebRTCSignalingClient, IceCandidateManager, TurnConfig
+```

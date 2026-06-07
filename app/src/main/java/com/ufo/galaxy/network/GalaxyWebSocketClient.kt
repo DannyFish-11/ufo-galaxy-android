@@ -1,0 +1,3218 @@
+package com.ufo.galaxy.network
+
+import android.content.Context
+import android.os.Build
+import android.os.PowerManager
+import android.os.SystemClock
+import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.ufo.galaxy.BuildConfig
+import com.ufo.galaxy.data.AIPMessage
+import com.ufo.galaxy.data.AIPMessageType
+import com.ufo.galaxy.data.CapabilityReport
+import com.ufo.galaxy.observability.GalaxyLogger
+import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
+import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
+import com.ufo.galaxy.runtime.AndroidCrossRepoDedupeContract
+import com.ufo.galaxy.runtime.AndroidDiagnosticsFailureExplanationUplinkContract
+import com.ufo.galaxy.runtime.AndroidDistributedTruthOwnershipUplinkContract
+import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
+import com.ufo.galaxy.runtime.AndroidLocalDiagnosticReasonContract
+import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
+import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
+import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
+import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
+import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
+import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
+import com.ufo.galaxy.runtime.LocalExecutionModeGate
+import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+import com.ufo.galaxy.runtime.ReconciliationSignal
+import com.ufo.galaxy.runtime.SourceRuntimePosture
+import com.ufo.galaxy.protocol.DiagnosticsPayload
+import com.ufo.galaxy.protocol.MeshJoinPayload
+import com.ufo.galaxy.protocol.MeshLeavePayload
+import com.ufo.galaxy.protocol.MeshResultPayload
+import com.ufo.galaxy.protocol.MeshSubtaskResult
+import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
+import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.ReconnectionConfig
+import com.ufo.galaxy.shared.protocol.AuthMessage
+import kotlinx.coroutines.*
+import org.json.JSONObject
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import okhttp3.*
+import okhttp3.CertificatePinner
+import java.security.MessageDigest
+import java.security.NoSuchAlgorithmException
+import java.security.KeyManagementException
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import kotlin.math.min
+import kotlin.random.Random
+
+/**
+ * **The sole cross-device uplink and session transport backbone** for the Android runtime.
+ *
+ * All outbound cross-device messages flow through this class:
+ *  - **Device registration / capability report**: sent automatically on [onOpen] via
+ *    [sendHandshake], carrying platform, device_id, supported_actions, capability schema,
+ *    and metadata flags.
+ *  - **Heartbeats**: emitted every [HEARTBEAT_INTERVAL_MS] (30 s) with device_id,
+ *    route_mode, and reconnect_attempts for liveness monitoring.
+ *  - **Task / goal uplink**: [sendJson] is the single write path for `task_submit`,
+ *    `goal_execution_result`, and `cancel_result` envelopes.  All production result
+ *    paths (task_assign, goal_execution, parallel_subtask, error/parse-failure) emit
+ *    `goal_execution_result` as the canonical result type.  Callers must use
+ *    [InputRouter] (or [GalaxyConnectionService] for inbound dispatch) — never bypass
+ *    [sendJson] with a separate WebSocket connection.
+ *  - **Offline replay**: `goal_execution_result` envelopes (and legacy `task_result` /
+ *    `goal_result` envelopes retained for backward compatibility) are buffered in
+ *    [offlineQueue] when disconnected and replayed in FIFO order on reconnect.
+ *
+ * **Lifecycle ownership**: [RuntimeController] is the sole authority for connect /
+ * disconnect decisions and cross-device enable/disable toggling. No other component
+ * should call [connect], [disconnect], or [setCrossDeviceEnabled] directly.
+ *
+ * **Reconnect strategy** — exponential backoff with jitter + perpetual watchdog:
+ *   base delays 1 s → 2 s → 4 s → 8 s → 16 s → 30 s (capped), plus up to 1 s
+ *   of random jitter.  Attempt counter is reset to 0 on a successful [onOpen].
+ *   Calling [connect] while already connected or connecting is a no-op.
+ *   Calling [connect] after an explicit [disconnect] restarts the attempt counter.
+ *   Once the attempt ceiling ([MAX_RECONNECT_ATTEMPTS]) is reached, [Listener.onError]
+ *   is emitted (for UI / recovery-state updates) and the counter resets to 0;
+ *   reconnect attempts then continue indefinitely at the capped 30 s interval.
+ *   The device **never** stops reconnecting while [shouldReconnect] is `true`.
+ *
+ * **Cross-device gate**: [sendJson] is hard-blocked when [crossDeviceEnabled] is `false`,
+ *   regardless of connection state, to enforce the local-only mode invariant.
+ *
+ * **Offline task queue** — when [sendJson] is called while disconnected and the
+ *   message type matches [OfflineTaskQueue.QUEUEABLE_TYPES] ("goal_execution_result",
+ *   or legacy "task_result" / "goal_result" for backward compatibility), the payload
+ *   is enqueued in [offlineQueue] instead of being dropped.  The queue is flushed
+ *   automatically when the connection is (re-)established.  Observable via [queueSize].
+ *
+ * **Log tags** — all log lines use the [TAG] constant ("GalaxyWebSocket") which
+ *   is prefixed with a contextual marker:
+ *   - `[WS:CONNECT]`    — connection lifecycle (open / close / disable)
+ *   - `[WS:DISCONNECT]` — explicit disconnect
+ *   - `[WS:RETRY]`      — reconnect scheduling / attempts
+ *
+ * @param serverUrl          WebSocket server URL.
+ * @param crossDeviceEnabled When false, [connect] is a no-op and no device_register or
+ *                           capability_report messages are sent. Defaults to true for
+ *                           backward compatibility.
+ * @param offlineQueue       Offline task queue used to buffer outgoing task results
+ *                           while disconnected.  Pass a pre-configured [OfflineTaskQueue]
+ *                           (with [android.content.SharedPreferences]) for persistence;
+ *                           defaults to an in-memory-only queue.
+ * @param allowSelfSigned    When true, OkHttp trusts self-signed TLS certificates.
+ *                           Only relevant when using `wss://` / `https://` URLs.
+ *                           **Debug/dev only** — never use on public networks.
+ */
+class GalaxyWebSocketClient(
+    private var serverUrl: String,
+    crossDeviceEnabled: Boolean = true,
+    val offlineQueue: OfflineTaskQueue = OfflineTaskQueue(),
+    private val allowSelfSigned: Boolean = false,
+    private var gatewayToken: String = "",
+    private var runtimeSessionId: String? = null,
+    private var configuredDeviceId: String = "",
+    private val useBinaryFormat: Boolean = false,
+    private val context: Context? = null,
+    private val lifecycleOwner: LifecycleOwner? = null,
+) : GatewayClient {
+    // ── Runtime attachment session identity fields (PR-G) ─────────────────────
+
+    /**
+     * The stable `runtime_attachment_session_id` for the current attached session era.
+     *
+     * Set by [RuntimeController] via [updateRuntimeConnectionConfig] each time a new
+     * [com.ufo.galaxy.runtime.AttachedRuntimeSession] is created or preserved on reconnect.
+     *
+     * - On first connect / user activation: set to a freshly generated UUID v4.
+     * - On transparent reconnect (RECONNECT_RECOVERY): **same value as before**, enabling
+     *   the V2 continuity consumer to recognise the returning device as restoring the same
+     *   attachment rather than starting a brand-new one.
+     * - On explicit stop or invalidation: cleared to `null`; the next activation generates
+     *   a fresh ID.
+     *
+     * Included in both `device_register` and `capability_report` handshake messages as the
+     * `runtime_attachment_session_id` wire field.
+     */
+    @Volatile private var runtimeAttachmentSessionId: String? = null
+
+    /**
+     * The durable session ID for the current activation era (PR-1 / PR-G).
+     *
+     * Sourced from [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.durableSessionId].
+     * Stable across all reconnects within the same activation era; cleared on stop/invalidate.
+     *
+     * Included in handshake messages as `durable_session_id` when non-null.
+     */
+    @Volatile private var durableSessionId: String? = null
+
+    /**
+     * The session continuity epoch for the current activation era (PR-1 / PR-G).
+     *
+     * Sourced from [com.ufo.galaxy.runtime.DurableSessionContinuityRecord.sessionContinuityEpoch].
+     * `0` at first attach; increments on each transparent reconnect.
+     *
+     * Included in handshake messages as `session_continuity_epoch` when [durableSessionId]
+     * is non-null.
+     */
+    @Volatile private var sessionContinuityEpoch: Int? = null
+    companion object {
+        private const val TAG = "GalaxyWebSocket"
+        const val ENTRYPOINT_ROLE = "internal_entry"
+        /** SECURITY-FIX (P2): Message types that may be dropped under extreme backpressure. */
+        private val LOW_PRIORITY_TYPES = setOf(
+            "heartbeat", "heartbeat_ack", "ping", "pong", "ack"
+        )
+        // PR-RECONNECT-UNIFIED: Use ReconnectionConfig constants shared with Wear OS.
+        private const val HEARTBEAT_INTERVAL_MS = ReconnectionConfig.HEARTBEAT_INTERVAL_MS
+        private const val HEARTBEAT_TIMEOUT_MS = ReconnectionConfig.HEARTBEAT_TIMEOUT_MS
+        private const val MAX_MISSED_HEARTBEATS = ReconnectionConfig.MAX_MISSED_HEARTBEATS
+        private const val MAX_RECONNECT_ATTEMPTS = ReconnectionConfig.MAX_ATTEMPTS
+        private const val DEFAULT_MESH_ROLE = "participant"
+
+        // D4-FIX: Canonical wire constants extracted from magic strings to prevent
+        // typos and enable find-usages refactoring.
+        const val DEVICE_TYPE_ANDROID = "Android_Agent"
+        const val AIP_PROTOCOL_VERSION = "AIP/1.0"
+        const val AIP_SPEC_VERSION = "3.0"
+
+        // SECURITY: Sanitizes URLs to prevent sensitive data (tokens, credentials) from
+        // being logged. Strips query parameters, user info, and path details — preserves
+        // only protocol, host, and port for diagnostic purposes.
+        fun sanitizeUrlForLogging(url: String): String {
+            return try {
+                val parsed = java.net.URI(url)
+                val port = when {
+                    parsed.port > 0 -> ":${parsed.port}"
+                    else -> ""
+                }
+                "${parsed.scheme}://${parsed.host}$port/[REDACTED]"
+            } catch (_: java.net.URISyntaxException) {
+                "[INVALID_URL]"
+            }
+        }
+
+        /**
+         * SECURITY: Resolves whether self-signed certificates should be allowed.
+         * Self-signed certificates are ONLY permitted in DEBUG builds.
+         * Release builds always return false, regardless of the requested value.
+         */
+        fun resolveAllowSelfSigned(requested: Boolean, isDebugBuild: Boolean): Boolean {
+            return isDebugBuild && requested
+        }
+
+        /**
+         * Builds an OkHttpClient configured for WebSocket connections.
+         *
+         * When [allowSelfSigned] is `true` the client accepts all TLS certificates,
+         * including self-signed ones. Use this **only** in debug/dev environments on
+         * private (e.g. Tailscale) networks — it disables hostname verification.
+         *
+         * SECURITY: Release builds use certificate pinning to prevent MITM attacks.
+         * The pinned SHA-256 hash must be updated with the production certificate
+         * before release deployment. Self-signed certificates are NEVER trusted
+         * in release builds regardless of the [allowSelfSigned] parameter.
+         */
+        fun buildOkHttpClient(
+            allowSelfSigned: Boolean = false,
+            isDebugBuild: Boolean = BuildConfig.DEBUG
+        ): OkHttpClient {
+            val builder = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .pingInterval(20, TimeUnit.SECONDS)
+            val effectiveAllowSelfSigned = resolveAllowSelfSigned(
+                requested = allowSelfSigned,
+                isDebugBuild = isDebugBuild
+            )
+            if (effectiveAllowSelfSigned) {
+                // SECURITY: This branch only executes in DEBUG builds.
+                // All certificate validation is disabled — debug/dev only on private networks.
+                try {
+                    val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+                        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+                        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                    })
+                    val sslContext = SSLContext.getInstance("TLS")
+                    sslContext.init(null, trustAllCerts, SecureRandom())
+                    builder.sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                    builder.hostnameVerifier { _, _ -> true }
+                    Log.w(TAG, "[WS:CONNECT] allowSelfSigned=true — TLS certificate validation is DISABLED (debug only)")
+                } catch (e: NoSuchAlgorithmException) {
+                    Log.e(TAG, "[WS:CONNECT] Failed to configure self-signed trust: TLS algorithm not available: ${e.message}")
+                } catch (e: KeyManagementException) {
+                    Log.e(TAG, "[WS:CONNECT] Failed to configure self-signed trust: key management error: ${e.message}")
+                }
+            } else if (!isDebugBuild) {
+                // R3-3-FIX: Certificate pinning with placeholder safety check.
+                // If the hash is still the placeholder, disable pinning and log a
+                // loud warning rather than crashing with a pinning failure.
+                val pinHash = BuildConfig.CERT_PIN_HASH
+                val placeholder = "sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"
+                if (pinHash.isNullOrEmpty() || pinHash == placeholder) {
+                    Log.w(
+                        TAG,
+                        "RELEASE BUILD WITHOUT CERTIFICATE PINNING! " +
+                            "Set CERT_PIN_HASH in build.gradle before release. " +
+                            "Run: openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | " +
+                            "openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | " +
+                            "openssl dgst -sha256 -binary | openssl enc -base64"
+                    )
+                } else {
+                    val certificatePinner = CertificatePinner.Builder()
+                        .add("galaxy.ufo.ai", pinHash)
+                        .build()
+                    builder.certificatePinner(certificatePinner)
+                    Log.i(TAG, "[WS:CONNECT] Certificate pinning enabled for release build")
+                }
+            }
+            return builder.build()
+        }
+    }
+    
+    /**
+     * WebSocket 监听器接口
+     */
+    interface Listener {
+        fun onConnected()
+        fun onDisconnected()
+        fun onMessage(message: String)
+        fun onError(error: String)
+        fun onDeviceRegisterSent(deviceId: String, traceId: String?) = Unit
+        fun onCapabilityReportSent(deviceId: String, traceId: String?) = Unit
+
+        /**
+         * Called when a strong-typed task_assign message is received.
+         *
+         * [taskId] is the task_id from the payload and should be used as the
+         * correlation_id when sending the task_result reply.
+         * [taskAssignPayloadJson] is the raw JSON of the payload object, ready for
+         * deserialization into [com.ufo.galaxy.protocol.TaskAssignPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should use [traceId] as-is in the reply envelope and in the
+         * [com.ufo.galaxy.protocol.TaskResultPayload.trace_id] field, generating a
+         * new UUID only when [traceId] is null or blank.
+         *
+         * Default implementation is a no-op to maintain backward compatibility
+         * with existing [Listener] implementations.
+         */
+        fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String? = null) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION] message is received.
+         *
+         * [taskId] is the task_id from the payload.
+         * [goalPayloadJson] is the raw JSON of the payload, ready for deserialization
+         * into [com.ufo.galaxy.protocol.GoalExecutionPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should echo [traceId] in the reply envelope for full-chain correlation.
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onGoalExecution(taskId: String, goalPayloadJson: String, traceId: String? = null) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK] message is received.
+         *
+         * [taskId] is the task_id from the payload.
+         * [subtaskPayloadJson] is the raw JSON of the payload, ready for deserialization
+         * into [com.ufo.galaxy.protocol.GoalExecutionPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should echo [traceId] in the reply envelope for full-chain correlation.
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onParallelSubtask(taskId: String, subtaskPayloadJson: String, traceId: String? = null) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.TASK_CANCEL] message is received.
+         *
+         * [taskId] is the task_id from the cancel payload.
+         * [cancelPayloadJson] is the raw JSON of the payload, ready for deserialization
+         * into [com.ufo.galaxy.protocol.TaskCancelPayload].
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onTaskCancel(taskId: String, cancelPayloadJson: String) = Unit
+
+        /**
+         * Called for any inbound message whose type belongs to
+         * [com.ufo.galaxy.protocol.MsgType.ADVANCED_TYPES] (PR-4 minimal-compat channels).
+         *
+         * These channels are recognised by the AIP v3 model and will not be silently
+         * dropped, but their full business logic is not yet implemented.
+         * The default implementation is a no-op; override to add custom handling.
+         *
+         * @param type       The parsed [MsgType] of the inbound message.
+         * @param messageId  Optional `message_id` field from the AIP v3 envelope.
+         * @param rawJson    Full raw JSON of the inbound envelope (for logging/debugging).
+         */
+        fun onAdvancedMessage(type: com.ufo.galaxy.protocol.MsgType, messageId: String?, rawJson: String) = Unit
+
+        /**
+         * Called when a completely unrecognised message type string is received.
+         *
+         * This is the last-resort fallback to prevent silent failures. The default
+         * implementation is a no-op; override to add structured error reporting.
+         *
+         * @param rawType  The raw `type` string from the inbound JSON.
+         * @param rawJson  Full raw JSON of the inbound envelope.
+         */
+        fun onUnknownMessage(rawType: String?, rawJson: String) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.STATE_EVENT] message is
+         * received from V2 (cross-device phase/state sync).
+         *
+         * [eventCategory] is the event category: "phase", "task", "skill", "device", etc.
+         * [eventAction] is the event action: e.g. "silent", "liminal", "manifest" for phase category.
+         * [stateEventPayloadJson] is the raw JSON of the payload object, ready for
+         * deserialization into [com.ufo.galaxy.protocol.StateEventPayload].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         *
+         * Default implementation is a no-op for backward compatibility.
+         */
+        fun onStateEvent(
+            eventCategory: String,
+            eventAction: String,
+            stateEventPayloadJson: String,
+            traceId: String? = null
+        ) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.HANDOFF_ENVELOPE_V2] message is
+         * received (PR-H native consumption path).
+         *
+         * [taskId] is the task_id extracted from the envelope payload.
+         * [envelopePayloadJson] is the raw JSON of the payload object, ready for
+         * deserialization into [com.ufo.galaxy.agent.HandoffEnvelopeV2].
+         * [traceId] is the trace_id from the inbound AIP envelope; null if absent.
+         * Receivers should echo [traceId] in the result reply for full-chain correlation.
+         *
+         * Default implementation is a no-op for backward compatibility with existing
+         * [Listener] implementations that pre-date PR-H.
+         */
+        fun onHandoffEnvelopeV2(taskId: String, envelopePayloadJson: String, traceId: String? = null) = Unit
+
+        /**
+         * Called when a [com.ufo.galaxy.protocol.MsgType.OPERATOR_ACTION_REQUEST] message is
+         * received from V2/operator control surfaces.
+         */
+        fun onOperatorAction(
+            actionId: String,
+            operatorActionPayloadJson: String,
+            traceId: String? = null
+        ) = Unit
+
+        /**
+         * LIQUID-ISLAND: Called when a liquid_event message is received from V2.
+         *
+         * This is the cross-device message routing channel used for
+         *灵动岛-style state and message delivery. Messages are routed
+         * to the active conversation device first, then broadcast.
+         *
+         * [msgType] is the liquid event type: "phase_change", "task_done",
+         * "task_progress", "text_result", etc.
+         * [contentJson] is the raw JSON of the liquid content object.
+         * [route] indicates how the message was routed: "active_conversation"
+         * or "broadcast".
+         * [traceId] is the trace_id from the inbound AIP envelope.
+         *
+         * Default implementation is a no-op.
+         */
+        fun onLiquidEvent(
+            msgType: String,
+            contentJson: String,
+            route: String,
+            traceId: String? = null
+        ) = Unit
+    }
+    
+    private val client = buildOkHttpClient(allowSelfSigned)
+
+    private val gson = Gson()
+    private var webSocket: WebSocket? = null
+    // C1-FIX: Use ConcurrentLinkedQueue for better write performance under high-frequency
+    // add/remove operations (CopyOnWriteArrayList copies the entire array on each mutation).
+    private val listeners: java.util.concurrent.ConcurrentLinkedQueue<Listener> = java.util.concurrent.ConcurrentLinkedQueue()
+    private var isConnected = false
+
+    /** Set to false by [disconnect] to suppress automatic reconnect scheduling. */
+    @Volatile private var shouldReconnect = false
+
+    private var reconnectAttempts = 0
+    private var reconnectJob: Job? = null
+    private var heartbeatJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // R3-3-FIX: Semaphore to prevent unbounded coroutine growth under high-priority
+    // backpressure. Limits concurrent high-priority message dispatches to 10.
+    private val highPrioritySemaphore = Semaphore(10)
+
+    // ── Connection establishment timeout (WS-3) ─────────────────────────────
+    /** Maximum time to wait for [onOpen] before treating the connect attempt as failed (ms). */
+    private val CONNECT_TIMEOUT_MS = 30_000L
+    /** Job that fires if [onOpen] is not received within [CONNECT_TIMEOUT_MS]. */
+    private var connectTimeoutJob: Job? = null
+
+    // ── Heartbeat pong timeout detection (WS-1) ─────────────────────────────
+    /** Timestamp of the last received heartbeat_ack (or initial connection). */
+    @Volatile private var lastPongTime = SystemClock.elapsedRealtime()
+    /** Maximum time to wait for a heartbeat_ack before counting a missed pong (ms). */
+    private val PONG_TIMEOUT_MS = 10_000L
+    /** Consecutive missed pongs since last successful heartbeat_ack. */
+    @Volatile private var missedHeartbeats = 0
+    /** Threshold of consecutive missed pongs before forcing reconnect. */
+    private val MAX_MISSED_HEARTBEATS = 3
+
+    /**
+     * Session-level trace identifier regenerated on each successful [onOpen].
+     * All outbound messages within a session reuse this ID for end-to-end correlation.
+     * Exposed via [getTraceId] for callers that need to propagate the current session trace.
+     */
+    @Volatile private var sessionTraceId: String = java.util.UUID.randomUUID().toString()
+
+    /** Returns the trace identifier for the current WS session. */
+    fun getTraceId(): String = sessionTraceId
+
+    /** Mesh session ID currently joined; null if not participating in any mesh. Set by [sendMeshJoin]. */
+    private var currentMeshId: String? = null
+    private var currentMeshRole: String = DEFAULT_MESH_ROLE
+    private var currentMeshCapabilities: List<String> = emptyList()
+    private val meshContextLock = Any()
+
+    private data class MeshRejoinContext(
+        val meshId: String,
+        val role: String,
+        val capabilities: List<String>
+    )
+
+    private data class MeshRejoinEnvelope(
+        val meshId: String,
+        val role: String,
+        val capabilityCount: Int,
+        val json: String
+    )
+
+    /** Derives route_mode from the cross-device switch state. */
+    private fun currentRouteMode(): String =
+        if (crossDeviceEnabled) "cross_device" else "local"
+
+    // ── Observable state ──────────────────────────────────────────────────────
+
+    private val _reconnectAttemptCount = MutableStateFlow(0)
+    /**
+     * Number of consecutive reconnect attempts since the last successful [onOpen].
+     * Resets to 0 on connect; increments before each scheduled retry.
+     * Useful for debug UI display.
+     */
+    val reconnectAttemptCount: StateFlow<Int> = _reconnectAttemptCount.asStateFlow()
+
+    /** Current depth of the offline task queue (updated reactively). */
+    val queueSize: StateFlow<Int> = offlineQueue.sizeFlow
+
+    /**
+     * Runtime cross-device collaboration switch.
+     *
+     * When set to [false] the client operates in local-only mode: any subsequent
+     * [connect] call is a no-op and no registration/capability_report messages are
+     * emitted. Changing this to [true] will enable connections; call [connect] to
+     * actually establish the WebSocket.
+     *
+     * NOTE: Toggling while already connected does NOT disconnect; call [disconnect]
+     * first if a live connection should be torn down.
+     */
+    @Volatile
+    var crossDeviceEnabled: Boolean
+        private set
+
+    init {
+        // Use `this.crossDeviceEnabled` explicitly to avoid ambiguity with the constructor param.
+        this.crossDeviceEnabled = crossDeviceEnabled
+
+        // PR-RUNTIME-CONTRACT-GUARD: Verify runtime contract classes are available.
+        // If R8/ProGuard removes any contract class, log it but don't crash.
+        val contractClasses = listOf(
+            "AndroidAuthoritativeParticipationTruth",
+            "AndroidCapabilityExportContract",
+            "AndroidCrossRepoDedupeContract",
+            "AndroidDiagnosticsFailureExplanationUplinkContract",
+            "AndroidDistributedTruthOwnershipUplinkContract",
+            "AndroidGovernanceExecutionPolicyIngressContract",
+            "AndroidLocalDiagnosticReasonContract",
+            "AndroidNonClosureSignalBoundaryContract",
+            "AndroidCompletionClosureUplinkContract",
+            "AndroidResultUplinkBoundaryContract",
+            "AndroidRuntimeEmissionTruthSemantics",
+            "AndroidUplinkLineageMetadataContract",
+            "AndroidContinuityRecoveryStateModel",
+            "LocalExecutionModeGate",
+            "LocalIntelligenceCapabilityStatus",
+            "ReconciliationSignal",
+            "SourceRuntimePosture",
+        )
+        val missing = contractClasses.filter { className ->
+            try {
+                Class.forName("com.ufo.galaxy.runtime.$className")
+                false
+            } catch (_: ClassNotFoundException) {
+                true
+            }
+        }
+        if (missing.isNotEmpty()) {
+            Log.w(TAG, "PR-RUNTIME-CONTRACT-GUARD: ${missing.size} contract classes not found: $missing")
+        }
+    }
+
+    /**
+     * Updates [crossDeviceEnabled] at runtime.
+     *
+     * When toggled to false while connected, the connection stays alive until the
+     * caller explicitly calls [disconnect]. When toggled to true the caller should
+     * call [connect] to initiate the connection — [MainViewModel.toggleCrossDeviceEnabled]
+     * already does this, which provides the "immediate reconnect on toggle enable"
+     * behaviour required by PR14.
+     */
+    fun setCrossDeviceEnabled(enabled: Boolean) {
+        if (crossDeviceEnabled == enabled) return
+        crossDeviceEnabled = enabled
+        Log.i(TAG, "[WS:CONNECT] crossDeviceEnabled changed to $enabled")
+    }
+
+    /**
+     * Applies live runtime connection settings used by future (or immediate) WS connections.
+     *
+     * Also accepts the runtime attachment session identity fields added in PR-G:
+     * [runtimeAttachmentSessionId], [durableSessionId], and [sessionContinuityEpoch].
+     * These are included in subsequent [sendHandshake] invocations so both the initial
+     * registration and every reconnect registration carry the stable attachment identity
+     * the V2 continuity consumer needs.
+     *
+     * Pass `null` for any field that should remain unchanged.
+     *
+     * @return true when either URL or token changed.
+     */
+    fun updateRuntimeConnectionConfig(
+        serverUrl: String? = null,
+        gatewayToken: String? = null,
+        runtimeSessionId: String? = null,
+        deviceId: String? = null,
+        runtimeAttachmentSessionId: String? = null,
+        durableSessionId: String? = null,
+        sessionContinuityEpoch: Int? = null
+    ): Boolean {
+        var changed = false
+        if (serverUrl != null && serverUrl != this.serverUrl) {
+            this.serverUrl = serverUrl
+            changed = true
+        }
+        if (gatewayToken != null && gatewayToken != this.gatewayToken) {
+            this.gatewayToken = gatewayToken
+            changed = true
+        }
+        if (runtimeSessionId != null && runtimeSessionId != this.runtimeSessionId) {
+            this.runtimeSessionId = runtimeSessionId
+        }
+        if (deviceId != null && deviceId != this.configuredDeviceId) {
+            this.configuredDeviceId = deviceId
+        }
+        if (runtimeAttachmentSessionId != null) {
+            this.runtimeAttachmentSessionId = runtimeAttachmentSessionId.takeIf { it.isNotBlank() }
+        }
+        if (durableSessionId != null) {
+            this.durableSessionId = durableSessionId.takeIf { it.isNotBlank() }
+            if (this.durableSessionId == null) {
+                this.sessionContinuityEpoch = null
+            }
+        }
+        if (sessionContinuityEpoch != null) {
+            if (this.durableSessionId != null) {
+                this.sessionContinuityEpoch = sessionContinuityEpoch.coerceAtLeast(0)
+            } else {
+                this.sessionContinuityEpoch = null
+            }
+        }
+        return changed
+    }
+
+    /**
+     * Clears the runtime attachment session identity fields (PR-G).
+     *
+     * Called by [RuntimeController] on explicit stop or session invalidation to ensure
+     * the next activation generates a fresh identity and does not accidentally carry a
+     * stale session ID from a previous era into the new connection handshake.
+     */
+    fun clearRuntimeAttachmentSessionIdentity() {
+        runtimeAttachmentSessionId = null
+        durableSessionId = null
+        sessionContinuityEpoch = null
+    }
+
+    /**
+     * Returns the current [runtimeAttachmentSessionId] held by this client (PR-G).
+     *
+     * Exposed for testing so assertions can verify that [RuntimeController] pushed the
+     * correct identity before the WS handshake was sent.
+     */
+    internal fun getRuntimeAttachmentSessionId(): String? = runtimeAttachmentSessionId
+
+    /**
+     * Returns the current [durableSessionId] held by this client (PR-1 / PR-G).
+     *
+     * Exposed for testing so assertions can verify that [RuntimeController] propagated the
+     * correct durable session identity to the WS client before the reconnect handshake.
+     * This value is included in `device_register` and `capability_report` messages as the
+     * `durable_session_id` wire field when non-null.
+     */
+    internal fun getDurableSessionId(): String? = durableSessionId
+
+    /**
+     * Returns the current [sessionContinuityEpoch] held by this client (PR-1 / PR-G).
+     *
+     * Exposed for testing so assertions can verify that [RuntimeController] propagated the
+     * correct continuity epoch to the WS client after each reconnect.  `0` at first attach;
+     * increments by one per transparent reconnect within the same activation era.
+     * This value is included in `device_register` and `capability_report` messages as the
+     * `session_continuity_epoch` wire field when [durableSessionId] is non-null.
+     */
+    internal fun getSessionContinuityEpoch(): Int? = sessionContinuityEpoch
+
+    private fun currentRegistrationPosture(): String {
+        val goalExecutionEnabled = (deviceMetadata["goal_execution_enabled"] as? Boolean) == true
+        return if (crossDeviceEnabled && goalExecutionEnabled) {
+            SourceRuntimePosture.JOIN_RUNTIME
+        } else {
+            SourceRuntimePosture.CONTROL_ONLY
+        }
+    }
+
+    /**
+     * Additional action capabilities reported when models are loaded.
+     * Update via [setModelCapabilities] when planner/grounding services become ready.
+     */
+    private var modelCapabilities: List<String> = emptyList()
+
+    /**
+     * High-level autonomous capability names included in the capability_report.
+     * Updated via [setHighLevelCapabilities] when the device role is determined.
+     */
+    private var highLevelCapabilities: List<String> = emptyList()
+
+    /**
+     * Device metadata flags included in the capability_report.
+     * Updated via [setDeviceMetadata].
+     *
+     * Default initialised to the full 8-field canonical runtime identity map so that
+     * a capability_report sent before [setDeviceMetadata] is ever called (e.g. in tests)
+     * still satisfies [CapabilityReport.REQUIRED_METADATA_KEYS].
+     */
+    private var deviceMetadata: Map<String, Any> = normalizedCapabilityMetadata(emptyMap())
+    
+    /**
+     * 设置监听器（向后兼容；清除已有监听器后添加新的）
+     */
+    fun setListener(listener: Listener) {
+        listeners.clear()
+        listeners.add(listener)
+    }
+
+    /**
+     * Adds [listener] to the set of active listeners.
+     * Multiple listeners may be registered simultaneously; each receives every event.
+     */
+    fun addListener(listener: Listener) {
+        listeners.add(listener)
+    }
+
+    /**
+     * Removes a previously registered [listener]. No-op if not present.
+     */
+    fun removeListener(listener: Listener) {
+        listeners.remove(listener)
+    }
+
+    /**
+     * Updates the model-specific capabilities included in the capability_report.
+     * Call this when [LocalPlannerService] or [LocalGroundingService] become ready
+     * so the gateway receives an accurate list of available on-device actions.
+     *
+     * @param capabilities Additional action names to include (e.g., "local_planning",
+     *                     "local_grounding"). These are appended to the base action list
+     *                     and deduplicated before reporting. Pass an empty list to clear.
+     */
+    fun setModelCapabilities(capabilities: List<String>) {
+        modelCapabilities = capabilities
+    }
+
+    /**
+     * Updates the high-level autonomous capabilities advertised in the capability_report.
+     *
+     * @param capabilities High-level capability names, e.g.:
+     *   "autonomous_goal_execution", "local_task_planning", "local_ui_reasoning",
+     *   "cross_device_coordination", "local_model_inference".
+     */
+    fun setHighLevelCapabilities(capabilities: List<String>) {
+        highLevelCapabilities = capabilities
+    }
+
+    /**
+     * Updates the device metadata reported in the capability_report.
+     *
+     * The supplied map must contain all keys defined in
+     * [CapabilityReport.REQUIRED_METADATA_KEYS] so that the gateway can treat the
+     * device as a fully-identified runtime peer:
+     *   - `goal_execution_enabled`     (Boolean)
+     *   - `local_model_enabled`        (Boolean)
+     *   - `cross_device_enabled`       (Boolean) — overwritten at send-time from the live flag
+     *   - `parallel_execution_enabled` (Boolean)
+     *   - `device_role`                (String)
+     *   - `model_ready`                (Boolean)
+     *   - `accessibility_ready`        (Boolean)
+     *   - `overlay_ready`              (Boolean)
+     *
+     * Use [AppSettings.toMetadataMap] to build a conforming map. Unrecognised extra keys
+     * are forwarded as-is to the gateway and ignored by servers that do not know them.
+     */
+    fun setDeviceMetadata(metadata: Map<String, Any>) {
+        deviceMetadata = normalizedCapabilityMetadata(metadata)
+    }
+
+    private fun normalizedCapabilityMetadata(
+        metadata: Map<String, Any>,
+        inferredLocalInferenceAvailable: Boolean? = null
+    ): Map<String, Any> {
+        val merged = mutableMapOf<String, Any>(
+            "goal_execution_enabled" to false,
+            "local_model_enabled" to false,
+            "cross_device_enabled" to crossDeviceEnabled,
+            "parallel_execution_enabled" to false,
+            "device_role" to "phone",
+            "model_ready" to false,
+            "accessibility_ready" to false,
+            "overlay_ready" to false,
+            "degraded_mode" to true,
+            "mode_state" to "local_only",
+            "mode_readiness_state" to "degraded",
+            "cross_device_eligibility" to false,
+            "goal_execution_eligibility" to false,
+            "parallel_execution_eligibility" to false,
+            "local_intelligence_status" to "disabled",
+            "local_inference_ready" to false,
+            "local_inference_available" to false,
+            "authoritative_participation_state" to
+                AndroidAuthoritativeParticipationTruth.State.LOCAL_ONLY.wireValue,
+            "authoritative_participation_transition_sequence" to 0L,
+            "authoritative_participation_transition_trigger" to
+                AndroidAuthoritativeParticipationTruth.TransitionTrigger.INITIALIZED.wireValue,
+            "authoritative_participation_transition_history" to emptyList<String>(),
+            "authoritative_participation_connected" to false,
+            "authoritative_participation_attached" to false,
+            "authoritative_participation_dispatch_eligible" to false,
+            "authoritative_participation_distributed_participant" to false,
+            "participation_tier" to AndroidAuthoritativeParticipationTruth.ParticipationTier.PRE_ATTACH.wireValue,
+            "runtime_constrained" to true,
+            "runtime_deferred" to false,
+            "local_mode_active" to true
+        )
+        merged.putAll(metadata)
+
+        val modelReady = merged["model_ready"] as? Boolean ?: false
+        val accessibilityReady = merged["accessibility_ready"] as? Boolean ?: false
+        val overlayReady = merged["overlay_ready"] as? Boolean ?: false
+        val degradedMode = !(modelReady && accessibilityReady && overlayReady)
+        merged["degraded_mode"] = degradedMode
+
+        val crossDeviceEnabledValue = merged["cross_device_enabled"] as? Boolean ?: crossDeviceEnabled
+        val goalExecutionEnabled = merged["goal_execution_enabled"] as? Boolean ?: false
+        val parallelExecutionEnabled = merged["parallel_execution_enabled"] as? Boolean ?: false
+        val modeTransitioningTo = (merged[LocalExecutionModeGate.KEY_TRANSITIONING_TO] as? String)
+            ?.takeIf { it.isNotBlank() }
+        val degradationReasons = when (val rawReasons = merged[LocalExecutionModeGate.KEY_DEGRADATION_REASONS]) {
+            is String -> rawReasons.split(",").mapNotNull { it.trim().takeIf(String::isNotBlank) }
+            is Iterable<*> -> rawReasons.mapNotNull { (it as? String)?.trim()?.takeIf(String::isNotBlank) }
+            else -> emptyList()
+        }
+        val modeDecision = LocalExecutionModeGate.decide(
+            crossDeviceEnabled = crossDeviceEnabledValue,
+            wsConnected = isConnected,
+            capabilityDegraded = degradedMode,
+            degradationReasons = degradationReasons
+        )
+        val modeSemantics = LocalExecutionModeGate.capabilityMetadataSemanticsFor(modeDecision.state)
+        merged["mode_state"] = modeSemantics.modeState
+        merged["mode_readiness_state"] = modeSemantics.modeReadinessState
+        merged["cross_device_eligibility"] = modeSemantics.acceptsCrossDeviceTasks
+        merged["goal_execution_eligibility"] =
+            modeSemantics.acceptsCrossDeviceTasks && goalExecutionEnabled
+        merged["parallel_execution_eligibility"] =
+            modeSemantics.acceptsCrossDeviceTasks && parallelExecutionEnabled
+        merged[LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE] = modeDecision.state.wireValue
+        merged[LocalExecutionModeGate.KEY_ACCEPTS_CROSS_DEVICE_TASKS] = modeDecision.acceptsCrossDeviceTasks
+        merged[LocalExecutionModeGate.KEY_V2_GOVERNANCE_ACTIVE] = modeDecision.v2GovernanceActive
+        merged[LocalExecutionModeGate.KEY_IS_HOLD_STATE] = modeDecision.isHoldState
+        merged[LocalExecutionModeGate.KEY_DEGRADATION_REASONS] =
+            modeDecision.degradationReasons.joinToString(",")
+        merged[LocalExecutionModeGate.KEY_SEMANTIC_TAG] = modeDecision.semanticTag
+        merged[LocalExecutionModeGate.KEY_SCHEMA_VERSION] = modeDecision.schemaVersion
+        when {
+            modeDecision.transitioningTo != null ->
+                merged[LocalExecutionModeGate.KEY_TRANSITIONING_TO] =
+                    modeDecision.transitioningTo.wireValue
+            modeTransitioningTo != null ->
+                merged.remove(LocalExecutionModeGate.KEY_TRANSITIONING_TO)
+        }
+
+        // Normalize potentially mixed-case external metadata values to canonical lowercase wire form.
+        val rawStatus = (merged["local_intelligence_status"] as? String)?.trim()
+        val status = rawStatus?.lowercase() ?: LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+        if (rawStatus.isNullOrEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] local_intelligence_status missing; defaulting to " +
+                    LocalIntelligenceCapabilityStatus.DISABLED.wireValue
+            )
+        }
+        val inferredAvailableFromStatus =
+            status == LocalIntelligenceCapabilityStatus.ACTIVE.wireValue ||
+                status == LocalIntelligenceCapabilityStatus.DEGRADED.wireValue ||
+                status == LocalIntelligenceCapabilityStatus.RECOVERING.wireValue
+        // If explicit local_inference_ready is absent, fall back to local_model_enabled so
+        // pre-existing senders still emit a deterministic readiness boolean for gate consumers.
+        val localInferenceReady = merged["local_inference_ready"] as? Boolean
+            ?: (merged["local_model_enabled"] as? Boolean ?: false)
+        val localInferenceAvailable = inferredLocalInferenceAvailable
+            ?: (merged["local_inference_available"] as? Boolean)
+            ?: inferredAvailableFromStatus
+        merged["local_intelligence_status"] = status
+        merged["local_inference_ready"] = localInferenceReady
+        merged["local_inference_available"] = localInferenceAvailable
+        val hasAuthoritativeState =
+            (merged["authoritative_participation_state"] as? String)?.isNotBlank() == true
+        if (!hasAuthoritativeState) {
+            // Capability metadata fallback: this path only prevents empty wire fields during
+            // early startup. RuntimeController remains the sole source of authoritative
+            // transition-tracked participation truth used for snapshots/events/reconciliation.
+            merged["authoritative_participation_state"] = when {
+                !crossDeviceEnabledValue ->
+                    AndroidAuthoritativeParticipationTruth.State.LOCAL_ONLY.wireValue
+                modeSemantics.acceptsCrossDeviceTasks ->
+                    AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_CAPABLE.wireValue
+                else ->
+                    AndroidAuthoritativeParticipationTruth.State.CROSS_DEVICE_ENABLED.wireValue
+            }
+        }
+        // authoritative_participation_state may come from external metadata; non-string values
+        // are treated as absent and safely downgraded to PRE_ATTACH by tier derivation.
+        val rawParticipationState = merged["authoritative_participation_state"]
+        if (rawParticipationState != null && rawParticipationState !is String) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] authoritative_participation_state type invalid: " +
+                    "${rawParticipationState::class.java.simpleName}; defaulting participation_tier=pre_attach"
+            )
+        }
+        val participationStateWireValue = rawParticipationState as? String
+        if (participationStateWireValue != null &&
+            AndroidAuthoritativeParticipationTruth.State.entries.none {
+                it.wireValue == participationStateWireValue
+            }
+        ) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] authoritative_participation_state unknown: " +
+                    "$participationStateWireValue; defaulting participation_tier=pre_attach"
+            )
+        }
+        merged["participation_tier"] = AndroidAuthoritativeParticipationTruth
+            .participationTierWireValueFor(participationStateWireValue)
+        merged["runtime_constrained"] = !modeSemantics.acceptsCrossDeviceTasks || degradedMode
+        merged["runtime_deferred"] = modeDecision.isHoldState
+        merged["local_mode_active"] =
+            modeDecision.state == LocalExecutionModeGate.ExecutionModeState.LOCAL_ONLY
+        merged[AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION_KEY] =
+            AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION
+
+        return merged
+    }
+
+    /**
+     * The canonical runtime-host descriptor for this Android instance.
+     *
+     * When set, its metadata (host_id, formation_role, participation_state,
+     * registered_at_ms) is merged into both the `device_register` and `capability_report`
+     * payloads sent during [sendHandshake], allowing the gateway to treat this device
+     * as a first-class runtime host rather than a generic connected endpoint.
+     *
+     * Call this once at startup via [com.ufo.galaxy.UFOGalaxyApplication] before the
+     * WebSocket connects; the descriptor is immutable after construction.
+     */
+    @Volatile
+    private var runtimeHostDescriptor: RuntimeHostDescriptor? = null
+
+    /**
+     * Registers the [RuntimeHostDescriptor] that represents this Android instance as
+     * a first-class runtime host in the Galaxy formation.
+     *
+     * The descriptor metadata is merged into subsequent [sendHandshake] payloads.
+     * Must be called before [connect] to ensure the initial registration message
+     * carries complete host identity.
+     *
+     * @param descriptor Canonical host identity for this Android runtime instance.
+     */
+    fun setRuntimeHostDescriptor(descriptor: RuntimeHostDescriptor) {
+        runtimeHostDescriptor = descriptor
+        Log.i(TAG, "[WS:HOST] RuntimeHostDescriptor set: host_id=${descriptor.hostId} " +
+                "role=${descriptor.formationRole.wireValue} " +
+                "state=${descriptor.participationState.wireValue}")
+    }
+    
+    // C13-FIX: Message processing channel with backpressure handling.
+    // Uses a buffered Channel + Flow with conflate() to prevent memory exhaustion
+    // when the server sends messages faster than the consumer can process them.
+    // Under backpressure, intermediate messages are dropped (conflate), keeping only
+    // the latest message — appropriate for state-event-style traffic where stale
+    // data is less valuable than fresh data.
+    private val messageChannel = Channel<String>(Channel.BUFFERED)
+
+    init {
+        // C13-FIX: Start the message consumer coroutine with backpressure handling.
+        // buffer() + conflate() ensures that if messages arrive faster than they can
+        // be processed, intermediate values are dropped and only the latest is delivered.
+        messageChannel.consumeAsFlow()
+            .buffer(capacity = 64)
+            .conflate()
+            .flowOn(Dispatchers.IO)
+            .onEach { text -> processMessage(text) }
+            .launchIn(scope)
+    }
+
+    // R3-3-FIX: Bind lifecycle so destroy() is called automatically when the owner
+    // is torn down, preventing scope/webSocket leaks.
+    init {
+        lifecycleOwner?.lifecycle?.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                Log.i(TAG, "[WS:LIFECYCLE] onDestroy triggered — auto-destroying client")
+                destroy()
+            }
+        })
+    }
+
+    /**
+     * SECURITY-FIX (P2): Priority-based backpressure for inbound WebSocket messages.
+     * Instead of silently dropping all messages under backpressure, we classify by type:
+     * - LOW priority (heartbeat, ping): trySend, can drop on backpressure.
+     * - HIGH priority (task_assign, goal_execution, state_event, handoff): launch send()
+     *   to block until space is available, ensuring critical task messages are never lost.
+     */
+    private fun handleMessage(text: String) {
+        val msgTypeStr = try {
+            gson.fromJson(text, JsonObject::class.java).get("type")?.asString
+        } catch (_: Exception) { null }
+
+        val isLowPriority = msgTypeStr in LOW_PRIORITY_TYPES
+
+        val result = messageChannel.trySend(text)
+        if (!result.isSuccess) {
+            if (isLowPriority) {
+                // Low-priority messages may be dropped under backpressure.
+                Log.w(TAG, "[WS:BACKPRESSURE] Low-priority message dropped: type=$msgTypeStr")
+                GalaxyLogger.log(TAG, mapOf("event" to "message_dropped_backpressure", "type" to (msgTypeStr ?: "unknown"), "reason" to "low_priority_channel_full"))
+            } else {
+                // R3-3-FIX: High-priority message: block asynchronously until channel has space,
+                // guarded by a semaphore to prevent unbounded coroutine growth under sustained
+                // backpressure (each permit acquisition throttles at 10 concurrent sends).
+                Log.i(TAG, "[WS:BACKPRESSURE] High-priority message queued for delivery: type=$msgTypeStr")
+                scope.launch {
+                    highPrioritySemaphore.withPermit {
+                        messageChannel.send(text)
+                    }
+                }
+            }
+        }
+    }
+
+    // LOW_PRIORITY_TYPES moved to class-level companion object above (P2-FIX)
+
+    /**
+     * 连接到服务器
+     * No-op when [crossDeviceEnabled] is false (local-only mode).
+     */
+    fun connect() {
+        if (!crossDeviceEnabled) {
+            Log.i(TAG, "[WS:CONNECT] Cross-device disabled (crossDeviceEnabled=false); skipping WS connection")
+            return
+        }
+        if (isConnected) {
+            Log.d(TAG, "[WS:CONNECT] Already connected, skipping")
+            return
+        }
+
+        // C5-FIX: Clean up any stale WebSocket instance before creating a new one.
+        // This prevents resource leaks when connect() is called repeatedly.
+        webSocket?.cancel()
+        webSocket = null
+        
+        shouldReconnect = true
+        reconnectJob?.cancel()
+
+        // WS-3: start a guard timer so that a connect() that never reaches onOpen
+        // (e.g. half-open TCP, frozen intermediary) does not hang forever.
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = scope.launch {
+            delay(CONNECT_TIMEOUT_MS)
+            if (!isConnected) {
+                Log.w(TAG, "[WS:CONNECT] Connection establishment timeout (${CONNECT_TIMEOUT_MS}ms) — tearing down half-open socket")
+                webSocket?.cancel()
+                webSocket = null
+                if (shouldReconnect) {
+                    scheduleReconnect()
+                }
+            }
+        }
+
+        // SECURITY: Log only sanitized URL — prevents leaking tokens/credentials in logs.
+        val sanitizedConnectUrl = sanitizeUrlForLogging(serverUrl)
+        Log.i(TAG, "[WS:CONNECT] Connecting to $sanitizedConnectUrl (attempt ${reconnectAttempts + 1})")
+        
+        // DUAL-FORMAT: opt-in to MessagePack via query parameter
+        val wsUrl = if (useBinaryFormat) {
+            serverUrl + if (serverUrl.contains("?")) "&format=msgpack" else "?format=msgpack"
+        } else serverUrl
+
+        val request: Request
+        try {
+            request = Request.Builder()
+                .url(wsUrl)
+                .apply { if (gatewayToken.isNotBlank()) addHeader("Authorization", "Bearer $gatewayToken") }
+                .build()
+        } catch (e: IllegalArgumentException) {
+            // SECURITY: Log sanitized URL even for error cases to avoid credential leakage.
+            Log.e(TAG, "[WS:CONNECT] Invalid WebSocket URL: ${sanitizeUrlForLogging(wsUrl)} — ${e.message}")
+            val errorMsg = "Invalid WebSocket URL: ${e.message}"
+            listeners.forEach { it.onError(errorMsg) }
+            connectTimeoutJob?.cancel()
+            connectTimeoutJob = null
+            return
+        }
+
+        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                // WS-3: connection established — cancel the guard timer.
+                connectTimeoutJob?.cancel()
+                connectTimeoutJob = null
+
+                // Regenerate session trace ID for fresh end-to-end correlation.
+                sessionTraceId = java.util.UUID.randomUUID().toString()
+                Log.i(TAG, "[WS:CONNECT] WebSocket open — resetting backoff counter trace_id=$sessionTraceId")
+                // SECURITY: Log sanitized URL to prevent leaking credentials in structured logs.
+                GalaxyLogger.log(GalaxyLogger.TAG_CONNECT, mapOf("url" to sanitizeUrlForLogging(serverUrl), "attempt" to reconnectAttempts, "trace_id" to sessionTraceId))
+                isConnected = true
+                reconnectAttempts = 0
+                _reconnectAttemptCount.value = 0
+                // WS-1: reset pong timeout tracking on every successful open
+                lastPongTime = System.currentTimeMillis()
+                missedHeartbeats = 0
+                listeners.forEach { it.onConnected() }
+                startHeartbeat()
+
+                // PR-AUTH-UNIFIED: Send WebSocket auth message post-connect (unified with Wear OS).
+                // The HTTP Authorization header is retained as a compatibility fallback for
+                // legacy gateways; the WebSocket auth message is the canonical auth path.
+                sendAuthMessage()
+
+                // 发送握手消息
+                sendHandshake()
+                // Re-announce mesh participation context after reconnect so center-side
+                // collaboration runtime can re-bind this participant to the in-flight mesh.
+                sendMeshRejoinIfNeeded()
+
+                // Flush any messages queued while we were offline
+                flushOfflineQueue()
+            }
+            
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                // D2-FIX: Truncate message content in debug logs to avoid leaking sensitive data
+                Log.d(TAG, "收到消息: ${text.take(50)}... [${text.length} chars total]")
+                handleMessage(text)
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                // DUAL-FORMAT: handle MessagePack binary frames
+                Log.d(TAG, "收到二进制消息 (${bytes.size} bytes)")
+                val unpacked = unpackMsgpack(bytes.toByteArray())
+                if (unpacked != null) {
+                    handleMessage(unpacked)
+                } else {
+                    Log.w(TAG, "无法解析二进制消息，丢弃")
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i(TAG, "[WS:DISCONNECT] WebSocket closing: code=$code reason=$reason")
+                webSocket.close(1000, null)
+            }
+            
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i(TAG, "[WS:DISCONNECT] WebSocket closed: code=$code reason=$reason")
+                GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("code" to code, "reason" to reason, "type" to "closed"))
+                isConnected = false
+                stopHeartbeat()
+                connectTimeoutJob?.cancel()
+                connectTimeoutJob = null
+                listeners.forEach { it.onDisconnected() }
+
+                // Reconnect unless the close was intentional (code 1000)
+                if (shouldReconnect && code != 1000) {
+                    scheduleReconnect()
+                }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "[WS:DISCONNECT] WebSocket failure: ${t.message}", t)
+                GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("type" to "failure", "error" to (t.message ?: "unknown")))
+                isConnected = false
+                stopHeartbeat()
+                connectTimeoutJob?.cancel()
+                connectTimeoutJob = null
+                listeners.forEach { it.onError(t.message ?: "连接失败") }
+
+                // Always attempt reconnect on failure
+                if (shouldReconnect) {
+                    scheduleReconnect()
+                }
+            }
+        })
+    }
+    
+    /**
+     * 断开连接
+     * Sets [shouldReconnect] to false so the automatic backoff loop stops.
+     * If the device is currently participating in a mesh session, a [MsgType.MESH_LEAVE]
+     * message is sent before the connection is torn down.
+     */
+    fun disconnect() {
+        // Notify the mesh coordinator before closing the WebSocket.
+        // Capture into a local val to avoid a TOCTOU race between the null-check and the call.
+        val meshId = currentMeshIdSnapshot()
+        if (meshId != null) sendMeshLeave(meshId, "disconnect")
+        Log.i(TAG, "[WS:DISCONNECT] Explicit disconnect requested")
+        shouldReconnect = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+        stopHeartbeat()
+        webSocket?.close(1000, "用户断开")
+        webSocket = null
+        isConnected = false
+    }
+
+    /**
+     * 彻底销毁客户端，取消 [scope] 中所有协程并断开连接。
+     *
+     * **WS-2 robustness**: cancels the [CoroutineScope] so that heartbeat,
+     * reconnect, and flush jobs cannot outlive the owner (Activity / Service).
+     * Must be called from the owner's lifecycle teardown (e.g. `onDestroy`)
+     * to prevent memory leaks.
+     *
+     * After [destroy] the client must not be reused; create a new instance
+     * if a fresh connection is needed.
+     */
+    fun destroy() {
+        Log.i(TAG, "[WS:DESTROY] Destroying GalaxyWebSocketClient")
+        disconnect()
+        messageChannel.close()
+        scope.cancel()
+        // ROUND-3-FIX: Clear all listeners to prevent memory leaks via
+        // long-lived listener references that retain the Activity/Service context.
+        listeners.clear()
+    }
+
+    /**
+     * C13-FIX: Processes a single inbound WebSocket message delivered by the
+     * backpressure-managed Flow consumer.
+     *
+     * This method is the actual message handling logic that was previously
+     * inlined (and missing) in the WebSocketListener.onMessage callback.
+     * It parses the JSON envelope, dispatches to typed handlers, and routes
+     * to registered listeners.
+     */
+    private fun processMessage(text: String) {
+        try {
+            val root = gson.fromJson(text, JsonObject::class.java)
+            val msgTypeStr = root.get("type")?.asString
+            val traceId = root.get("trace_id")?.asString
+            val msgType = try {
+                msgTypeStr?.let { com.ufo.galaxy.protocol.MsgType.fromValue(it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "[WS:PARSE] Unknown msg_type '$msgTypeStr': ${e.message}")
+                null
+            }
+
+            when (msgType) {
+                com.ufo.galaxy.protocol.MsgType.TASK_ASSIGN -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    listeners.forEach { it.onTaskAssign(taskId, payload?.toString() ?: "{}", traceId) }
+                }
+                com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    listeners.forEach { it.onGoalExecution(taskId, payload?.toString() ?: "{}", traceId) }
+                }
+                com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    listeners.forEach { it.onParallelSubtask(taskId, payload?.toString() ?: "{}", traceId) }
+                }
+                com.ufo.galaxy.protocol.MsgType.TASK_CANCEL -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    listeners.forEach { it.onTaskCancel(taskId, payload?.toString() ?: "{}") }
+                }
+                com.ufo.galaxy.protocol.MsgType.STATE_EVENT -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val eventCategory = payload?.get("category")?.asString ?: ""
+                    val eventAction = payload?.get("action")?.asString ?: ""
+                    listeners.forEach {
+                        it.onStateEvent(eventCategory, eventAction, payload?.toString() ?: "{}", traceId)
+                    }
+                }
+                com.ufo.galaxy.protocol.MsgType.HANDOFF_ENVELOPE_V2 -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    listeners.forEach { it.onHandoffEnvelopeV2(taskId, payload?.toString() ?: "{}", traceId) }
+                }
+                com.ufo.galaxy.protocol.MsgType.OPERATOR_ACTION_REQUEST -> {
+                    val payload = root.getAsJsonObject("payload")
+                    val actionId = payload?.get("action_id")?.asString ?: ""
+                    listeners.forEach { it.onOperatorAction(actionId, payload?.toString() ?: "{}", traceId) }
+                }
+                com.ufo.galaxy.protocol.MsgType.HEARTBEAT_ACK -> {
+                    onPongReceived()
+                }
+                in com.ufo.galaxy.protocol.MsgType.ADVANCED_TYPES -> {
+                    val messageId = root.get("message_id")?.asString
+                    val type = msgType ?: run {
+                        Log.w(TAG, "msgType is null in ADVANCED_TYPES branch, using UNKNOWN")
+                        com.ufo.galaxy.protocol.MsgType.UNKNOWN
+                    }
+                    listeners.forEach { it.onAdvancedMessage(type, messageId, text) }
+                }
+                else -> {
+                    if (msgType == null) {
+                        listeners.forEach { it.onUnknownMessage(msgTypeStr, text) }
+                    } else {
+                        listeners.forEach { it.onMessage(text) }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[WS:PARSE] Failed to parse message: ${e.message}")
+            listeners.forEach { it.onMessage(text) }
+        }
+    }
+    
+    /**
+     * 发送文本消息
+     *
+     * **DEPRECATED**: Use [sendJson] with a fully-serialised AIP v3 envelope.
+     * This method bypasses the cross-device gate and is retained only for legacy
+     * compatibility during migration.
+     */
+    @Deprecated(
+        message = "Use sendJson() with a fully-serialised AIP v3 envelope. " +
+            "sendJson() enforces the cross-device gate and offline queuing.",
+        replaceWith = ReplaceWith("sendJson(json)")
+    )
+    fun send(text: String): Boolean {
+        if (!crossDeviceEnabled) {
+            Log.w(TAG, "[WS:BLOCKED] send() rejected: cross_device=off reason=cross_device_disabled")
+            return false
+        }
+        if (!isConnected) {
+            Log.w(TAG, "未连接，无法发送")
+            return false
+        }
+        
+        val message = AIPMessage(
+            type = AIPMessageType.TEXT,
+            payload = mapOf("content" to text)
+        )
+        
+        return sendAIPMessage(message)
+    }
+    
+    /**
+     * 发送 AIP 消息
+     *
+     * **DEPRECATED**: Use [sendJson] with a fully-serialised AIP v3 envelope.
+     * This method bypasses the cross-device gate and is retained only for legacy
+     * compatibility during migration.
+     */
+    @Deprecated(
+        message = "Use sendJson() with a fully-serialised AIP v3 envelope. " +
+            "sendJson() enforces the cross-device gate and offline queuing.",
+        replaceWith = ReplaceWith("sendJson(json)")
+    )
+    fun sendAIPMessage(message: AIPMessage): Boolean {
+        val json = gson.toJson(message)
+        Log.w(
+            TAG,
+            "[WS:COMPAT_PATH] sendAIPMessage() invoked; forcing canonical sendJson path"
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "compat_send_redirected_to_canonical_sendJson",
+                "compat_method" to "sendAIPMessage"
+            )
+        )
+        return sendJson(json)
+    }
+    
+    /**
+     * Sends a pre-serialized JSON string directly over the WebSocket.
+     * Used for AIP v3 protocol messages ([com.ufo.galaxy.protocol.AipMessage]) that
+     * use the strong-typed model classes rather than the legacy [AIPMessage] envelope.
+     *
+     * **Offline queuing**: if the socket is currently disconnected, or an immediate
+     * transport send attempt returns `false`, and the message
+     * `type` field belongs to [OfflineTaskQueue.QUEUEABLE_TYPES] ("task_result" /
+     * "goal_result" / "goal_execution_result" / "delegated_execution_signal" /
+     * "device_execution_event" / "reconciliation_signal"), the payload is enqueued in
+     * [offlineQueue] for delivery on the
+     * next successful reconnect.  The method returns `false` in this case (the message
+     * was not sent *now*) but will not be lost.
+     *
+     * @return true if the message was transmitted immediately; false if disconnected
+     *         (queued or dropped depending on type).
+     */
+    override fun sendJson(json: String): Boolean {
+        val msgType = tryExtractType(json)
+        val canonicalJson = canonicalizeCompletionIdentityPayload(json, msgType)
+        val canonicalMsgType = msgType ?: tryExtractType(canonicalJson)
+        // Hard constraint: cross-device switch OFF must block ALL outbound WS sends,
+        // even if a stale connection is somehow still open.
+        if (!crossDeviceEnabled) {
+            val traceId = java.util.UUID.randomUUID().toString()
+            Log.w(TAG, "[WS:BLOCKED] sendJson rejected: cross_device=off trace_id=$traceId type=$canonicalMsgType reason=cross_device_disabled")
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "send_blocked",
+                "trace_id" to traceId,
+                "type" to (canonicalMsgType ?: "unknown"),
+                "reason" to "cross_device_disabled"
+            ))
+            return false
+        }
+        if (canonicalMsgType == MsgType.RECONCILIATION_SIGNAL.value &&
+            !hasCanonicalReconciliationIngress(canonicalJson)
+        ) {
+            return false
+        }
+        if (!isConnected) {
+            if (canonicalMsgType != null && canonicalMsgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
+                enqueueForReliableReplay(
+                    msgType = canonicalMsgType,
+                    json = canonicalJson,
+                    reason = "disconnected"
+                )
+            } else {
+                Log.w(TAG, "Not connected and message type not queueable (type=$canonicalMsgType); dropping")
+            }
+            return false
+        }
+        // Log key fields for full-chain traceability
+        if (canonicalMsgType in listOf("task_submit", "task_result", "goal_result", "cancel_result")) {
+            val correlationId = tryExtractField(canonicalJson, "correlation_id")
+            val taskId = tryExtractField(canonicalJson, "task_id") ?: tryExtractFieldNested(canonicalJson, "payload", "task_id")
+            val deviceId = tryExtractField(canonicalJson, "device_id")
+            Log.i(TAG, "[WS:UPLINK] type=$canonicalMsgType task_id=$taskId correlation_id=$correlationId device_id=${maskDeviceId(deviceId)}")
+        } else {
+            Log.d(TAG, "发送 JSON: ${canonicalJson.take(100)}...")
+        }
+        // DUAL-FORMAT: send as MessagePack binary if opted in, fallback to JSON
+        val sent = if (useBinaryFormat) {
+            val packed = packMsgpack(canonicalJson)
+            if (packed != null) {
+                webSocket?.send(okio.ByteString.of(*packed)) ?: false
+            } else {
+                webSocket?.send(canonicalJson) ?: false
+            }
+        } else {
+            webSocket?.send(canonicalJson) ?: false
+        }
+        if (!sent && canonicalMsgType != null && canonicalMsgType in OfflineTaskQueue.QUEUEABLE_TYPES) {
+            enqueueForReliableReplay(
+                msgType = canonicalMsgType,
+                json = canonicalJson,
+                reason = "transport_send_failed"
+            )
+        }
+        return sent
+    }
+
+    /**
+     * Sends or queues a queueable payload while allowing the caller to stamp truthful
+     * delivery semantics into the JSON before the final transport action is taken.
+     *
+     * This is used for payloads whose wire content must distinguish:
+     *  - locally emitted only
+     *  - sent to transport now
+     *  - queued for later replay
+     *
+     * The [buildJson] lambda is called with the final delivery disposition that will be
+     * represented on the wire. When the socket is connected but the immediate send fails,
+     * the message is rebuilt with [AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED]
+     * before being persisted for replay, so the queued JSON does not over-signal direct delivery.
+     */
+    fun sendQueueableJsonWithDeliveryTruth(
+        msgType: MsgType,
+        buildJson: (AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition) -> String
+    ): AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition {
+        require(msgType.value in OfflineTaskQueue.QUEUEABLE_TYPES) {
+            "sendQueueableJsonWithDeliveryTruth requires a queueable MsgType"
+        }
+        if (!crossDeviceEnabled) {
+            val traceId = java.util.UUID.randomUUID().toString()
+            Log.w(
+                TAG,
+                "[WS:BLOCKED] sendQueueableJsonWithDeliveryTruth rejected: cross_device=off " +
+                    "trace_id=$traceId type=${msgType.value} reason=cross_device_disabled"
+            )
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "send_blocked",
+                    "trace_id" to traceId,
+                    "type" to msgType.value,
+                    "reason" to "cross_device_disabled"
+                )
+            )
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+        }
+
+        fun canonicalJsonFor(
+            disposition: AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition
+        ): String = canonicalizeCompletionIdentityPayload(buildJson(disposition), msgType.value)
+
+        fun ingressAllowed(canonicalJson: String): Boolean =
+            msgType != MsgType.RECONCILIATION_SIGNAL || hasCanonicalReconciliationIngress(canonicalJson)
+
+        if (!isConnected) {
+            val queuedJson = canonicalJsonFor(
+                AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+            )
+            if (!ingressAllowed(queuedJson)) {
+                return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+            }
+            enqueueForReliableReplay(
+                msgType = msgType.value,
+                json = queuedJson,
+                reason = "disconnected"
+            )
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+        }
+
+        val directJson = canonicalJsonFor(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT
+        )
+        if (!ingressAllowed(directJson)) {
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+        }
+        val sent = webSocket?.send(directJson) ?: false
+        if (sent) {
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.DIRECT_SENT
+        }
+
+        val queuedJson = canonicalJsonFor(
+            AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+        )
+        if (!ingressAllowed(queuedJson)) {
+            return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.SEND_FAILED
+        }
+        enqueueForReliableReplay(
+            msgType = msgType.value,
+            json = queuedJson,
+            reason = "transport_send_failed"
+        )
+        return AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.OFFLINE_QUEUED
+    }
+
+    private fun canonicalizeCompletionIdentityPayload(json: String, msgType: String?): String {
+        val supportedTypes = setOf(
+            MsgType.GOAL_EXECUTION_RESULT.value,
+            MsgType.DEVICE_EXECUTION_EVENT.value,
+            MsgType.RECONCILIATION_SIGNAL.value,
+            MsgType.DEVICE_STATE_SNAPSHOT.value
+        )
+        val type = msgType ?: tryExtractType(json)
+        if (type == null || type !in supportedTypes) return json
+        val root = try {
+            gson.fromJson(json, JsonObject::class.java)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "[WS:CANONICALIZE] JSON parse failed: ${e.message}")
+            null
+        } ?: return json
+        val payload = root.getAsJsonObject("payload") ?: return json
+        val payloadTaskId = payload.stringOrNull("task_id")
+        val taskId = payloadTaskId ?: root.stringOrNull("correlation_id")
+        if (payloadTaskId == null && taskId != null) {
+            payload.addProperty("task_id", taskId)
+        }
+        if (payload.stringOrNull("status") == null) {
+            val derivedStatus = when (type) {
+                MsgType.DEVICE_EXECUTION_EVENT.value ->
+                    payload.stringOrNull("phase")
+                MsgType.RECONCILIATION_SIGNAL.value ->
+                    payload.stringOrNull("kind")
+                else ->
+                    null
+            }
+            derivedStatus?.let { payload.addProperty("status", it) }
+        }
+        if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION) == null) {
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION,
+                AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION
+            )
+        }
+        if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION) == null) {
+            val contractVersion = payload.stringOrNull(
+                AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION
+            ) ?: AndroidCompletionClosureUplinkContract.SCHEMA_VERSION
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION,
+                contractVersion
+            )
+        }
+        val existingRootIdempotencyKey = root.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
+        val existingPayloadIdempotencyKey = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY)
+        val fingerprintSeed = listOfNotNull(
+            type,
+            taskId ?: "no_task",
+            payload.stringOrNull("signal_id"),
+            payload.stringOrNull("event_id"),
+            payload.stringOrNull("uplink_lineage_emission_id"),
+            payload.stringOrNull("timestamp_ms"),
+            root.stringOrNull("timestamp")
+        ).joinToString(":")
+        val canonicalIdempotencyKey = existingRootIdempotencyKey
+            ?: existingPayloadIdempotencyKey
+            ?: buildStableFallbackIdempotencyKey(
+                type = type,
+                taskId = taskId,
+                completionEmissionId = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID)
+                    ?: payload.stringOrNull("uplink_lineage_emission_id")
+                    ?: payload.stringOrNull("event_id")
+                    ?: payload.stringOrNull("signal_id"),
+                payloadFingerprint = sha256Hex(fingerprintSeed).take(16)
+            )
+        if (existingRootIdempotencyKey != canonicalIdempotencyKey) {
+            root.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY,
+                canonicalIdempotencyKey
+            )
+        }
+        if (existingPayloadIdempotencyKey != canonicalIdempotencyKey) {
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IDEMPOTENCY_KEY,
+                canonicalIdempotencyKey
+            )
+        }
+        if (payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID) == null) {
+            val emissionId = payload.stringOrNull("uplink_lineage_emission_id")
+                ?: payload.stringOrNull("event_id")
+                ?: payload.stringOrNull("signal_id")
+                ?: canonicalIdempotencyKey
+            payload.addProperty(AndroidCompletionClosureUplinkContract.KEY_COMPLETION_EMISSION_ID, emissionId)
+        }
+        if (!payload.has(AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH)) {
+            val isV2Confirmed = payload.stringOrNull(AndroidCompletionClosureUplinkContract.KEY_OUTWARD_TRUTH_SURFACE_CLASS) ==
+                AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass.V2_CONFIRMED_CANONICAL_TRUTH.wireValue
+            payload.addProperty(
+                AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH,
+                isV2Confirmed
+            )
+        }
+        val isClosureBearingType = type == MsgType.GOAL_EXECUTION_RESULT.value ||
+            type == MsgType.DEVICE_EXECUTION_EVENT.value
+        if (isClosureBearingType) {
+            // Stage-1 hardening rule for strict V2 canonical ingress:
+            // closure-grade identity comes only from explicit lineage keys.
+            // task_id is necessary routing context but is not sufficient lineage identity.
+            val lineageMetadata = AndroidUplinkLineageMetadataContract.derive(
+                executionIdentity = payload.stringOrNull(
+                    AndroidUplinkLineageMetadataContract.KEY_EXECUTION_IDENTITY
+                ),
+                emissionIdentity = payload.stringOrNull(
+                    AndroidUplinkLineageMetadataContract.KEY_EMISSION_IDENTITY
+                ),
+                durableSessionId = payload.stringOrNull("durable_session_id"),
+                sessionContinuityEpoch = payload.intOrNull("session_continuity_epoch"),
+                recoveryBasis = "transport_canonicalization"
+            )
+            val isClosureLineageIncomplete = !lineageMetadata.isClosureLineageComplete
+            val resultReturned = payload.booleanOrNull("result_returned") == true
+            val completionSignaled = payload.booleanOrNull("completion_signaled") == true
+            val lifecycleTerminal = payload.booleanOrNull("lifecycle_terminal_phase") == true
+            val isTerminalLikeSignal = resultReturned || completionSignaled || lifecycleTerminal
+            if (isClosureLineageIncomplete && isTerminalLikeSignal) {
+                payload.addProperty(
+                    AndroidResultUplinkBoundaryContract.KEY_RESULT_SIGNAL_CLASS,
+                    AndroidResultUplinkBoundaryContract
+                        .ResultSignalClass.ACCEPTANCE_CLOSURE_SIGNAL.wireValue
+                )
+                payload.addProperty(
+                    AndroidResultUplinkBoundaryContract.KEY_ACCEPTANCE_CANDIDATE_CLASS,
+                    AndroidResultUplinkBoundaryContract
+                        .AcceptanceCandidateClass.ACCEPTANCE_BLOCKED.wireValue
+                )
+                payload.addProperty(
+                    AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS,
+                    AndroidCompletionClosureUplinkContract
+                        .ClosureFinalizationSignalClass.SESSION_FINALIZATION_BLOCKED.wireValue
+                )
+                payload.addProperty("closure_ready_for_acceptance", false)
+            }
+        }
+        return gson.toJson(root)
+    }
+
+    private fun JsonObject.stringOrNull(key: String): String? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.asString?.takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
+    private fun JsonObject.booleanOrNull(key: String): Boolean? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.takeUnless { it.isJsonNull }?.asBoolean
+        }
+    }.getOrNull()
+
+    private fun JsonObject.intOrNull(key: String): Int? = runCatching {
+        if (!has(key)) {
+            null
+        } else {
+            get(key)?.takeUnless { it.isJsonNull }?.asInt
+        }
+    }.getOrNull()
+
+    private fun buildStableFallbackIdempotencyKey(
+        type: String,
+        taskId: String?,
+        completionEmissionId: String?,
+        payloadFingerprint: String
+    ): String {
+        val session = runtimeSessionId ?: "no_runtime_session"
+        val task = taskId ?: "no_task"
+        val emission = completionEmissionId ?: "payload_$payloadFingerprint"
+        return "$session:$type:$task:$emission"
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(value.toByteArray())
+            .joinToString(separator = "") { "%02x".format(it) }
+    }
+
+    private fun hasCanonicalReconciliationIngress(json: String): Boolean {
+        val root = try {
+            gson.fromJson(json, JsonObject::class.java)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "[WS:RECONCILIATION_INGRESS] JSON parse failed: ${e.message}")
+            null
+        }
+        val payload = root?.getAsJsonObject("payload")
+        val kindWire = payload?.get("kind")?.asString
+        val kind = ReconciliationSignal.Kind.fromValue(kindWire)
+        if (kind == null) {
+            reportNonCanonicalReconciliationIngress(
+                reason = "missing_or_unknown_reconciliation_kind",
+                kind = kindWire
+            )
+            return false
+        }
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract.classifyReconciliation(kind)
+        val boundary = payload.get("ingress_boundary_class")?.asString
+        val consumption = payload.get("ingress_consumption_kind")?.asString
+        val signalClass = payload.get("ingress_signal_class")?.asString
+        val schemaVersion = payload.get("ingress_schema_version")?.asString
+        val matches =
+            boundary == ingress.boundaryClass.wireValue &&
+                consumption == ingress.consumptionKind.wireValue &&
+                signalClass == ingress.signalClass.wireValue &&
+                schemaVersion == ingress.schemaVersion
+        if (!matches) {
+            reportNonCanonicalReconciliationIngress(
+                reason = "reconciliation_ingress_contract_mismatch",
+                kind = kind.wireValue,
+                expectedBoundary = ingress.boundaryClass.wireValue,
+                actualBoundary = boundary
+            )
+            return false
+        }
+        return true
+    }
+
+    private fun reportNonCanonicalReconciliationIngress(
+        reason: String,
+        kind: String?,
+        expectedBoundary: String? = null,
+        actualBoundary: String? = null
+    ) {
+        Log.e(
+            TAG,
+            "[WS:BLOCKED] Rejected non-canonical reconciliation_signal ingress " +
+                "reason=$reason kind=$kind expected_boundary=$expectedBoundary actual_boundary=$actualBoundary"
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "reconciliation_signal_non_canonical_ingress_blocked",
+                "reason" to reason,
+                "signal_kind" to (kind ?: "unknown"),
+                "expected_boundary" to (expectedBoundary ?: ""),
+                "actual_boundary" to (actualBoundary ?: "")
+            )
+        )
+    }
+
+    /** Extracts the `type` field from a JSON string without full deserialization. Returns null on error. */
+    private fun tryExtractType(json: String): String? = try {
+        gson.fromJson(json, JsonObject::class.java)?.get("type")?.asString
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "[WS:PARSE] tryExtractType failed: ${e.message}")
+        null
+    }
+
+    /** Extracts a top-level string field from a JSON string. Returns null on error. */
+    private fun tryExtractField(json: String, field: String): String? = try {
+        gson.fromJson(json, JsonObject::class.java)?.get(field)?.asString
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "[WS:PARSE] tryExtractField($field) failed: ${e.message}")
+        null
+    }
+
+    /** Extracts a nested string field from a JSON string (e.g., payload.task_id). Returns null on error. */
+    private fun tryExtractFieldNested(json: String, outerField: String, innerField: String): String? = try {
+        gson.fromJson(json, JsonObject::class.java)
+            ?.getAsJsonObject(outerField)?.get(innerField)?.asString
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "[WS:PARSE] tryExtractFieldNested($outerField.$innerField) failed: ${e.message}")
+        null
+    }
+
+    private val replayFlushIdCounter = AtomicLong(0L)
+
+    private fun annotateReplayEnvelopeForFlush(
+        message: OfflineTaskQueue.QueuedMessage,
+        replayFlushId: String,
+        replayFlushIndex: Int,
+        replayFlushTotal: Int
+    ): String {
+        val root = try {
+            gson.fromJson(message.json, JsonObject::class.java)
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "[WS:OfflineQueue] Failed to parse replay envelope JSON for metadata annotation; " +
+                    "forwarding original payload " +
+                    "type=${message.type} queue_sequence=${message.queueSequence} error=${e.message}"
+            )
+            null
+        } ?: return message.json
+        root.addProperty("replay_semantic_class", "offline_queue_replay")
+        root.addProperty("replay_order_contract_version", "android_offline_replay_ordering_v1")
+        root.addProperty("replay_flush_id", replayFlushId)
+        root.addProperty("replay_flush_index", replayFlushIndex)
+        root.addProperty("replay_flush_total", replayFlushTotal)
+        root.addProperty("replay_queue_sequence", message.queueSequence)
+        root.addProperty("replay_queued_at_ms", message.queuedAt)
+        val hasSessionTag = !message.sessionTag.isNullOrBlank()
+        root.addProperty("replay_session_tag_present", hasSessionTag)
+        if (hasSessionTag) {
+            root.addProperty("replay_session_tag", message.sessionTag)
+        }
+        val sessionEpoch = message.sessionEpoch
+        root.addProperty("replay_session_epoch_present", sessionEpoch != null)
+        if (sessionEpoch != null) {
+            root.addProperty("replay_session_epoch", sessionEpoch)
+        }
+        val dedupeAssessment = AndroidCrossRepoDedupeContract.assessEnvelopeJson(message.json, gson)
+        root.addProperty("replay_dedupe_contract_version", AndroidCrossRepoDedupeContract.SCHEMA_VERSION)
+        root.addProperty("replay_dedupe_contract_status", dedupeAssessment.status.wireValue)
+        dedupeAssessment.stableKeySource?.let {
+            root.addProperty("replay_dedupe_contract_key_source", it)
+        }
+        if (dedupeAssessment.missingFields.isNotEmpty()) {
+            root.addProperty(
+                "replay_dedupe_contract_missing_fields",
+                dedupeAssessment.missingFields.joinToString(",")
+            )
+        }
+        if (!message.dedupeKey.isNullOrBlank()) {
+            root.addProperty("replay_dedupe_key", message.dedupeKey)
+        }
+        if (message.type == MsgType.GOAL_EXECUTION_RESULT.value) {
+            root.objectOrNull("payload")?.let { payload ->
+                val emissionTruth = AndroidRuntimeEmissionTruthSemantics.derive(
+                    recoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase.fromWireValue(
+                        payload.stringOrNull(AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE)
+                    ),
+                    isContinuation = payload.booleanOrNull("is_continuation") == true,
+                    interruptionReason = payload.stringOrNull("interruption_reason"),
+                    isTerminal = true,
+                    deliveryDisposition = AndroidRuntimeEmissionTruthSemantics
+                        .DeliveryDisposition
+                        .REPLAYED_FORWARDED,
+                    resultConvergenceDecision = payload.stringOrNull(
+                        AndroidRuntimeEmissionTruthSemantics.KEY_RESULT_CONVERGENCE_DECISION
+                    )
+                )
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS,
+                    emissionTruth.executionContinuityClass.wireValue
+                )
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS,
+                    emissionTruth.terminalEmissionClass.wireValue
+                )
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION,
+                    emissionTruth.deliveryDisposition.wireValue
+                )
+                emissionTruth.resultConvergenceDecision?.let {
+                    payload.addProperty(
+                        AndroidRuntimeEmissionTruthSemantics.KEY_RESULT_CONVERGENCE_DECISION,
+                        it
+                    )
+                }
+                payload.addProperty(
+                    AndroidRuntimeEmissionTruthSemantics.KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION,
+                    AndroidRuntimeEmissionTruthSemantics.SCHEMA_VERSION
+                )
+                applyReplayLegalityPayloadSemantics(payload)
+            }
+        }
+        if (message.type == MsgType.RECONCILIATION_SIGNAL.value) {
+            // Reconciliation envelopes are structured as:
+            // root.payload (ReconciliationSignalPayload) -> payload (signal detail map).
+            // Replay legality metadata belongs on the inner signal-detail payload.
+            root.objectOrNull("payload")
+                ?.objectOrNull("payload")
+                ?.let { nestedPayload ->
+                    applyReplayLegalityPayloadSemantics(nestedPayload)
+                }
+        }
+        return gson.toJson(root)
+    }
+
+    private fun applyReplayLegalityPayloadSemantics(payload: JsonObject) {
+        payload.addProperty(
+            ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS,
+            ReconciliationSignal.CanonicalClosureAuthorityClass.V2_CANONICAL_AUTHORITY.wireValue
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE,
+            ReconciliationSignal.ParticipantLocalConvergenceState
+                .REPLAYED_PENDING_V2_REVALIDATION.wireValue
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_CLOSURE_READY_FOR_ACCEPTANCE,
+            false
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_V2_CANONICAL_TRUTH_COMPLETED,
+            false
+        )
+        payload.addProperty(
+            ReconciliationSignal.KEY_V2_MATURE_CLOSURE_ACHIEVED,
+            false
+        )
+        payload.addProperty("replay_continuity_revalidation_required", true)
+        payload.addProperty("replay_freshness_class", "stale_replayed_delivery")
+    }
+
+    private fun JsonObject.objectOrNull(key: String): JsonObject? =
+        runCatching { getAsJsonObject(key) }.getOrNull()
+
+    private fun JsonObject.stringOrNull(key: String): String? =
+        get(key)?.takeUnless { it.isJsonNull }?.asString?.ifBlank { null }
+
+    private fun JsonObject.booleanOrNull(key: String): Boolean? =
+        get(key)?.takeUnless { it.isJsonNull }?.asBoolean
+
+    private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
+        val dedupeAssessment = AndroidCrossRepoDedupeContract.assessEnvelopeJson(json, gson)
+        offlineQueue.enqueue(
+            type = msgType,
+            json = json,
+            sessionTag = durableSessionId,
+            sessionEpoch = when {
+                dedupeAssessment.sessionEpoch != null -> dedupeAssessment.sessionEpoch
+                msgType == MsgType.RECONCILIATION_SIGNAL.value -> sessionContinuityEpoch
+                else -> null
+            },
+            dedupeKey = dedupeAssessment.stableKey
+        )
+        if (shouldLogDegradedCanonicalContract(msgType, dedupeAssessment)) {
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "replay_dedupe_contract_degraded",
+                    "type" to msgType,
+                    "status" to dedupeAssessment.status.wireValue,
+                    "reason" to dedupeAssessment.reason,
+                    "missing_fields" to dedupeAssessment.missingFields.joinToString(",")
+                )
+            )
+        }
+        Log.i(
+            TAG,
+            "[WS:OfflineQueue] Queued reliable replay message type=$msgType reason=$reason " +
+                "queue_size=${offlineQueue.size} session_tag=${durableSessionId ?: "none"} " +
+                "session_epoch=${sessionContinuityEpoch ?: "none"} " +
+                "dedupe_status=${dedupeAssessment.status.wireValue}"
+        )
+    }
+
+    private fun shouldLogDegradedCanonicalContract(
+        msgType: String,
+        assessment: AndroidCrossRepoDedupeContract.Assessment
+    ): Boolean =
+        msgType in AndroidCrossRepoDedupeContract.CANONICAL_REPLAY_TYPES &&
+            !assessment.isCanonical
+
+    /**
+     * PR-AUTH-UNIFIED: Send the unified WebSocket auth message after the connection opens.
+     *
+     * Both Android and Wear OS now send this message as the first frame after onOpen.
+     * The server should respond with `auth_ok`, `auth_failed`, or `auth_invalid`.
+     *
+     * The auth token is sourced from the [gatewayToken] field set via
+     * [updateRuntimeConnectionConfig]. If no token is configured, the auth message
+     * is skipped (for local-only or open-gateway scenarios).
+     */
+    private fun sendAuthMessage() {
+        if (gatewayToken.isBlank()) {
+            Log.d(TAG, "[WS:AUTH] No gateway token configured; skipping auth message")
+            return
+        }
+        val deviceId = getDeviceId()
+        val authMsg = AuthMessage(
+            token = gatewayToken,
+            deviceId = deviceId,
+            deviceType = AuthMessage.DEVICE_TYPE_ANDROID,
+            protocolVersion = AIP_SPEC_VERSION
+        )
+        val json = try {
+            AuthMessage.serializer().let {
+                kotlinx.serialization.json.Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                }.encodeToString(it, authMsg)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[WS:AUTH] kotlinx.serialization failed, falling back to Gson: ${e.message}")
+            gson.toJson(authMsg)
+        }
+        val sent = webSocket?.send(json) ?: false
+        Log.i(TAG, "[WS:AUTH] Auth message sent device_id=${maskDeviceId(deviceId)} sent=$sent")
+    }
+
+    /**
+     * Sends the AIP v3.0 capability_report handshake immediately after the WebSocket opens.
+     *
+     * The payload is the **canonical runtime identity** of this device. It includes:
+     *  - `platform` / `device_id` / `version` — stable device identity fields.
+     *  - `device_type` — always `"Android_Agent"`.
+     *  - `trace_id` / `route_mode` — per-session observability fields.
+     *  - `supported_actions` — merged low-level action list from [baseActions] and
+     *    [modelCapabilities] (set via [setModelCapabilities]).
+     *  - `capabilities` — high-level autonomous capability names from [highLevelCapabilities]
+     *    (set via [setHighLevelCapabilities]), defaulting to the standard 5-capability set.
+     *  - `metadata` — the full 8-field canonical runtime identity map (see
+     *    [CapabilityReport.REQUIRED_METADATA_KEYS]): `goal_execution_enabled`,
+     *    `local_model_enabled`, `parallel_execution_enabled`, `device_role`,
+     *    `model_ready`, `accessibility_ready`, `overlay_ready`, and `cross_device_enabled`
+     *    (always overwritten from the live [crossDeviceEnabled] flag at send-time).
+     *
+     * Update [deviceMetadata] via [setDeviceMetadata] (using [AppSettings.toMetadataMap])
+     * before the WS opens to ensure the handshake reflects current device state.
+     */
+    private fun sendHandshake() {
+        val deviceId = getDeviceId()
+        val hostDescriptor = runtimeHostDescriptor
+        val hostMeta: Map<String, Any> = hostDescriptor?.toMetadataMap() ?: emptyMap()
+        // Snapshot PR-G identity fields atomically so both messages carry the same values.
+        val attachmentSessionId = runtimeAttachmentSessionId
+        val durableId = durableSessionId
+        val continuityEpoch = sessionContinuityEpoch
+
+        // ── PR-B2: 在握手开始时推导注册体位（source_runtime_posture）─────────────────────
+        // source_runtime_posture 声明本设备是作为纯控制/发起端（control_only）接入，
+        // 还是同时作为运行时执行者（join_runtime）加入分发池。V2 可在注册阶段即获取
+        // 此字段，实现更早、更准确的参与层级推断，而无需等待后续快照或执行事件。
+        // 推导规则：crossDeviceEnabled && goal_execution_enabled → join_runtime；否则 control_only。
+        // 两条握手消息（device_register + capability_report）携带相同值以保证一致性。
+        val registrationPosture = currentRegistrationPosture()
+
+        // Step 1: device_register — server expects this before capability_report (H2)
+        val register = JsonObject().apply {
+            addProperty("type", MsgType.DEVICE_REGISTER.value)
+            addProperty("protocol", "AIP/1.0")
+            addProperty("version", "3.0")
+            addProperty("device_id", deviceId)
+            addProperty("device_type", "Android_Agent")
+            addProperty("trace_id", sessionTraceId)
+            addProperty("timestamp", System.currentTimeMillis())
+            if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            // PR-G: stable attachment identity for V2 continuity consumer.
+            if (!attachmentSessionId.isNullOrBlank()) {
+                addProperty("runtime_attachment_session_id", attachmentSessionId)
+            }
+            // PR-G: durable continuity fields — present when a durable era is active.
+            if (!durableId.isNullOrBlank()) {
+                addProperty("durable_session_id", durableId)
+                addProperty("session_continuity_epoch", continuityEpoch ?: 0)
+            }
+            addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = MsgType.DEVICE_REGISTER.value))
+            // PR-5: include runtime-host identity in device_register so the gateway
+            // can immediately classify this device as a formal runtime host rather than
+            // a generic endpoint.
+            if (hostDescriptor != null) {
+                addProperty(RuntimeHostDescriptor.KEY_HOST_ID, hostDescriptor.hostId)
+                addProperty(RuntimeHostDescriptor.KEY_FORMATION_ROLE, hostDescriptor.formationRole.wireValue)
+                addProperty(RuntimeHostDescriptor.KEY_PARTICIPATION_STATE, hostDescriptor.participationState.wireValue)
+            }
+            // PR-B2: registration posture — enables V2 early participation-tier derivation.
+            addProperty("source_runtime_posture", registrationPosture)
+            // PR-28: Tailscale IP for P2P direct transport — enables Galaxy to route
+            // messages directly through Tailscale WireGuard tunnel instead of WebSocket.
+            try {
+                val tsIp = com.ufo.galaxy.UFOGalaxyApplication.tailscaleAdapter.getLocalTailscaleIp()
+                if (!tsIp.isNullOrBlank()) {
+                    addProperty("tailscale_ip", tsIp)
+                }
+            } catch (_: Exception) {
+                // Tailscale not available — omit field, fallback to WebSocket
+            }
+        }
+        val registerSent = sendJson(gson.toJson(register))
+        if (registerSent) {
+            listeners.forEach { it.onDeviceRegisterSent(deviceId, sessionTraceId) }
+        }
+        Log.i(TAG, "[WS:DEVICE_REGISTER] device_id=${maskDeviceId(deviceId)} trace_id=$sessionTraceId" +
+                (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
+                (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
+                " source_runtime_posture=$registrationPosture" +
+                if (hostDescriptor != null) " host_id=${hostDescriptor.hostId} " +
+                    "formation_role=${hostDescriptor.formationRole.wireValue} " +
+                    "participation_state=${hostDescriptor.participationState.wireValue}" else "")
+
+        val baseActions = listOf(
+            "location", "camera", "sensor_data", "automation",
+            "notification", "sms", "phone_call", "contacts",
+            "calendar", "voice_input", "screen_capture", "app_control"
+        )
+        val allActions = (baseActions + modelCapabilities).distinct()
+
+        // PR-5: merge runtime-host identity metadata into the capability_report so the
+        // gateway session-truth layer has complete host representation on the first report.
+        val mergedMetadata = deviceMetadata.toMutableMap().also { m ->
+            m["cross_device_enabled"] = crossDeviceEnabled
+            m.putAll(hostMeta)
+        }
+
+        val effectiveCapabilities = highLevelCapabilities.ifEmpty {
+            listOf(
+                "autonomous_goal_execution",
+                "local_task_planning",
+                "local_ui_reasoning",
+                "cross_device_coordination"
+            )
+        }
+
+        val report = CapabilityReport(
+            platform = "android",
+            device_id = deviceId,
+            supported_actions = allActions,
+            version = "3.0",
+            // `local_model_inference` is intentionally absent from the fallback list.
+            // It is added by GalaxyConnectionService.loadModels() only after
+            // LocalInferenceRuntimeManager confirms the runtime is operational.
+            // Claiming it before runtime readiness is verified would produce a false
+            // capability advertisement on the initial connection handshake.
+            capabilities = effectiveCapabilities,
+            metadata = normalizedCapabilityMetadata(
+                metadata = mergedMetadata,
+                inferredLocalInferenceAvailable = effectiveCapabilities.contains("local_model_inference")
+            )
+        )
+        val metadataEvidence = report.metadataEvidenceSurface()
+        val handshakeMetadata = report.metadata.toMutableMap().apply {
+            putAll(metadataEvidence)
+        }
+        @Suppress("UNCHECKED_CAST")
+        val missingRequired =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_REQUIRED_KEYS] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val missingCanonicalGate =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_CANONICAL_GATE_KEYS] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val malformedCanonicalGate =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MALFORMED_CANONICAL_GATE_KEYS] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val canonicalGateContractIssues =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_CANONICAL_GATE_CONTRACT_ISSUES] as? List<String>).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val missingSchedulingBasis =
+            (metadataEvidence[CapabilityReport.KEY_METADATA_MISSING_SCHEDULING_BASIS_KEYS] as? List<String>).orEmpty()
+
+        val handshake = JsonObject().apply {
+            addProperty("type", "capability_report")
+            addProperty("version", report.version)
+            addProperty("platform", report.platform)
+            addProperty("device_id", report.device_id)
+            addProperty("device_type", "Android_Agent")
+            addProperty("trace_id", sessionTraceId)
+            addProperty("route_mode", currentRouteMode())
+            if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            // PR-G: stable attachment identity for V2 continuity consumer.
+            if (!attachmentSessionId.isNullOrBlank()) {
+                addProperty("runtime_attachment_session_id", attachmentSessionId)
+            }
+            // PR-G: durable continuity fields — present when a durable era is active.
+            if (!durableId.isNullOrBlank()) {
+                addProperty("durable_session_id", durableId)
+                addProperty("session_continuity_epoch", continuityEpoch ?: 0)
+            }
+            addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
+            add("supported_actions", gson.toJsonTree(report.supported_actions))
+            add("capabilities", gson.toJsonTree(report.capabilities))
+            add("metadata", gson.toJsonTree(handshakeMetadata))
+            // PR-B2: registration posture — carried in capability_report for consistency with
+            // device_register; allows V2 to derive participation tier from the first complete
+            // capability report without waiting for device_state_snapshot.
+            addProperty("source_runtime_posture", registrationPosture)
+        }
+
+        val handshakeJson = gson.toJson(handshake)
+        // Warn if metadata is incomplete so evidence drift is surfaced in logcat immediately.
+        if (missingRequired.isNotEmpty()) {
+            Log.w(TAG, "[WS:CAPABILITY_REPORT] metadata is missing required keys: $missingRequired — " +
+                    "call setDeviceMetadata(appSettings.toMetadataMap()) before connecting")
+        }
+        if (missingCanonicalGate.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata is missing canonical gate keys: $missingCanonicalGate"
+            )
+        }
+        if (malformedCanonicalGate.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata has malformed canonical gate keys: $malformedCanonicalGate"
+            )
+        }
+        if (canonicalGateContractIssues.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata has canonical gate contract issues: $canonicalGateContractIssues"
+            )
+        }
+        if (missingSchedulingBasis.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "[WS:CAPABILITY_REPORT] metadata is missing scheduling-basis keys: $missingSchedulingBasis"
+            )
+        }
+        // Route through sendJson() so the cross-device gate is uniformly enforced
+        // across all uplink message types, including the initial capability_report.
+        val capabilitySent = sendJson(handshakeJson)
+        if (capabilitySent) {
+            listeners.forEach { it.onCapabilityReportSent(report.device_id, sessionTraceId) }
+        }
+        Log.i(TAG, "[WS:CAPABILITY_REPORT] device_id=${report.device_id} platform=${report.platform}" +
+                " actions=${report.supported_actions.size} capabilities=${report.capabilities}" +
+                " required_complete=${missingRequired.isEmpty()}" +
+                " canonical_gate_complete=${missingCanonicalGate.isEmpty()}" +
+                " canonical_gate_valid=${malformedCanonicalGate.isEmpty() && canonicalGateContractIssues.isEmpty()}" +
+                " scheduling_basis_complete=${missingSchedulingBasis.isEmpty()}" +
+                " cross_device_enabled=$crossDeviceEnabled trace_id=$sessionTraceId route_mode=${currentRouteMode()}" +
+                " source_runtime_posture=$registrationPosture" +
+                (if (!attachmentSessionId.isNullOrBlank()) " runtime_attachment_session_id=$attachmentSessionId" else "") +
+                (if (!durableId.isNullOrBlank()) " durable_session_id=$durableId epoch=${continuityEpoch ?: 0}" else "") +
+                if (hostDescriptor != null) " host_id=${hostDescriptor.hostId}" else "")
+    }
+
+    /**
+     * 发送结构化诊断载荷（任务失败时调用）
+     * 服务端 Loop 1（自修复）和 Loop 2（学习反馈）依据此信息分类重复失败
+     *
+     * @param taskId    失败任务的唯一标识
+     * @param nodeName  上报诊断的节点名称
+     * @param errorType 错误分类（如 "network_timeout"、"permission_denied"）
+     * @param errorContext 具体错误描述或堆栈摘要
+     */
+    fun sendDiagnostics(
+        taskId: String,
+        nodeName: String,
+        errorType: String,
+        errorContext: String
+    ): Boolean {
+        val deviceId = getDeviceId()
+        val diagnosticClassification = AndroidLocalDiagnosticReasonContract.classify(
+            errorType = errorType,
+            nodeName = nodeName
+        )
+        val diagnosticsBoundary = AndroidDiagnosticsFailureExplanationUplinkContract
+            .forDiagnosticsPayload()
+        val ingress = AndroidGovernanceExecutionPolicyIngressContract
+            .classifyMsgType(MsgType.DIAGNOSTICS_PAYLOAD)
+        val truthOwnershipBoundary = AndroidDistributedTruthOwnershipUplinkContract.derive(
+            AndroidDistributedTruthOwnershipUplinkContract.TruthOwnershipUplinkDerivationInput(
+                executionBusy = false,
+                crossDeviceEnabled = crossDeviceEnabled,
+                sourceRuntimePosture = currentRegistrationPosture(),
+                takeoverActive = false,
+                isHandoffInitiator = false,
+                isOwnershipReturnPending = false,
+                sessionId = runtimeSessionId,
+                isSessionRecoveryActive = false,
+                isCapabilityDegraded = false,
+                isRecoveryActive = false,
+                isDiagnosticsSignal = true,
+                isOperatorVisibleSummary = false
+            )
+        )
+
+        val diagnosticsPayload = DiagnosticsPayload(
+            task_id = taskId,
+            device_id = deviceId,
+            node_name = nodeName,
+            error_type = errorType,
+            error_context = errorContext,
+            diagnostic_schema_version = diagnosticClassification.schemaVersion,
+            diagnostic_domain = diagnosticClassification.domain.wireValue,
+            diagnostic_reason = diagnosticClassification.reason.wireValue,
+            local_cause = diagnosticClassification.localCause,
+            ingress_boundary_class = ingress.boundaryClass.wireValue,
+            ingress_consumption_kind = ingress.consumptionKind.wireValue,
+            ingress_signal_class = ingress.signalClass.wireValue,
+            ingress_schema_version = ingress.schemaVersion,
+            uplink_semantic_boundary_class = diagnosticsBoundary.uplinkSemanticBoundaryClass.wireValue,
+            operator_projection_class = diagnosticsBoundary.operatorProjectionClass.wireValue,
+            diagnostics_failure_explanation_schema_version =
+                AndroidDiagnosticsFailureExplanationUplinkContract.SCHEMA_VERSION,
+            authority_signal_class = truthOwnershipBoundary.authoritySignalClass.wireValue,
+            ownership_uplink_class = truthOwnershipBoundary.ownershipUplinkClass.wireValue,
+            session_continuity_class = truthOwnershipBoundary.sessionContinuityClass.wireValue,
+            device_posture_signal_class = truthOwnershipBoundary.devicePostureSignalClass.wireValue,
+            distributed_truth_ownership_uplink_schema_version =
+                AndroidDistributedTruthOwnershipUplinkContract.SCHEMA_VERSION,
+            // ── PR-120 (Android): Non-closure signal boundary classification ────────────
+            non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                .classify(MsgType.DIAGNOSTICS_PAYLOAD)?.wireValue ?: "unknown",
+            non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
+        )
+        val envelope = AipMessage(
+            type = MsgType.DIAGNOSTICS_PAYLOAD,
+            payload = diagnosticsPayload,
+            device_id = deviceId,
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = taskId, type = MsgType.DIAGNOSTICS_PAYLOAD.value)
+        )
+
+        // Route through sendJson() so the cross-device gate and connection check
+        // are applied uniformly — the same as every other cross-device uplink message.
+        return sendJson(gson.toJson(envelope))
+    }
+
+    /**
+     * Sends a [MsgType.MESH_JOIN] message to report that this device is joining a mesh session.
+     *
+     * The [meshId] is tracked internally so that [sendMeshLeave] is called automatically
+     * when [disconnect] is invoked while participating in a mesh.
+     *
+     * @param meshId       Stable mesh session identifier shared by all participants.
+     * @param role         Role of this device in the mesh ("participant" or "coordinator").
+     * @param capabilities Capability names this device contributes to the mesh.
+     * @return true if the message was sent immediately; false if blocked or disconnected.
+     */
+    fun sendMeshJoin(
+        meshId: String,
+        role: String = DEFAULT_MESH_ROLE,
+        capabilities: List<String> = emptyList()
+    ): Boolean {
+        rememberMeshRejoinContext(meshId = meshId, role = role, capabilities = capabilities)
+        val deviceId = getDeviceId()
+        val payload = MeshJoinPayload(
+            mesh_id = meshId,
+            device_id = deviceId,
+            role = role,
+            capabilities = capabilities
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_JOIN,
+            payload = payload,
+            device_id = deviceId,
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_JOIN.value)
+        )
+        val sent = sendJson(gson.toJson(envelope))
+        if (sent) {
+            Log.i(TAG, "[MESH:JOIN] mesh_id=$meshId role=$role device_id=${maskDeviceId(deviceId)} trace_id=$sessionTraceId")
+        }
+        return sent
+    }
+
+    /**
+     * Sends a [MsgType.MESH_LEAVE] message to notify the server that this device is leaving
+     * the mesh session. Clears the tracked [currentMeshId] after sending.
+     *
+     * @param meshId Mesh session identifier to leave.
+     * @param reason Reason for leaving: "disconnect", "task_complete", or "error".
+     * @return true if the message was sent immediately; false if blocked or disconnected.
+     */
+    fun sendMeshLeave(
+        meshId: String,
+        reason: String = "disconnect"
+    ): Boolean {
+        val deviceId = getDeviceId()
+        val payload = MeshLeavePayload(
+            mesh_id = meshId,
+            device_id = deviceId,
+            reason = reason
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_LEAVE,
+            payload = payload,
+            device_id = deviceId,
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_LEAVE.value)
+        )
+        val sent = sendJson(gson.toJson(envelope))
+        clearMeshRejoinContext()
+        Log.i(TAG, "[MESH:LEAVE] mesh_id=$meshId reason=$reason device_id=${maskDeviceId(deviceId)} sent=$sent")
+        return sent
+    }
+
+    private fun sendMeshRejoinIfNeeded() {
+        val rejoinEnvelope = buildMeshRejoinEnvelope() ?: return
+        val sent = sendJson(rejoinEnvelope.json)
+        if (sent) {
+            Log.i(
+                TAG,
+                "[MESH:REJOIN] mesh_id=${rejoinEnvelope.meshId} role=${rejoinEnvelope.role} capabilities=${rejoinEnvelope.capabilityCount}"
+            )
+        } else {
+            Log.w(TAG, "[MESH:REJOIN] Failed to rejoin mesh_id=${rejoinEnvelope.meshId} after reconnect")
+        }
+    }
+
+    private fun buildMeshRejoinEnvelope(): MeshRejoinEnvelope? {
+        val context = snapshotMeshRejoinContext() ?: return null
+        val payload = MeshJoinPayload(
+            mesh_id = context.meshId,
+            device_id = getDeviceId(),
+            role = context.role,
+            capabilities = context.capabilities
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_JOIN,
+            payload = payload,
+            device_id = getDeviceId(),
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = context.meshId, type = MsgType.MESH_JOIN.value)
+        )
+        return MeshRejoinEnvelope(
+            meshId = context.meshId,
+            role = context.role,
+            capabilityCount = context.capabilities.size,
+            json = gson.toJson(envelope)
+        )
+    }
+
+    private fun rememberMeshRejoinContext(meshId: String, role: String, capabilities: List<String>) {
+        synchronized(meshContextLock) {
+            currentMeshId = meshId
+            currentMeshRole = role
+            currentMeshCapabilities = capabilities
+        }
+    }
+
+    private fun clearMeshRejoinContext() {
+        synchronized(meshContextLock) {
+            currentMeshId = null
+            currentMeshRole = DEFAULT_MESH_ROLE
+            currentMeshCapabilities = emptyList()
+        }
+    }
+
+    private fun snapshotMeshRejoinContext(): MeshRejoinContext? = synchronized(meshContextLock) {
+        val meshId = currentMeshId ?: return@synchronized null
+        MeshRejoinContext(
+            meshId = meshId,
+            role = currentMeshRole,
+            capabilities = currentMeshCapabilities
+        )
+    }
+
+    private fun currentMeshIdSnapshot(): String? = synchronized(meshContextLock) { currentMeshId }
+
+    internal fun buildMeshRejoinEnvelopeForTest(): String? = buildMeshRejoinEnvelope()?.json
+
+    /**
+     * Sends a [MsgType.MESH_RESULT] message reporting aggregated parallel-subtask results
+     * for a mesh session.
+     *
+     * @param meshId     Mesh session identifier.
+     * @param taskId     Top-level task identifier associated with the mesh execution.
+     * @param status     Aggregate status: "success", "partial", or "error".
+     * @param results    Per-device subtask result summaries.
+     * @param summary    Human-readable one-line aggregate outcome (optional).
+     * @param latencyMs  Wall-clock time from first dispatch to last result (ms).
+     * @return true if the message was sent immediately; false if blocked or disconnected.
+     */
+    fun sendMeshResult(
+        meshId: String,
+        taskId: String,
+        status: String,
+        results: List<MeshSubtaskResult> = emptyList(),
+        summary: String? = null,
+        latencyMs: Long = 0L
+    ): Boolean {
+        val deviceId = getDeviceId()
+        val payload = MeshResultPayload(
+            mesh_id = meshId,
+            task_id = taskId,
+            device_id = deviceId,
+            status = status,
+            results = results,
+            summary = summary,
+            latency_ms = latencyMs
+        )
+        val envelope = AipMessage(
+            type = MsgType.MESH_RESULT,
+            payload = payload,
+            correlation_id = taskId,
+            device_id = deviceId,
+            trace_id = sessionTraceId,
+            runtime_session_id = runtimeSessionId,
+            idempotency_key = buildIdempotencyKey(taskId = taskId, type = MsgType.MESH_RESULT.value)
+        )
+        Log.i(TAG, "[MESH:RESULT] mesh_id=$meshId task_id=$taskId status=$status results=${results.size} trace_id=$sessionTraceId")
+        return sendJson(gson.toJson(envelope))
+    }
+
+    /**
+     * Sends a [MsgType.DEVICE_EXECUTION_EVENT] uplink message to V2.
+     *
+     * Encodes [payload] into an [AipMessage] envelope and routes it through [sendJson]
+     * so the cross-device gate and connection check are uniformly enforced.
+     *
+     * ## V2 ingestion
+     * V2 absorbs the event via
+     * `core.android_device_state_store.absorb_device_execution_event(device_id, payload_dict)`,
+     * which:
+     *  1. Parses the payload into a `DeviceExecutionEvent` dataclass.
+     *  2. Appends it to the in-process execution-event ring buffer.
+     *  3. Forwards the event to `FlowLevelOperatorSurface` (when `flow_id` is non-empty)
+     *     so live cross-device execution state is visible at the V2 operator surface.
+     *
+     * Send failure **never throws** — any exception is caught and logged so the caller's
+     * execution lifecycle progression is not interrupted.
+     *
+     * @param payload The [DeviceExecutionEventPayload] describing the execution phase event.
+     * @return `true` if the message was sent immediately; `false` if blocked, disconnected,
+     *         or an exception occurred.
+     */
+    fun sendDeviceExecutionEvent(payload: DeviceExecutionEventPayload): Boolean {
+        return try {
+            val deviceId = getDeviceId()
+            val enrichedPayload = payload.copy(
+                device_id = payload.device_id.ifBlank { deviceId }
+            )
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_EXECUTION_EVENT,
+                payload = enrichedPayload,
+                device_id = deviceId,
+                correlation_id = payload.task_id,
+                trace_id = sessionTraceId,
+                runtime_session_id = runtimeSessionId,
+                idempotency_key = payload.event_id
+            )
+            val sent = sendJson(gson.toJson(envelope))
+            if (sent) {
+                Log.d(
+                    TAG, "[DEVICE_EXEC_EVENT] sent event_id=${payload.event_id} " +
+                        "task_id=${payload.task_id} phase=${payload.phase} " +
+                        "step=${payload.step_index} is_blocking=${payload.is_blocking}"
+                )
+            } else {
+                Log.w(
+                    TAG, "[DEVICE_EXEC_EVENT] send blocked/failed event_id=${payload.event_id} " +
+                        "task_id=${payload.task_id} phase=${payload.phase}"
+                )
+            }
+            sent
+        } catch (e: Exception) {
+            Log.e(TAG, "[DEVICE_EXEC_EVENT] unexpected error sending event task_id=${payload.task_id}: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Sends a [MsgType.DEVICE_PERCEPTION_EMISSION] uplink message to V2.
+     *
+     * This is the canonical Android-side multimodal ingress contract for screenshot / vision /
+     * grounding / local-perception emissions. The payload itself distinguishes one-shot vision
+     * requests from multimodal main-chain participation signals.
+     */
+    fun sendDevicePerceptionEmission(payload: DevicePerceptionEmissionPayload): Boolean {
+        return try {
+            val deviceId = getDeviceId()
+            val canonicalPayload = payload.toCanonicalIngressPayload()
+            val traceId = canonicalPayload.trace_id?.takeIf { it.isNotBlank() } ?: sessionTraceId
+            val enrichedPayload = canonicalPayload.copy(
+                device_id = canonicalPayload.device_id.ifBlank { deviceId },
+                trace_id = traceId
+            )
+            val envelope = AipMessage(
+                type = MsgType.DEVICE_PERCEPTION_EMISSION,
+                payload = enrichedPayload,
+                device_id = deviceId,
+                correlation_id = enrichedPayload.task_id,
+                trace_id = traceId,
+                runtime_session_id = runtimeSessionId,
+                idempotency_key = enrichedPayload.emission_id
+            )
+            val sent = sendJson(gson.toJson(envelope))
+            if (sent) {
+                Log.d(
+                    TAG,
+                    "[DEVICE_PERCEPTION] sent emission_id=${enrichedPayload.emission_id} " +
+                        "task_id=${enrichedPayload.task_id} kind=${enrichedPayload.emission_kind} " +
+                        "stage=${enrichedPayload.perception_stage} " +
+                        "downstream=${enrichedPayload.downstream_consumption_semantics}"
+                )
+            } else {
+                Log.w(
+                    TAG,
+                    "[DEVICE_PERCEPTION] send blocked/failed emission_id=${enrichedPayload.emission_id} " +
+                        "task_id=${enrichedPayload.task_id} kind=${enrichedPayload.emission_kind}"
+                )
+            }
+            sent
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "[DEVICE_PERCEPTION] unexpected error sending emission task_id=${payload.task_id}: ${e.message}",
+                e
+            )
+            false
+        }
+    }
+
+    /**
+     * R3-3-FIX: Returns the heartbeat interval in milliseconds, accounting for
+     * Android Doze mode and Power Save mode to comply with background execution
+     * constraints and prevent excessive wakeups.
+     *
+     * | Mode                | Interval |
+     * |---------------------|----------|
+     * | Normal              | 20 s     |
+     * | Power Save          | 40 s     |
+     * | Doze (idle)         | 60 s     |
+     */
+    private fun getHeartbeatIntervalMs(): Long {
+        val pm = context?.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                when {
+                    pm?.isDeviceIdleMode == true -> 60_000L   // Doze: 60s
+                    pm?.isPowerSaveMode == true -> 40_000L    // Power save: 40s
+                    else -> ReconnectionConfig.HEARTBEAT_INTERVAL_MS // Normal: 20s
+                }
+            }
+            else -> ReconnectionConfig.HEARTBEAT_INTERVAL_MS
+        }
+    }
+
+    /**
+     * 启动心跳
+     * B5-FIX: Heartbeat is aligned to the next minute boundary to reduce wakeups
+     * under Android Doze mode (alarms are batched to the next maintenance window).
+     * R3-3-FIX: Interval is dynamically adjusted based on Doze / Power Save state.
+     */
+    private fun startHeartbeat() {
+        heartbeatJob = scope.launch {
+            // B5-FIX: Initial delay aligns to the next minute boundary for Doze batching.
+            val interval = getHeartbeatIntervalMs()
+            val initialDelay = interval - (System.currentTimeMillis() % interval)
+            delay(initialDelay)
+            while (isActive && isConnected) {
+                sendHeartbeat()
+                delay(getHeartbeatIntervalMs())
+            }
+        }
+    }
+    
+    /**
+     * 停止心跳
+     */
+    private fun stopHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+    }
+    
+    /**
+     * Called when a heartbeat_ack is received from the server.
+     * Resets the pong timeout tracking so missed-heartbeat detection does not
+     * accumulate across healthy connections.
+     */
+    private fun onPongReceived() {
+        lastPongTime = SystemClock.elapsedRealtime()
+        missedHeartbeats = 0
+    }
+
+    /**
+     * 发送心跳，附带 device_id、route_mode、device_type 与重连次数用于联调追踪。
+     *
+     * **WS-1 robustness**: before sending, checks whether the last heartbeat_ack
+     * from the server has exceeded [PONG_TIMEOUT_MS].  After [MAX_MISSED_HEARTBEATS]
+     * consecutive failures the connection is forcibly torn down and a reconnect
+     * is scheduled so that a dead server / frozen TCP link is detected within
+     * ~30 s rather than hanging indefinitely.
+     */
+    private fun sendHeartbeat() {
+        // ── Pong timeout detection ──────────────────────────────────────────
+        val timeSinceLastPong = SystemClock.elapsedRealtime() - lastPongTime
+        if (timeSinceLastPong > PONG_TIMEOUT_MS) {
+            missedHeartbeats++
+            Log.w(TAG, "[WS:HEARTBEAT] Pong timeout #$missedHeartbeats (last ack ${timeSinceLastPong}ms ago)")
+            if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
+                Log.e(TAG, "[WS:HEARTBEAT] Max missed heartbeats ($MAX_MISSED_HEARTBEATS) — forcing reconnect")
+                missedHeartbeats = 0
+                disconnect()
+                if (shouldReconnect) {
+                    scheduleReconnect()
+                }
+                return
+            }
+        }
+
+        val deviceId = getDeviceId()
+        val heartbeat = JsonObject().apply {
+            addProperty("type", "heartbeat")
+            addProperty("timestamp", System.currentTimeMillis())
+            addProperty("device_id", deviceId)
+            addProperty("device_type", "Android_Agent")
+            addProperty("route_mode", currentRouteMode())
+            addProperty("trace_id", sessionTraceId)
+            addProperty("reconnect_attempts", reconnectAttempts)
+            if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
+            addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = "heartbeat"))
+        }
+        val json = gson.toJson(heartbeat)
+        val sent = webSocket?.send(json) ?: false
+        if (!sent) {
+            Log.w(TAG, "[WS:HEARTBEAT] Failed to send heartbeat — socket may be dead")
+        }
+        Log.d(TAG, "[WS:HEARTBEAT] device_id=${maskDeviceId(deviceId)} route_mode=${currentRouteMode()} reconnect_attempts=$reconnectAttempts sent=$sent")
+    }
+    
+    /**
+     * 安排重连 — exponential backoff with jitter, with perpetual watchdog recovery.
+     *
+     * Normal phase: Delay = RECONNECT_BACKOFF_MS[min(attempt, last)] + random jitter
+     * [0, RECONNECT_JITTER_MAX_MS).
+     *
+     * Watchdog phase: Once [MAX_RECONNECT_ATTEMPTS] is reached, [Listener.onError] is
+     * emitted (so the runtime can update recovery state and UI), the attempt counter is
+     * reset to 0, and a new reconnect is scheduled at the maximum backoff + jitter.
+     * This perpetual watchdog cycle repeats indefinitely — the device **never** stops
+     * attempting to reconnect as long as [shouldReconnect] is `true`.  An explicit
+     * [disconnect] call (which sets [shouldReconnect]=false) is the only way to stop the
+     * cycle (e.g. user disables cross-device or stop() is called).
+     *
+     * This design eliminates the prior terminal dead state where the Android participant
+     * would permanently fall out of the distributed system after 10 consecutive failures.
+     */
+    private fun scheduleReconnect() {
+        if (reconnectAttempts >= ReconnectionConfig.MAX_ATTEMPTS) {
+            // Notify listeners of the ceiling breach so the runtime can update its
+            // recovery state (RECOVERING → FAILED) and the UI can show a transient
+            // "connection failed" message.  We then reset the counter and fall into
+            // a perpetual watchdog retry at the capped backoff + jitter — no permanent stop.
+            Log.w(
+                TAG,
+                "[WS:RETRY] Attempt ceiling (${ReconnectionConfig.MAX_ATTEMPTS}) reached; " +
+                    "entering watchdog recovery cycle (will retry at cap delay indefinitely)"
+            )
+            GalaxyLogger.log(
+                GalaxyLogger.TAG_RECONNECT,
+                mapOf(
+                    "event" to "watchdog_cycle_entered",
+                    "attempt_ceiling" to ReconnectionConfig.MAX_ATTEMPTS
+                )
+            )
+            listeners.forEach { it.onError("无法连接到服务器") }
+            // Reset the attempt counter so the next watchdog cycle starts from 0
+            // and so the reconnectAttemptCount observable reflects a fresh cycle.
+            reconnectAttempts = 0
+            _reconnectAttemptCount.value = 0
+            // Schedule a single watchdog retry at the capped delay so we do not storm.
+            val watchdogDelay = ReconnectionConfig.MAX_DELAY_MS +
+                Random.nextLong(ReconnectionConfig.JITTER_MS)
+            Log.i(TAG, "[WS:RETRY] Watchdog reconnect scheduled in ${watchdogDelay}ms")
+            reconnectJob?.cancel()
+            reconnectJob = scope.launch {
+                delay(watchdogDelay)
+                if (shouldReconnect && !isConnected) {
+                    connect()
+                }
+            }
+            return
+        }
+
+        val delay = ReconnectionConfig.computeDelay(reconnectAttempts)
+        reconnectAttempts++
+        _reconnectAttemptCount.value = reconnectAttempts
+
+        Log.i(
+            TAG,
+            "[WS:RETRY] Scheduling reconnect attempt $reconnectAttempts/${ReconnectionConfig.MAX_ATTEMPTS} " +
+                "in ${delay}ms"
+        )
+        GalaxyLogger.log(GalaxyLogger.TAG_RECONNECT, mapOf(
+            "attempt" to reconnectAttempts,
+            "max_attempts" to ReconnectionConfig.MAX_ATTEMPTS,
+            "delay_ms" to delay
+        ))
+
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(delay)
+            if (shouldReconnect && !isConnected) {
+                connect()
+            }
+        }
+    }
+
+    /**
+     * Flushes the [offlineQueue] by sending each queued message through [sendJson].
+     * Must only be called after [onOpen] confirms the connection is up.
+     *
+     * Before draining, stale-session messages are purged via
+     * [OfflineTaskQueue.discardForDifferentSession] using the current [durableSessionId].
+     * This prevents messages enqueued under an earlier durable session from being
+     * replayed into the new connection.
+     *
+     * All messages are sent through [sendJson] so that the cross-device gate and any
+     * other runtime send constraints are uniformly enforced during replay — the flush
+     * path does not bypass the gate.
+     *
+     * Reconciliation signals are additionally bounded by [sessionContinuityEpoch] so a signal
+     * from an older reconnect epoch is discarded instead of being replayed into the current
+     * continuity era.
+     *
+     * Messages that fail to send are re-enqueued through [sendJson] using the same offline queue,
+     * so reconnect/flush remains retryable without bypassing the canonical transport path.
+     */
+    private fun flushOfflineQueue() {
+        // Purge messages enqueued under a different durable session before replaying.
+        val tag = durableSessionId
+        if (tag != null) {
+            val discarded = offlineQueue.discardForDifferentSession(tag)
+            if (discarded > 0) {
+                Log.i(TAG, "[WS:OfflineQueue] Discarded $discarded stale-session message(s) before flush (tag=$tag)")
+            }
+        } else {
+            val discarded = offlineQueue.discardSessionTaggedWithoutAuthority()
+            if (discarded > 0) {
+                Log.i(TAG, "[WS:OfflineQueue] Discarded $discarded tagged message(s) before flush because session authority is unavailable")
+            }
+        }
+        val staleEpochDiscarded =
+            offlineQueue.discardReconciliationSignalsForDifferentEpoch(sessionContinuityEpoch)
+        if (staleEpochDiscarded > 0) {
+            Log.i(
+                TAG,
+                "[WS:OfflineQueue] Discarded $staleEpochDiscarded stale reconciliation signal(s) " +
+                    "before flush (epoch=${sessionContinuityEpoch ?: "none"})"
+            )
+        }
+        val staleLineageEpochDiscarded =
+            offlineQueue.discardLineageBoundMessagesForDifferentEpoch(sessionContinuityEpoch)
+        if (staleLineageEpochDiscarded > 0) {
+            Log.i(
+                TAG,
+                "[WS:OfflineQueue] Discarded $staleLineageEpochDiscarded stale lineage-bound message(s) " +
+                    "before flush (epoch=${sessionContinuityEpoch ?: "none"})"
+            )
+        }
+
+        val messages = offlineQueue.drainAll()
+        if (messages.isEmpty()) return
+
+        Log.i(TAG, "[WS:OfflineQueue] Flushing ${messages.size} offline message(s)")
+        val replayFlushId =
+            "flush-${runtimeSessionId ?: "no_runtime"}-" +
+                "${System.currentTimeMillis()}-${replayFlushIdCounter.incrementAndGet()}"
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "offline_replay_flush_started",
+                "replay_flush_id" to replayFlushId,
+                "replay_flush_total" to messages.size,
+                "replay_session_tag" to (durableSessionId ?: ""),
+                "replay_session_epoch" to (sessionContinuityEpoch ?: -1)
+            )
+        )
+        var sent = 0
+        var lost = 0
+        for ((index, msg) in messages.withIndex()) {
+            val replayJson = annotateReplayEnvelopeForFlush(
+                message = msg,
+                replayFlushId = replayFlushId,
+                replayFlushIndex = index + 1,
+                replayFlushTotal = messages.size
+            )
+            // Route through sendJson() so that the cross-device gate is uniformly enforced
+            // during replay — same constraints as every other outbound message.
+            val ok = sendJson(replayJson)
+            if (!ok) {
+                lost++
+                Log.w(
+                    TAG,
+                    "[WS:OfflineQueue] Flush failed for type=${msg.type}; message re-queued if queueable " +
+                        "(total failures: $lost)"
+                )
+            } else {
+                sent++
+                Log.d(TAG, "[WS:OfflineQueue] Flushed type=${msg.type}")
+            }
+            GalaxyLogger.log(
+                TAG,
+                mapOf(
+                    "event" to "offline_replay_flush_item",
+                    "replay_flush_id" to replayFlushId,
+                    "replay_flush_index" to (index + 1),
+                    "replay_flush_total" to messages.size,
+                    "replay_queue_sequence" to msg.queueSequence,
+                    "replay_type" to msg.type,
+                    "replay_forwarded" to ok,
+                    "replay_session_tag" to (msg.sessionTag ?: ""),
+                    "replay_session_epoch" to (msg.sessionEpoch ?: -1),
+                    "replay_reason" to if (ok) "forwarded" else "send_failed_requeued"
+                )
+            )
+        }
+        if (lost > 0) {
+            Log.w(TAG, "[WS:OfflineQueue] Flush complete: sent=$sent failed=$lost")
+        } else {
+            Log.i(TAG, "[WS:OfflineQueue] Flush complete: all $sent message(s) sent")
+        }
+    }
+    
+    /**
+     * 是否已连接
+     */
+    override fun isConnected(): Boolean = isConnected
+
+    /**
+     * Called when network connectivity is restored (e.g. from a
+     * [android.net.ConnectivityManager] broadcast or NetworkCallback).
+     *
+     * Cancels any pending backoff delay and triggers an immediate reconnect attempt
+     * so that the device re-registers as soon as the network comes up.
+     *
+     * No-op if already connected or if [crossDeviceEnabled] is false.
+     */
+    fun notifyNetworkAvailable() {
+        if (isConnected || !crossDeviceEnabled) return
+        Log.i(TAG, "[WS:RETRY] Network available — resetting backoff and reconnecting immediately")
+        reconnectAttempts = 0
+        _reconnectAttemptCount.value = 0
+        reconnectJob?.cancel()
+        shouldReconnect = true
+        scope.launch { connect() }
+    }
+
+    /**
+     * 获取设备唯一标识
+     */
+    private fun getDeviceId(): String =
+        sanitizeDeviceId(
+            configuredDeviceId.takeIf { it.isNotBlank() }
+                ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        )
+
+    private fun sanitizeDeviceId(rawDeviceId: String): String =
+        rawDeviceId
+            .trim()
+            .replace("\\s+".toRegex(), "_")
+            .replace("[^A-Za-z0-9._-]".toRegex(), "_")
+
+    /**
+     * Privacy-safe device ID for logging — masks the middle portion so that
+     * only the first 4 and last 4 characters are visible.
+     *
+     * SECURITY: Never log full deviceId in production.  Always use this helper.
+     */
+    private fun maskDeviceId(deviceId: String): String =
+        if (deviceId.length > 12) {
+            "${deviceId.take(4)}...${deviceId.takeLast(4)}"
+        } else {
+            "****"
+        }
+
+    private fun buildIdempotencyKey(taskId: String, type: String): String {
+        val session = runtimeSessionId ?: "no_runtime_session"
+        val nonce = java.util.UUID.randomUUID().toString()
+        return "$session:$type:$taskId:$nonce"
+    }
+
+    // ── PR-33 test-support simulation API ────────────────────────────────────
+
+    /**
+     * Installs a test [WebSocket] transport.
+     *
+     * Used by JVM tests to capture outbound reconnect-handshake/replay messages without
+     * requiring a live server.
+     */
+    internal fun installWebSocketForTest(testWebSocket: WebSocket?) {
+        webSocket = testWebSocket
+    }
+
+    /**
+     * PR-84 — For testing only: simulates the canonical reconnect-open sequence.
+     *
+     * Mirrors the production [onOpen] recovery steps needed for runtime-proof tests:
+     *  1) marks socket connected and resets reconnect counters
+     *  2) notifies listeners (`onConnected`) so [RuntimeController] restores attachment context
+     *  3) sends handshake / mesh rejoin envelopes
+     *  4) flushes offline replay queue
+     *
+     * Heartbeat scheduling is intentionally omitted to keep JVM tests deterministic.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateCanonicalReconnectOpenForTest() {
+        isConnected = true
+        reconnectAttempts = 0
+        _reconnectAttemptCount.value = 0
+        listeners.forEach { it.onConnected() }
+        sendHandshake()
+        sendMeshRejoinIfNeeded()
+        flushOfflineQueue()
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onConnected] on all registered listeners
+     * without establishing a real WebSocket connection.
+     *
+     * Allows unit tests to drive [com.ufo.galaxy.runtime.RuntimeController]'s
+     * `permanentWsListener` reconnect transition deterministically — specifically the
+     * `RECOVERING → RECOVERED` path — without requiring a live WS server.
+     *
+     * This method also sets [isConnected] to `true` so that subsequent
+     * [sendJson] calls behave as if the socket is live.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateConnected() {
+        isConnected = true
+        listeners.forEach { it.onConnected() }
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onDisconnected] on all registered listeners
+     * without a real WebSocket close event.
+     *
+     * Allows unit tests to drive the `IDLE → RECOVERING` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController.permanentWsListener] without a live server.
+     *
+     * This method also sets [isConnected] to `false`.
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateDisconnected() {
+        isConnected = false
+        listeners.forEach { it.onDisconnected() }
+    }
+
+    /**
+     * PR-BIDIRECTIONAL: Send a task with target device specified.
+     * Used when user wants to control a specific device (e.g., "control PC").
+     *
+     * Builds a `task_submit` envelope that includes `source_device` and
+     * `target_device` fields so the V2 center can route the task to the
+     * intended destination rather than executing it locally.
+     */
+    suspend fun sendTaskWithTarget(
+        task: String,
+        targetDevice: String = "v2_center",
+        sourceDevice: String = "android"
+    ) {
+        val message = JSONObject().apply {
+            put("type", "task_submit")
+            put("task", task)
+            put("source_device", sourceDevice)
+            put("target_device", targetDevice)
+            put("timestamp", System.currentTimeMillis())
+        }
+        sendJson(message.toString())
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onError] on all registered listeners.
+     *
+     * Allows unit tests to drive the `RECOVERING → FAILED` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController.permanentWsListener] without a live server.
+     *
+     * This method also triggers the automatic reconnect loop so the full error → retry
+     * → recovery flow can be exercised in isolation.
+     */
+    @Suppress("unused")
+    fun testFireErrorOnListeners(errorMessage: String = "test_error") {
+        listeners.forEach { it.onError(errorMessage) }
+    }
+
+    // -----------------------------------------------------------------
+    // DUAL-FORMAT: MessagePack helpers
+    // -----------------------------------------------------------------
+
+    companion object {
+        private const val TAG_COMPANION = "GalaxyWebSocket"
+
+        /**
+         * Unpack a MessagePack byte array into a JSON string.
+         * Returns null if unpacking fails (falls back to JSON on caller side).
+         */
+        fun unpackMsgpack(data: ByteArray): String? {
+            return try {
+                val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
+                val value = unpacker.unpackValue()
+                unpacker.close()
+                value.toString()
+            } catch (e: Exception) {
+                Log.w(TAG_COMPANION, "Msgpack unpack failed: ${e.message}")
+                null
+            }
+        }
+
+        /**
+         * Shared Gson instance for MessagePack packing.
+         * Gson is thread-safe so a single instance can be reused across all calls.
+         */
+        private val gsonShared: Gson by lazy { Gson() }
+
+        /**
+         * Pack a JSON string into a MessagePack byte array.
+         * Returns null if packing fails (falls back to JSON on caller side).
+         *
+         * **P1 optimisation**: reuses [gsonShared] instead of creating a new Gson()
+         * instance on every invocation, reducing GC pressure on the hot send path.
+         */
+        fun packMsgpack(json: String): ByteArray? {
+            return try {
+                val element = gsonShared.fromJson(json, com.google.gson.JsonElement::class.java)
+                val packer = org.msgpack.core.MessagePack.newDefaultBufferPacker()
+                packGsonElement(packer, element)
+                packer.toByteArray()
+            } catch (e: Exception) {
+                Log.w(TAG_COMPANION, "Msgpack pack failed: ${e.message}")
+                null
+            }
+        }
+
+        private fun packGsonElement(packer: org.msgpack.core.MessagePacker, element: com.google.gson.JsonElement) {
+            when {
+                element.isJsonObject -> {
+                    val obj = element.asJsonObject
+                    packer.packMapHeader(obj.size())
+                    obj.entrySet().forEach { (key, value) ->
+                        packer.packString(key)
+                        packGsonElement(packer, value)
+                    }
+                }
+                element.isJsonArray -> {
+                    val arr = element.asJsonArray
+                    packer.packArrayHeader(arr.size())
+                    arr.forEach { packGsonElement(packer, it) }
+                }
+                element.isJsonPrimitive -> {
+                    val p = element.asJsonPrimitive
+                    when {
+                        p.isString -> packer.packString(p.asString)
+                        p.isBoolean -> packer.packBoolean(p.asBoolean)
+                        p.isNumber -> {
+                            val num = p.asNumber
+                            if (num.toDouble() == num.toLong().toDouble()) {
+                                packer.packLong(num.toLong())
+                            } else {
+                                packer.packDouble(num.toDouble())
+                            }
+                        }
+                        else -> packer.packString(p.asString)
+                    }
+                }
+                element.isJsonNull -> packer.packNil()
+            }
+        }
+    }
+}

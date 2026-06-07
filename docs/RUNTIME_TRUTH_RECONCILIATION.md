@@ -1,0 +1,436 @@
+# Android Runtime Truth and V2 Reconciliation
+
+> **PR-51 / PR-52**
+> Introduced in: `ufo-galaxy-android`
+> Audience: V2 orchestration engineers, Android platform engineers, distributed runtime reviewers
+
+---
+
+## Overview
+
+This document provides the canonical reference for:
+
+1. **What Android reports as local runtime truth** — the specific state fields Android owns and publishes
+2. **How Android participant/session/runtime state maps to V2 expectations** — field-by-field alignment
+3. **Cancel/status/failure/result protocol semantics** — structured signals and reconciliation protocol
+4. **Android local truth vs V2 canonical truth** — explicit responsibility boundaries
+
+---
+
+## Responsibility Boundaries
+
+### Android owns locally
+
+Android is the **participant-side** runtime owner. It exclusively owns the following truths:
+
+| Truth Domain | Android-owned fields | Surface |
+|---|---|---|
+| **Participant identity** | `participantId`, `deviceId`, `hostId`, `deviceRole`, `formationRole` | `RuntimeHostDescriptor`, `CanonicalParticipantModel` |
+| **Participation state** | `participationState` (ACTIVE / STANDBY / DRAINING / INACTIVE) | `RuntimeHostDescriptor.HostParticipationState` |
+| **Session attachment** | `sessionId`, `sessionState`, `delegatedExecutionCount`, `isReuseValid` | `AttachedRuntimeSession`, `AttachedRuntimeHostSessionSnapshot` |
+| **Runtime posture** | `source_runtime_posture` (JOIN_RUNTIME / CONTROL_ONLY) | `SourceRuntimePosture` |
+| **Health state** | `healthState` (HEALTHY / DEGRADED / RECOVERING / FAILED / UNKNOWN) | `ParticipantHealthState` |
+| **Readiness** | `readinessState` (READY / READY_WITH_FALLBACK / NOT_READY / UNKNOWN) | `ParticipantReadinessState` |
+| **Active task status** | `activeTaskId`, `activeTaskStatus` (RUNNING / PENDING / CANCELLING / FAILING) | `AndroidParticipantRuntimeTruth.ActiveTaskStatus` |
+| **Task outcomes** | cancel, status, failure, result signals | `AndroidSessionContribution`, `ReconciliationSignal` |
+| **Runtime lifecycle transitions** | connect, reconnect, disconnect, degraded, health changed | `V2MultiDeviceLifecycleEvent` |
+
+### V2 owns canonically
+
+V2 is the **center-side orchestration authority**. It owns:
+
+- Global session truth (which participants are in a session, which tasks are assigned to whom)
+- Task assignment and dispatch decisions
+- Barrier / merge / completion tracking across multiple participants
+- Canonical reconciliation of Android-reported truth against its own participant registry
+- Cross-participant coordination (formation, role rebalancing, fallback/recovery decisions)
+
+### Reconciliation flow
+
+```
+Android                                    V2
+  │                                         │
+  │── AndroidParticipantRuntimeTruth ──────►│ (full participant truth snapshot)
+  │                                         │── reconcile against participant registry
+  │                                         │
+  │── ReconciliationSignal.TASK_ACCEPTED ──►│ (task in-progress)
+  │                                         │── mark task active for this participant
+  │                                         │
+  │── ReconciliationSignal.TASK_CANCELLED ─►│ (task stopped by cancel request)
+  │                                         │── close task as cancelled; update canonical
+  │                                         │
+  │── ReconciliationSignal.TASK_FAILED ────►│ (task failed)
+  │                                         │── close task as failed; trigger fallback if needed
+  │                                         │
+  │── ReconciliationSignal.TASK_RESULT ────►│ (task completed successfully)
+  │                                         │── close task as success; update session truth
+  │                                         │
+  │── ReconciliationSignal.PARTICIPANT_STATE►│ (health/readiness state changed)
+  │                                         │── update participant state in canonical registry
+  │                                         │
+  │── V2MultiDeviceLifecycleEvent ─────────►│ (participant health/connectivity events)
+  │                                         │── update device health; trigger mesh session lifecycle
+```
+
+All `ReconciliationSignal` instances are emitted on `RuntimeController.reconciliationSignals`
+(a `SharedFlow<ReconciliationSignal>`).  V2 should collect this flow to receive all structured
+Android→V2 reconciliation signals without polling or inspecting raw runtime state.
+
+**Emission points in `RuntimeController`:**
+
+| Signal Kind | Emission method | Trigger |
+|---|---|---|
+| `TASK_ACCEPTED` | `recordDelegatedTaskAccepted(taskId, correlationId)` | Delegated task accepted by Android |
+| `TASK_STATUS_UPDATE` | `ReconciliationSignal.taskStatusUpdate(...)` (caller-built) | Mid-execution status report |
+| `TASK_RESULT` | `publishTaskResult(taskId, correlationId)` | Task completed successfully |
+| `TASK_CANCELLED` | `publishTaskCancelled(taskId, correlationId)` or `notifyTakeoverFailed(..., CANCELLED)` | Task stopped by cancel |
+| `TASK_FAILED` | `notifyTakeoverFailed(..., FAILED/TIMEOUT/DISCONNECT)` | Task ended with failure |
+| `PARTICIPANT_STATE` | `notifyParticipantHealthChanged(health, readiness)` | Health or readiness changed |
+| `RUNTIME_TRUTH_SNAPSHOT` | `publishRuntimeTruthSnapshot(health, readiness, ...)` | Full reconciliation snapshot requested |
+
+---
+
+## Structured Android Runtime State Report
+
+### `AndroidParticipantRuntimeTruth`
+
+The canonical consolidated snapshot for V2 reconciliation. Published via
+`ReconciliationSignal.RUNTIME_TRUTH_SNAPSHOT` and available as a point-in-time
+map via `toMap()`.
+
+| Field | Wire key | Type | Description |
+|---|---|---|---|
+| `participantId` | `participant_id` | String | Stable `deviceId:hostId` participant identity |
+| `deviceId` | `device_id` | String | Hardware device identifier |
+| `hostId` | `host_id` | String | Per-process runtime host instance UUID |
+| `deviceRole` | `device_role` | String | Logical device role ("phone", "tablet") |
+| `participationState` | `participation_state` | String | ACTIVE / STANDBY / DRAINING / INACTIVE |
+| `coordinationRole` | `coordination_role` | String | "coordinator" or "participant" |
+| `sourceRuntimePosture` | `source_runtime_posture` | String | "join_runtime" or "control_only" |
+| `sessionId` | `session_id` | String? | Current attached session UUID; absent if not attached |
+| `sessionState` | `session_state` | String? | "attached" / "detaching" / "detached"; absent if no session |
+| `delegatedExecutionCount` | `delegated_execution_count` | Int | Tasks accepted under current session |
+| `healthState` | `health_state` | String | "healthy" / "degraded" / "recovering" / "failed" / "unknown" |
+| `readinessState` | `readiness_state` | String | "ready" / "ready_with_fallback" / "not_ready" / "unknown" |
+| `activeTaskId` | `active_task_id` | String? | In-flight task ID; absent if idle |
+| `activeTaskStatus` | `active_task_status` | String? | "running" / "pending" / "cancelling" / "failing"; absent if idle |
+| `reportedAtMs` | `reported_at_ms` | Long | Epoch-ms snapshot creation timestamp |
+| `reconciliationEpoch` | `reconciliation_epoch` | Int | Monotonically increasing epoch for staleness detection |
+| `isFullyReconcilable` | `is_fully_reconcilable` | Boolean | Pre-computed reconcilability flag |
+
+#### `isFullyReconcilable` semantics
+
+A snapshot is **fully reconcilable** when:
+- `participantId` is non-blank
+- `participationState` is not INACTIVE
+- `healthState` is not UNKNOWN
+- `readinessState` is not UNKNOWN
+
+V2 should accept non-reconcilable snapshots as **partial truth** and wait for a subsequent
+fully-reconcilable snapshot or a `V2MultiDeviceLifecycleEvent` to complete the picture.
+
+---
+
+## Cancel / Status / Failure / Result Protocol
+
+### `ReconciliationSignal`
+
+Structured wrapper for all Android→V2 signals requiring canonical reconciliation.
+
+#### Signal taxonomy
+
+| `Kind` | Wire value | Phase | V2 action |
+|---|---|---|---|
+| `TASK_ACCEPTED` | `task_accepted` | Pre-execution | Mark task as in-progress under this participant |
+| `TASK_STATUS_UPDATE` | `task_status_update` | In-progress | Update progress tracking; do not close task |
+| `TASK_RESULT` | `task_result` | Terminal | Close task as success; update session truth |
+| `TASK_CANCELLED` | `task_cancelled` | Terminal | Close task as cancelled; release execution capacity |
+| `TASK_FAILED` | `task_failed` | Terminal | Close task as failed; trigger fallback if policy requires |
+| `PARTICIPANT_STATE` | `participant_state` | Any time | Update canonical participant view immediately |
+| `RUNTIME_TRUTH_SNAPSHOT` | `runtime_truth_snapshot` | Any time | Full reconciliation pass against `AndroidParticipantRuntimeTruth` |
+
+#### `TASK_CANCELLED` semantics
+
+`TASK_CANCELLED` is emitted **as soon as Android determines a task will be cancelled**,
+before the full termination sequence completes. V2 must treat this signal as authoritative:
+the task is being stopped. A subsequent `AndroidSessionContribution.Kind.CANCELLATION` closes
+the terminal session-truth record.
+
+**V2 must not re-dispatch a cancelled task to Android until it receives confirmation that
+the cancel is complete** (i.e. the terminal `AndroidSessionContribution`).
+
+#### `TASK_FAILED` semantics
+
+`TASK_FAILED` is emitted as soon as Android encounters a failure condition, before execution
+fully terminates. V2 should begin fallback/retry evaluation on receipt of this signal rather
+than waiting for the terminal contribution.
+
+The signal's `payload["error_detail"]` carries a human-readable error description when available.
+
+#### `TASK_RESULT` vs `AndroidSessionContribution.Kind.FINAL_COMPLETION`
+
+`ReconciliationSignal.TASK_RESULT` is the **pre-terminal** signal indicating Android has
+completed execution successfully. `AndroidSessionContribution.Kind.FINAL_COMPLETION` is the
+**terminal** session-truth contribution that closes the V2 session-truth record.
+
+V2 may process `TASK_RESULT` for early pipeline advancement while awaiting the
+`FINAL_COMPLETION` contribution for canonical session-truth closure.
+
+---
+
+## V2 Participant State Alignment
+
+### Participant state → V2 hook mapping
+
+| Android state | V2 expectation |
+|---|---|
+| `participationState = ACTIVE` + `healthState = HEALTHY` | Participant eligible for task dispatch |
+| `participationState = STANDBY` | Participant temporarily not accepting tasks; no new dispatch |
+| `participationState = DRAINING` | In-flight tasks may complete; no new dispatch |
+| `participationState = INACTIVE` | Participant absent from formation; treat as unavailable |
+| `healthState = DEGRADED` | Dispatch at reduced priority; prefer other participants |
+| `healthState = RECOVERING` | Do not dispatch new tasks; await HEALTHY |
+| `healthState = FAILED` | Mark participant unavailable; trigger formation rebalance |
+| `sessionState = ATTACHED` + `participationState = ACTIVE` | Valid delegated dispatch target |
+| `sessionState = DETACHED` | Session terminated; do not dispatch until new session announced |
+| `sourceRuntimePosture = JOIN_RUNTIME` | Android is a runtime executor for the current task |
+| `sourceRuntimePosture = CONTROL_ONLY` | Android is initiator/controller only; no task allocation |
+
+### Formation role alignment
+
+| Android `FormationRole` | V2 interpretation |
+|---|---|
+| `PRIMARY` | Lead execution surface; may receive primary task assignments |
+| `SECONDARY` | Auxiliary surface; receives overflow or parallel subtasks from PRIMARY |
+| `SATELLITE` | Lightweight participant; receives task fragments but not full tasks |
+
+---
+
+## Protocol Safety Rules
+
+1. **Android never re-orders cancel and result signals.** A `TASK_CANCELLED` signal for a given
+   `taskId` means the task is being stopped. No `TASK_RESULT` will follow for that `taskId`.
+
+2. **Signal `signalId` fields are stable and unique.** V2 may use `signalId` for deduplication
+   when a signal is retried over a lossy transport.
+
+3. **`reconciliationEpoch` is monotonically increasing.** V2 should discard a snapshot with a
+   lower epoch than the most recently received snapshot for the same `participantId`.
+
+4. **Android does not modify V2 canonical state directly.** All state changes on V2's side
+   are V2's decision based on Android's signals. Android owns its local truth; V2 owns the
+   canonical orchestration truth.
+
+5. **`RUNTIME_TRUTH_SNAPSHOT` signals are authoritative over V2's cached state.** When V2
+   receives a `RUNTIME_TRUTH_SNAPSHOT`, it must resolve any conflicts in favour of the snapshot.
+
+---
+
+## Related Surfaces
+
+| Surface | Purpose | PR |
+|---|---|---|
+| `AndroidParticipantRuntimeTruth` | Consolidated participant truth snapshot | PR-51 |
+| `ReconciliationSignal` | Structured Android→V2 signal wrapper | PR-51 |
+| `ActiveTaskStatus` | In-flight task status enum | PR-51 |
+| `RuntimeController.reconciliationSignals` | Observable Android→V2 reconciliation signal stream | PR-52 |
+| `RuntimeController.publishRuntimeTruthSnapshot` | Emits full participant truth snapshot to V2 | PR-52 |
+| `RuntimeController.recordDelegatedTaskAccepted` | Session counter + TASK_ACCEPTED signal emission | PR-52 |
+| `RuntimeController.publishTaskResult` | TASK_RESULT signal emission | PR-52 |
+| `RuntimeController.publishTaskCancelled` | TASK_CANCELLED signal emission | PR-52 |
+| `AndroidSessionContribution` | Terminal task result/cancellation envelope | PR-4 |
+| `StagedMeshParticipationResult` | Staged-mesh target execution result | PR-32 |
+| `CanonicalParticipantModel` | Participant read-model projection | PR-6 |
+| `AttachedRuntimeHostSessionSnapshot` | Session truth snapshot | PR-19 |
+| `V2MultiDeviceLifecycleEvent` | V2-consumable device lifecycle events | PR-43 / PR-44 |
+| `RuntimeTruthPrecedenceRules` | Three-tier truth precedence model (internal) | PR-39 |
+| `AndroidContractFinalizer` | Contract responsibility boundaries | PR-41 |
+| `RuntimeInvariantEnforcer` | Internal invariant enforcement | PR-42 |
+| `AndroidAppLifecycleTransition` | Named lifecycle transitions with runtime implications | PR-60 |
+| `HybridParticipantCapability` | Structured hybrid/distributed capability status | PR-60 |
+| `AndroidLifecycleRecoveryContract` | Recovery boundary: process recreation, transient disconnect, hybrid limitations | PR-60 |
+| `ParticipantRuntimeSemanticsBoundary` | Single reviewer-facing boundary: truth ownership, execution semantics, first-class participant declaration | PR-61 |
+| `ParticipantLiveExecutionSurface` | Live execution wiring: active task state tracking, publishTaskStatusUpdate, auto-TASK_FAILED on disconnect, auto-RUNTIME_TRUTH_SNAPSHOT on reconnect | PR-62 |
+| `ParticipantProgressFeedbackSurface` | Richer progress/checkpoint/subtask feedback surfaces beyond ack/result/error | PR-63 |
+| `ParticipantProgressCheckpoint` | Named, structured execution-stage marker (planning→grounding→step→finalizing) | PR-63 |
+| `SubtaskProgressReport` | Typed subtask-level progress report (index, label, PENDING/EXECUTING/COMPLETE/FAILED/SKIPPED) | PR-63 |
+
+---
+
+## Reviewer Guide (PR-61 Acceptance Criteria)
+
+A reviewer can determine the following from the structures in this document:
+
+### 1. What Android considers local participant/runtime truth
+
+**See**: `ParticipantRuntimeSemanticsBoundary.ANDROID_TRUTH_DOMAIN`
+
+Android exclusively owns **10 truth domains**:
+
+| Domain | Key fields | Canonical surface |
+|---|---|---|
+| Participant identity | `participantId`, `deviceId`, `hostId`, `deviceRole`, `formationRole` | `RuntimeHostDescriptor` |
+| Participation state | `participationState` | `HostParticipationState` |
+| Session attachment | `sessionId`, `sessionState`, `delegatedExecutionCount` | `AttachedRuntimeSession` |
+| Runtime posture | `sourceRuntimePosture` | `SourceRuntimePosture` |
+| Health state | `healthState` | `ParticipantHealthState` |
+| Readiness state | `readinessState` | `ParticipantReadinessState` |
+| Active task status | `activeTaskId`, `activeTaskStatus` | `ActiveTaskStatus` |
+| Task outcomes | cancel, status, failure, result | `ReconciliationSignal` |
+| Lifecycle transitions | app lifecycle events | `AndroidAppLifecycleTransition` |
+| Hybrid capability | capability support level | `HybridParticipantCapability` |
+
+V2 must treat all fields in these domains as Android-reported local truth.
+
+### 2. How Android represents cancel/status/failure/result semantics
+
+**See**: `ParticipantRuntimeSemanticsBoundary.EXECUTION_OUTCOMES`
+
+| Signal | Phase | Terminal? | Android emits when… |
+|---|---|---|---|
+| `TASK_ACCEPTED` | Pre-execution | No | Task accepted; execution started |
+| `TASK_STATUS_UPDATE` | In-progress | No | Intermediate progress update |
+| `TASK_RESULT` | Terminal | **Yes** | Task completed successfully |
+| `TASK_CANCELLED` | Terminal | **Yes** | Cancel determined (before termination completes) |
+| `TASK_FAILED` | Terminal | **Yes** | Failure detected (before termination completes) |
+| `PARTICIPANT_STATE` | Any time | No | Health/readiness/posture changed |
+| `RUNTIME_TRUTH_SNAPSHOT` | Any time | No | Full reconciliation snapshot requested |
+
+Key protocol invariants (`ParticipantRuntimeSemanticsBoundary.PROTOCOL_SAFETY_RULES`):
+- `TASK_CANCELLED` for a `taskId` means **no** `TASK_RESULT` will follow for that `taskId`.
+- `signalId` values are unique for deduplication.
+- `reconciliationEpoch` is monotonically increasing per participant.
+- `RUNTIME_TRUTH_SNAPSHOT` resolves conflicts **in Android's favour**.
+- Android owns local truth; V2 owns canonical orchestration truth.
+
+### 3. Whether Android behaves as a first-class participant runtime
+
+**See**: `ParticipantRuntimeSemanticsBoundary.FIRST_CLASS_PARTICIPANT_DECLARATION`
+
+Android is a first-class participant runtime because it:
+
+1. **Runs a complete local AI execution loop** — MobileVLM planner + SeeClick grounding + AccessibilityService (screenshot → plan → click → repeat)
+2. **Owns local truth exclusively** — 10 truth domains; V2 must not override without a signal
+3. **Has lifecycle authority** — `AndroidAppLifecycleTransition` decisions are Android's
+4. **Emits pre-terminal cancel signals** — `TASK_CANCELLED` before termination completes
+5. **Emits pre-terminal failure signals** — `TASK_FAILED` before termination completes
+6. **Can elevate posture** — `JOIN_RUNTIME` makes Android a full runtime host peer
+7. **Self-assesses health** — reports `ParticipantHealthState` independently
+8. **Self-assesses readiness** — reports `ParticipantReadinessState` independently
+9. **Participates in formation** — COORDINATOR or PARTICIPANT role
+
+Android is **not** a second orchestration authority:
+- Does not assign tasks or decide dispatch
+- Does not unilaterally continue or terminate sessions
+- Does not override V2 canonical truth
+- Does not participate in barrier coordination (V2-side authority)
+- Does not make formation rebalance decisions
+
+---
+
+## What is Fully Wired vs Contract-First
+
+### Fully wired and evidence-backed
+
+- ✅ Android participant identity (`participantId = deviceId:hostId`) — stable across PRs
+- ✅ Session attachment lifecycle (ATTACHED → DETACHING → DETACHED) — tested in `RuntimeControllerAttachedSessionTest`
+- ✅ Cancel signal propagation via `AndroidSessionContribution.Kind.CANCELLATION` — tested in `Pr32StagedMeshTargetExecutionTest`
+- ✅ Failure signal via `AndroidSessionContribution.Kind.FAILURE` — tested across multiple PR test suites
+- ✅ Staged-mesh execution target and result (PR-32) — full test coverage in `Pr32StagedMeshTargetExecutionTest`
+- ✅ V2 lifecycle event stream (`RuntimeController.v2LifecycleEvents`) — tested in `Pr43V2MultiDeviceLifecycleIntegrationTest`
+- ✅ Mesh session lifecycle hints (PR-44) — tested in `Pr44MeshSessionLifecycleMappingTest`
+- ✅ Consolidated participant truth snapshot (`AndroidParticipantRuntimeTruth`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
+- ✅ Structured reconciliation signal (`ReconciliationSignal`) — tested in `Pr51AndroidParticipantRuntimeTruthTest`
+- ✅ `ReconciliationSignal.taskStatusUpdate` factory helper — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `ReconciliationSignal.participantStateSignal` factory helper — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.reconciliationSignals` observable flow — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.recordDelegatedTaskAccepted` TASK_ACCEPTED emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.publishTaskResult` TASK_RESULT emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.publishTaskCancelled` TASK_CANCELLED emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `RuntimeController.publishRuntimeTruthSnapshot` RUNTIME_TRUTH_SNAPSHOT emission — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `notifyTakeoverFailed` TASK_FAILED/TASK_CANCELLED reconciliation signal — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `notifyParticipantHealthChanged` PARTICIPANT_STATE reconciliation signal — tested in `Pr52ReconciliationSignalEmissionTest`
+- ✅ `AndroidAppLifecycleTransition` — named lifecycle model with runtime implications — tested in `Pr60AndroidLifecycleHardeningTest`
+- ✅ `HybridParticipantCapability` — structured capability status registry — tested in `Pr60AndroidLifecycleHardeningTest`
+- ✅ `AndroidLifecycleRecoveryContract` — process recreation and disconnect recovery boundaries — tested in `Pr60AndroidLifecycleHardeningTest`
+- ✅ `ParticipantRuntimeSemanticsBoundary` — reviewer-facing boundary for all 3 acceptance criteria — tested in `Pr61ParticipantRuntimeTruthBoundaryTest`
+- ✅ `ParticipantLiveExecutionSurface` — live execution wiring: active task state, TASK_STATUS_UPDATE, auto-TASK_FAILED, auto-RUNTIME_TRUTH_SNAPSHOT — tested in `Pr62ParticipantLiveExecutionSurfaceTest`
+- ✅ `ParticipantProgressFeedbackSurface` — richer progress/checkpoint/subtask feedback surfaces — tested in `Pr8ParticipantProgressFeedbackTest`
+- ✅ `ParticipantProgressCheckpoint` — named, structured execution-stage markers — tested in `Pr8ParticipantProgressFeedbackTest`
+- ✅ `SubtaskProgressReport` — typed subtask progress with status, index, label — tested in `Pr8ParticipantProgressFeedbackTest`
+- ✅ `ReconciliationSignal` progress payload key constants — tested in `Pr8ParticipantProgressFeedbackTest`
+
+### Contract-first / partially wired
+
+- ⚠️ `RELAY` / `FORWARD` / `REPLY` message types — minimal-compat stubs (logged, no routing logic)
+- ⚠️ `HYBRID_EXECUTE` — payload parsed; degrade reply sent; full hybrid executor not implemented
+- ⚠️ `RAG_QUERY` — logged; empty result returned; full RAG pipeline not implemented
+- ⚠️ `CODE_EXECUTE` — logged; error result returned; sandbox not implemented
+
+### What Android does NOT own
+
+- ❌ Global session truth (which participants are assigned to which tasks)
+- ❌ Barrier / merge / completion tracking (V2-side concern)
+- ❌ Formation rebalance decisions (V2 decides; Android reports health/readiness)
+- ❌ Task retry/fallback policy (V2 policy; Android only signals failure)
+
+---
+
+## Reviewer Guide (PR-63 Acceptance Criteria)
+
+A reviewer can determine the following from `ParticipantProgressFeedbackSurface`:
+
+### 1. Which richer Android runtime/progress states are now emitted outward
+
+**See**: `ParticipantProgressFeedbackSurface.PROGRESS_FEEDBACK_SURFACES`
+
+| Surface | What it exposes |
+|---|---|
+| `ParticipantProgressCheckpoint` | Named execution-stage markers (8 canonical stages) via `TASK_STATUS_UPDATE` payload |
+| `SubtaskProgressReport` | Typed subtask progress: index, label, status (PENDING/EXECUTING/COMPLETE/FAILED/SKIPPED) |
+| Structured `TASK_STATUS_UPDATE` payload keys | `KEY_CHECKPOINT_ID`, `KEY_SUBTASK_INDEX`, `KEY_SUBTASK_STATUS`, `KEY_SUBTASK_LABEL` etc. |
+| `KNOWN_CHECKPOINT_IDS` registry | Stable, versioned set of all canonical Android execution stage identifiers |
+| `SubtaskStatus.ALL_WIRE_VALUES` | Stable set of all subtask status wire values for V2-side validation |
+
+### 2. How Android local execution is represented beyond ack/result/error
+
+**Before PR-63**: TASK_ACCEPTED → (optional TASK_STATUS_UPDATE with free-form string) → terminal
+
+**After PR-63**: TASK_ACCEPTED → structured TASK_STATUS_UPDATE signals at each stage boundary:
+
+| Stage checkpoint | Wire value | Meaning |
+|---|---|---|
+| `planning_started` | Emitted at task acceptance | Planning phase begins |
+| `planning_complete` | Plan produced | Grounding/action phase begins |
+| `grounding_started` | For each step | UI coordinate mapping begins |
+| `grounding_complete` | Grounding done | Action dispatch begins |
+| `step_executing` | Step N of M | Step execution in progress |
+| `step_complete` | Step N done | Next step or finalization |
+| `replanning` | Plan revision needed | Re-planning in progress |
+| `finalizing` | All steps done | Result assembly (terminal follows) |
+
+Each checkpoint carries `checkpoint_id`, `checkpoint_step_index`, optional `checkpoint_total_steps`.
+Each subtask report carries `subtask_index`, `subtask_label`, `subtask_status`, optional `subtask_total`.
+
+### 3. Whether Android participant runtime activity is now more reviewable from outside
+
+**See**: `ParticipantProgressFeedbackSurface.OBSERVABILITY_SURFACES`
+
+- `KNOWN_CHECKPOINT_IDS` — reviewers can enumerate all canonical execution stages at compile time
+- `SubtaskStatus.ALL_WIRE_VALUES` — all subtask status wire values are named constants
+- `ReconciliationSignal.KEY_CHECKPOINT_ID` etc. — all payload keys are publicly named constants
+- `toPayloadMap()` — deterministic, immutable wire output; directly assertable in unit tests
+
+### 4. Whether the added feedback remains bounded under participant-local authority
+
+**See**: `ParticipantProgressFeedbackSurface.AUTHORITY_BOUNDARY_DECLARATIONS`
+
+| Android owns | V2 retains authority over |
+|---|---|
+| Checkpoint identity and ordering | Task lifecycle outcomes (retry, fallback, failure) |
+| Subtask labeling and plan breakdown | Dispatch, assignment, rebalance |
+| Progress signal frequency and count | Whether to act on subtask-level state |
+| When to emit `CHECKPOINT_REPLANNING` | Whether to intervene on replanning |
+
+Android does **not** make orchestration decisions based on its own subtask progress.
+V2 does **not** require a specific number or order of progress signals before accepting terminal signals.

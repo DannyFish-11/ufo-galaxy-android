@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Expose the app's private files directory so galaxy_observability.log can be shared. -->
+    <files-path name="galaxy_logs" path="." />
+</paths>

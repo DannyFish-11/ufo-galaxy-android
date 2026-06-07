@@ -1,0 +1,611 @@
+package com.ufo.galaxy.agent
+
+import com.ufo.galaxy.data.InMemoryAppSettings
+import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.observability.MetricsRecorder
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.*
+import org.junit.Test
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Unit tests for [AgentRuntimeBridge] covering:
+ *  - Happy path: cross-device ON, eligible task → handoff_sent.
+ *  - OFF path regression: cross-device OFF → local execution, no bridge message sent.
+ *  - exec_mode=local guard: bridge is skipped even when cross-device is ON.
+ *  - Idempotency: repeated calls with the same trace_id return the cached result.
+ *  - Timeout / fallback: send always fails → all retries exhausted → fallback result.
+ *  - Retry telemetry: metrics counters updated correctly for success and fallback.
+ *  - buildBridgeJson: JSON payload contains all required metadata fields.
+ *
+ * All tests run on the JVM without Android framework dependencies.
+ */
+class AgentRuntimeBridgeTest {
+
+    // ── Fake GatewayClient implementations ───────────────────────────────────
+
+    /** Always reports connected; [sendJson] always succeeds. */
+    private class AlwaysConnectedClient : GatewayClient {
+        val sentMessages = mutableListOf<String>()
+        override fun isConnected() = true
+        override fun sendJson(json: String): Boolean {
+            sentMessages.add(json)
+            return true
+        }
+    }
+
+    /** Always reports connected; [sendJson] always fails (simulates send error). */
+    private class AlwaysFailingClient : GatewayClient {
+        val callCount = AtomicInteger(0)
+        override fun isConnected() = true
+        override fun sendJson(json: String): Boolean {
+            callCount.incrementAndGet()
+            return false
+        }
+    }
+
+    /** Always disconnected. */
+    private class DisconnectedClient : GatewayClient {
+        override fun isConnected() = false
+        override fun sendJson(json: String) = false
+    }
+
+    // ── Fake MetricsRecorder ──────────────────────────────────────────────────
+
+    /**
+     * Thin MetricsRecorder that avoids the OkHttpClient dependency (networking).
+     * Uses a no-op AppSettings so no HTTP posts are made.
+     */
+    private fun buildMetrics(): MetricsRecorder =
+        MetricsRecorder(InMemoryAppSettings())
+
+    // ── Builder helpers ───────────────────────────────────────────────────────
+
+    private fun buildBridge(
+        client: GatewayClient = AlwaysConnectedClient(),
+        crossDeviceEnabled: Boolean = true,
+        metrics: MetricsRecorder = buildMetrics()
+    ): AgentRuntimeBridge {
+        val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
+        return AgentRuntimeBridge(
+            gatewayClient = client,
+            settings = settings,
+            metricsRecorder = metrics
+        )
+    }
+
+    private fun buildRequest(
+        execMode: String = AgentRuntimeBridge.EXEC_MODE_REMOTE,
+        traceId: String = UUID.randomUUID().toString()
+    ) = AgentRuntimeBridge.HandoffRequest(
+        traceId = traceId,
+        taskId = "task-${UUID.randomUUID()}",
+        goal = "open WeChat",
+        execMode = execMode,
+        routeMode = AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE,
+        capability = "task_execution"
+    )
+
+    // ── OFF path: cross-device switch OFF ─────────────────────────────────────
+
+    @Test
+    fun `handoff returns isHandoff=false when crossDeviceEnabled is false`() = runBlocking {
+        val bridge = buildBridge(crossDeviceEnabled = false)
+        val result = bridge.handoff(buildRequest())
+        assertFalse("Bridge must not hand off when cross-device is OFF", result.isHandoff)
+        assertEquals(AgentRuntimeBridge.STATUS_LOCAL, result.status)
+    }
+
+    @Test
+    fun `handoff does not send any WS message when cross-device is OFF`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = false)
+        bridge.handoff(buildRequest())
+        assertTrue("No WS messages must be sent when cross-device is OFF", client.sentMessages.isEmpty())
+    }
+
+    @Test
+    fun `handoff returns isHandoff=false for exec_mode=local even when cross-device is ON`() = runBlocking {
+        val bridge = buildBridge(crossDeviceEnabled = true)
+        val result = bridge.handoff(buildRequest(execMode = AgentRuntimeBridge.EXEC_MODE_LOCAL))
+        assertFalse("Bridge must skip EXEC_MODE_LOCAL tasks", result.isHandoff)
+        assertEquals(AgentRuntimeBridge.STATUS_LOCAL, result.status)
+    }
+
+    @Test
+    fun `handoff does not send WS message for exec_mode=local`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = true)
+        bridge.handoff(buildRequest(execMode = AgentRuntimeBridge.EXEC_MODE_LOCAL))
+        assertTrue("No WS messages for exec_mode=local", client.sentMessages.isEmpty())
+    }
+
+    // ── Happy path: cross-device ON, eligible task ────────────────────────────
+
+    @Test
+    fun `handoff returns isHandoff=true when cross-device ON and exec_mode=remote`() = runBlocking {
+        val bridge = buildBridge(crossDeviceEnabled = true)
+        val result = bridge.handoff(buildRequest(execMode = AgentRuntimeBridge.EXEC_MODE_REMOTE))
+        assertTrue("Bridge should hand off EXEC_MODE_REMOTE tasks", result.isHandoff)
+        assertEquals(AgentRuntimeBridge.STATUS_HANDOFF_SENT, result.status)
+    }
+
+    @Test
+    fun `handoff sends WS message when cross-device ON and eligible`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = true)
+        bridge.handoff(buildRequest())
+        assertEquals("Exactly one bridge_handoff message should be sent", 1, client.sentMessages.size)
+    }
+
+    @Test
+    fun `handoff returns isHandoff=true for exec_mode=both`() = runBlocking {
+        val bridge = buildBridge(crossDeviceEnabled = true)
+        val result = bridge.handoff(buildRequest(execMode = AgentRuntimeBridge.EXEC_MODE_BOTH))
+        assertTrue("EXEC_MODE_BOTH should be handed off", result.isHandoff)
+    }
+
+    @Test
+    fun `handoff result carries the correct trace_id and task_id`() = runBlocking {
+        val traceId = "trace-abc-123"
+        val bridge = buildBridge(crossDeviceEnabled = true)
+        val request = buildRequest(traceId = traceId)
+        val result = bridge.handoff(request)
+        assertEquals("trace_id must be preserved in result", traceId, result.traceId)
+        assertEquals("task_id must be preserved in result", request.taskId, result.taskId)
+    }
+
+    // ── Idempotency ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `handoff with same trace_id returns identical cached result`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = true)
+        val request = buildRequest()
+
+        val first = bridge.handoff(request)
+        val second = bridge.handoff(request)
+
+        assertEquals("Cached status must match first result", first.status, second.status)
+        assertEquals("Cached isHandoff must match first result", first.isHandoff, second.isHandoff)
+        // Only one WS message should have been sent (idempotent — no re-send).
+        assertEquals("Bridge message must be sent exactly once (idempotent)", 1, client.sentMessages.size)
+    }
+
+    @Test
+    fun `handoff with different trace_ids sends separate messages`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = true)
+
+        bridge.handoff(buildRequest(traceId = "trace-1"))
+        bridge.handoff(buildRequest(traceId = "trace-2"))
+
+        assertEquals("Two distinct trace_ids should produce two WS messages", 2, client.sentMessages.size)
+    }
+
+    @Test
+    fun `idempotent cached result for OFF path is also stable`() = runBlocking {
+        // Even when cross-device is OFF, the cached result is returned on repeated calls.
+        val bridge = buildBridge(crossDeviceEnabled = false)
+        val request = buildRequest()
+        val first = bridge.handoff(request)
+        val second = bridge.handoff(request)
+        assertEquals(first.status, second.status)
+        assertEquals(first.isHandoff, second.isHandoff)
+    }
+
+    // ── Timeout / fallback ────────────────────────────────────────────────────
+
+    @Test
+    fun `handoff returns isHandoff=false when send always fails (fallback)`() = runBlocking {
+        val client = AlwaysFailingClient()
+        val metrics = buildMetrics()
+        val settings = InMemoryAppSettings(crossDeviceEnabled = true)
+        val bridge = AgentRuntimeBridge(
+            gatewayClient = client,
+            settings = settings,
+            metricsRecorder = metrics
+        )
+
+        val result = bridge.handoff(buildRequest())
+        assertFalse("All retries exhausted → must fall back", result.isHandoff)
+        assertEquals(AgentRuntimeBridge.STATUS_FALLBACK, result.status)
+        assertNotNull("Error must be set on fallback", result.error)
+    }
+
+    @Test
+    fun `handoff fallback increments MetricsRecorder handoffFailures counter`() = runBlocking {
+        val client = AlwaysFailingClient()
+        val metrics = buildMetrics()
+        val settings = InMemoryAppSettings(crossDeviceEnabled = true)
+        val bridge = AgentRuntimeBridge(
+            gatewayClient = client,
+            settings = settings,
+            metricsRecorder = metrics
+        )
+
+        bridge.handoff(buildRequest())
+
+        assertTrue("handoffFailures must be incremented on fallback", metrics.handoffFailures.get() > 0)
+        assertTrue("handoffFallbacks must be incremented on fallback", metrics.handoffFallbacks.get() > 0)
+    }
+
+    @Test
+    fun `handoff success increments MetricsRecorder handoffSuccesses counter`() = runBlocking {
+        val metrics = buildMetrics()
+        val bridge = buildBridge(metrics = metrics, crossDeviceEnabled = true)
+
+        bridge.handoff(buildRequest())
+
+        assertEquals("handoffSuccesses must be 1 after success", 1, metrics.handoffSuccesses.get())
+        assertEquals("handoffFailures must remain 0 after success", 0, metrics.handoffFailures.get())
+        assertEquals("handoffFallbacks must remain 0 after success", 0, metrics.handoffFallbacks.get())
+    }
+
+    @Test
+    fun `handoff OFF path does not touch MetricsRecorder handoff counters`() = runBlocking {
+        val metrics = buildMetrics()
+        val bridge = buildBridge(metrics = metrics, crossDeviceEnabled = false)
+
+        bridge.handoff(buildRequest())
+
+        assertEquals("No handoff success counter change for OFF path", 0, metrics.handoffSuccesses.get())
+        assertEquals("No handoff failure counter change for OFF path", 0, metrics.handoffFailures.get())
+        assertEquals("No handoff fallback counter change for OFF path", 0, metrics.handoffFallbacks.get())
+    }
+
+    // ── buildBridgeJson: JSON payload structure ───────────────────────────────
+
+    @Test
+    fun `buildBridgeJson contains required fields`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-xyz",
+            taskId = "task-abc",
+            goal = "open WeChat",
+            execMode = AgentRuntimeBridge.EXEC_MODE_REMOTE,
+            routeMode = AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE,
+            capability = "task_execution",
+            sessionId = "session-001",
+            context = mapOf("locale" to "zh-CN"),
+            constraints = listOf("no audio")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertEquals("bridge_handoff", obj.getString("type"))
+        assertEquals("trace-xyz", obj.getString("trace_id"))
+        assertEquals("task-abc", obj.getString("task_id"))
+        assertEquals(AgentRuntimeBridge.EXEC_MODE_REMOTE, obj.getString("exec_mode"))
+        assertEquals(AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE, obj.getString("route_mode"))
+        assertEquals("open WeChat", obj.getString("goal"))
+        assertEquals("task_execution", obj.getString("capability"))
+        assertEquals("session-001", obj.getString("session_id"))
+        assertTrue("canonical cognition input must be present", obj.has("canonical_android_cognition_input"))
+        assertTrue("execution planning profile must be present", obj.has("execution_planning_profile"))
+        assertTrue("context field must be present", obj.has("context"))
+        assertTrue("constraints field must be present", obj.has("constraints"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits optional fields when blank or empty`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "t",
+            taskId = "t",
+            goal = "do something"
+            // capability, sessionId, context, constraints all use defaults
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("capability must be absent when null", obj.has("capability"))
+        assertFalse("session_id must be absent when null", obj.has("session_id"))
+        assertFalse("context must be absent when empty", obj.has("context"))
+        assertFalse("constraints must be absent when empty", obj.has("constraints"))
+        assertEquals("direct_execution", obj.getString("orchestration_stage"))
+    }
+
+    @Test
+    fun `buildBridgeJson derives confirmation-first planning from unified cognition inputs`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-confirm",
+            taskId = "task-confirm",
+            goal = "Delete old backups",
+            constraints = listOf("require approval before deletion")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+        val planningProfile = obj.getJSONObject("execution_planning_profile")
+
+        assertEquals("confirmation_first", planningProfile.getString("planning_mode"))
+        assertTrue(planningProfile.getBoolean("requires_confirmation"))
+        assertEquals("task_confirmation", obj.getString("dispatch_intent"))
+        assertEquals("confirmation_first", obj.getString("orchestration_stage"))
+    }
+
+    @Test
+    fun `buildBridgeJson derives recovery-resume planning when resumable recovery context exists`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-recovery",
+            taskId = "task-recovery",
+            goal = "Continue task",
+            isResumable = true,
+            interruptionReason = "network_disconnect",
+            recoveryContext = mapOf("resume_from" to "step_3")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+        val planningProfile = obj.getJSONObject("execution_planning_profile")
+        val cognition = obj.getJSONObject("canonical_android_cognition_input")
+
+        assertEquals("recovery_resume", planningProfile.getString("planning_mode"))
+        assertTrue(planningProfile.getBoolean("has_recovery_signal"))
+        assertEquals("task_resume", obj.getString("dispatch_intent"))
+        assertTrue(
+            cognition
+                .getJSONObject("device_context_input")
+                .getJSONObject("merged_context")
+                .getBoolean("is_resumable")
+        )
+    }
+
+    @Test
+    fun `buildBridgeJson type is always bridge_handoff`() {
+        val bridge = buildBridge()
+        val json = bridge.buildBridgeJson(buildRequest())
+        val obj = org.json.JSONObject(json)
+        assertEquals(AgentRuntimeBridge.MSG_TYPE_BRIDGE_HANDOFF, obj.getString("type"))
+    }
+
+    // ── AipMessage trace_id + route_mode propagation ──────────────────────────
+
+    @Test
+    fun `AipMessage accepts trace_id and route_mode fields`() {
+        val msg = com.ufo.galaxy.protocol.AipMessage(
+            type = com.ufo.galaxy.protocol.MsgType.TASK_RESULT,
+            payload = mapOf("status" to "success"),
+            correlation_id = "task-1",
+            device_id = "phone-1",
+            trace_id = "trace-abc",
+            route_mode = AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE
+        )
+        assertEquals("trace-abc", msg.trace_id)
+        assertEquals(AgentRuntimeBridge.ROUTE_MODE_CROSS_DEVICE, msg.route_mode)
+    }
+
+    @Test
+    fun `AipMessage trace_id and route_mode default to null for backward compat`() {
+        val msg = com.ufo.galaxy.protocol.AipMessage(
+            type = com.ufo.galaxy.protocol.MsgType.HEARTBEAT,
+            payload = emptyMap<String, Any>()
+        )
+        assertNull("trace_id must default to null for backward compat", msg.trace_id)
+        assertNull("route_mode must default to null for backward compat", msg.route_mode)
+    }
+
+    // ── MetricsRecorder handoff counters ──────────────────────────────────────
+
+    @Test
+    fun `MetricsRecorder records handoff success correctly`() {
+        val metrics = buildMetrics()
+        assertEquals(0, metrics.handoffSuccesses.get())
+        metrics.recordHandoffSuccess()
+        assertEquals(1, metrics.handoffSuccesses.get())
+        metrics.recordHandoffSuccess()
+        assertEquals(2, metrics.handoffSuccesses.get())
+    }
+
+    @Test
+    fun `MetricsRecorder records handoff failure correctly`() {
+        val metrics = buildMetrics()
+        assertEquals(0, metrics.handoffFailures.get())
+        metrics.recordHandoffFailure()
+        assertEquals(1, metrics.handoffFailures.get())
+    }
+
+    @Test
+    fun `MetricsRecorder records handoff fallback correctly`() {
+        val metrics = buildMetrics()
+        assertEquals(0, metrics.handoffFallbacks.get())
+        metrics.recordHandoffFallback()
+        assertEquals(1, metrics.handoffFallbacks.get())
+    }
+
+    @Test
+    fun `MetricsRecorder snapshot includes handoff counters`() {
+        val metrics = buildMetrics()
+        metrics.recordHandoffSuccess()
+        metrics.recordHandoffSuccess()
+        metrics.recordHandoffFailure()
+        metrics.recordHandoffFallback()
+        val snap = metrics.snapshot()
+        assertEquals(2, snap.getInt("handoff_successes"))
+        assertEquals(1, snap.getInt("handoff_failures"))
+        assertEquals(1, snap.getInt("handoff_fallbacks"))
+    }
+
+    // ── PR-D: dispatch metadata fields ────────────────────────────────────────
+
+    @Test
+    fun `HandoffRequest dispatch metadata defaults to null and empty for backward compat`() {
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-001",
+            taskId = "task-001",
+            goal = "open WeChat"
+        )
+
+        assertNull("dispatchIntent must default to null", request.dispatchIntent)
+        assertNull("dispatchOrigin must default to null", request.dispatchOrigin)
+        assertNull("orchestrationStage must default to null", request.orchestrationStage)
+        assertTrue("executionContext must default to empty", request.executionContext.isEmpty())
+    }
+
+    @Test
+    fun `HandoffRequest accepts V2 source dispatch metadata`() {
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-v2",
+            taskId = "task-v2",
+            goal = "send message",
+            dispatchIntent = "task_execute",
+            dispatchOrigin = "orchestrator-001",
+            orchestrationStage = "stage_1",
+            executionContext = mapOf("priority" to "high")
+        )
+
+        assertEquals("task_execute", request.dispatchIntent)
+        assertEquals("orchestrator-001", request.dispatchOrigin)
+        assertEquals("stage_1", request.orchestrationStage)
+        assertEquals("high", request.executionContext["priority"])
+    }
+
+    @Test
+    fun `buildBridgeJson includes dispatch_intent when present`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-di",
+            taskId = "task-di",
+            goal = "test",
+            dispatchIntent = "task_execute"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertTrue("dispatch_intent must be present when set", obj.has("dispatch_intent"))
+        assertEquals("task_execute", obj.getString("dispatch_intent"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits dispatch_intent when null`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-no-di",
+            taskId = "task-no-di",
+            goal = "test"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("dispatch_intent must be absent when null", obj.has("dispatch_intent"))
+    }
+
+    @Test
+    fun `buildBridgeJson includes all V2 dispatch metadata fields when present`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-full",
+            taskId = "task-full",
+            goal = "full metadata test",
+            dispatchIntent = "staged_handoff",
+            dispatchOrigin = "orch-abc",
+            orchestrationStage = "stage_2",
+            executionContext = mapOf("locale" to "zh-CN", "priority" to "normal")
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertEquals("staged_handoff", obj.getString("dispatch_intent"))
+        assertEquals("orch-abc", obj.getString("dispatch_origin"))
+        assertEquals("stage_2", obj.getString("orchestration_stage"))
+        assertTrue("execution_context must be present when non-empty", obj.has("execution_context"))
+        val ctx = obj.getJSONObject("execution_context")
+        assertEquals("zh-CN", ctx.getString("locale"))
+        assertEquals("normal", ctx.getString("priority"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits V2 dispatch metadata when all are null or empty`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-none",
+            taskId = "task-none",
+            goal = "legacy task"
+            // dispatchIntent, dispatchOrigin, orchestrationStage, executionContext all default
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("dispatch_intent must be absent when null", obj.has("dispatch_intent"))
+        assertFalse("dispatch_origin must be absent when null", obj.has("dispatch_origin"))
+        assertFalse("orchestration_stage must be absent when null", obj.has("orchestration_stage"))
+        assertFalse("execution_context must be absent when empty", obj.has("execution_context"))
+    }
+
+    @Test
+    fun `handoff succeeds end-to-end with V2 dispatch metadata populated`() = runBlocking {
+        val client = AlwaysConnectedClient()
+        val bridge = buildBridge(client = client, crossDeviceEnabled = true)
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-e2e-v2",
+            taskId = "task-e2e-v2",
+            goal = "open settings",
+            dispatchIntent = "task_execute",
+            dispatchOrigin = "v2-orchestrator",
+            orchestrationStage = "primary",
+            executionContext = mapOf("env" to "production")
+        )
+
+        val result = bridge.handoff(request)
+
+        assertTrue("Handoff must succeed with V2 metadata populated", result.isHandoff)
+        assertEquals(AgentRuntimeBridge.STATUS_HANDOFF_SENT, result.status)
+        assertEquals(1, client.sentMessages.size)
+        val sentJson = org.json.JSONObject(client.sentMessages[0])
+        assertEquals("task_execute", sentJson.getString("dispatch_intent"))
+    }
+
+    // ── buildBridgeJson: PR-E executor target typing ──────────────────────────
+
+    @Test
+    fun `buildBridgeJson includes executor_target_type when present`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-ett",
+            taskId = "task-ett",
+            goal = "test",
+            executorTargetType = "android_device"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertTrue("executor_target_type must be present when set", obj.has("executor_target_type"))
+        assertEquals("android_device", obj.getString("executor_target_type"))
+    }
+
+    @Test
+    fun `buildBridgeJson omits executor_target_type when null`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-no-ett",
+            taskId = "task-no-ett",
+            goal = "legacy task"
+            // executorTargetType defaults to null
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertFalse("executor_target_type must be absent when null", obj.has("executor_target_type"))
+    }
+
+    @Test
+    fun `buildBridgeJson includes executor_target_type alongside V2 dispatch metadata`() {
+        val bridge = buildBridge()
+        val request = AgentRuntimeBridge.HandoffRequest(
+            traceId = "trace-combo",
+            taskId = "task-combo",
+            goal = "combined v2 fields test",
+            dispatchIntent = "staged_handoff",
+            dispatchOrigin = "orch-xyz",
+            executorTargetType = "android_device"
+        )
+        val json = bridge.buildBridgeJson(request)
+        val obj = org.json.JSONObject(json)
+
+        assertEquals("staged_handoff", obj.getString("dispatch_intent"))
+        assertEquals("orch-xyz", obj.getString("dispatch_origin"))
+        assertEquals("android_device", obj.getString("executor_target_type"))
+    }
+}

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Configuration for UFO Galaxy Android.
+
+  SECURITY FIX: base-config now prohibits cleartext by default.
+  Only specific debug/local domains are whitelisted for cleartext.
+  All remote (internet) traffic must use TLS (https/wss).
+-->
+<network-security-config>
+    <!-- Base: deny cleartext for all traffic by default -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+
+    <!-- Domain-specific: stricter for known remote endpoints -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">huggingface.co</domain>
+        <domain includeSubdomains="true">github.com</domain>
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Debug/Local network only: permissive for development environments -->
+    <!-- B4-FIX: Restricted to essential local addresses. 192.168.* removed for release safety.
+         Full debug config kept in network_security_config_debug.xml. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>   <!-- Android emulator localhost -->
+        <domain includeSubdomains="true">10.0.0.1</domain>   <!-- Local network gateway -->
+        <domain includeSubdomains="true">100.64.0.1</domain> <!-- Tailscale/WireGuard CGNAT -->
+        <domain includeSubdomains="true">localhost</domain>  <!-- Local dev server -->
+        <domain includeSubdomains="true">127.0.0.1</domain>  <!-- IPv4 loopback (B3-FIX) -->
+    </domain-config>
+</network-security-config>

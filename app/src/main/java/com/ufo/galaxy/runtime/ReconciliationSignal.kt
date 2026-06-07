@@ -1,0 +1,1532 @@
+package com.ufo.galaxy.runtime
+
+import java.security.MessageDigest
+
+/**
+ * PR-51 — Android Reconciliation Signal.
+ *
+ * A structured, protocol-safe wrapper for any Android-originated signal that V2 must
+ * reconcile into its canonical orchestration truth.  Provides a single, typed channel
+ * for all cancel, status, failure, and result signals — distinct from
+ * [AndroidSessionContribution] (which is the terminal result envelope) in that
+ * [ReconciliationSignal] covers **all phases** of a task's lifecycle, including
+ * in-progress status updates and pre-terminal cancellation/failure notifications.
+ *
+ * ## Problem addressed
+ *
+ * [AndroidSessionContribution] models Android's **terminal** task contribution to session
+ * truth.  However, V2's reconciliation loop also needs:
+ *  - **In-progress status** — V2 should know a task is actively executing before the result.
+ *  - **Pre-terminal cancellation** — V2 must receive a cancel signal as soon as Android
+ *    begins stopping a task, not only after execution fully terminates.
+ *  - **Pre-terminal failure** — V2 must be notified of failure conditions before Android
+ *    produces the final [AndroidSessionContribution.Kind.FAILURE] contribution.
+ *  - **Participant state change** — when participant state changes (health, readiness,
+ *    posture) V2 needs a structured signal to update its canonical view immediately.
+ *
+ * [ReconciliationSignal] fills this gap.  It is the first-class protocol vehicle for
+ * all Android→V2 signals that must update V2's canonical orchestration truth.
+ *
+ * ## Kind taxonomy
+ *
+ * | [Kind]                        | When emitted                                                         | V2 action                        |
+ * |-------------------------------|----------------------------------------------------------------------|----------------------------------|
+ * | [Kind.TASK_ACCEPTED]          | Android accepted a delegated task and started execution              | Mark task as in-progress         |
+ * | [Kind.TASK_STATUS_UPDATE]     | Android reports an intermediate execution status for a running task  | Update task progress tracking    |
+ * | [Kind.TASK_RESULT]            | Android completed a task successfully                                | Close task as success            |
+ * | [Kind.TASK_CANCELLED]         | Android cancelled a running task (explicit or preempted)             | Close task as cancelled          |
+ * | [Kind.TASK_FAILED]            | Android failed a task (error, timeout, pipeline fault)               | Close task as failed             |
+ * | [Kind.PARTICIPANT_STATE]      | Android participant state changed (health, readiness, posture)        | Update participant truth         |
+ * | [Kind.RUNTIME_TRUTH_SNAPSHOT] | Android publishes a consolidated [AndroidParticipantRuntimeTruth]    | Full reconciliation pass         |
+ *
+ * ## Reconciliation protocol
+ *
+ * V2 should consume [ReconciliationSignal] events as a **structured input stream** to
+ * its participant truth reconciliation loop.  The protocol is:
+ *
+ * 1. [Kind.TASK_ACCEPTED] — V2 marks the task as active under this participant.
+ * 2. [Kind.TASK_STATUS_UPDATE] — V2 updates its in-flight view without closing the task.
+ * 3. [Kind.TASK_RESULT] / [Kind.TASK_CANCELLED] / [Kind.TASK_FAILED] — V2 closes the task
+ *    with the specified outcome and updates the participant's contribution record.
+ * 4. [Kind.PARTICIPANT_STATE] — V2 updates its canonical participant view independently of
+ *    any in-flight task.
+ * 5. [Kind.RUNTIME_TRUTH_SNAPSHOT] — V2 reconciles its full canonical participant view
+ *    against the snapshot; any V2-held state that conflicts with the snapshot must be
+ *    resolved in favour of the snapshot (Android owns its local truth).
+ *
+ * ## Responsibility boundary
+ *
+ * [ReconciliationSignal] travels from Android to V2.  Android owns the content of each
+ * signal; V2 owns the canonical reconciliation decision (what to do with the signal).
+ * Android must not rely on V2's reconciliation state — only V2 holds the global orchestration
+ * truth.
+ *
+ * @property kind             Signal taxonomy discriminator.
+ * @property participantId    Stable participant node identifier for routing by V2.
+ * @property taskId           Task this signal belongs to; null for participant-state signals.
+ * @property correlationId    Optional correlation identifier echoed from the originating request.
+ * @property status           Wire-level status string; matches [AndroidSessionContribution] status constants.
+ * @property payload          Optional free-form payload map carrying signal-specific fields.
+ * @property runtimeTruth     Populated only for [Kind.RUNTIME_TRUTH_SNAPSHOT] signals.
+ * @property signalId         Unique, stable identifier for this signal; used by V2 for deduplication.
+ * @property emittedAtMs      Epoch-millisecond timestamp when this signal was emitted.
+ * @property reconciliationEpoch Snapshot epoch from the participant's runtime truth clock.
+ * @property durableSessionId Stable activation-era session identifier, when available.
+ * @property sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId], when
+ *                                  available.
+ * @property dispatchPlanId  V2-issued distributed dispatch plan identifier, when available.
+ *                           Populated by [RuntimeController.recordDelegatedTaskAccepted] when
+ *                           the originating dispatch envelope carries a plan ID.  Non-null values
+ *                           enable V2 to classify this activation as
+ *                           [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.DISPATCH_PLAN_ANCHORED]
+ *                           for stricter distributed execution verification.
+ * @property temporalWorkflowRunId V2-issued Temporal workflow run identifier, when available.
+ *                                  Populated by [RuntimeController.recordDelegatedTaskAccepted]
+ *                                  when the originating dispatch envelope carries a Temporal
+ *                                  workflow run ID.  Non-null values indicate this signal
+ *                                  participates in a Temporal-backed execution path and enable
+ *                                  V2 to correlate signals back to the correct Temporal workflow
+ *                                  run for stricter workflow-backed completion semantics.
+ */
+data class ReconciliationSignal(
+    val kind: Kind,
+    val participantId: String,
+    val taskId: String?,
+    val correlationId: String?,
+    val status: String,
+    val payload: Map<String, Any?> = emptyMap(),
+    val runtimeTruth: AndroidParticipantRuntimeTruth? = null,
+    val signalId: String,
+    val emittedAtMs: Long,
+    val reconciliationEpoch: Int,
+    val durableSessionId: String? = null,
+    val sessionContinuityEpoch: Int? = null,
+    val dispatchPlanId: String? = null,
+    val temporalWorkflowRunId: String? = null
+) {
+
+    /**
+     * Signal kind taxonomy for Android→V2 reconciliation signals.
+     *
+     * Each kind maps to a specific V2 reconciliation action.
+     *
+     * @property wireValue Stable lowercase string used in wire-format payloads.
+     */
+    enum class Kind(val wireValue: String) {
+
+        /**
+         * Android accepted a delegated task and execution has begun.
+         *
+         * V2 should record the task as actively in progress under this participant,
+         * blocking duplicate dispatch until a terminal signal ([TASK_RESULT],
+         * [TASK_CANCELLED], or [TASK_FAILED]) arrives.
+         */
+        TASK_ACCEPTED("task_accepted"),
+
+        /**
+         * Android reports an intermediate execution status for a currently running task.
+         *
+         * V2 can use this signal to update its progress view without changing the
+         * task's terminal state.  This signal does not indicate task completion.
+         */
+        TASK_STATUS_UPDATE("task_status_update"),
+
+        /**
+         * Android completed a task successfully.
+         *
+         * Equivalent to [AndroidSessionContribution.Kind.FINAL_COMPLETION] at the
+         * session-contribution level.  V2 should close the task as a success and
+         * update the participant's contribution record.
+         */
+        TASK_RESULT("task_result"),
+
+        /**
+         * Android cancelled a running task.
+         *
+         * Equivalent to [AndroidSessionContribution.Kind.CANCELLATION] at the
+         * session-contribution level.  V2 should close the task as cancelled and
+         * release any reserved execution capacity for this participant.
+         *
+         * Importantly, this signal is emitted **as soon as Android determines a task
+         * will be cancelled** (before the full termination sequence completes), so V2
+         * can begin its reconciliation pass immediately.
+         */
+        TASK_CANCELLED("task_cancelled"),
+
+        /**
+         * Android failed a task.
+         *
+         * Equivalent to [AndroidSessionContribution.Kind.FAILURE] at the session-
+         * contribution level.  V2 should close the task as failed and may trigger
+         * a fallback or retry according to its orchestration policy.
+         *
+         * Like [TASK_CANCELLED], this signal is emitted as soon as Android determines
+         * a failure condition, before the full termination sequence.
+         */
+        TASK_FAILED("task_failed"),
+
+        /**
+         * Android participant state changed: health, readiness, or posture.
+         *
+         * V2 should update its canonical participant view to reflect the new participant
+         * state.  This signal is independent of any in-flight task and may be emitted
+         * at any time during the participant's lifecycle.
+         */
+        PARTICIPANT_STATE("participant_state"),
+
+        /**
+         * Android publishes a consolidated [AndroidParticipantRuntimeTruth] snapshot.
+         *
+         * V2 should perform a full reconciliation pass against [runtimeTruth], treating
+         * the snapshot as Android's authoritative self-report.  Any V2-held state that
+         * conflicts with the snapshot must be resolved in favour of the snapshot.
+         *
+         * This signal is emitted periodically or in response to a V2 reconciliation
+         * request.
+         */
+        RUNTIME_TRUTH_SNAPSHOT("runtime_truth_snapshot");
+
+        companion object {
+            /**
+             * Parses [value] to a [Kind], returning null for unknown values.
+             *
+             * @param value Wire string from a reconciliation signal; may be null.
+             */
+            fun fromValue(value: String?): Kind? =
+                entries.firstOrNull { it.wireValue == value }
+
+            /** All stable wire values. */
+            val ALL_WIRE_VALUES: Set<String> = entries.map { it.wireValue }.toSet()
+        }
+    }
+
+    // ── Derived helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Returns `true` when this signal represents a terminal task outcome that closes
+     * the V2 reconciliation loop for the associated task.
+     *
+     * Terminal signals: [Kind.TASK_RESULT], [Kind.TASK_CANCELLED], [Kind.TASK_FAILED].
+     */
+    val isTerminal: Boolean
+        get() = kind == Kind.TASK_RESULT ||
+            kind == Kind.TASK_CANCELLED ||
+            kind == Kind.TASK_FAILED
+
+    /**
+     * Returns `true` when this signal carries a full [AndroidParticipantRuntimeTruth]
+     * snapshot suitable for a full V2 reconciliation pass.
+     */
+    val hasRuntimeTruth: Boolean
+        get() = kind == Kind.RUNTIME_TRUTH_SNAPSHOT && runtimeTruth != null
+
+    /**
+     * Canonical participant execution signal class under the unified contract (PR-75).
+     *
+     * Maps this signal's [kind] to the single shared [ParticipantExecutionSignalContract.ExecSignalClass]
+     * that applies uniformly across [ReconciliationSignal], [DelegatedExecutionSignal], and
+     * [com.ufo.galaxy.agent.TakeoverResponseEnvelope].
+     *
+     *  - [Kind.TASK_ACCEPTED]          → [ParticipantExecutionSignalContract.ExecSignalClass.ACK]
+     *  - [Kind.TASK_STATUS_UPDATE]     → [ParticipantExecutionSignalContract.ExecSignalClass.NON_TERMINAL]
+     *  - [Kind.TASK_RESULT]            → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *  - [Kind.TASK_CANCELLED]         → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *  - [Kind.TASK_FAILED]            → [ParticipantExecutionSignalContract.ExecSignalClass.TERMINAL]
+     *  - [Kind.PARTICIPANT_STATE]      → [ParticipantExecutionSignalContract.ExecSignalClass.RECONCILE_ONLY]
+     *  - [Kind.RUNTIME_TRUTH_SNAPSHOT] → [ParticipantExecutionSignalContract.ExecSignalClass.RECONCILE_ONLY]
+     *
+     * Callers MUST use this property — not raw [kind] comparisons — when routing or reducing
+     * signals at the execution lifecycle level, so that reconciliation signals are handled
+     * identically to the corresponding delegated execution signals.
+     */
+    val participantExecSignalClass: ParticipantExecutionSignalContract.ExecSignalClass
+        get() = ParticipantExecutionSignalContract.classifyReconciliation(kind)
+
+    /**
+     * Stable delivery / dedupe key for reliable reconciliation uplink.
+     *
+     * Unlike [signalId], this key is derived from continuity-bound task/session context so
+     * retries, offline replay, and duplicate local emissions for the same logical reconciliation
+     * event converge on one idempotent identity.
+     */
+    val stableDedupeKey: String
+        get() = buildStableDedupeKey(
+            kind = kind.wireValue,
+            participantId = participantId,
+            taskId = taskId,
+            correlationId = correlationId,
+            status = status,
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch,
+            payload = payload,
+            runtimeTruth = runtimeTruth?.toMap()
+        )
+
+    /**
+     * PR-123 — Returns a copy of this signal with [dispatchPlanId] set to [planId].
+     *
+     * Use this helper to attach a V2-issued dispatch plan identifier to a signal that was
+     * created before the plan ID was known.  Callers that already have the plan ID at signal
+     * construction time should prefer passing [dispatchPlanId] directly to the factory methods
+     * ([taskAccepted], [taskResult], [taskCancelled], [taskFailed]) instead.
+     *
+     * When [planId] is non-null, the corresponding payload entry [KEY_DISPATCH_PLAN_ID] is
+     * also updated so the wire map stays consistent with the [dispatchPlanId] field.
+     *
+     * @param planId  V2-issued dispatch plan identifier; null clears any previously set value.
+     */
+    fun withDispatchPlanId(planId: String?): ReconciliationSignal {
+        val updatedPayload = if (planId != null) {
+            payload + (KEY_DISPATCH_PLAN_ID to planId)
+        } else {
+            payload - KEY_DISPATCH_PLAN_ID
+        }
+        return copy(dispatchPlanId = planId, payload = updatedPayload)
+    }
+
+    /**
+     * PR-125 — Returns a copy of this signal with [temporalWorkflowRunId] set to [runId].
+     *
+     * Use this helper to attach a V2-issued Temporal workflow run identifier to a signal
+     * that was created before the run ID was known.  Callers that already have the run ID at
+     * signal construction time should prefer passing [temporalWorkflowRunId] directly to the
+     * factory methods ([taskAccepted], [taskResult], [taskCancelled], [taskFailed]) instead.
+     *
+     * When [runId] is non-null, the corresponding payload entry
+     * [AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID] is also
+     * updated so the wire map stays consistent with the [temporalWorkflowRunId] field.
+     *
+     * @param runId  V2-issued Temporal workflow run identifier; null clears any previously set value.
+     */
+    fun withTemporalWorkflowRunId(runId: String?): ReconciliationSignal {
+        val updatedPayload = if (runId != null) {
+            payload + (AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID to runId)
+        } else {
+            payload - AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID
+        }
+        return copy(temporalWorkflowRunId = runId, payload = updatedPayload)
+    }
+
+    // ── Companion ─────────────────────────────────────────────────────────────
+
+    companion object {
+
+        // ── Wire key constants ────────────────────────────────────────────────
+
+        /** Wire key for [kind] ([Kind.wireValue]). */
+        const val KEY_KIND = "reconciliation_signal_kind"
+
+        /** Wire key for [participantId]. */
+        const val KEY_PARTICIPANT_ID = "reconciliation_participant_id"
+
+        /** Wire key for [taskId]; absent when null. */
+        const val KEY_TASK_ID = "reconciliation_task_id"
+
+        /** Wire key for [correlationId]; absent when null. */
+        const val KEY_CORRELATION_ID = "reconciliation_correlation_id"
+
+        /** Wire key for [status]. */
+        const val KEY_STATUS = "reconciliation_status"
+
+        /** Payload key for the terminal outcome classification carried on terminal task signals. */
+        const val KEY_TERMINAL_OUTCOME_KIND = "terminal_outcome_kind"
+
+        /**
+         * Payload key for the center-facing result semantic class derived from
+         * [KEY_TERMINAL_OUTCOME_KIND].
+         */
+        const val KEY_RESULT_UPLINK_SEMANTIC_CLASS = "result_uplink_semantic_class"
+
+        /**
+         * Payload key for the Stage 5/7 completion-truth grade derived from the terminal
+         * outcome and result semantic.
+         */
+        const val KEY_COMPLETION_TRUTH_GRADE = "completion_truth_grade"
+
+        /**
+         * Payload key describing who owns canonical closure authority for this signal.
+         *
+         * Android is always a participant and evidence emitter; V2 remains canonical closure authority.
+         */
+        const val KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS = "canonical_closure_authority_class"
+
+        /**
+         * Payload key describing participant-local convergence/finality stage relative to V2 closure.
+         */
+        const val KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE = "participant_local_convergence_state"
+
+        enum class CanonicalClosureAuthorityClass(val wireValue: String) {
+            V2_CANONICAL_AUTHORITY("v2_canonical_authority"),
+            ANDROID_PARTICIPANT_EVIDENCE_ONLY("android_participant_evidence_only")
+        }
+
+        enum class ParticipantLocalConvergenceState(val wireValue: String) {
+            UNRESOLVED_INFLIGHT("unresolved_inflight"),
+            LOCAL_COMPLETION_PENDING_DELIVERY("local_completion_pending_delivery"),
+            LOCAL_COMPLETION_DELIVERED_PENDING_CANONICAL("local_completion_delivered_pending_canonical"),
+            INTERRUPTION_RESUME_PENDING("interruption_resume_pending"),
+            TIMEOUT_PENDING_CANONICAL("timeout_pending_canonical"),
+            ABANDONED_UNRESOLVED("abandoned_unresolved"),
+            REPLAYED_PENDING_V2_REVALIDATION("replayed_pending_v2_revalidation")
+        }
+
+        /**
+         * Payload key: whether Android has produced a terminal result for this task.
+         *
+         * `true` for terminal task signals (`task_result` / `task_cancelled` / `task_failed`);
+         * `false` for non-terminal lifecycle signals.
+         */
+        const val KEY_RESULT_RETURNED = "result_returned"
+
+        /**
+         * Payload key: whether Android has emitted a completion-side reconciliation signal.
+         *
+         * `true` for terminal task signals; `false` for accepted/progress/state/snapshot signals.
+         */
+        const val KEY_COMPLETION_SIGNALED = "completion_signaled"
+
+        /**
+         * Payload key: whether this signal alone means closure is ready for central acceptance.
+         *
+         * Reconciliation terminal signals are pre-acceptance observations on Android and do not
+         * unilaterally close central truth, therefore this value is `false` for all task signals.
+         */
+        const val KEY_CLOSURE_READY_FOR_ACCEPTANCE = "closure_ready_for_acceptance"
+
+        /** Payload key: authority runtime completion signal class. */
+        const val KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS
+
+        /** Payload key: result completion signal class. */
+        const val KEY_RESULT_COMPLETION_SIGNAL_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_RESULT_COMPLETION_SIGNAL_CLASS
+
+        /** Payload key: closure/session-finalization signal class. */
+        const val KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS
+
+        /** Payload key: operator-visible done projection class. */
+        const val KEY_OPERATOR_DONE_PROJECTION_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_OPERATOR_DONE_PROJECTION_CLASS
+
+        /** Payload key: completion/closure uplink schema version. */
+        const val KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION =
+            AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION
+
+        /** Payload key: Android-local execution completion state. */
+        const val KEY_LOCAL_EXECUTION_COMPLETED =
+            AndroidCompletionClosureUplinkContract.KEY_LOCAL_EXECUTION_COMPLETED
+
+        /** Payload key: Android emitted advisory evidence uplink. */
+        const val KEY_ADVISORY_EVIDENCE_SENT =
+            AndroidCompletionClosureUplinkContract.KEY_ADVISORY_EVIDENCE_SENT
+
+        /** Payload key: V2 uplink acknowledgement state. */
+        const val KEY_V2_UPLINK_ACKNOWLEDGED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_UPLINK_ACKNOWLEDGED
+
+        /** Payload key: V2 reconciliation acknowledgement state. */
+        const val KEY_V2_RECONCILIATION_ACKNOWLEDGED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_RECONCILIATION_ACKNOWLEDGED
+
+        /** Payload key: V2 canonical truth completion state. */
+        const val KEY_V2_CANONICAL_TRUTH_COMPLETED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_CANONICAL_TRUTH_COMPLETED
+
+        /** Payload key: V2 mature closure state. */
+        const val KEY_V2_MATURE_CLOSURE_ACHIEVED =
+            AndroidCompletionClosureUplinkContract.KEY_V2_MATURE_CLOSURE_ACHIEVED
+
+        /** Payload key: outward truth-surface authority classification. */
+        const val KEY_OUTWARD_TRUTH_SURFACE_CLASS =
+            AndroidCompletionClosureUplinkContract.KEY_OUTWARD_TRUTH_SURFACE_CLASS
+
+        /** Wire key for [signalId]. */
+        const val KEY_SIGNAL_ID = "reconciliation_signal_id"
+
+        /** Wire key for [emittedAtMs]. */
+        const val KEY_EMITTED_AT_MS = "reconciliation_emitted_at_ms"
+
+        /** Wire key for [reconciliationEpoch]. */
+        const val KEY_RECONCILIATION_EPOCH = "reconciliation_epoch"
+
+        /** Wire key for [durableSessionId]. */
+        const val KEY_DURABLE_SESSION_ID = DurableSessionContinuityRecord.KEY_DURABLE_SESSION_ID
+
+        /** Wire key for [sessionContinuityEpoch]. */
+        const val KEY_SESSION_CONTINUITY_EPOCH =
+            DurableSessionContinuityRecord.KEY_SESSION_CONTINUITY_EPOCH
+
+        /**
+         * Wire key for [dispatchPlanId].
+         *
+         * Present in task-bearing [ReconciliationSignal] payloads when the Android-side
+         * activation was tagged with a V2-issued distributed dispatch plan identifier.
+         * Absence means [AndroidV2DistributedActivationCompatibilityContract.ActivationIdentityClass.TASK_IDENTITY_ONLY]
+         * (or weaker); presence means [DISPATCH_PLAN_ANCHORED] and enables V2 to enforce
+         * stricter plan-level binding verification.
+         */
+        const val KEY_DISPATCH_PLAN_ID = "dispatch_plan_id"
+
+        /**
+         * Wire key for [temporalWorkflowRunId].
+         *
+         * Present in task-bearing [ReconciliationSignal] payloads when the Android-side
+         * activation was initiated under a V2-issued Temporal workflow run.  Absence means
+         * this activation does not participate in a Temporal-backed execution path;
+         * V2 SHOULD classify the signal as
+         * [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.NOT_TEMPORAL_WORKFLOW_PATH].
+         * Presence enables V2 to enforce stricter workflow-backed execution and completion
+         * semantics by correlating signals back to the correct Temporal workflow run.
+         */
+        const val KEY_TEMPORAL_WORKFLOW_RUN_ID =
+            AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_WORKFLOW_RUN_ID
+
+        /** Payload key for [stableDedupeKey]. */
+        const val KEY_STABLE_DEDUPE_KEY = "reconciliation_stable_dedupe_key"
+
+        /**
+         * Payload key for the structured Android implementation-reality checkpoint map.
+         */
+        const val KEY_IMPLEMENTATION_REALITY_CHECKPOINT =
+            AndroidImplementationRealityCheckpoint.KEY_CHECKPOINT
+        const val KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE = "unified_action_lifecycle_surface"
+        const val UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION = "1.0"
+
+        /**
+         * Wire key for the `visibility_boundary` section of `unified_action_lifecycle_surface`.
+         *
+         * Contains a map from [AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.wireValue]
+         * to the corresponding [AndroidDualRepoHiddenVisibleBoundaryContract.BoundaryDecision.toWireMap]
+         * for every Android-originated information item classified in this surface emission.
+         *
+         * V2 MUST read this section to determine which Android-originated items in the surface
+         * payload are foreground-eligible and which have been suppressed.
+         *
+         * Introduced: PR-128.
+         */
+        const val KEY_VISIBILITY_BOUNDARY = "visibility_boundary"
+        const val KEY_TASK_ALLOCATION_TRUTH = AndroidParticipantRuntimeTruth.KEY_TASK_ALLOCATION_TRUTH
+        const val KEY_RUNTIME_PARTICIPATION_TOPOLOGY =
+            AndroidParticipantRuntimeTruth.KEY_RUNTIME_PARTICIPATION_TOPOLOGY
+        const val KEY_AUTONOMY_RUNTIME_EVIDENCE = "autonomy_runtime_evidence"
+
+        // ── PR-116: Continuity recovery state payload key constants ──────────────────────
+
+        /**
+         * Payload key for the unified Android-side continuity recovery phase.
+         *
+         * Value: one of [AndroidContinuityRecoveryStateModel.RecoveryPhase.wireValue] strings.
+         * Populated in [runtimeTruthSnapshot] from the runtimeTruth's inflight continuity state.
+         */
+        const val KEY_CONTINUITY_RECOVERY_STATE =
+            AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE
+
+        /**
+         * Payload key for the source label of the recovery phase observation.
+         *
+         * Echoes [InflightContinuityRecoverySnapshot.source] for RUNTIME_TRUTH_SNAPSHOT signals.
+         */
+        const val KEY_CONTINUITY_RECOVERY_SOURCE =
+            AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_SOURCE
+
+        /**
+         * Payload key for [AndroidContinuityRecoveryStateModel.SCHEMA_VERSION].
+         */
+        const val KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION =
+            AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION
+
+        const val KEY_EXECUTION_CONTINUITY_CLASS =
+            AndroidRuntimeEmissionTruthSemantics.KEY_EXECUTION_CONTINUITY_CLASS
+
+        const val KEY_TERMINAL_EMISSION_CLASS =
+            AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_EMISSION_CLASS
+
+        const val KEY_TERMINAL_DELIVERY_DISPOSITION =
+            AndroidRuntimeEmissionTruthSemantics.KEY_TERMINAL_DELIVERY_DISPOSITION
+
+        const val KEY_RESULT_CONVERGENCE_DECISION =
+            AndroidRuntimeEmissionTruthSemantics.KEY_RESULT_CONVERGENCE_DECISION
+
+        const val KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION =
+            AndroidRuntimeEmissionTruthSemantics.KEY_RUNTIME_EMISSION_TRUTH_SCHEMA_VERSION
+
+        // ── PR-119: Cross-repo recovery state routing payload key constants ────────
+
+        /**
+         * Payload key for the [AndroidCrossRepoRecoveryStateRoutingContract.V2RoutingCategory.wireValue]
+         * that V2 should use to route the recovery evidence.
+         *
+         * Present in [payload] of [Kind.RUNTIME_TRUTH_SNAPSHOT] signals when a
+         * [AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision] is provided.
+         */
+        const val KEY_V2_ROUTING_CATEGORY =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_V2_ROUTING_CATEGORY
+
+        /**
+         * Payload key indicating whether this recovery phase requires explicit V2 canonical action.
+         *
+         * Value: `"true"` or `"false"`.
+         */
+        const val KEY_ROUTING_REQUIRES_V2_ACTION =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_REQUIRES_V2_ACTION
+
+        /**
+         * Payload key indicating whether this recovery phase carries only advisory evidence.
+         *
+         * Value: `"true"` or `"false"`.
+         */
+        const val KEY_ROUTING_IS_ADVISORY_ONLY =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_IS_ADVISORY_ONLY
+
+        /**
+         * Payload key indicating whether canonical task closure is blocked for this phase.
+         *
+         * Value: `"true"` or `"false"`.  When `"true"`, V2 MUST NOT close the task canonically
+         * based solely on this recovery evidence.
+         */
+        const val KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED
+
+        /**
+         * Payload key for [AndroidCrossRepoRecoveryStateRoutingContract.SCHEMA_VERSION].
+         */
+        const val KEY_ROUTING_SCHEMA_VERSION =
+            AndroidCrossRepoRecoveryStateRoutingContract.KEY_ROUTING_SCHEMA_VERSION
+
+        // ── PR-124: Failure recovery compatibility payload key constants ────────
+
+        /**
+         * Payload key for the [AndroidV2FailureRecoveryCompatibilityContract.FailureRecoveryClass.wireValue]
+         * that V2 should use to route failure signals to the correct distributed recovery path.
+         *
+         * Present in [payload] of [Kind.TASK_FAILED] signals.  When absent, V2 SHOULD treat the
+         * failure as [AndroidV2FailureRecoveryCompatibilityContract.FailureRecoveryClass.EXECUTION_FAILED]
+         * for backward compatibility with pre-PR-124 signals.
+         */
+        const val KEY_FAILURE_RECOVERY_CLASS =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_FAILURE_RECOVERY_CLASS
+
+        /**
+         * Payload key indicating whether this failure involved prior partial execution output.
+         *
+         * Value: `"true"` or `"false"`.  When `"true"`, V2 MUST reconcile partial state before
+         * closing or retrying the task.
+         */
+        const val KEY_FAILURE_HAD_PARTIAL_PROGRESS =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_HAD_PARTIAL_PROGRESS
+
+        /**
+         * Payload key indicating whether V2 retry is structurally safe for this failure class.
+         *
+         * Value: `"true"` or `"false"`.
+         */
+        const val KEY_FAILURE_IS_RETRY_ELIGIBLE =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_IS_RETRY_ELIGIBLE
+
+        /**
+         * Payload key for [AndroidV2FailureRecoveryCompatibilityContract.SCHEMA_VERSION].
+         */
+        const val KEY_FAILURE_RECOVERY_SCHEMA_VERSION =
+            AndroidV2FailureRecoveryCompatibilityContract.KEY_FAILURE_RECOVERY_SCHEMA_VERSION
+
+        // ── PR-125: Temporal continuation finality payload key constants ────────
+
+        /**
+         * Payload key for the [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.wireValue]
+         * that V2 should use to determine whether its Temporal workflow can close for this signal.
+         *
+         * Present in [payload] of task-bearing signals when [temporalWorkflowRunId] is non-null.
+         * When absent, V2 SHOULD classify the signal as
+         * [AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.NOT_TEMPORAL_WORKFLOW_PATH]
+         * for backward compatibility with pre-PR-125 signals.
+         */
+        const val KEY_TEMPORAL_CONTINUATION_FINALITY_CLASS =
+            AndroidV2TemporalContinuationFinalityContract.KEY_TEMPORAL_CONTINUATION_FINALITY_CLASS
+
+        /**
+         * Payload key indicating whether V2's Temporal workflow can safely close for this signal.
+         *
+         * Value: `"true"` or `"false"`.  When `"false"`, V2 MUST NOT close the associated
+         * Temporal workflow based solely on this signal.
+         */
+        const val KEY_IS_TEMPORAL_WORKFLOW_FINAL =
+            AndroidV2TemporalContinuationFinalityContract.KEY_IS_TEMPORAL_WORKFLOW_FINAL
+
+        /**
+         * Payload key indicating whether a pending Temporal workflow resume is possible.
+         *
+         * Value: `"true"` or `"false"`.  When `"true"`, V2 MUST hold the Temporal workflow
+         * open and await a follow-up signal.
+         */
+        const val KEY_HAS_PENDING_TEMPORAL_RESUME =
+            AndroidV2TemporalContinuationFinalityContract.KEY_HAS_PENDING_TEMPORAL_RESUME
+
+        /**
+         * Payload key for [AndroidV2TemporalContinuationFinalityContract.SCHEMA_VERSION].
+         */
+        const val KEY_TEMPORAL_CONTINUATION_FINALITY_SCHEMA_VERSION =
+            AndroidV2TemporalContinuationFinalityContract
+                .KEY_TEMPORAL_CONTINUATION_FINALITY_SCHEMA_VERSION
+
+        // ── PR-63 progress / checkpoint / subtask payload key constants ────────
+
+        /**
+         * Payload key for a structured execution checkpoint identifier
+         * ([ParticipantProgressCheckpoint.checkpointId]).
+         *
+         * Present in [payload] of a [Kind.TASK_STATUS_UPDATE] signal that carries a
+         * [ParticipantProgressCheckpoint].  V2 can use this key to distinguish structured
+         * checkpoint progress updates from plain [progressDetail] string updates.
+         */
+        const val KEY_CHECKPOINT_ID = ParticipantProgressCheckpoint.KEY_CHECKPOINT_ID
+
+        /**
+         * Payload key for the zero-based execution step index carried by a
+         * [ParticipantProgressCheckpoint] ([ParticipantProgressCheckpoint.stepIndex]).
+         *
+         * Present in [payload] when a checkpoint is carried by this signal.
+         */
+        const val KEY_STEP_INDEX = ParticipantProgressCheckpoint.KEY_STEP_INDEX
+
+        /**
+         * Payload key for the optional total step count hint carried by a
+         * [ParticipantProgressCheckpoint] ([ParticipantProgressCheckpoint.totalSteps]).
+         *
+         * Present in [payload] only when [ParticipantProgressCheckpoint.totalSteps] is non-null.
+         */
+        const val KEY_TOTAL_STEPS = ParticipantProgressCheckpoint.KEY_TOTAL_STEPS
+
+        /**
+         * Payload key for the zero-based subtask index carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.subtaskIndex]).
+         *
+         * Present in [payload] when a subtask report is carried by this signal.
+         */
+        const val KEY_SUBTASK_INDEX = SubtaskProgressReport.KEY_SUBTASK_INDEX
+
+        /**
+         * Payload key for the optional subtask total count carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.subtaskTotal]).
+         *
+         * Present in [payload] only when [SubtaskProgressReport.subtaskTotal] is non-null.
+         */
+        const val KEY_SUBTASK_TOTAL = SubtaskProgressReport.KEY_SUBTASK_TOTAL
+
+        /**
+         * Payload key for the subtask status wire value carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.SubtaskStatus.wireValue]).
+         *
+         * Present in [payload] when a subtask report is carried by this signal.
+         */
+        const val KEY_SUBTASK_STATUS = SubtaskProgressReport.KEY_SUBTASK_STATUS
+
+        /**
+         * Payload key for the human-readable subtask label carried by a
+         * [SubtaskProgressReport] ([SubtaskProgressReport.subtaskLabel]).
+         *
+         * Present in [payload] when a subtask report is carried by this signal.
+         */
+        const val KEY_SUBTASK_LABEL = SubtaskProgressReport.KEY_SUBTASK_LABEL
+
+        // ── Status constants (mirror AndroidSessionContribution) ──────────────
+
+        /** Wire status for a running / accepted task. */
+        const val STATUS_RUNNING = "running"
+
+        /** Wire status for a completed, successful task. */
+        const val STATUS_SUCCESS = "success"
+
+        /** Wire status for a cancelled task. */
+        const val STATUS_CANCELLED = "cancelled"
+
+        /** Wire status for a failed task. */
+        const val STATUS_FAILED = "failed"
+
+        /** Wire status for an intermediate status update. */
+        const val STATUS_IN_PROGRESS = "in_progress"
+
+        /** Wire status for a participant state change signal (no task outcome). */
+        const val STATUS_STATE_CHANGED = "state_changed"
+
+        /** Wire status for a full snapshot signal. */
+        const val STATUS_SNAPSHOT = "snapshot"
+
+        private fun closureSemanticsPayload(
+            isTerminalSignal: Boolean,
+            resultReturned: Boolean,
+            completionSignaled: Boolean,
+            closureReadyForAcceptance: Boolean,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind? = null,
+            additionalPayload: Map<String, Any?> = emptyMap(),
+            outwardTruthSurfaceClass: AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass =
+                AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                    .ANDROID_ADVISORY_EVIDENCE
+        ): Map<String, Any?> {
+            val completionClosure = AndroidCompletionClosureUplinkContract
+                .deriveForReconciliationSignal(
+                    isTerminalSignal = isTerminalSignal,
+                    resultReturned = resultReturned,
+                    completionSignaled = completionSignaled,
+                    closureReadyForAcceptance = closureReadyForAcceptance
+                )
+            val v2Boundary = AndroidCompletionClosureUplinkContract
+                .deriveV2CanonicalBoundary(
+                    localExecutionCompleted =
+                        terminalOutcomeKind?.let { outcome ->
+                            val resultSemanticClass =
+                                AndroidMissionCompletionSemanticsContract
+                                    .classifyReportedResultSemantic(outcome)
+                            val completionTruthGrade =
+                                AndroidCompletionTruthHardeningContract
+                                    .classifyCompletionTruthGrade(
+                                        resultUplinkSemanticClass = resultSemanticClass,
+                                        terminalOutcomeKind = outcome
+                                    )
+                            completionTruthGrade == AndroidCompletionTruthHardeningContract
+                                .CompletionTruthGrade.VERIFIED_COMPLETE ||
+                                completionTruthGrade == AndroidCompletionTruthHardeningContract
+                                    .CompletionTruthGrade.DEGRADED_COMPLETE
+                        } ?: (isTerminalSignal && resultReturned && completionSignaled),
+                    advisoryEvidenceSent = true,
+                    outwardTruthSurfaceClass = outwardTruthSurfaceClass
+                )
+            val terminalOutcomePayload = terminalOutcomeKind?.let { outcome ->
+                val resultSemanticClass =
+                    AndroidMissionCompletionSemanticsContract
+                        .classifyReportedResultSemantic(outcome)
+                val completionTruthGrade =
+                    AndroidCompletionTruthHardeningContract
+                        .classifyCompletionTruthGrade(
+                            resultUplinkSemanticClass = resultSemanticClass,
+                            terminalOutcomeKind = outcome
+                        )
+                mapOf(
+                    KEY_TERMINAL_OUTCOME_KIND to outcome.wireValue,
+                    KEY_RESULT_UPLINK_SEMANTIC_CLASS to resultSemanticClass.wireValue,
+                    KEY_COMPLETION_TRUTH_GRADE to completionTruthGrade.wireValue
+                )
+            }.orEmpty()
+            val participantLocalConvergenceState = if (!isTerminalSignal) {
+                ParticipantLocalConvergenceState.UNRESOLVED_INFLIGHT
+            } else {
+                when (terminalOutcomeKind) {
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION ->
+                        ParticipantLocalConvergenceState.INTERRUPTION_RESUME_PENDING
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.TIMEOUT ->
+                        ParticipantLocalConvergenceState.TIMEOUT_PENDING_CANONICAL
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABANDON ->
+                        ParticipantLocalConvergenceState.ABANDONED_UNRESOLVED
+                    else ->
+                        ParticipantLocalConvergenceState.LOCAL_COMPLETION_PENDING_DELIVERY
+                }
+            }
+            return mapOf(
+                AndroidCompletionClosureUplinkContract.KEY_SCHEMA_VERSION to
+                    AndroidCompletionClosureUplinkContract.PAYLOAD_SCHEMA_VERSION,
+                AndroidCompletionClosureUplinkContract.KEY_COMPLETION_CLOSURE_CONTRACT_VERSION to
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                KEY_RESULT_RETURNED to resultReturned,
+                KEY_COMPLETION_SIGNALED to completionSignaled,
+                KEY_CLOSURE_READY_FOR_ACCEPTANCE to closureReadyForAcceptance,
+                KEY_AUTHORITY_RUNTIME_COMPLETION_SIGNAL_CLASS to
+                    completionClosure.authorityRuntimeCompletionSignalClass.wireValue,
+                KEY_RESULT_COMPLETION_SIGNAL_CLASS to
+                    completionClosure.resultCompletionSignalClass.wireValue,
+                KEY_CLOSURE_FINALIZATION_SIGNAL_CLASS to
+                    completionClosure.closureFinalizationSignalClass.wireValue,
+                KEY_OPERATOR_DONE_PROJECTION_CLASS to
+                    completionClosure.operatorDoneProjectionClass.wireValue,
+                KEY_COMPLETION_CLOSURE_UPLINK_SCHEMA_VERSION to
+                    AndroidCompletionClosureUplinkContract.SCHEMA_VERSION,
+                KEY_LOCAL_EXECUTION_COMPLETED to v2Boundary.localExecutionCompleted,
+                KEY_ADVISORY_EVIDENCE_SENT to v2Boundary.advisoryEvidenceSent,
+                KEY_V2_UPLINK_ACKNOWLEDGED to v2Boundary.v2UplinkAcknowledged,
+                KEY_V2_RECONCILIATION_ACKNOWLEDGED to v2Boundary.v2ReconciliationAcknowledged,
+                KEY_V2_CANONICAL_TRUTH_COMPLETED to v2Boundary.v2CanonicalTruthCompleted,
+                KEY_V2_MATURE_CLOSURE_ACHIEVED to v2Boundary.v2MatureClosureAchieved,
+                KEY_OUTWARD_TRUTH_SURFACE_CLASS to v2Boundary.outwardTruthSurfaceClass.wireValue,
+                KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS to
+                    CanonicalClosureAuthorityClass.V2_CANONICAL_AUTHORITY.wireValue,
+                KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE to participantLocalConvergenceState.wireValue,
+                AndroidCompletionClosureUplinkContract.KEY_IS_V2_CONFIRMED_CANONICAL_TRUTH to
+                    (
+                        v2Boundary.outwardTruthSurfaceClass ==
+                            AndroidCompletionClosureUplinkContract.OutwardTruthSurfaceClass
+                                .V2_CONFIRMED_CANONICAL_TRUTH
+                        )
+            ) + terminalOutcomePayload + additionalPayload
+        }
+
+        private fun toBooleanOrFalse(value: Any?): Boolean = when (value) {
+            is Boolean -> value
+            is String -> value.equals("true", ignoreCase = true)
+            is Number -> value.toInt() != 0
+            else -> false
+        }
+
+        private fun requiresConfirmation(
+            isTerminal: Boolean,
+            closureReadyForAcceptance: Boolean
+        ): Boolean = isTerminal && !closureReadyForAcceptance
+
+        private fun withUnifiedActionLifecycleSurface(
+            kind: Kind,
+            status: String,
+            taskId: String?,
+            reconciliationEpoch: Int,
+            payload: Map<String, Any?>
+        ): Map<String, Any?> {
+            val isTerminal = kind == Kind.TASK_RESULT ||
+                kind == Kind.TASK_CANCELLED ||
+                kind == Kind.TASK_FAILED
+            val resultReturned = toBooleanOrFalse(payload[KEY_RESULT_RETURNED])
+            val closureReadyForAcceptance = toBooleanOrFalse(payload[KEY_CLOSURE_READY_FOR_ACCEPTANCE])
+            val canonicalClosureBlocked =
+                toBooleanOrFalse(payload[KEY_ROUTING_CANONICAL_CLOSURE_BLOCKED])
+            val hasFailureBlocker = kind == Kind.TASK_FAILED
+            val isBlocked = canonicalClosureBlocked || hasFailureBlocker
+            val rawBlockerReason = when {
+                canonicalClosureBlocked -> "canonical_closure_blocked"
+                hasFailureBlocker -> "execution_failed"
+                else -> null
+            }
+            // Confirmation is required when Android has emitted a terminal lifecycle stage but
+            // canonical closure has not yet been marked ready for acceptance by the boundary.
+            val confirmationNeeded = requiresConfirmation(
+                isTerminal = isTerminal,
+                closureReadyForAcceptance = closureReadyForAcceptance
+            )
+            val continuityRecoveryState =
+                payload[KEY_CONTINUITY_RECOVERY_STATE]?.toString()?.ifBlank { null }
+            val stage = when (kind) {
+                Kind.TASK_ACCEPTED -> "accepted"
+                Kind.TASK_STATUS_UPDATE -> "executing"
+                Kind.TASK_RESULT -> "result_emitted"
+                Kind.TASK_CANCELLED -> "cancelled"
+                Kind.TASK_FAILED -> "failed"
+                Kind.PARTICIPANT_STATE -> "participant_state"
+                Kind.RUNTIME_TRUTH_SNAPSHOT -> when (continuityRecoveryState) {
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERING.wireValue ->
+                        "recovery_replaying"
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERED_INFLIGHT.wireValue,
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RESUMED_CLEANLY.wireValue ->
+                        "recovery_recovered"
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.RECOVERY_FAILED.wireValue ->
+                        "recovery_failed"
+                    AndroidContinuityRecoveryStateModel.RecoveryPhase.REQUIRES_RECONCILIATION.wireValue ->
+                        "recovery_reconciliation_pending"
+                    else -> "reconciliation_snapshot"
+                }
+            }
+
+            // ── Dual-repo hidden-visible boundary classification (PR-128) ──────
+            // Each Android-originated information item is routed through the shared boundary
+            // contract.  The resulting BoundaryDecision governs whether the item appears in
+            // the foreground payload or is suppressed.
+            val Contract = AndroidDualRepoHiddenVisibleBoundaryContract
+            val blockerDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.BLOCKER,
+                    blockerReason = rawBlockerReason,
+                    isCanonicalClosureBlocked = canonicalClosureBlocked,
+                    isExecutionFailed = hasFailureBlocker
+                )
+            )
+            val confirmationDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.CONFIRMATION_NEEDED,
+                    confirmationNeeded = confirmationNeeded,
+                    isTerminalSignal = isTerminal,
+                    closureReadyForAcceptance = closureReadyForAcceptance
+                )
+            )
+            val deviceStateDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY,
+                    deviceStateStage = stage
+                )
+            )
+            val lifecycleDecision = Contract.classify(
+                Contract.BoundaryInput(
+                    infoOriginClass = Contract.AndroidInfoOriginClass.LIFECYCLE_STATE,
+                    lifecycleStage = stage
+                )
+            )
+
+            // Foreground payload for "blocker": only expose if boundary says FOREGROUND.
+            // An OPERATOR_ONLY or BACKGROUND blocker must not appear as a user-facing block.
+            val foregroundBlockedValue = isBlocked && !blockerDecision.foregroundSuppressed
+            val foregroundBlockerReason = if (blockerDecision.foregroundSuppressed) null else rawBlockerReason
+
+            // Foreground payload for "confirmation": only expose if boundary says FOREGROUND.
+            val foregroundConfirmationNeeded = confirmationNeeded && !confirmationDecision.foregroundSuppressed
+
+            val surface = mapOf(
+                "schema_version" to UNIFIED_ACTION_LIFECYCLE_SCHEMA_VERSION,
+                "stage" to stage,
+                "action" to mapOf(
+                    "kind" to kind.wireValue,
+                    "task_id" to taskId,
+                    "status" to status
+                ),
+                "acceptance" to mapOf(
+                    "accepted" to (kind == Kind.TASK_ACCEPTED),
+                    "status" to if (kind == Kind.TASK_ACCEPTED) "accepted" else "not_applicable"
+                ),
+                "execution" to mapOf(
+                    "state" to status,
+                    "progress_detail" to payload["progress_detail"],
+                    "is_terminal" to isTerminal
+                ),
+                "result" to mapOf(
+                    "is_first_class_surface" to true,
+                    "returned" to resultReturned,
+                    "terminal_outcome_kind" to payload[KEY_TERMINAL_OUTCOME_KIND],
+                    "semantic_class" to payload[KEY_RESULT_UPLINK_SEMANTIC_CLASS],
+                    "completion_truth_grade" to payload[KEY_COMPLETION_TRUTH_GRADE]
+                ),
+                // Blocker foreground payload is governed by the dual-repo boundary decision.
+                // When blockerDecision.foregroundSuppressed=true the block is not surfaced to
+                // the user; the raw blocker information remains in visibility_boundary only.
+                "blocker" to mapOf(
+                    "is_blocked" to foregroundBlockedValue,
+                    "reason" to foregroundBlockerReason
+                ),
+                // Confirmation foreground payload is governed by the dual-repo boundary decision.
+                // Non-terminal or post-closure confirmations are demoted to BACKGROUND and do
+                // not appear as foreground confirmation_needed.
+                "confirmation" to mapOf(
+                    "confirmation_needed" to foregroundConfirmationNeeded,
+                    "closure_ready_for_acceptance" to closureReadyForAcceptance
+                ),
+                "handoff" to mapOf(
+                    "state" to when {
+                        kind == Kind.RUNTIME_TRUTH_SNAPSHOT -> "reconciliation_handoff"
+                        isTerminal -> "result_handoff_to_v2"
+                        else -> "android_execution_active"
+                    }
+                ),
+                "closure" to mapOf(
+                    "closure_ready_for_acceptance" to closureReadyForAcceptance,
+                    "participant_local_convergence_state" to payload[KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE]
+                ),
+                "reconciliation" to mapOf(
+                    "epoch" to reconciliationEpoch,
+                    "signal_kind" to kind.wireValue,
+                    "completion_state" to when {
+                        kind == Kind.RUNTIME_TRUTH_SNAPSHOT -> "snapshot_emitted"
+                        isTerminal -> "terminal_signal_emitted"
+                        else -> "inflight_signal_emitted"
+                    }
+                ),
+                "recovery" to mapOf(
+                    "phase" to continuityRecoveryState,
+                    "source" to payload[KEY_CONTINUITY_RECOVERY_SOURCE],
+                    "requires_reconciliation" to (
+                        continuityRecoveryState ==
+                            AndroidContinuityRecoveryStateModel.RecoveryPhase
+                                .REQUIRES_RECONCILIATION
+                                .wireValue
+                        )
+                ),
+                // Dual-repo hidden-visible boundary decisions (PR-128).
+                // V2 reads this section to know which Android-originated items are foreground-
+                // eligible and which have been classified as BACKGROUND or OPERATOR_ONLY.
+                KEY_VISIBILITY_BOUNDARY to mapOf(
+                    Contract.AndroidInfoOriginClass.BLOCKER.wireValue to
+                        blockerDecision.toWireMap(),
+                    Contract.AndroidInfoOriginClass.CONFIRMATION_NEEDED.wireValue to
+                        confirmationDecision.toWireMap(),
+                    Contract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY.wireValue to
+                        deviceStateDecision.toWireMap(),
+                    Contract.AndroidInfoOriginClass.LIFECYCLE_STATE.wireValue to
+                        lifecycleDecision.toWireMap()
+                )
+            )
+            return payload + mapOf(KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE to surface)
+        }
+
+        private fun buildStableDedupeKey(
+            kind: String,
+            participantId: String,
+            taskId: String?,
+            correlationId: String?,
+            status: String,
+            reconciliationEpoch: Int,
+            durableSessionId: String?,
+            sessionContinuityEpoch: Int?,
+            payload: Map<String, Any?>,
+            runtimeTruth: Map<String, Any>?
+        ): String {
+            val canonical = listOf(
+                "reconciliation_signal",
+                kind,
+                participantId,
+                taskId ?: "no_task",
+                correlationId ?: "no_correlation",
+                status,
+                durableSessionId ?: "no_durable_session",
+                sessionContinuityEpoch?.toString() ?: "no_session_epoch",
+                reconciliationEpoch.toString(),
+                canonicalizeForDedupe(payload),
+                canonicalizeForDedupe(runtimeTruth)
+            ).joinToString(":")
+            val digest = MessageDigest.getInstance("SHA-256")
+            val hash = digest.digest(canonical.toByteArray())
+                .joinToString(separator = "") { byte -> "%02x".format(byte) }
+            return "reconciliation_signal:$hash"
+        }
+
+        private fun canonicalizeForDedupe(value: Any?): String = when (value) {
+            null -> "null"
+            is Map<*, *> -> value.entries
+                .sortedBy { it.key?.toString().orEmpty() }
+                .joinToString(prefix = "{", postfix = "}") { entry ->
+                    "${entry.key}=${canonicalizeForDedupe(entry.value)}"
+                }
+            is Iterable<*> -> value.joinToString(prefix = "[", postfix = "]") {
+                canonicalizeForDedupe(it)
+            }
+            is Array<*> -> value.joinToString(prefix = "[", postfix = "]") {
+                canonicalizeForDedupe(it)
+            }
+            else -> value.toString()
+        }
+
+        // ── Factories ─────────────────────────────────────────────────────────
+
+        /**
+         * Creates a [Kind.TASK_ACCEPTED] signal indicating Android accepted a delegated task.
+         *
+         * @param participantId Stable participant node identifier.
+         * @param taskId        Task identifier from the inbound dispatch envelope.
+         * @param correlationId Correlation identifier from the inbound envelope.
+         * @param signalId      Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         */
+        fun taskAccepted(
+            participantId: String,
+            taskId: String,
+            correlationId: String? = null,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal = ReconciliationSignal(
+            kind = Kind.TASK_ACCEPTED,
+            participantId = participantId,
+            taskId = taskId,
+            correlationId = correlationId,
+            status = STATUS_RUNNING,
+            payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_ACCEPTED,
+                status = STATUS_RUNNING,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = false,
+                    resultReturned = false,
+                    completionSignaled = false,
+                    closureReadyForAcceptance = false,
+                    additionalPayload = additionalPayload
+                )
+            ),
+            signalId = signalId,
+            emittedAtMs = System.currentTimeMillis(),
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
+        )
+
+        /**
+         * Creates a [Kind.TASK_CANCELLED] signal indicating Android cancelled a running task.
+         *
+         * @param participantId Stable participant node identifier.
+         * @param taskId        Task identifier of the cancelled task.
+         * @param correlationId Correlation identifier from the originating request.
+         * @param signalId      Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         */
+        fun taskCancelled(
+            participantId: String,
+            taskId: String,
+            correlationId: String? = null,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABORT,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal = ReconciliationSignal(
+            kind = Kind.TASK_CANCELLED,
+            participantId = participantId,
+            taskId = taskId,
+            correlationId = correlationId,
+            status = STATUS_CANCELLED,
+            payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_CANCELLED,
+                status = STATUS_CANCELLED,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = true,
+                    resultReturned = true,
+                    completionSignaled = true,
+                    closureReadyForAcceptance = false,
+                    terminalOutcomeKind = terminalOutcomeKind,
+                    additionalPayload = additionalPayload
+                )
+            ),
+            signalId = signalId,
+            emittedAtMs = System.currentTimeMillis(),
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
+        )
+
+        /**
+         * Creates a [Kind.TASK_FAILED] signal indicating Android failed a task.
+         *
+         * @param participantId Stable participant node identifier.
+         * @param taskId        Task identifier of the failed task.
+         * @param correlationId Correlation identifier from the originating request.
+         * @param errorDetail   Optional human-readable error detail.
+         * @param signalId      Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         */
+        fun taskFailed(
+            participantId: String,
+            taskId: String,
+            correlationId: String? = null,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.FAILURE,
+            errorDetail: String? = null,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal {
+            val payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_FAILED,
+                status = STATUS_FAILED,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = true,
+                    resultReturned = true,
+                    completionSignaled = true,
+                    closureReadyForAcceptance = false,
+                    terminalOutcomeKind = terminalOutcomeKind,
+                    additionalPayload = additionalPayload
+                ).toMutableMap().apply {
+                    errorDetail?.let { put("error_detail", it) }
+                }
+            )
+            return ReconciliationSignal(
+                kind = Kind.TASK_FAILED,
+                participantId = participantId,
+                taskId = taskId,
+                correlationId = correlationId,
+                status = STATUS_FAILED,
+                payload = payload,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
+            )
+        }
+
+        /**
+         * Creates a [Kind.TASK_RESULT] signal indicating Android completed a task successfully.
+         *
+         * @param participantId Stable participant node identifier.
+         * @param taskId        Task identifier of the completed task.
+         * @param correlationId Correlation identifier from the originating request.
+         * @param signalId      Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         */
+        fun taskResult(
+            participantId: String,
+            taskId: String,
+            correlationId: String? = null,
+            terminalOutcomeKind: AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind =
+                AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal = ReconciliationSignal(
+            kind = Kind.TASK_RESULT,
+            participantId = participantId,
+            taskId = taskId,
+            correlationId = correlationId,
+            status = STATUS_SUCCESS,
+            payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_RESULT,
+                status = STATUS_SUCCESS,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = true,
+                    resultReturned = true,
+                    completionSignaled = true,
+                    closureReadyForAcceptance = false,
+                    terminalOutcomeKind = terminalOutcomeKind,
+                    additionalPayload = additionalPayload
+                )
+            ),
+            signalId = signalId,
+            emittedAtMs = System.currentTimeMillis(),
+            reconciliationEpoch = reconciliationEpoch,
+            durableSessionId = durableSessionId,
+            sessionContinuityEpoch = sessionContinuityEpoch
+        )
+
+        /**
+         * Creates a [Kind.TASK_STATUS_UPDATE] signal reporting an intermediate execution
+         * status for a currently running task.
+         *
+         * V2 should update its in-flight progress view without closing the task.
+         *
+         * @param participantId Stable participant node identifier.
+         * @param taskId        Task identifier of the in-progress task.
+         * @param correlationId Correlation identifier from the originating request.
+         * @param progressDetail Optional human-readable description of the current progress step.
+         * @param signalId      Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         */
+        fun taskStatusUpdate(
+            participantId: String,
+            taskId: String,
+            correlationId: String? = null,
+            progressDetail: String? = null,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal {
+            val payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.TASK_STATUS_UPDATE,
+                status = STATUS_IN_PROGRESS,
+                taskId = taskId,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = false,
+                    resultReturned = false,
+                    completionSignaled = false,
+                    closureReadyForAcceptance = false,
+                    additionalPayload = additionalPayload
+                ).toMutableMap().apply {
+                    progressDetail?.let { put("progress_detail", it) }
+                }
+            )
+            return ReconciliationSignal(
+                kind = Kind.TASK_STATUS_UPDATE,
+                participantId = participantId,
+                taskId = taskId,
+                correlationId = correlationId,
+                status = STATUS_IN_PROGRESS,
+                payload = payload,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
+            )
+        }
+
+        /**
+         * Creates a [Kind.PARTICIPANT_STATE] signal reporting an Android participant state
+         * change (health, readiness, or posture).
+         *
+         * V2 should update its canonical participant view immediately on receipt.
+         * This signal is independent of any in-flight task and may be emitted at any time.
+         *
+         * @param participantId  Stable participant node identifier.
+         * @param healthState    Current [ParticipantHealthState] of the participant.
+         * @param readinessState Current [ParticipantReadinessState] for dispatch selection.
+         * @param posture        Optional posture value from [SourceRuntimePosture] constants
+         *                       (e.g. [SourceRuntimePosture.CONTROL_ONLY],
+         *                       [SourceRuntimePosture.JOIN_RUNTIME]); `null` when the posture
+         *                       is not being reported in this signal.
+         * @param signalId       Unique signal identifier for deduplication.
+         * @param reconciliationEpoch Snapshot epoch from the participant's truth clock.
+         * @param durableSessionId Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         */
+        fun participantStateSignal(
+            participantId: String,
+            healthState: ParticipantHealthState,
+            readinessState: ParticipantReadinessState,
+            posture: String? = null,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            reconciliationEpoch: Int = 0,
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal {
+            val payload = withUnifiedActionLifecycleSurface(
+                kind = Kind.PARTICIPANT_STATE,
+                status = STATUS_STATE_CHANGED,
+                taskId = null,
+                reconciliationEpoch = reconciliationEpoch,
+                payload = buildMap<String, Any?> {
+                    putAll(
+                        closureSemanticsPayload(
+                            isTerminalSignal = false,
+                            resultReturned = false,
+                            completionSignaled = false,
+                            closureReadyForAcceptance = false,
+                            additionalPayload = additionalPayload
+                        )
+                    )
+                    put("health_state", healthState.wireValue)
+                    put("readiness_state", readinessState.wireValue)
+                    posture?.let { put("source_runtime_posture", it) }
+                }
+            )
+            return ReconciliationSignal(
+                kind = Kind.PARTICIPANT_STATE,
+                participantId = participantId,
+                taskId = null,
+                correlationId = null,
+                status = STATUS_STATE_CHANGED,
+                payload = payload,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
+            )
+        }
+
+        /**
+         * Creates a [Kind.RUNTIME_TRUTH_SNAPSHOT] signal carrying a full participant truth snapshot.
+         *
+         * The payload explicitly includes the unified continuity recovery state derived from
+         * [AndroidParticipantRuntimeTruth.inflightContinuityState] so V2 can consume
+         * recovery evidence directly from the payload without reading nested truth fields.
+         *
+         * When [v2RoutingDecision] is provided, the payload also includes structured routing
+         * metadata from [AndroidCrossRepoRecoveryStateRoutingContract] so V2 can route the
+         * recovery evidence to the correct handling path without re-inferring the category
+         * from the raw phase value (PR-119, INV-ROUTING-05).
+         *
+         * @param truth              The [AndroidParticipantRuntimeTruth] snapshot to publish.
+         * @param signalId           Unique signal identifier for deduplication.
+         * @param durableSessionId   Stable activation-era session identifier, when available.
+         * @param sessionContinuityEpoch Monotone reconnect epoch within [durableSessionId],
+         *                               when available.
+         * @param v2RoutingDecision  Optional routing decision from
+         *                           [AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase];
+         *                           when provided its wire map is merged into the payload.
+         */
+        fun runtimeTruthSnapshot(
+            truth: AndroidParticipantRuntimeTruth,
+            signalId: String = java.util.UUID.randomUUID().toString(),
+            durableSessionId: String? = null,
+            sessionContinuityEpoch: Int? = null,
+            v2RoutingDecision: AndroidCrossRepoRecoveryStateRoutingContract.RoutingDecision? = null,
+            additionalPayload: Map<String, Any?> = emptyMap()
+        ): ReconciliationSignal {
+            val normalizedRecoveryPhase = AndroidContinuityRecoveryStateModel.RecoveryPhase
+                .fromWireValue(truth.inflightContinuityState)
+            if (v2RoutingDecision != null) {
+                requireNotNull(normalizedRecoveryPhase) {
+                    "v2RoutingDecision requires a valid inflightContinuityState wire value"
+                }
+                require(v2RoutingDecision.phase == normalizedRecoveryPhase) {
+                    "v2RoutingDecision phase (${v2RoutingDecision.phase.wireValue}) must match " +
+                        "truth.inflightContinuityState (${normalizedRecoveryPhase.wireValue})"
+                }
+            }
+            // Promote inflight continuity state into explicit payload keys so V2 can consume
+            // recovery evidence directly from the reconciliation signal payload without having
+            // to read nested runtimeTruth fields (INV-REC-04).
+            val recoveryPayload = withUnifiedActionLifecycleSurface(
+                kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
+                status = STATUS_SNAPSHOT,
+                taskId = truth.activeTaskId,
+                reconciliationEpoch = truth.reconciliationEpoch,
+                payload = closureSemanticsPayload(
+                    isTerminalSignal = false,
+                    resultReturned = false,
+                    completionSignaled = false,
+                    closureReadyForAcceptance = false,
+                    outwardTruthSurfaceClass = AndroidCompletionClosureUplinkContract
+                        .OutwardTruthSurfaceClass.ANDROID_RUNTIME_VISIBLE_STATE
+                ).toMutableMap<String, Any?>().apply {
+                    truth.inflightContinuityState?.let {
+                        put(KEY_CONTINUITY_RECOVERY_STATE, it)
+                    }
+                    truth.inflightContinuitySource?.let {
+                        put(KEY_CONTINUITY_RECOVERY_SOURCE, it)
+                    }
+                    put(
+                        KEY_CONTINUITY_RECOVERY_SCHEMA_VERSION,
+                        AndroidContinuityRecoveryStateModel.SCHEMA_VERSION
+                    )
+                    // PR-119: include structured routing metadata so V2 can consume routing
+                    // intent without re-deriving it from the raw phase value (INV-ROUTING-05).
+                    v2RoutingDecision?.let { decision ->
+                        putAll(AndroidCrossRepoRecoveryStateRoutingContract.toWireMap(decision))
+                    }
+                    put(
+                        KEY_IMPLEMENTATION_REALITY_CHECKPOINT,
+                        AndroidImplementationRealityCheckpoint.build(truth)
+                    )
+                    truth.taskAllocationTruth?.let {
+                        put(KEY_TASK_ALLOCATION_TRUTH, it.toMap())
+                    }
+                    put(
+                        AndroidParticipantRuntimeTruth.KEY_PRESENCE_PARTICIPATION_PROJECTION,
+                        truth.presenceParticipationProjection.toMap()
+                    )
+                    put(KEY_RUNTIME_PARTICIPATION_TOPOLOGY, truth.runtimeParticipationTopology.toMap())
+                    truth.runtimeNodeIdentity?.let {
+                        put(KEY_AUTONOMY_RUNTIME_EVIDENCE, it.autonomyEvidence.toMap())
+                    }
+                    putAll(additionalPayload)
+                }
+            )
+            return ReconciliationSignal(
+                kind = Kind.RUNTIME_TRUTH_SNAPSHOT,
+                participantId = truth.participantId,
+                taskId = truth.activeTaskId,
+                correlationId = null,
+                status = STATUS_SNAPSHOT,
+                payload = recoveryPayload,
+                runtimeTruth = truth,
+                signalId = signalId,
+                emittedAtMs = System.currentTimeMillis(),
+                reconciliationEpoch = truth.reconciliationEpoch,
+                durableSessionId = durableSessionId,
+                sessionContinuityEpoch = sessionContinuityEpoch
+            )
+        }
+    }
+}

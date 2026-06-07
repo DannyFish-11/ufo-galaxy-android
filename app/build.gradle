@@ -1,0 +1,214 @@
+// UFO Galaxy Android - 模块级 build.gradle
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.ufo.galaxy'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.ufo.galaxy"
+        minSdk 26
+        targetSdk 35
+        // D1-FIX: versionCode = major*100 + minor*10 + patch (201 = 2.0.1)
+        versionCode 201
+        versionName "2.0.1"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        
+        vectorDrawables {
+            useSupportLibrary true
+        }
+
+        // ABI filters: arm64-v8a for modern 64-bit devices (primary); armeabi-v7a for
+        // legacy 32-bit devices. x86_64 is included for emulators and CI testing.
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
+        
+        // 构建配置字段
+        // NOTE: GALAXY_SERVER_URL is used only as the last-resort runtime fallback for
+        // AppConfig.serverUrl (build-time identity).  Effective runtime gateway URLs are
+        // sourced from AppSettings (SharedPreferences → assets/config.properties → here).
+        // B3-FIX: Default URL changed to localhost:9000 for V2 backend compatibility
+        // CRITICAL-6-FIX: Use wss:// even in debug builds to prevent cleartext fallback exposure
+        buildConfigField "String", "GALAXY_SERVER_URL", '"wss://localhost:9000"'
+        buildConfigField "String", "API_VERSION", '"v3.0"'
+        buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "true"
+        // R3-3-FIX: Certificate pinning hash for release builds. Set to placeholder by default.
+        // Before release: generate hash with:
+        //   openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \
+        //     openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \
+        //     openssl dgst -sha256 -binary | openssl enc -base64
+        // Then prefix with "sha256/" and set via -PcertPinHash=... or replace below.
+        buildConfigField "String", "CERT_PIN_HASH", '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"'
+        // MINIMUM-PRIVILEGE-FIX: Expected SHA-256 of the APK signing certificate.
+        // Set to the hex-encoded SHA-256 of your release keystore certificate.
+        // Generate with:
+        //   keytool -list -v -keystore your-release.keystore | grep "SHA256:" | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-Z' 'a-z'
+        // In debug builds the placeholder is ignored; in release builds a mismatch
+        // causes the app to crash on startup (anti-tampering).
+        buildConfigField "String", "EXPECTED_CERT_SHA256", '"PLACEHOLDER_SET_BEFORE_RELEASE"'
+        // NOTE: PLANNER_* / GROUNDING_* / SCALED_MAX_EDGE are last-resort fallback constants.
+        // Effective runtime values are owned by AppSettings:
+        //   SharedPreferences override → assets/config.properties → these BuildConfig values.
+        // Do not read these BuildConfig fields directly in business logic.
+        buildConfigField "int", "PLANNER_MAX_TOKENS", "512"
+        buildConfigField "double", "PLANNER_TEMPERATURE", "0.1"
+        buildConfigField "int", "PLANNER_TIMEOUT_MS", "30000"
+        buildConfigField "int", "GROUNDING_TIMEOUT_MS", "15000"
+        buildConfigField "int", "SCALED_MAX_EDGE", "720"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // B4-FIX: Use strict release network security config (cleartext disabled)
+            resValue "xml", "network_security_config", "@xml/network_security_config_release"
+            buildConfigField "String", "GALAXY_SERVER_URL", '"wss://galaxy.ufo.ai:9000"'
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            debuggable true
+        }
+    }
+
+    // Round-4 HIGH: fail release builds when certificate-pinning hash is still a placeholder
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == "release") {
+            variant.preBuildProvider.get().doFirst {
+                def pinHash = variant.buildConfigFields["CERT_PIN_HASH"]?.value
+                if (!pinHash || pinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
+                    throw new GradleException(
+                        "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
+                        "Generate the real hash with:\n" +
+                        "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
+                        "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
+                        "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
+                        "Then set it in build.gradle or via -PcertPinHash=sha256/YOUR_HASH"
+                    )
+                }
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    
+    buildFeatures {
+        compose true
+        viewBinding true
+        buildConfig true
+    }
+    
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.6'
+    }
+    
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+        // CRITICAL-7-FIX: Strip native debug symbols in release builds to reduce reverse engineering surface.
+        jniLibs {
+            keepDebugSymbols += ''
+        }
+    }
+
+    testOptions {
+        unitTests {
+            returnDefaultValues = true
+        }
+    }
+}
+
+dependencies {
+    // Kotlin
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    
+    // AndroidX Core
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.activity:activity-compose:1.8.2'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2'
+    
+    // Jetpack Compose
+    implementation platform('androidx.compose:compose-bom:2023.10.01')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.animation:animation'
+    implementation 'androidx.compose.foundation:foundation'
+    
+    // Material Design
+    implementation 'com.google.android.material:material:1.11.0'
+    
+    // 网络
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    
+    // ── Shared protocol module (cross-repo unification) ──────────────────────
+    implementation project(':shared-protocol')
+
+    // Serialization — JSON + MessagePack dual-format
+    // Gson is retained for legacy interop; kotlinx.serialization is the default.
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2'
+    implementation 'org.msgpack:msgpack-core:0.9.8'
+    
+    // 图片加载
+    implementation 'io.coil-kt:coil-compose:2.5.0'
+    
+    // 权限处理
+    implementation 'com.google.accompanist:accompanist-permissions:0.32.0'
+    
+    // 数据存储
+    implementation 'androidx.datastore:datastore-preferences:1.0.0'
+    // C8-FIX: WorkManager for deferrable background tasks (log upload, metrics,
+    // heartbeat alignment in Doze mode). Uses androidx.work:work-runtime-ktx for
+    // coroutine-friendly APIs.
+    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+    
+    // WebRTC (PR-5 real-time communication)
+    // Current version: io.github.webrtc-sdk:android:125.6422.07 (M125).
+    // Monitor https://github.com/webrtc-sdk/android/releases for security updates.
+    // CRITICAL-1-FIX: Upgraded from M120 (CVE-2024-4764, CVSS 10.0) to M125 (125.6422.07)
+    implementation 'io.github.webrtc-sdk:android:125.6422.07'
+    
+    // 测试
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    
+    // 调试
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+
+    // ── Local inference native runtimes ───────────────────────────────────────
+    // llama.cpp Android JNI bindings for MobileVLM GGUF inference (libllama.so).
+    // The AAR provides prebuilt arm64-v8a and armeabi-v7a shared libraries.
+    // Build tag b4833 corresponds to a stable llama.cpp release with Android JNI support.
+    implementation 'com.github.ggerganov:llama.cpp:b4833'
+
+    // NCNN Android inference library for SeeClick grounding (libncnn.so).
+    // The AAR provides prebuilt arm64-v8a, armeabi-v7a, and x86_64 shared libraries
+    // compiled with Vulkan and NEON acceleration.
+    implementation 'com.github.nihui:ncnn-android-vulkan:20240410'
+}
