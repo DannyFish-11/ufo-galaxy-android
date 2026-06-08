@@ -449,9 +449,12 @@ enum class MsgType(val value: String) {
  *                            Android MUST accept this field without failure.  `null` for
  *                            legacy senders.
  */
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
+
 data class AipMessage(
     val type: MsgType,
-    val payload: Any,
+    val payload: JsonElement = JsonNull,
     val correlation_id: String? = null,
     val protocol: String = "AIP/1.0",
     val version: String = "3.0",
