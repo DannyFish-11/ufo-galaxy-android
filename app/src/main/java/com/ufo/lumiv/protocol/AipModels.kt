@@ -1,5 +1,8 @@
 package com.ufo.lumiv.protocol
 
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
+
 /**
  * AIP v3 message type identifiers, mirroring server-side MsgType enum exactly.
  * Covers all message types used across the cloud-edge task pipeline.
@@ -302,7 +305,11 @@ enum class MsgType(val value: String) {
      *  and device state changes. Android updates its presence projection layer accordingly.
      *  Payload model: [StateEventPayload].
      *  @status cross-sync — payload defined; receive path wired in LumivConnectionService. */
-    STATE_EVENT("state_event");
+    STATE_EVENT("state_event"),
+
+    /** Uplink: device authentication message.
+     *  Payload model: [AuthMessage] from shared-protocol module. */
+    AUTH("auth");
 
     companion object {
         /**
@@ -451,9 +458,6 @@ enum class MsgType(val value: String) {
  *                            Android MUST accept this field without failure.  `null` for
  *                            legacy senders.
  */
-import com.google.gson.JsonElement
-import com.google.gson.JsonNull
-
 data class AipMessage(
     val type: MsgType,
     val payload: JsonElement = JsonNull,
@@ -471,28 +475,6 @@ data class AipMessage(
     // ── PR-G: V2 observability/tracing metadata (optional; null-safe for legacy senders) ──
     val dispatch_trace_id: String? = null,
     val session_correlation_id: String? = null
-)
-
-/**
- * PR-CROSS-SYNC: State event payload — V2 pushes phase transitions and state changes
- * to Android via this payload.
- *
- * @param event_category  Event category: "phase" | "task" | "skill" | "device" | "mesh".
- * @param event_action    Event action: e.g. "silent", "liminal", "manifest" for phase category.
- * @param from_phase      Previous phase (for phase transition events).
- * @param to_phase        New phase (for phase transition events).
- * @param source          Source of the event, e.g. "desktop_presence_runtime".
- * @param sync_type       Sync type: "cross_device_broadcast" | "direct_push".
- * @param payload         Extra event-specific data as key-value map.
- */
-data class StateEventPayload(
-    val event_category: String = "",
-    val event_action: String = "",
-    val from_phase: String = "",
-    val to_phase: String = "",
-    val source: String = "",
-    val sync_type: String = "cross_device_broadcast",
-    val payload: Map<String, Any> = emptyMap()
 )
 
 /**
