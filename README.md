@@ -56,7 +56,7 @@ Open the app → ⚙ icon → **Network & Diagnostics**:
 | Field | Example |
 |-------|---------|
 | Host / IP | `100.64.0.1` (Tailscale) or `192.168.1.100` |
-| Port | `8765` |
+| Port | `9000` |
 | Use TLS | off for dev, on for production |
 | Allow self-signed | dev/intranet only |
 | Device ID | leave blank for system default |
@@ -67,15 +67,15 @@ Tap **Save & Reconnect**.
 **Alternative — `assets/config.properties` (packaged default, no code change):**
 
 ```properties
-galaxy_gateway_url=ws://100.64.0.1:8765
-rest_base_url=http://100.64.0.1:8765
+galaxy_gateway_url=ws://100.64.0.1:9000
+rest_base_url=http://100.64.0.1:9000
 cross_device_enabled=true
 ```
 
 **Alternative — compile-time default (`app/build.gradle`):**
 
 ```gradle
-buildConfigField "String", "GALAXY_SERVER_URL", '"ws://192.168.1.100:8765"'
+buildConfigField "String", "GALAXY_SERVER_URL", '"ws://192.168.1.100:9000"'
 ```
 
 **Configuration priority (high → low):**

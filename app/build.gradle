@@ -67,8 +67,11 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // B4-FIX: Use strict release network security config (cleartext disabled)
-            resValue "xml", "network_security_config", "@xml/network_security_config_release"
+            // B4-FIX: 严格的 release 网络安全配置（禁用明文）由 release 源集覆盖提供
+            // (app/src/release/res/xml/network_security_config.xml)。
+            // 旧写法用 resValue 生成同名 xml/network_security_config，与 main 源集已有的
+            // res/xml/network_security_config.xml 文件冲突 → release 构建 duplicate resources 失败。
+            // manifest 仍引用 @xml/network_security_config：debug 用 main 版、release 自动用 release 版。
             buildConfigField "String", "GALAXY_SERVER_URL", '"wss://galaxy.ufo.ai:9000"'
         }
         debug {
@@ -112,7 +115,9 @@ android {
     }
     
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.6'
+        // Kotlin 1.9.21 要求 Compose 编译器扩展 1.5.7（1.5.6 仅匹配 1.9.20）。
+        // 版本不匹配会在干净构建时硬失败：「requires Kotlin version 1.9.20 ...」。
+        kotlinCompilerExtensionVersion '1.5.7'
     }
     
     packaging {
