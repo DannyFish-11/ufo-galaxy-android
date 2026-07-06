@@ -23,7 +23,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.GoalExecutionPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import okhttp3.Request
 import okhttp3.WebSocket
 import okio.ByteString

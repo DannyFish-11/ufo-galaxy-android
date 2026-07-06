@@ -1,5 +1,7 @@
 package com.ufo.galaxy.protocol
 
+import com.ufo.galaxy.shared.protocol.MsgType
+
 /**
  * Lightweight Android-side UGCP shared-schema alignment registry.
  *

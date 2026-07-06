@@ -3,7 +3,7 @@ package com.ufo.galaxy.runtime
 import com.google.gson.Gson
 import com.ufo.galaxy.agent.DelegatedRuntimeUnit
 import com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.junit.Assert.*
 import org.junit.Test
 

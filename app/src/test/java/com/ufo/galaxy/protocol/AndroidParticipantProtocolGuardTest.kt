@@ -1,5 +1,7 @@
 package com.ufo.galaxy.protocol
 
+import com.ufo.galaxy.shared.protocol.MsgType
+
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.ufo.galaxy.data.CapabilityReport

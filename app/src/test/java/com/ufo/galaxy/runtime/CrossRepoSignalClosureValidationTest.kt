@@ -11,7 +11,7 @@ import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.HandoffEnvelopeV2ResultPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

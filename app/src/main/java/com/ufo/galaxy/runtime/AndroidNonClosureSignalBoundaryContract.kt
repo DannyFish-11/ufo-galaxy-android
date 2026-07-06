@@ -1,6 +1,6 @@
 package com.ufo.galaxy.runtime
 
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 
 /**
  * PR-120 — Android Non-Closure Signal Boundary Contract.

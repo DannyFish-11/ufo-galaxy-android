@@ -14,7 +14,7 @@ import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
  * ## Production wiring
  *
  * In [com.ufo.galaxy.service.GalaxyConnectionService] the sink logs the event and
- * transmits it as a [com.ufo.galaxy.protocol.MsgType.DEVICE_EXECUTION_EVENT] AIP v3
+ * transmits it as a [com.ufo.galaxy.shared.protocol.MsgType.DEVICE_EXECUTION_EVENT] AIP v3
  * uplink message via [com.ufo.galaxy.network.GalaxyWebSocketClient.sendDeviceExecutionEvent]:
  *
  * ```kotlin
@@ -34,7 +34,7 @@ import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
  * ```
  *
  * @see DeviceExecutionEventPayload
- * @see com.ufo.galaxy.protocol.MsgType.DEVICE_EXECUTION_EVENT
+ * @see com.ufo.galaxy.shared.protocol.MsgType.DEVICE_EXECUTION_EVENT
  */
 fun interface DeviceExecutionEventSink {
 

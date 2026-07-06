@@ -3,7 +3,7 @@ package com.ufo.galaxy.network
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.ufo.galaxy.protocol.AipMessage
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel

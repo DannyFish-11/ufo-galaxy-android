@@ -1,6 +1,6 @@
 package com.ufo.galaxy.network
 
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test

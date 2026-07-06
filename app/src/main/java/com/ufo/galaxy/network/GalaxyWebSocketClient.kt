@@ -40,7 +40,7 @@ import com.ufo.galaxy.protocol.MeshResultPayload
 import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.shared.protocol.ReconnectionConfig
 import com.ufo.galaxy.shared.protocol.AuthMessage
 import kotlinx.coroutines.*
@@ -330,7 +330,7 @@ class GalaxyWebSocketClient(
         fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String? = null) = Unit
 
         /**
-         * Called when a [com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION] message is received.
+         * Called when a [com.ufo.galaxy.shared.protocol.MsgType.GOAL_EXECUTION] message is received.
          *
          * [taskId] is the task_id from the payload.
          * [goalPayloadJson] is the raw JSON of the payload, ready for deserialization
@@ -343,7 +343,7 @@ class GalaxyWebSocketClient(
         fun onGoalExecution(taskId: String, goalPayloadJson: String, traceId: String? = null) = Unit
 
         /**
-         * Called when a [com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK] message is received.
+         * Called when a [com.ufo.galaxy.shared.protocol.MsgType.PARALLEL_SUBTASK] message is received.
          *
          * [taskId] is the task_id from the payload.
          * [subtaskPayloadJson] is the raw JSON of the payload, ready for deserialization
@@ -356,7 +356,7 @@ class GalaxyWebSocketClient(
         fun onParallelSubtask(taskId: String, subtaskPayloadJson: String, traceId: String? = null) = Unit
 
         /**
-         * Called when a [com.ufo.galaxy.protocol.MsgType.TASK_CANCEL] message is received.
+         * Called when a [com.ufo.galaxy.shared.protocol.MsgType.TASK_CANCEL] message is received.
          *
          * [taskId] is the task_id from the cancel payload.
          * [cancelPayloadJson] is the raw JSON of the payload, ready for deserialization
@@ -368,7 +368,7 @@ class GalaxyWebSocketClient(
 
         /**
          * Called for any inbound message whose type belongs to
-         * [com.ufo.galaxy.protocol.MsgType.ADVANCED_TYPES] (PR-4 minimal-compat channels).
+         * [com.ufo.galaxy.shared.protocol.MsgType.ADVANCED_TYPES] (PR-4 minimal-compat channels).
          *
          * These channels are recognised by the AIP v3 model and will not be silently
          * dropped, but their full business logic is not yet implemented.
@@ -378,7 +378,7 @@ class GalaxyWebSocketClient(
          * @param messageId  Optional `message_id` field from the AIP v3 envelope.
          * @param rawJson    Full raw JSON of the inbound envelope (for logging/debugging).
          */
-        fun onAdvancedMessage(type: com.ufo.galaxy.protocol.MsgType, messageId: String?, rawJson: String) = Unit
+        fun onAdvancedMessage(type: com.ufo.galaxy.shared.protocol.MsgType, messageId: String?, rawJson: String) = Unit
 
         /**
          * Called when a completely unrecognised message type string is received.
@@ -392,7 +392,7 @@ class GalaxyWebSocketClient(
         fun onUnknownMessage(rawType: String?, rawJson: String) = Unit
 
         /**
-         * Called when a [com.ufo.galaxy.protocol.MsgType.STATE_EVENT] message is
+         * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
          * [eventCategory] is the event category: "phase", "task", "skill", "device", etc.
@@ -411,7 +411,7 @@ class GalaxyWebSocketClient(
         ) = Unit
 
         /**
-         * Called when a [com.ufo.galaxy.protocol.MsgType.HANDOFF_ENVELOPE_V2] message is
+         * Called when a [com.ufo.galaxy.shared.protocol.MsgType.HANDOFF_ENVELOPE_V2] message is
          * received (PR-H native consumption path).
          *
          * [taskId] is the task_id extracted from the envelope payload.
@@ -426,7 +426,7 @@ class GalaxyWebSocketClient(
         fun onHandoffEnvelopeV2(taskId: String, envelopePayloadJson: String, traceId: String? = null) = Unit
 
         /**
-         * Called when a [com.ufo.galaxy.protocol.MsgType.OPERATOR_ACTION_REQUEST] message is
+         * Called when a [com.ufo.galaxy.shared.protocol.MsgType.OPERATOR_ACTION_REQUEST] message is
          * received from V2/operator control surfaces.
          */
         fun onOperatorAction(
@@ -1272,7 +1272,7 @@ class GalaxyWebSocketClient(
             val msgTypeStr = root.get("type")?.asString
             val traceId = root.get("trace_id")?.asString
             val msgType = try {
-                msgTypeStr?.let { com.ufo.galaxy.protocol.MsgType.fromValue(it) }
+                msgTypeStr?.let { com.ufo.galaxy.shared.protocol.MsgType.fromValue(it) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1281,27 +1281,27 @@ class GalaxyWebSocketClient(
             }
 
             when (msgType) {
-                com.ufo.galaxy.protocol.MsgType.TASK_ASSIGN -> {
+                com.ufo.galaxy.shared.protocol.MsgType.TASK_ASSIGN -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onTaskAssign(taskId, payload?.toString() ?: "{}", traceId) }
                 }
-                com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION -> {
+                com.ufo.galaxy.shared.protocol.MsgType.GOAL_EXECUTION -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onGoalExecution(taskId, payload?.toString() ?: "{}", traceId) }
                 }
-                com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK -> {
+                com.ufo.galaxy.shared.protocol.MsgType.PARALLEL_SUBTASK -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onParallelSubtask(taskId, payload?.toString() ?: "{}", traceId) }
                 }
-                com.ufo.galaxy.protocol.MsgType.TASK_CANCEL -> {
+                com.ufo.galaxy.shared.protocol.MsgType.TASK_CANCEL -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onTaskCancel(taskId, payload?.toString() ?: "{}") }
                 }
-                com.ufo.galaxy.protocol.MsgType.STATE_EVENT -> {
+                com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT -> {
                     val payload = root.getAsJsonObject("payload")
                     val eventCategory = payload?.get("category")?.asString ?: ""
                     val eventAction = payload?.get("action")?.asString ?: ""
@@ -1309,24 +1309,24 @@ class GalaxyWebSocketClient(
                         it.onStateEvent(eventCategory, eventAction, payload?.toString() ?: "{}", traceId)
                     }
                 }
-                com.ufo.galaxy.protocol.MsgType.HANDOFF_ENVELOPE_V2 -> {
+                com.ufo.galaxy.shared.protocol.MsgType.HANDOFF_ENVELOPE_V2 -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onHandoffEnvelopeV2(taskId, payload?.toString() ?: "{}", traceId) }
                 }
-                com.ufo.galaxy.protocol.MsgType.OPERATOR_ACTION_REQUEST -> {
+                com.ufo.galaxy.shared.protocol.MsgType.OPERATOR_ACTION_REQUEST -> {
                     val payload = root.getAsJsonObject("payload")
                     val actionId = payload?.get("action_id")?.asString ?: ""
                     listeners.forEach { it.onOperatorAction(actionId, payload?.toString() ?: "{}", traceId) }
                 }
-                com.ufo.galaxy.protocol.MsgType.HEARTBEAT_ACK -> {
+                com.ufo.galaxy.shared.protocol.MsgType.HEARTBEAT_ACK -> {
                     onPongReceived()
                 }
-                in com.ufo.galaxy.protocol.MsgType.ADVANCED_TYPES -> {
+                in com.ufo.galaxy.shared.protocol.MsgType.ADVANCED_TYPES -> {
                     val messageId = root.get("message_id")?.asString
                     val type = msgType ?: run {
                         Log.w(TAG, "msgType is null in ADVANCED_TYPES branch, using UNKNOWN")
-                        com.ufo.galaxy.protocol.MsgType.UNKNOWN
+                        com.ufo.galaxy.shared.protocol.MsgType.UNKNOWN
                     }
                     listeners.forEach { it.onAdvancedMessage(type, messageId, text) }
                 }

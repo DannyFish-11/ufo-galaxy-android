@@ -17,7 +17,7 @@ import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.protocol.HybridDegradePayload
 import com.ufo.galaxy.protocol.HybridExecutePayload
 import com.ufo.galaxy.protocol.HybridResultPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration

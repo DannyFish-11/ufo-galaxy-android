@@ -11,7 +11,7 @@ import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskSubmitContext
 import com.ufo.galaxy.protocol.TaskSubmitPayload
 import com.ufo.galaxy.runtime.AndroidNlInitiationContract

@@ -5,7 +5,7 @@ import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
 import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
 import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull

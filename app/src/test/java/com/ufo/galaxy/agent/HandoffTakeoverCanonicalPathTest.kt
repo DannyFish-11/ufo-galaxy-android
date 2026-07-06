@@ -4,7 +4,7 @@ import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.coordination.MultiDeviceCoordinator
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.MetricsRecorder
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject

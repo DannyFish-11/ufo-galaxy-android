@@ -7,12 +7,12 @@ import java.util.concurrent.ConcurrentHashMap
  * Thread-safe registry that tracks the active coroutine [Job] for each running task.
  *
  * Used by [com.ufo.galaxy.service.GalaxyConnectionService] to support on-demand
- * cancellation of in-flight [com.ufo.galaxy.protocol.MsgType.GOAL_EXECUTION] and
- * [com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK] tasks.
+ * cancellation of in-flight [com.ufo.galaxy.shared.protocol.MsgType.GOAL_EXECUTION] and
+ * [com.ufo.galaxy.shared.protocol.MsgType.PARALLEL_SUBTASK] tasks.
  *
  * ## Lifecycle
  * 1. Call [register] when a task coroutine is launched.
- * 2. Call [cancel] when a [com.ufo.galaxy.protocol.MsgType.TASK_CANCEL] is received.
+ * 2. Call [cancel] when a [com.ufo.galaxy.shared.protocol.MsgType.TASK_CANCEL] is received.
  * 3. Call [deregister] in the task coroutine's `finally` block to release the slot.
  *
  * ## Idempotency

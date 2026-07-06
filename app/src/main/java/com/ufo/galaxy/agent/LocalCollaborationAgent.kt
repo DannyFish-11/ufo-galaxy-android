@@ -5,7 +5,7 @@ import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
 
 /**
- * Handles incoming [com.ufo.galaxy.protocol.MsgType.PARALLEL_SUBTASK] messages by
+ * Handles incoming [com.ufo.galaxy.shared.protocol.MsgType.PARALLEL_SUBTASK] messages by
  * delegating to [LocalGoalExecutor] and ensuring the [GoalResultPayload.group_id]
  * and [GoalResultPayload.subtask_index] are echoed back so the server can converge
  * parallel-group results.

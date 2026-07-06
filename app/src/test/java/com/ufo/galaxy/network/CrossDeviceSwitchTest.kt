@@ -3,7 +3,7 @@ package com.ufo.galaxy.network
 import com.google.gson.JsonParser
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.protocol.GoalExecutionPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
