@@ -4,7 +4,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.UnifiedReplayRecoveryContract
 import kotlinx.coroutines.CoroutineScope

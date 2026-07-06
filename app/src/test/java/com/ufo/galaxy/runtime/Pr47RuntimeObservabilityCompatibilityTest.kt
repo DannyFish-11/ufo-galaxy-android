@@ -12,7 +12,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

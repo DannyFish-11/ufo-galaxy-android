@@ -3,7 +3,7 @@ package com.ufo.galaxy.runtime
 import com.google.gson.Gson
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull

@@ -7,7 +7,7 @@ import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.GoalExecutionPayload
 import com.ufo.galaxy.protocol.GoalResultPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskSubmitPayload
 import kotlinx.coroutines.runBlocking

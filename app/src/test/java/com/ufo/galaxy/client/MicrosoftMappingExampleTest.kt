@@ -1,6 +1,6 @@
 package com.ufo.galaxy.client
 
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

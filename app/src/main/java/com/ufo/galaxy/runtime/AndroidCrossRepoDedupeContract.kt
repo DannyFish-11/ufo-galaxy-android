@@ -3,7 +3,7 @@ package com.ufo.galaxy.runtime
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 
 /**
  * Canonical cross-repo dedupe / idempotency contract for Android → V2 uplinks and replay.

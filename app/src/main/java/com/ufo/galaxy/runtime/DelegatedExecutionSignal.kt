@@ -607,7 +607,7 @@ data class DelegatedExecutionSignal(
 
 /**
  * Maps this [DelegatedExecutionSignal] to a [com.ufo.galaxy.protocol.DelegatedExecutionSignalPayload]
- * suitable for transmission as a [com.ufo.galaxy.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL]
+ * suitable for transmission as a [com.ufo.galaxy.shared.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL]
  * AIP v3 message.
  *
  * All required identity fields ([signalId], [emissionSeq], [taskId], [traceId],

@@ -9,7 +9,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.TraceContext
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskAssignPayload
 import org.junit.After
 import org.junit.Assert.assertEquals

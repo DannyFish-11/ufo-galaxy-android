@@ -1,7 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.ufo.galaxy.observability.GalaxyLogger
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull

@@ -5,7 +5,7 @@ import com.ufo.galaxy.protocol.DeviceGroundingPayload
 import com.ufo.galaxy.protocol.DeviceLocalPerceptionPayload
 import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
 import com.ufo.galaxy.protocol.DeviceVisionPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import okhttp3.Request
 import okhttp3.WebSocket
 import okio.ByteString

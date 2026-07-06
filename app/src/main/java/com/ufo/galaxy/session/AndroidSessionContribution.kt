@@ -68,7 +68,7 @@ data class AndroidSessionContribution(
         /** Task failed: error, timeout, model failure, or any non-success terminal state. */
         FAILURE,
 
-        /** Task was cancelled by an explicit [com.ufo.galaxy.protocol.MsgType.TASK_CANCEL]
+        /** Task was cancelled by an explicit [com.ufo.galaxy.shared.protocol.MsgType.TASK_CANCEL]
          *  request or runtime preemption. */
         CANCELLATION,
 

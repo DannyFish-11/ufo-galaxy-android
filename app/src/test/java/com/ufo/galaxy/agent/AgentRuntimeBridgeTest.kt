@@ -366,7 +366,7 @@ class AgentRuntimeBridgeTest {
     @Test
     fun `AipMessage accepts trace_id and route_mode fields`() {
         val msg = com.ufo.galaxy.protocol.AipMessage(
-            type = com.ufo.galaxy.protocol.MsgType.TASK_RESULT,
+            type = com.ufo.galaxy.shared.protocol.MsgType.TASK_RESULT,
             payload = mapOf("status" to "success"),
             correlation_id = "task-1",
             device_id = "phone-1",
@@ -380,7 +380,7 @@ class AgentRuntimeBridgeTest {
     @Test
     fun `AipMessage trace_id and route_mode default to null for backward compat`() {
         val msg = com.ufo.galaxy.protocol.AipMessage(
-            type = com.ufo.galaxy.protocol.MsgType.HEARTBEAT,
+            type = com.ufo.galaxy.shared.protocol.MsgType.HEARTBEAT,
             payload = emptyMap<String, Any>()
         )
         assertNull("trace_id must default to null for backward compat", msg.trace_id)

@@ -105,7 +105,7 @@ import com.ufo.galaxy.protocol.HybridDegradePayload
 import com.ufo.galaxy.protocol.HybridExecutePayload
 import com.ufo.galaxy.protocol.HybridResultPayload
 import com.ufo.galaxy.protocol.MeshTopologyPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.PeerExchangePayload
 import com.ufo.galaxy.protocol.PeerAnnouncePayload
@@ -501,7 +501,7 @@ class GalaxyConnectionService : Service() {
      * Receives [com.ufo.galaxy.runtime.DelegatedExecutionSignal] events (ACK / PROGRESS /
      * RESULT / TIMEOUT / CANCELLED) emitted by [delegatedTakeoverExecutor] and:
      *  1. Writes them to structured telemetry via [GalaxyLogger] (observability).
-     *  2. Transmits each signal as a [com.ufo.galaxy.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL]
+     *  2. Transmits each signal as a [com.ufo.galaxy.shared.protocol.MsgType.DELEGATED_EXECUTION_SIGNAL]
      *     AIP v3 message uplink via [webSocketClient] (PR-16 transport closure).
      *
      * Signal send failure never interrupts the delegated execution lifecycle — any error

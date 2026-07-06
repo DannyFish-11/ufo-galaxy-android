@@ -1,5 +1,7 @@
 package com.ufo.galaxy.protocol
 
+import com.ufo.galaxy.shared.protocol.MsgType
+
 import com.google.gson.Gson
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import org.junit.Assert.assertTrue

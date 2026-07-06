@@ -1,6 +1,6 @@
 package com.ufo.galaxy.runtime
 
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 
 /**
  * PR-14Android — Minimal Android ↔ V2 contract schema / version gate.
@@ -98,7 +98,7 @@ object AndroidV2ContractVersionGate {
     // ── AIP MsgType count anchor ──────────────────────────────────────────────
 
     /**
-     * The expected number of [com.ufo.galaxy.protocol.MsgType] enum entries at gate introduction.
+     * The expected number of [com.ufo.galaxy.shared.protocol.MsgType] enum entries at gate introduction.
      *
      * This count is a machine-verifiable drift anchor:
      *  - If [MsgType.entries.size] > [EXPECTED_MSG_TYPE_COUNT], a new type was added without

@@ -1,5 +1,7 @@
 package com.ufo.galaxy.protocol
 
+import com.ufo.galaxy.shared.protocol.MsgType
+
 import com.ufo.galaxy.network.OfflineTaskQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

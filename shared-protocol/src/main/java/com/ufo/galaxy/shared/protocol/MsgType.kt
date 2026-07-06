@@ -22,6 +22,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class MsgType(val value: String) {
 
+    /** SECURITY-FIX: Fallback for null or unrecognised message types. */
+    @SerialName("unknown")
+    UNKNOWN("unknown"),
+
     // ── Core protocol types ──────────────────────────────────────────────────────────────
 
     @SerialName("auth")
@@ -161,6 +165,11 @@ enum class MsgType(val value: String) {
 
     @SerialName("operator_action_result")
     OPERATOR_ACTION_RESULT("operator_action_result"),
+
+    /** DECISION_REQUEST: V2 asks the human to choose (human-in-the-loop / HITL).
+     *  Drives a decision notification; user reply goes back via human_input. */
+    @SerialName("decision_request")
+    DECISION_REQUEST("decision_request"),
 
     // ── Advanced / low-priority capability channels ──────────────────────────────────────
     // These types receive minimal-compat handling (log + optional ack) except where promoted.

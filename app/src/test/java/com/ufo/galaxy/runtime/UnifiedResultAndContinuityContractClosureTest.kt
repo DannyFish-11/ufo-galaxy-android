@@ -4,7 +4,7 @@ import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.GoalResultPayload
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue

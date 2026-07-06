@@ -1,6 +1,6 @@
 package com.ufo.galaxy.runtime
 
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 
 /**
  * PR-35 / PR-36 — Long-tail compatibility surface registry.

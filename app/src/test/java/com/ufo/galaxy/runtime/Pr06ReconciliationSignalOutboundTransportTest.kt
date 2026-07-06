@@ -2,7 +2,7 @@ package com.ufo.galaxy.runtime
 
 import com.google.gson.Gson
 import com.ufo.galaxy.protocol.AipMessage
-import com.ufo.galaxy.protocol.MsgType
+import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import org.junit.Assert.*
