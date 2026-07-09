@@ -43,6 +43,11 @@ dependencies {
     // AndroidX Core (for Context in DeviceIdProvider)
     implementation 'androidx.core:core-ktx:1.12.0'
 
+    // Encrypted persistent storage for DeviceIdProvider —— 提供 MasterKey.Builder /
+    // EncryptedSharedPreferences(此前 DeviceIdProvider 引用了 androidx.security.crypto.*
+    // 但模块未声明该依赖,shared-protocol 一编译即 Unresolved reference)。
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+
     // Testing
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
