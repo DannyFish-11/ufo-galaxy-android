@@ -37,8 +37,11 @@ dependencies {
 
     // Serialization — kotlinx.serialization is the canonical serializer;
     // Gson is listed as compileOnly for legacy interop (Android side).
+    // 版本对齐 2.8.9:security-crypto→tink 在运行时引入 gson 2.8.9,Gradle 的
+    // compile/runtime classpath 对齐会把编译期也约束到 strictly 2.8.9;若这里仍写
+    // 2.10.1 会与之冲突而无法解析。@SerializedName 注解在两版本间一致,降版无影响。
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2'
-    compileOnly 'com.google.code.gson:gson:2.10.1'
+    compileOnly 'com.google.code.gson:gson:2.8.9'
 
     // AndroidX Core (for Context in DeviceIdProvider)
     implementation 'androidx.core:core-ktx:1.12.0'
