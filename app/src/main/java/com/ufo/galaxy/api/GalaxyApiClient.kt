@@ -94,6 +94,80 @@ class GalaxyApiClient(
         return postWithFallback(v1Url = v1Url, legacyUrl = legacyUrl, body = body, action = "HEARTBEAT")
     }
 
+    /**
+     * Reconcile this device's local (typically offline-generated) conversation session
+     * into the user's canonical cross-device session line on V2.
+     *
+     * Posts to `POST /api/v1/sessions/reconcile`. After this call the local session id is
+     * aliased to the canonical thread on the backend, so every subsequent turn carrying
+     * that local id — online goal_execution, panel, or offline ingest — folds into the
+     * one shared conversation line. New v1-only endpoint: no legacy fallback.
+     *
+     * @param localSessionId     The device-local conversation session id to claim.
+     * @param canonicalSessionId Optional explicit target thread; blank → V2 picks the
+     *                           user's active thread or creates one.
+     * @param userId             Optional user id owning the canonical thread.
+     * @param deviceId           This device's id (for the session_sync push back).
+     * @param mergeHistory       When true, V2 merges the local session's recorded turns
+     *                           into the canonical thread.
+     */
+    fun reconcileSession(
+        localSessionId: String,
+        canonicalSessionId: String = "",
+        userId: String = "",
+        deviceId: String = "",
+        mergeHistory: Boolean = true
+    ): Result<JSONObject> {
+        val base = restBaseUrl.trimEnd('/')
+        val url = "$base/api/v1/sessions/reconcile"
+        val body = JSONObject().apply {
+            put("local_session_id", localSessionId)
+            if (canonicalSessionId.isNotBlank()) put("canonical_session_id", canonicalSessionId)
+            if (userId.isNotBlank()) put("user_id", userId)
+            if (deviceId.isNotBlank()) put("device_id", deviceId)
+            put("merge_history", mergeHistory)
+        }
+        return postDirect(url, body, action = "SESSION_RECONCILE")
+    }
+
+    /**
+     * Ingest a batch of conversation turns (typically recorded while the phone was
+     * offline) into the unified session line on V2.
+     *
+     * Posts to `POST /api/v1/sessions/ingest_turns`. The session id is alias-resolved to
+     * the canonical thread on the backend and each turn goes through the single unified
+     * memory door. New v1-only endpoint: no legacy fallback.
+     *
+     * @param sessionId The (possibly local/alias) conversation session id.
+     * @param turns     Ordered conversation turns to append.
+     * @param userId    Optional user id owning the thread.
+     * @param deviceId  This device's id.
+     */
+    fun ingestConversationTurns(
+        sessionId: String,
+        turns: List<ConversationTurn>,
+        userId: String = "",
+        deviceId: String = ""
+    ): Result<JSONObject> {
+        val base = restBaseUrl.trimEnd('/')
+        val url = "$base/api/v1/sessions/ingest_turns"
+        val turnsArray = org.json.JSONArray()
+        for (t in turns) {
+            turnsArray.put(JSONObject().apply {
+                put("role", t.role)
+                put("content", t.content)
+                if (t.tsMs > 0) put("ts", t.tsMs / 1000.0)
+            })
+        }
+        val body = JSONObject().apply {
+            put("session_id", sessionId)
+            if (userId.isNotBlank()) put("user_id", userId)
+            if (deviceId.isNotBlank()) put("device_id", deviceId)
+            put("turns", turnsArray)
+        }
+        return postDirect(url, body, action = "SESSION_INGEST_TURNS")
+    }
+
     // ── Internal helpers ────────────────────────────────────────────────────
 
     /**
@@ -154,6 +228,19 @@ class GalaxyApiClient(
             Result.failure(e)
         }
     }
+
+    /**
+     * One conversation turn for offline ingest.
+     *
+     * @param role    "user" | "assistant" (system turns are ignored by V2).
+     * @param content The turn text.
+     * @param tsMs    Client wall-clock timestamp in epoch millis (0 = omit).
+     */
+    data class ConversationTurn(
+        val role: String,
+        val content: String,
+        val tsMs: Long = 0L
+    )
 
     // ── Companion ────────────────────────────────────────────────────────────
 
