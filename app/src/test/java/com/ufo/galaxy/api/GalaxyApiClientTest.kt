@@ -206,4 +206,115 @@ class GalaxyApiClientTest {
         apiClient.sendHeartbeat("device-42")
         assertTrue("First request must target v1 path", urls[0].contains("/api/v1/devices/heartbeat"))
     }
+
+    // ── reconcileSession ───────────────────────────────────────────────────
+
+    /** Interceptor that captures both URL and request body for assertions. */
+    private fun capturingClient(
+        capturedUrls: MutableList<String>,
+        capturedBodies: MutableList<String>,
+        code: Int = 200
+    ): OkHttpClient {
+        val interceptor = Interceptor { chain ->
+            capturedUrls += chain.request().url.toString()
+            val buffer = okio.Buffer()
+            chain.request().body?.writeTo(buffer)
+            capturedBodies += buffer.readUtf8()
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message("OK")
+                .body("{\"success\": true}".toResponseBody("application/json".toMediaType()))
+                .build()
+        }
+        return OkHttpClient.Builder().addInterceptor(interceptor).build()
+    }
+
+    @Test
+    fun `reconcileSession posts to v1 reconcile endpoint with local session id`() {
+        val urls = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
+        val apiClient = GalaxyApiClient(
+            restBaseUrl = "http://gw.example.com:9000",
+            httpClient = capturingClient(urls, bodies)
+        )
+        val result = apiClient.reconcileSession(
+            localSessionId = "phone_local_1",
+            canonicalSessionId = "desk_main",
+            userId = "u1",
+            deviceId = "phone"
+        )
+        assertTrue("reconcile must succeed on 200", result.isSuccess)
+        assertEquals(1, urls.size)
+        assertTrue(urls[0].endsWith("/api/v1/sessions/reconcile"))
+        val body = JSONObject(bodies[0])
+        assertEquals("phone_local_1", body.getString("local_session_id"))
+        assertEquals("desk_main", body.getString("canonical_session_id"))
+        assertTrue(body.getBoolean("merge_history"))
+    }
+
+    @Test
+    fun `reconcileSession returns failure on network exception`() {
+        val apiClient = client(errorClient())
+        val result = apiClient.reconcileSession(localSessionId = "x")
+        assertFalse(result.isSuccess)
+    }
+
+    @Test
+    fun `reconcileSession does NOT fall back on 404 (v1-only endpoint)`() {
+        val urls = mutableListOf<String>()
+        val apiClient = GalaxyApiClient(
+            restBaseUrl = "http://gw.example.com:9000",
+            httpClient = urlCapturingClient(urls, code = 404)
+        )
+        val result = apiClient.reconcileSession(localSessionId = "x")
+        assertFalse("404 is a real failure for the v1-only endpoint", result.isSuccess)
+        assertEquals("Only one request — no legacy fallback", 1, urls.size)
+    }
+
+    // ── ingestConversationTurns ─────────────────────────────────────────────
+
+    @Test
+    fun `ingestConversationTurns posts turns array to v1 endpoint`() {
+        val urls = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
+        val apiClient = GalaxyApiClient(
+            restBaseUrl = "http://gw.example.com:9000",
+            httpClient = capturingClient(urls, bodies)
+        )
+        val result = apiClient.ingestConversationTurns(
+            sessionId = "phone_offline",
+            turns = listOf(
+                GalaxyApiClient.ConversationTurn("user", "离线问题", tsMs = 1000L),
+                GalaxyApiClient.ConversationTurn("assistant", "离线回答")
+            ),
+            userId = "u3",
+            deviceId = "phone"
+        )
+        assertTrue(result.isSuccess)
+        assertEquals(1, urls.size)
+        assertTrue(urls[0].endsWith("/api/v1/sessions/ingest_turns"))
+        val body = JSONObject(bodies[0])
+        assertEquals("phone_offline", body.getString("session_id"))
+        val turns = body.getJSONArray("turns")
+        assertEquals(2, turns.length())
+        assertEquals("user", turns.getJSONObject(0).getString("role"))
+        assertEquals(1.0, turns.getJSONObject(0).getDouble("ts"), 0.0001)
+        // 无 ts 的轮次不带 ts 字段
+        assertFalse(turns.getJSONObject(1).has("ts"))
+    }
+
+    @Test
+    fun `ingestConversationTurns handles empty list`() {
+        val urls = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
+        val apiClient = GalaxyApiClient(
+            restBaseUrl = "http://gw.example.com:9000",
+            httpClient = capturingClient(urls, bodies)
+        )
+        val result = apiClient.ingestConversationTurns(sessionId = "s", turns = emptyList())
+        assertTrue(result.isSuccess)
+        assertEquals(0, JSONObject(bodies[0]).getJSONArray("turns").length())
+    }
 }

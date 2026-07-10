@@ -3,6 +3,8 @@ package com.ufo.galaxy.shared.protocol
 import com.google.gson.annotations.SerializedName
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Unified WebSocket authentication message shared across Android and Wear OS.
@@ -57,11 +59,16 @@ data class AuthMessage(
      * through the unified transport layer.
      */
     fun toAipMessage(): AipMessage {
-        val payload = kotlinx.serialization.json.buildJsonObject {
+        val payload = buildJsonObject {
             put("token", token)
             put("device_type", deviceType)
             put("protocol_version", protocolVersion)
         }
         return AipMessage(
             type = MsgType.AUTH,
-            paylo
+            payload = payload,
+            deviceId = deviceId,
+            traceId = "auth_${System.currentTimeMillis()}"
+        )
+    }
+}

@@ -1,5 +1,7 @@
 package com.ufo.galaxy.shared.protocol
 
+import kotlin.math.pow
+
 /**
  * Unified reconnection and heartbeat configuration shared across Android and Wear OS.
  *
@@ -56,12 +58,12 @@ object ReconnectionConfig {
      * @return Delay in milliseconds to wait before the next reconnect attempt.
      */
     fun computeDelay(attempt: Int): Long {
-        val exponential = (INITIAL_DELAY_MS * kotlin.math.pow(MULTIPLIER, attempt.toDouble())).toLong()
+        val exponential = (INITIAL_DELAY_MS * MULTIPLIER.pow(attempt.toDouble())).toLong()
         val capped = exponential.coerceAtMost(MAX_DELAY_MS)
         val jitter = (-JITTER_MS..JITTER_MS).random()
         return (capped + jitter).coerceAtLeast(1_000L)
     }
 
     /** Convenience: Kotlin [Double.pow] wrapper for Java callers. */
-    private fun pow(base: Double, exp: Double): Double = kotlin.math.pow(base, exp)
+    private fun pow(base: Double, exp: Double): Double = base.pow(exp)
 }

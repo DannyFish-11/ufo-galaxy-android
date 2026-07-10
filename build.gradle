@@ -12,6 +12,10 @@ buildscript {
     dependencies {
         classpath 'com.android.tools.build:gradle:8.2.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // 提供 `org.jetbrains.kotlin.plugin.serialization` 插件 id(shared-protocol 按 id 应用
+        // 但未带版本)。此前 root 只有 kotlin-gradle-plugin 的 classpath,serialization 插件
+        // 无从解析 → shared-protocol/build.gradle 构建期报 "Plugin not found"。补上其 classpath。
+        classpath "org.jetbrains.kotlin:kotlin-serialization:$kotlin_version"
     }
 }
 
