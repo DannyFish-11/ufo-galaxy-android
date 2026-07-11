@@ -172,6 +172,50 @@ object HybridParticipantCapabilityBoundary {
         val rationale: String
     )
 
+    // ── Protocol response tag constants ───────────────────────────────────────
+
+    /**
+     * Wire tag key for including capability maturity in protocol response payloads.
+     *
+     * [CapabilityMaturity.CONTRACT_FIRST] capabilities MUST include this key in their
+     * response payload to avoid silent degrade behaviour.  The value must be
+     * [RESULT_MATURITY_CONTRACT_FIRST].
+     */
+    const val RESULT_CAPABILITY_MATURITY_TAG = "capability_maturity"
+
+    /**
+     * Wire value for [RESULT_CAPABILITY_MATURITY_TAG] when the capability is
+     * [CapabilityMaturity.CONTRACT_FIRST].
+     *
+     * V2 should interpret this value as: "Protocol accepted; implementation partial;
+     * do not dispatch full production workload to this capability yet."
+     */
+    const val RESULT_MATURITY_CONTRACT_FIRST = "contract_first"
+
+    /**
+     * Wire value for [RESULT_CAPABILITY_MATURITY_TAG] when the capability is
+     * [CapabilityMaturity.FULLY_WIRED].
+     */
+    const val RESULT_MATURITY_FULLY_WIRED = "fully_wired"
+
+    /**
+     * Wire reason value for a [HybridCapability.HYBRID_EXECUTE] CONTRACT_FIRST response.
+     *
+     * Include in the response payload's `reason` or `error` field to allow V2 to
+     * distinguish this intentional limitation from an execution failure.
+     */
+    const val REASON_HYBRID_EXECUTOR_NOT_IMPLEMENTED = "hybrid_executor_not_implemented"
+
+    /**
+     * Wire reason value for a [HybridCapability.RAG_QUERY] CONTRACT_FIRST response.
+     */
+    const val REASON_RAG_PIPELINE_NOT_IMPLEMENTED = "rag_pipeline_not_implemented"
+
+    /**
+     * Wire reason value for a [HybridCapability.CODE_EXECUTE] CONTRACT_FIRST response.
+     */
+    const val REASON_SANDBOX_NOT_IMPLEMENTED = "sandbox_not_implemented"
+
     // ── Capability boundary registry ──────────────────────────────────────────
 
     /**
@@ -278,50 +322,6 @@ object HybridParticipantCapabilityBoundary {
      */
     val contractFirstCapabilities: List<HybridCapability> =
         entries.filter { it.maturity == CapabilityMaturity.CONTRACT_FIRST }.map { it.capability }
-
-    // ── Protocol response tag constants ───────────────────────────────────────
-
-    /**
-     * Wire tag key for including capability maturity in protocol response payloads.
-     *
-     * [CapabilityMaturity.CONTRACT_FIRST] capabilities MUST include this key in their
-     * response payload to avoid silent degrade behaviour.  The value must be
-     * [RESULT_MATURITY_CONTRACT_FIRST].
-     */
-    const val RESULT_CAPABILITY_MATURITY_TAG = "capability_maturity"
-
-    /**
-     * Wire value for [RESULT_CAPABILITY_MATURITY_TAG] when the capability is
-     * [CapabilityMaturity.CONTRACT_FIRST].
-     *
-     * V2 should interpret this value as: "Protocol accepted; implementation partial;
-     * do not dispatch full production workload to this capability yet."
-     */
-    const val RESULT_MATURITY_CONTRACT_FIRST = "contract_first"
-
-    /**
-     * Wire value for [RESULT_CAPABILITY_MATURITY_TAG] when the capability is
-     * [CapabilityMaturity.FULLY_WIRED].
-     */
-    const val RESULT_MATURITY_FULLY_WIRED = "fully_wired"
-
-    /**
-     * Wire reason value for a [HybridCapability.HYBRID_EXECUTE] CONTRACT_FIRST response.
-     *
-     * Include in the response payload's `reason` or `error` field to allow V2 to
-     * distinguish this intentional limitation from an execution failure.
-     */
-    const val REASON_HYBRID_EXECUTOR_NOT_IMPLEMENTED = "hybrid_executor_not_implemented"
-
-    /**
-     * Wire reason value for a [HybridCapability.RAG_QUERY] CONTRACT_FIRST response.
-     */
-    const val REASON_RAG_PIPELINE_NOT_IMPLEMENTED = "rag_pipeline_not_implemented"
-
-    /**
-     * Wire reason value for a [HybridCapability.CODE_EXECUTE] CONTRACT_FIRST response.
-     */
-    const val REASON_SANDBOX_NOT_IMPLEMENTED = "sandbox_not_implemented"
 
     /**
      * Expected number of capability boundary entries in this registry.

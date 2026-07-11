@@ -1,5 +1,7 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.runtime.AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
+
 /**
  * PR-07 (Android) — Execution Result and State Uplink Discipline.
  *
@@ -162,51 +164,49 @@ object ExecutionUplinkDiscipline {
      * Key: [AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.wireValue].
      * Value: [UplinkDecision] governing what uplinks are required on entry to that phase.
      */
-    val UPLINK_DECISION_TABLE: Map<String, UplinkDecision> = run {
-        val P = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
-        mapOf(
-            P.CAPABILITY_IDLE.wireValue to UplinkDecision(
+    val UPLINK_DECISION_TABLE: Map<String, UplinkDecision> = mapOf(
+            ExecutionLifecyclePhase.CAPABILITY_IDLE.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.PROHIBITED,
                 stateUplinkRule = StateUplinkRule.OPTIONAL,
                 uplinkNote = "CAPABILITY_IDLE: no result signal; optional state snapshot on return to idle; " +
                     "capability is advertised via capability_report pathway"
             ),
-            P.PENDING.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.PENDING.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.PROHIBITED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "PENDING: publish state snapshot to inform V2 of acceptance; no result signal"
             ),
-            P.ACTIVATING.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.ACTIVATING.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.PROHIBITED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "ACTIVATING: publish state snapshot so V2 tracks in-preparation status; no result signal"
             ),
-            P.ACTIVE.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.ACTIVE.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.PROHIBITED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "ACTIVE: publish state snapshot with active task identity; ACK signal marks ACTIVE entry"
             ),
-            P.DEGRADED.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.DEGRADED.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.PROHIBITED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 degradedAware = true,
                 uplinkNote = "DEGRADED: publish state with fallback_tier and is_degraded_execution=true; " +
                     "V2 must not dispatch full-capability tasks to a DEGRADED participant"
             ),
-            P.INTERRUPTED.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.INTERRUPTED.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.REQUIRED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 interruptionAware = true,
                 uplinkNote = "INTERRUPTED: MUST emit RESULT(interruption) with interruption_cause and publish state; " +
                     "V2 applies its retry/fallback policy based on the interruption cause"
             ),
-            P.TIMED_OUT.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.TIMED_OUT.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.REQUIRED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "TIMED_OUT: MUST emit RESULT(TIMEOUT) and publish state; " +
                     "transition to terminal FAILED is immediate after uplinks"
             ),
-            P.RETRYING.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.RETRYING.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.PROHIBITED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 interruptionAware = true,
@@ -214,31 +214,30 @@ object ExecutionUplinkDiscipline {
                 uplinkNote = "RETRYING: publish state with retry_attempt_count ≥ 1; no result signal " +
                     "(retry is not a terminal outcome; V2 tracks retry count from state uplinks)"
             ),
-            P.COMPLETED.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.COMPLETED.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.REQUIRED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "COMPLETED: MUST emit RESULT(COMPLETED) and publish state; " +
                     "clear all in-flight task state after uplinks"
             ),
-            P.FAILED.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.FAILED.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.REQUIRED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "FAILED: MUST emit RESULT(FAILED/TIMEOUT/CANCELLED) and publish state; " +
                     "clear all in-flight task state after uplinks"
             ),
-            P.REJECTED.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.REJECTED.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.REQUIRED,
                 stateUplinkRule = StateUplinkRule.REQUIRED,
                 uplinkNote = "REJECTED: MUST emit RESULT(REJECTED) and publish state; " +
                     "clear all in-flight task state after uplinks"
             ),
-            P.UNKNOWN.wireValue to UplinkDecision(
+            ExecutionLifecyclePhase.UNKNOWN.wireValue to UplinkDecision(
                 resultUplinkRule = ResultUplinkRule.OPTIONAL,
                 stateUplinkRule = StateUplinkRule.OPTIONAL,
                 uplinkNote = "UNKNOWN: forward-compat sentinel; uplinks are not governed"
             )
         )
-    }
 
     // ── Decision function ─────────────────────────────────────────────────────
 

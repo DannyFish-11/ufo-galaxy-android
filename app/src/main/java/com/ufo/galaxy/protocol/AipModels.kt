@@ -62,7 +62,7 @@ import com.google.gson.JsonNull
 
 data class AipMessage(
     val type: MsgType,
-    val payload: JsonElement = JsonNull,
+    val payload: JsonElement = JsonNull.INSTANCE,
     val correlation_id: String? = null,
     val protocol: String = "AIP/1.0",
     val version: String = "3.0",

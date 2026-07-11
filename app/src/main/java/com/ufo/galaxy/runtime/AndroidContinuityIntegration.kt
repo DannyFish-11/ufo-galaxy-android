@@ -552,7 +552,7 @@ class AndroidContinuityIntegration {
             durableSessionId = durableSession?.durableSessionId,
             continuityEpoch = durableSession?.sessionContinuityEpoch
         )
-        val priorPhase = priorFlowRecord?.executionPhase?.let(AndroidFlowExecutionPhase::fromWireValue)
+        val priorPhase = priorFlowRecord?.executionPhase?.let(AndroidFlowExecutionPhase::fromValue)
         return when {
             duplicateDetected ->
                 ContinuityGovernanceDecision(

@@ -299,8 +299,90 @@ class GalaxyWebSocketClient(
             }
             return builder.build()
         }
+
+        // -----------------------------------------------------------------
+        // DUAL-FORMAT: MessagePack helpers (merged from second companion)
+        // -----------------------------------------------------------------
+
+        private const val TAG_COMPANION = "GalaxyWebSocket"
+
+        /**
+         * Unpack a MessagePack byte array into a JSON string.
+         * Returns null if unpacking fails (falls back to JSON on caller side).
+         */
+        fun unpackMsgpack(data: ByteArray): String? {
+            return try {
+                val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
+                val value = unpacker.unpackValue()
+                unpacker.close()
+                value.toString()
+            } catch (e: Exception) {
+                Log.w(TAG_COMPANION, "Msgpack unpack failed: ${e.message}")
+                null
+            }
+        }
+
+        /**
+         * Shared Gson instance for MessagePack packing.
+         * Gson is thread-safe so a single instance can be reused across all calls.
+         */
+        private val gsonShared: Gson by lazy { Gson() }
+
+        /**
+         * Pack a JSON string into a MessagePack byte array.
+         * Returns null if packing fails (falls back to JSON on caller side).
+         *
+         * **P1 optimisation**: reuses [gsonShared] instead of creating a new Gson()
+         * instance on every invocation, reducing GC pressure on the hot send path.
+         */
+        fun packMsgpack(json: String): ByteArray? {
+            return try {
+                val element = gsonShared.fromJson(json, com.google.gson.JsonElement::class.java)
+                val packer = org.msgpack.core.MessagePack.newDefaultBufferPacker()
+                packGsonElement(packer, element)
+                packer.toByteArray()
+            } catch (e: Exception) {
+                Log.w(TAG_COMPANION, "Msgpack pack failed: ${e.message}")
+                null
+            }
+        }
+
+        private fun packGsonElement(packer: org.msgpack.core.MessagePacker, element: com.google.gson.JsonElement) {
+            when {
+                element.isJsonObject -> {
+                    val obj = element.asJsonObject
+                    packer.packMapHeader(obj.size())
+                    obj.entrySet().forEach { (key, value) ->
+                        packer.packString(key)
+                        packGsonElement(packer, value)
+                    }
+                }
+                element.isJsonArray -> {
+                    val arr = element.asJsonArray
+                    packer.packArrayHeader(arr.size())
+                    arr.forEach { packGsonElement(packer, it) }
+                }
+                element.isJsonPrimitive -> {
+                    val p = element.asJsonPrimitive
+                    when {
+                        p.isString -> packer.packString(p.asString)
+                        p.isBoolean -> packer.packBoolean(p.asBoolean)
+                        p.isNumber -> {
+                            val num = p.asNumber
+                            if (num.toDouble() == num.toLong().toDouble()) {
+                                packer.packLong(num.toLong())
+                            } else {
+                                packer.packDouble(num.toDouble())
+                            }
+                        }
+                        else -> packer.packString(p.asString)
+                    }
+                }
+                element.isJsonNull -> packer.packNil()
+            }
+        }
     }
-    
+
     /**
      * WebSocket 监听器接口
      */
@@ -2436,7 +2518,7 @@ class GalaxyWebSocketClient(
         )
         val envelope = AipMessage(
             type = MsgType.MESH_LEAVE,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = deviceId,
             trace_id = sessionTraceId,
             runtime_session_id = runtimeSessionId,
@@ -2471,7 +2553,7 @@ class GalaxyWebSocketClient(
         )
         val envelope = AipMessage(
             type = MsgType.MESH_JOIN,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = getDeviceId(),
             trace_id = sessionTraceId,
             runtime_session_id = runtimeSessionId,
@@ -2546,7 +2628,7 @@ class GalaxyWebSocketClient(
         )
         val envelope = AipMessage(
             type = MsgType.MESH_RESULT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             correlation_id = taskId,
             device_id = deviceId,
             trace_id = sessionTraceId,
@@ -2587,7 +2669,7 @@ class GalaxyWebSocketClient(
             )
             val envelope = AipMessage(
                 type = MsgType.DEVICE_EXECUTION_EVENT,
-                payload = enrichedPayload,
+                payload = gson.toJsonTree(enrichedPayload),
                 device_id = deviceId,
                 correlation_id = payload.task_id,
                 trace_id = sessionTraceId,
@@ -2632,7 +2714,7 @@ class GalaxyWebSocketClient(
             )
             val envelope = AipMessage(
                 type = MsgType.DEVICE_PERCEPTION_EMISSION,
-                payload = enrichedPayload,
+                payload = gson.toJsonTree(enrichedPayload),
                 device_id = deviceId,
                 correlation_id = enrichedPayload.task_id,
                 trace_id = traceId,
@@ -3133,86 +3215,7 @@ class GalaxyWebSocketClient(
     }
 
     // -----------------------------------------------------------------
-    // DUAL-FORMAT: MessagePack helpers
+    // DUAL-FORMAT: MessagePack helpers moved to class-level companion object above
+    // (merged to resolve duplicate companion object).
     // -----------------------------------------------------------------
-
-    companion object {
-        private const val TAG_COMPANION = "GalaxyWebSocket"
-
-        /**
-         * Unpack a MessagePack byte array into a JSON string.
-         * Returns null if unpacking fails (falls back to JSON on caller side).
-         */
-        fun unpackMsgpack(data: ByteArray): String? {
-            return try {
-                val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
-                val value = unpacker.unpackValue()
-                unpacker.close()
-                value.toString()
-            } catch (e: Exception) {
-                Log.w(TAG_COMPANION, "Msgpack unpack failed: ${e.message}")
-                null
-            }
-        }
-
-        /**
-         * Shared Gson instance for MessagePack packing.
-         * Gson is thread-safe so a single instance can be reused across all calls.
-         */
-        private val gsonShared: Gson by lazy { Gson() }
-
-        /**
-         * Pack a JSON string into a MessagePack byte array.
-         * Returns null if packing fails (falls back to JSON on caller side).
-         *
-         * **P1 optimisation**: reuses [gsonShared] instead of creating a new Gson()
-         * instance on every invocation, reducing GC pressure on the hot send path.
-         */
-        fun packMsgpack(json: String): ByteArray? {
-            return try {
-                val element = gsonShared.fromJson(json, com.google.gson.JsonElement::class.java)
-                val packer = org.msgpack.core.MessagePack.newDefaultBufferPacker()
-                packGsonElement(packer, element)
-                packer.toByteArray()
-            } catch (e: Exception) {
-                Log.w(TAG_COMPANION, "Msgpack pack failed: ${e.message}")
-                null
-            }
-        }
-
-        private fun packGsonElement(packer: org.msgpack.core.MessagePacker, element: com.google.gson.JsonElement) {
-            when {
-                element.isJsonObject -> {
-                    val obj = element.asJsonObject
-                    packer.packMapHeader(obj.size())
-                    obj.entrySet().forEach { (key, value) ->
-                        packer.packString(key)
-                        packGsonElement(packer, value)
-                    }
-                }
-                element.isJsonArray -> {
-                    val arr = element.asJsonArray
-                    packer.packArrayHeader(arr.size())
-                    arr.forEach { packGsonElement(packer, it) }
-                }
-                element.isJsonPrimitive -> {
-                    val p = element.asJsonPrimitive
-                    when {
-                        p.isString -> packer.packString(p.asString)
-                        p.isBoolean -> packer.packBoolean(p.asBoolean)
-                        p.isNumber -> {
-                            val num = p.asNumber
-                            if (num.toDouble() == num.toLong().toDouble()) {
-                                packer.packLong(num.toLong())
-                            } else {
-                                packer.packDouble(num.toDouble())
-                            }
-                        }
-                        else -> packer.packString(p.asString)
-                    }
-                }
-                element.isJsonNull -> packer.packNil()
-            }
-        }
-    }
 }
