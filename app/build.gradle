@@ -196,6 +196,9 @@ dependencies {
     // Google 登录(OAuthManager 的 GoogleSignIn / GoogleSignInAccount / ApiException /
     // Tasks —— com.google.android.gms.auth.* 都来自这里)
     implementation 'com.google.android.gms:play-services-auth:21.2.0'
+
+    // Custom Tabs(OAuthManager 用 CustomTabsIntent 打开 GitHub OAuth 授权页)
+    implementation 'androidx.browser:browser:1.7.0'
     // C8-FIX: WorkManager for deferrable background tasks (log upload, metrics,
     // heartbeat alignment in Doze mode). Uses androidx.work:work-runtime-ktx for
     // coroutine-friendly APIs.
