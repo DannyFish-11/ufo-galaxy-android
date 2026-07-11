@@ -457,6 +457,73 @@ class RuntimeController(
     companion object {
         /** Maximum time the start lock may be held before it is considered stale (ms). */
         private const val START_LOCK_TIMEOUT_MS = 60_000L
+
+        private const val TAG = "GALAXY:RUNTIME"
+        const val ENTRYPOINT_ROLE = "stage_entry"
+
+        /** Default maximum time to wait for a WS connection during [startWithTimeout]. */
+        const val DEFAULT_REGISTRATION_TIMEOUT_MS = 15_000L
+
+        /**
+         * PR-Block1 — Delay (ms) before the watchdog re-enters [ReconnectRecoveryState.RECOVERING]
+         * from [ReconnectRecoveryState.FAILED].
+         *
+         * This must be long enough that the UI has time to show a "failed" banner (UX) and
+         * that we do not storm immediately, but short enough that the participant re-enters
+         * the visible recovery cycle within the next WS watchdog attempt window.
+         * Set to 35 s — slightly longer than the WS cap delay (30 s + up to 1 s jitter)
+         * so the recovery-state transition FAILED → RECOVERING precedes the next watchdog
+         * reconnect attempt in most practical cases.
+         */
+        const val WATCHDOG_RECOVERY_REENTRY_DELAY_MS = 35_000L
+
+        /**
+         * PR-2 — Buffer capacity for [_formationRebalanceEvent].
+         *
+         * Sized to accommodate a burst of formation events (e.g. multiple participants
+         * transitioning simultaneously in a mesh session) without dropping events when
+         * observers are briefly slow to drain the flow.
+         */
+        private const val FORMATION_REBALANCE_EVENT_BUFFER_CAPACITY = 16
+
+        /**
+         * PR-37 — Buffer capacity for [_lifecycleTransitionEvents].
+         *
+         * Sized to accommodate a sequence of rapid state transitions (e.g. start → active
+         * → disconnect → reconnect → active) without dropping events when observers are
+         * briefly slow to drain.
+         */
+        private const val LIFECYCLE_TRANSITION_EVENT_BUFFER_CAPACITY = 32
+
+        /**
+         * PR-43 — Buffer capacity for [_v2LifecycleEvents].
+         *
+         * Sized to accommodate a burst of lifecycle events (connect → health-change →
+         * readiness-change) without dropping events when the V2 harness consumer is
+         * briefly slow to drain.
+         */
+        private const val V2_LIFECYCLE_EVENT_BUFFER_CAPACITY = 16
+
+        /**
+         * PR-52 — Buffer capacity for [_reconciliationSignals].
+         *
+         * Sized to accommodate a burst of task lifecycle signals (accepted → status update
+         * → terminal) plus concurrent participant-state and snapshot signals without
+         * dropping events when the V2 consumer is briefly slow to drain.
+         */
+        private const val RECONCILIATION_SIGNAL_BUFFER_CAPACITY = 32
+        // Terminal reconciliation retry should remain short-lived: long enough to survive
+        // brief collector backpressure, but bounded to avoid hanging retry coroutines.
+        private const val RECONCILIATION_SIGNAL_RETRY_TIMEOUT_MS = 2_000L
+
+        /**
+         * PR-118 — Buffer capacity for [_continuityDiagnosticsEvents].
+         *
+         * Sized to accommodate a burst of continuity events across a reconnect cycle
+         * (classification + recovery artifact + reconciliation signals) without dropping
+         * events when the service consumer is briefly slow to drain.
+         */
+        private const val CONTINUITY_DIAGNOSTICS_BUFFER_CAPACITY = 32
     }
 
     /**
@@ -4117,74 +4184,4 @@ class RuntimeController(
         }
     }
 
-    // ── Companion ─────────────────────────────────────────────────────────────
-
-    companion object {
-        private const val TAG = "GALAXY:RUNTIME"
-        const val ENTRYPOINT_ROLE = "stage_entry"
-
-        /** Default maximum time to wait for a WS connection during [startWithTimeout]. */
-        const val DEFAULT_REGISTRATION_TIMEOUT_MS = 15_000L
-
-        /**
-         * PR-Block1 — Delay (ms) before the watchdog re-enters [ReconnectRecoveryState.RECOVERING]
-         * from [ReconnectRecoveryState.FAILED].
-         *
-         * This must be long enough that the UI has time to show a "failed" banner (UX) and
-         * that we do not storm immediately, but short enough that the participant re-enters
-         * the visible recovery cycle within the next WS watchdog attempt window.
-         * Set to 35 s — slightly longer than the WS cap delay (30 s + up to 1 s jitter)
-         * so the recovery-state transition FAILED → RECOVERING precedes the next watchdog
-         * reconnect attempt in most practical cases.
-         */
-        const val WATCHDOG_RECOVERY_REENTRY_DELAY_MS = 35_000L
-
-        /**
-         * PR-2 — Buffer capacity for [_formationRebalanceEvent].
-         *
-         * Sized to accommodate a burst of formation events (e.g. multiple participants
-         * transitioning simultaneously in a mesh session) without dropping events when
-         * observers are briefly slow to drain the flow.
-         */
-        private const val FORMATION_REBALANCE_EVENT_BUFFER_CAPACITY = 16
-
-        /**
-         * PR-37 — Buffer capacity for [_lifecycleTransitionEvents].
-         *
-         * Sized to accommodate a sequence of rapid state transitions (e.g. start → active
-         * → disconnect → reconnect → active) without dropping events when observers are
-         * briefly slow to drain.
-         */
-        private const val LIFECYCLE_TRANSITION_EVENT_BUFFER_CAPACITY = 32
-
-        /**
-         * PR-43 — Buffer capacity for [_v2LifecycleEvents].
-         *
-         * Sized to accommodate a burst of lifecycle events (connect → health-change →
-         * readiness-change) without dropping events when the V2 harness consumer is
-         * briefly slow to drain.
-         */
-        private const val V2_LIFECYCLE_EVENT_BUFFER_CAPACITY = 16
-
-        /**
-         * PR-52 — Buffer capacity for [_reconciliationSignals].
-         *
-         * Sized to accommodate a burst of task lifecycle signals (accepted → status update
-         * → terminal) plus concurrent participant-state and snapshot signals without
-         * dropping events when the V2 consumer is briefly slow to drain.
-         */
-        private const val RECONCILIATION_SIGNAL_BUFFER_CAPACITY = 32
-        // Terminal reconciliation retry should remain short-lived: long enough to survive
-        // brief collector backpressure, but bounded to avoid hanging retry coroutines.
-        private const val RECONCILIATION_SIGNAL_RETRY_TIMEOUT_MS = 2_000L
-
-        /**
-         * PR-118 — Buffer capacity for [_continuityDiagnosticsEvents].
-         *
-         * Sized to accommodate a burst of continuity events across a reconnect cycle
-         * (classification + recovery artifact + reconciliation signals) without dropping
-         * events when the service consumer is briefly slow to drain.
-         */
-        private const val CONTINUITY_DIAGNOSTICS_BUFFER_CAPACITY = 32
-    }
 }

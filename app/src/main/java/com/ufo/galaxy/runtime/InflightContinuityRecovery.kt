@@ -77,6 +77,7 @@ data class InflightContinuityRecoveryArtifact(
     }
 
     companion object {
+        private const val TAG = "GALAXY:INFLIGHT_RECOVERY"
         const val KEY_TASK_ID = "inflight_task_id"
         const val KEY_ACTIVE_TASK_STATUS = "inflight_task_status"
         const val KEY_DURABLE_SESSION_ID = "inflight_durable_session_id"

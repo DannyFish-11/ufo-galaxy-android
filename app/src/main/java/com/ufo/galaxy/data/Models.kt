@@ -294,8 +294,8 @@ data class CapabilityReport(
         return mapOf(
             KEY_METADATA_REQUIRED_COMPLETE to missingRequired.isEmpty(),
             KEY_METADATA_CANONICAL_GATE_COMPLETE to missingCanonical.isEmpty(),
-            KEY_METADATA_CANONICAL_GATE_VALID to malformedCanonical.isEmpty() &&
-                canonicalContractIssues.isEmpty(),
+            KEY_METADATA_CANONICAL_GATE_VALID to (malformedCanonical.isEmpty() &&
+                canonicalContractIssues.isEmpty()),
             KEY_METADATA_SCHEDULING_BASIS_COMPLETE to missingScheduling.isEmpty(),
             KEY_METADATA_MISSING_REQUIRED_KEYS to missingRequired,
             KEY_METADATA_MISSING_CANONICAL_GATE_KEYS to missingCanonical,

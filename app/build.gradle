@@ -60,6 +60,10 @@ android {
         buildConfigField "int", "PLANNER_TIMEOUT_MS", "30000"
         buildConfigField "int", "GROUNDING_TIMEOUT_MS", "15000"
         buildConfigField "int", "SCALED_MAX_EDGE", "720"
+        // OAuth 客户端 ID(OAuthManager 读 BuildConfig.OAUTH_*_CLIENT_ID;缺失会编译报
+        // Unresolved,故在此声明占位值,发布前用 -PoauthGoogleClientId=... 等覆盖)
+        buildConfigField "String", "OAUTH_GOOGLE_CLIENT_ID", '"YOUR_GOOGLE_WEB_CLIENT_ID"'
+        buildConfigField "String", "OAUTH_GITHUB_CLIENT_ID", '"YOUR_GITHUB_CLIENT_ID"'
     }
 
     buildTypes {
@@ -157,6 +161,8 @@ dependencies {
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.animation:animation'
     implementation 'androidx.compose.foundation:foundation'
+    // 扩展图标集(BugReport / Mic / ContentCopy 等语义图标不在 core 集里,由 BOM 统一版本)
+    implementation 'androidx.compose.material:material-icons-extended'
     
     // Material Design
     implementation 'com.google.android.material:material:1.11.0'
@@ -183,6 +189,16 @@ dependencies {
     
     // 数据存储
     implementation 'androidx.datastore:datastore-preferences:1.0.0'
+    // 加密本地存储(AppSettings 的 EncryptedSharedPreferences / MasterKey;MasterKey
+    // 在 1.1.0-alpha 起提供)
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+
+    // Google 登录(OAuthManager 的 GoogleSignIn / GoogleSignInAccount / ApiException /
+    // Tasks —— com.google.android.gms.auth.* 都来自这里)
+    implementation 'com.google.android.gms:play-services-auth:21.2.0'
+
+    // Custom Tabs(OAuthManager 用 CustomTabsIntent 打开 GitHub OAuth 授权页)
+    implementation 'androidx.browser:browser:1.7.0'
     // C8-FIX: WorkManager for deferrable background tasks (log upload, metrics,
     // heartbeat alignment in Doze mode). Uses androidx.work:work-runtime-ktx for
     // coroutine-friendly APIs.
@@ -206,14 +222,24 @@ dependencies {
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
 
-    // ── Local inference native runtimes ───────────────────────────────────────
-    // llama.cpp Android JNI bindings for MobileVLM GGUF inference (libllama.so).
-    // The AAR provides prebuilt arm64-v8a and armeabi-v7a shared libraries.
-    // Build tag b4833 corresponds to a stable llama.cpp release with Android JNI support.
-    implementation 'com.github.ggerganov:llama.cpp:b4833'
-
-    // NCNN Android inference library for SeeClick grounding (libncnn.so).
-    // The AAR provides prebuilt arm64-v8a, armeabi-v7a, and x86_64 shared libraries
-    // compiled with Vulkan and NEON acceleration.
-    implementation 'com.github.nihui:ncnn-android-vulkan:20240410'
+    // ── Local inference native runtimes (libllama.so / libncnn.so) ────────────
+    // 不通过 Gradle 依赖引入:llama.cpp(ggerganov)与 ncnn(nihui)都是 C++/CMake
+    // 工程,JitPack 无法把它们构建成 Android AAR —— 之前的
+    //   implementation 'com.github.ggerganov:llama.cpp:b4833'
+    //   implementation 'com.github.nihui:ncnn-android-vulkan:20240410'
+    // 这两条坐标【永远无法解析】(JitPack 对 llama.cpp 返回 not-found、对 ncnn 返回
+    // 401),会让全新克隆的 gradle 构建卡死在 :app:...MergeDependencyArtifacts 依赖
+    // 解析阶段(main 上一直红)。而这两个库在本工程里【只提供运行时 .so】:Kotlin 侧
+    // 走 System.loadLibrary("llama"/"ncnn") + external fun 动态链接(见
+    // runtime/NativeInferenceLoader.kt、planner/LlamaCppPlannerService.kt、
+    // grounding/NcnnGroundingService.kt),编译期不需要它们的任何符号;且
+    // NativeInferenceLoader 已在 .so 缺失时捕获 UnsatisfiedLinkError 优雅降级
+    // (本地推理关闭,不崩)。故这里去掉这两条无效依赖,让 app 能从克隆直接构建。
+    //
+    // 正确的接入方式(需要真机端侧推理时):把预编译 .so 放进
+    //   app/src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/libllama.so、libncnn.so
+    //   · libllama.so:按 llama.cpp docs/android.md 用 NDK/CMake 从源码交叉编译;
+    //   · libncnn.so :从 ncnn Releases 的 ncnn-YYYYMMDD-android-vulkan.zip 解压取用。
+    // 放好后 loadLibrary 即自动加载,无需改本文件(jniLibs 已在 android{} 内配置)。
+    // 详见 app/src/main/jniLibs/README.md。
 }

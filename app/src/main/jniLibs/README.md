@@ -2,6 +2,12 @@
 
 This directory contains pre-compiled native libraries for local on-device inference.
 
+> **不要通过 Gradle / JitPack 引入这两个库。** `com.github.ggerganov:llama.cpp`
+> 与 `com.github.nihui:ncnn-android-vulkan` 都是 C++/CMake 工程,JitPack 无法把它们
+> 构建成 Android AAR(前者返回 not-found、后者返回 401),写成 `implementation`
+> 会让全新克隆的 gradle 构建卡死在依赖解析阶段。正确做法就是本文件描述的:把从源码
+> 交叉编译出的 `.so` 放进下面对应 ABI 目录,运行时由 `System.loadLibrary` 动态加载。
+
 ## Required Libraries
 
 | Library | Purpose | Source |

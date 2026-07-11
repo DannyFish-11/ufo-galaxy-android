@@ -941,4 +941,10 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
             val props = Properties()
             try {
                 context.assets.open("config.properties").use { props.load(it) }
-            } catch (
+            } catch (e: Exception) {
+                Log.w("AppSettings", "config.properties not found or unreadable: ${e.message}")
+            }
+            return props
+        }
+    }
+}

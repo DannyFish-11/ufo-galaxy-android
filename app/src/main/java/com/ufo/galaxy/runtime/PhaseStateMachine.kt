@@ -35,17 +35,20 @@ class PhaseStateMachine {
 
         /** SharedPreferences key for phase persistence. */
         private const val PREFS_KEY = "phase_state_machine_current"
+    }
 
-        /** The three canonical phases. */
-        enum class Phase(val wireValue: String) {
-            SILENT("silent"),
-            LIMINAL("liminal"),
-            MANIFEST("manifest");
+    /** The three canonical phases.
+     *  注意:必须是 PhaseStateMachine 的【直接】嵌套类,不能放进 companion object——
+     *  放进 companion 后外部 `PhaseStateMachine.Phase` 无法解析(MainActivity /
+     *  MainViewModel / GalaxyConnectionService 全报 Unresolved: Phase)。 */
+    enum class Phase(val wireValue: String) {
+        SILENT("silent"),
+        LIMINAL("liminal"),
+        MANIFEST("manifest");
 
-            companion object {
-                fun fromWire(value: String): Phase? =
-                    entries.find { it.wireValue.equals(value, ignoreCase = true) }
-            }
+        companion object {
+            fun fromWire(value: String): Phase? =
+                entries.find { it.wireValue.equals(value, ignoreCase = true) }
         }
     }
 

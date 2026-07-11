@@ -277,6 +277,7 @@ data class AndroidTaskAllocationTruthSnapshot(
     }.toString()
 
     companion object {
+        private const val TAG = "GALAXY:TASK_ALLOC_TRUTH"
         const val SCHEMA_VERSION = "1"
         const val KEY_SCHEMA_VERSION = "schema_version"
         const val KEY_GENERATED_AT_MS = "generated_at_ms"

@@ -507,7 +507,7 @@ class OAuthManager private constructor(private val context: Context) {
         val handler = Handler(Looper.getMainLooper())
         val timeoutRunnable = Runnable {
             githubOAuthContinuation?.let { cont ->
-                if (cont.isActive == true) {
+                if ((cont as? kotlinx.coroutines.CancellableContinuation<*>)?.isActive == true) {
                     cont.resumeWithException(OAuthException("GitHub 授权超时，请重试"))
                 }
             }
@@ -741,7 +741,7 @@ class OAuthManager private constructor(private val context: Context) {
             } catch (e: ApiException) {
                 Log.e(TAG, "Google Sign-In 失败: code=${e.statusCode}, message=${e.message}")
                 val message = when (e.statusCode) {
-                    com.google.android.gms.common.api.CommonStatusCodes.SIGN_IN_CANCELLED -> "用户取消了登录"
+                    com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "用户取消了登录"
                     com.google.android.gms.common.api.CommonStatusCodes.NETWORK_ERROR -> "网络错误，请检查网络连接"
                     else -> "Google 登录失败 (${e.statusCode})"
                 }

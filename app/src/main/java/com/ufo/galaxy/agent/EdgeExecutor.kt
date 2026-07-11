@@ -77,6 +77,7 @@ class EdgeExecutor(
     }
 
     companion object {
+        private const val TAG = "EdgeExecutor"
         const val STATUS_SUCCESS = "success"
         const val STATUS_ERROR = "error"
         const val STATUS_CANCELLED = "cancelled"

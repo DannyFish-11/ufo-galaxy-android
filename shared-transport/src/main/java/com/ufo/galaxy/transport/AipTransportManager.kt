@@ -84,7 +84,7 @@ class AipTransportManager private constructor() : GatewayClient {
      * @param json AIP v3 message JSON string (must contain "transport" field)
      * @return true if send succeeded
      */
-    fun sendJson(json: String): Boolean {
+    override fun sendJson(json: String): Boolean {
         return try {
             val message = JSONObject(json)
             // PR-AIP-UNIFIED: Auto-inject transport field if missing (backward compat)
@@ -137,7 +137,7 @@ class AipTransportManager private constructor() : GatewayClient {
     /**
      * Check if any transport is connected.
      */
-    fun isConnected(): Boolean {
+    override fun isConnected(): Boolean {
         return adapters.values.any { it.isConnected() }
     }
 

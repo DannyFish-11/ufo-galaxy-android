@@ -1,5 +1,7 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.runtime.AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
+
 /**
  * PR-08 (Android) — Canonical Runtime Truth Unification contract.
  *
@@ -801,22 +803,21 @@ object AndroidCanonicalRuntimeTruthContract {
         phase: AndroidExecutionLifecycleContract.ExecutionLifecyclePhase,
         priorPhaseWasInterruption: Boolean = false
     ): ResultUplinkSemanticClass {
-        val P = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
         return when (phase) {
             // Interruption: V2 must apply retry/fallback policy
-            P.INTERRUPTED -> ResultUplinkSemanticClass.AUTHORITATIVE_INTERRUPTION
+            ExecutionLifecyclePhase.INTERRUPTED -> ResultUplinkSemanticClass.AUTHORITATIVE_INTERRUPTION
 
             // Terminal phases after a prior interruption: recovery completion
-            P.COMPLETED, P.FAILED ->
+            ExecutionLifecyclePhase.COMPLETED, ExecutionLifecyclePhase.FAILED ->
                 if (priorPhaseWasInterruption) ResultUplinkSemanticClass.AUTHORITATIVE_RECOVERY
                 else ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL
 
             // Other terminal phases: authoritative terminal (no recovery distinction)
-            P.TIMED_OUT, P.REJECTED -> ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL
+            ExecutionLifecyclePhase.TIMED_OUT, ExecutionLifecyclePhase.REJECTED -> ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL
 
             // Non-terminal phases: informational
-            P.CAPABILITY_IDLE, P.PENDING, P.ACTIVATING, P.ACTIVE,
-            P.DEGRADED, P.RETRYING, P.UNKNOWN ->
+            ExecutionLifecyclePhase.CAPABILITY_IDLE, ExecutionLifecyclePhase.PENDING, ExecutionLifecyclePhase.ACTIVATING, ExecutionLifecyclePhase.ACTIVE,
+            ExecutionLifecyclePhase.DEGRADED, ExecutionLifecyclePhase.RETRYING, ExecutionLifecyclePhase.UNKNOWN ->
                 ResultUplinkSemanticClass.INFORMATIONAL
         }
     }

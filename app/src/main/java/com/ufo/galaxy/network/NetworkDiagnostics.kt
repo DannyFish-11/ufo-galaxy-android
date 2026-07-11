@@ -257,4 +257,7 @@ class NetworkDiagnostics(
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - t0
             Log.w(TAG, "AIP ping FAIL ${GalaxyWebSocketClient.sanitizeUrlForLogging(restBase)} — ${e.message}")
-            CheckResult(name, false, duration, 
+            CheckResult(name, false, duration, e.message ?: "请求失败")
+        }
+    }
+}

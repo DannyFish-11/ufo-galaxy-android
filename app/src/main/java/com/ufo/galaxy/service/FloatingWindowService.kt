@@ -213,7 +213,7 @@ class FloatingWindowService : Service() {
         )
         val notification = NotificationCompat.Builder(this, UFOGalaxyApplication.CHANNEL_ALERTS)
             .setContentTitle("UFO Galaxy 需要悬浮窗权限")
-            .setContentText("点击此通知前往设置，启用"显示在其他应用上层"权限以使用灵动岛功能。")
+            .setContentText("点击此通知前往设置，启用「显示在其他应用上层」权限以使用灵动岛功能。")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

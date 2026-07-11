@@ -10,7 +10,7 @@ package com.ufo.galaxy.runtime
  *
  * Prior to PR-07, Android execution lifecycle was fragmented across multiple surfaces:
  *  - [DelegatedActivationRecord.ActivationStatus]: PENDING/ACTIVATING/ACTIVE/COMPLETED/FAILED/REJECTED
- *  - [AndroidFlowExecutionPhase]: RECEIVED/ACTIVATING/ACTIVE_*/COMPLETED/FAILED/REJECTED/UNKNOWN
+ *  - [AndroidFlowExecutionPhase]: RECEIVED/ACTIVATING/ACTIVE_.../COMPLETED/FAILED/REJECTED/UNKNOWN
  *  - [AndroidLifecycleRecoveryContract]: connection-level recovery semantics
  *
  * None of those surfaces defined the full execution lifecycle including:

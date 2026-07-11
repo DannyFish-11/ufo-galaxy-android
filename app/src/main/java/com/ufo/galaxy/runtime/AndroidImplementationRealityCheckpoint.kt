@@ -70,7 +70,7 @@ object AndroidImplementationRealityCheckpoint {
             "runtime_freshness_class" to runtimeFreshnessClass(truth.inflightContinuityState),
             "continuity_recovery_state" to (
                 truth.inflightContinuityState
-                    ?: AndroidContinuityRecoveryStateModel.RecoveryPhase.UNKNOWN.wireValue
+                    ?: "unknown"
                 ),
             "continuity_recovery_source" to truth.inflightContinuitySource,
             "allocation_truth_requires_live_revalidation" to

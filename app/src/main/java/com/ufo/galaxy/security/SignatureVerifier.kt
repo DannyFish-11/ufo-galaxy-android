@@ -56,10 +56,17 @@ object SignatureVerifier {
             }
 
             val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                packageInfo.signingInfo.apkContentsSigners
+                packageInfo.signingInfo?.apkContentsSigners
             } else {
                 @Suppress("DEPRECATION")
                 packageInfo.signatures
+            } ?: emptyArray()
+
+            // 安全:签名者为空(signingInfo 为 null 等)必须【失败关闭】,不能跳过校验后
+            // 落到末尾 return true(那会让无签名信息的包被判为通过)。
+            if (signatures.isEmpty()) {
+                Log.e(TAG, "APK signature verification FAILED: no signing certificates present")
+                return false
             }
 
             for (signature in signatures) {

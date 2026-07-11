@@ -51,6 +51,11 @@ class NcnnGroundingService(
     private companion object {
         private const val TAG = "NcnnGroundingService"
 
+        // 图像预处理参数(原在第二个 companion,合并进来——一个类只允许一个 companion)。
+        private const val BLUR_RADIUS = 25f
+        private const val BLUR_ALPHA = 180
+        private const val JPEG_QUALITY = 70
+
         // Minimal 1×1 white JPEG for dry-run grounding validation.
         private const val DRY_RUN_SCREENSHOT_B64 =
             "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a" +
@@ -254,12 +259,6 @@ class NcnnGroundingService(
             Log.w(TAG, "preprocessScreenshot failed, passing through unmodified: ${e.message}")
             base64  // fail-safe: never block inference because of a privacy-filter bug
         }
-    }
-
-    companion object {
-        private const val BLUR_RADIUS = 25f
-        private const val BLUR_ALPHA = 180
-        private const val JPEG_QUALITY = 70
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────

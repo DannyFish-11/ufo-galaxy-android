@@ -303,7 +303,7 @@ private fun SectionTitle(title: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(top = 4.dp)
     )
-    HorizontalDivider()
+    Divider()
 }
 
 @Composable

@@ -131,7 +131,7 @@ object AndroidAuthoritativePathAlignmentAudit {
         companion object {
             /** Returns the [BehaviorTier] whose [wireValue] equals [value], or `null`. */
             fun fromValue(value: String): BehaviorTier? =
-                entries.firstOrNull { it.wireValue == value }
+                BehaviorTier.entries.firstOrNull { it.wireValue == value }
         }
     }
 
@@ -193,7 +193,7 @@ object AndroidAuthoritativePathAlignmentAudit {
         companion object {
             /** Returns the [SignalSemantics] whose [wireValue] equals [value], or `null`. */
             fun fromValue(value: String): SignalSemantics? =
-                entries.firstOrNull { it.wireValue == value }
+                SignalSemantics.entries.firstOrNull { it.wireValue == value }
         }
     }
 

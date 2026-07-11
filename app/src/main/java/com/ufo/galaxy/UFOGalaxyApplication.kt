@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import java.lang.ref.WeakReference
 import com.ufo.galaxy.agent.AutonomousExecutionPipeline
+import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.agent.AgentRuntimeBridge
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.LocalCollaborationAgent
@@ -76,7 +77,19 @@ class UFOGalaxyApplication : Application() {
          * The static reference is cleared in [onTerminate] to allow GC of all heavyweight objects.
          */
         private var instanceRef: WeakReference<UFOGalaxyApplication> = WeakReference(null)
+        // @JvmName 消除与 `var instance` 生成的 getter getInstance() 的 JVM 签名冲突
+        // (Platform declaration clash)。此函数 Kotlin 侧无调用者,改 JVM 名零影响。
+        @JvmName("getInstanceWeakRef")
         fun getInstance(): UFOGalaxyApplication? = instanceRef.get()
+
+        // companion 里的 lateinit 就绪判断必须在 companion 内做:从【实例方法】直接写
+        // `isRuntimeControllerInitialized()` 会报 "backing field ... not accessible"
+        // (跨作用域访问 companion 属性的后备字段)。这些薄封装供实例方法调用。
+        fun isWebSocketClientInitialized() = ::webSocketClient.isInitialized
+        fun isRuntimeControllerInitialized() = ::runtimeController.isInitialized
+        fun isLocalInferenceRuntimeManagerInitialized() = ::localInferenceRuntimeManager.isInitialized
+        fun isMetricsRecorderInitialized() = ::metricsRecorder.isInitialized
+        fun isModelDownloaderInitialized() = ::modelDownloader.isInitialized
         
         // CRITICAL-6: Use nullable var instead of lateinit so it can be cleared in onTerminate.
         // Callers should use [getInstance()] which returns a WeakReference-backed nullable.
@@ -352,13 +365,13 @@ class UFOGalaxyApplication : Application() {
         // Process termination also cleans up; this is a safety net.
         // ROUND-2-FIX: Null-safe termination — only call cancel()/stop() on components
         // that were actually initialized (lateinit isInitialized guard).
-        if (::modelDownloader.isInitialized) modelDownloader.cancel()
-        if (::runtimeController.isInitialized) runtimeController.cancel()
-        if (::localInferenceRuntimeManager.isInitialized) localInferenceRuntimeManager.cancel()
-        if (::metricsRecorder.isInitialized) metricsRecorder.stop()
+        if (isModelDownloaderInitialized()) modelDownloader.cancel()
+        if (isRuntimeControllerInitialized()) runtimeController.cancel()
+        if (isLocalInferenceRuntimeManagerInitialized()) localInferenceRuntimeManager.cancel()
+        if (isMetricsRecorderInitialized()) metricsRecorder.stop()
         // R3-3-FIX: Destroy WebSocket client to cancel its internal scope and close the
         // socket, preventing coroutine leaks and stale connection orphans.
-        if (::webSocketClient.isInitialized) webSocketClient.destroy()
+        if (isWebSocketClientInitialized()) webSocketClient.destroy()
         // SECURITY-FIX: Cancel applicationScope to prevent coroutine leaks (P2-FIX)
         applicationScope.cancel()
         // CRITICAL-6: Clear all static references to allow GC of the Application graph
@@ -396,7 +409,7 @@ class UFOGalaxyApplication : Application() {
                     val updatedWsUrl = appSettings.effectiveGatewayWsUrl()
                     val updatedToken = appSettings.gatewayToken
                     val connectionRelevantChanged = previousWsUrl != updatedWsUrl || previousToken != updatedToken
-                    if (::webSocketClient.isInitialized) {
+                    if (isWebSocketClientInitialized()) {
                         webSocketClient.updateRuntimeConnectionConfig(
                             serverUrl = updatedWsUrl,
                             gatewayToken = updatedToken,
@@ -408,7 +421,7 @@ class UFOGalaxyApplication : Application() {
                         TAG,
                         "Remote gateway config applied (connection_changed=$connectionRelevantChanged)"
                     )
-                    if (connectionRelevantChanged && ::runtimeController.isInitialized && appSettings.crossDeviceEnabled) {
+                    if (connectionRelevantChanged && isRuntimeControllerInitialized() && appSettings.crossDeviceEnabled) {
                         val reconnected = runtimeController.reconnect()
                         Log.i(TAG, "Remote gateway config live reconnect result=$reconnected")
                     }

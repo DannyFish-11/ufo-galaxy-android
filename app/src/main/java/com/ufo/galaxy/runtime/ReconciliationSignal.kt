@@ -816,7 +816,7 @@ data class ReconciliationSignal(
                         ParticipantLocalConvergenceState.INTERRUPTION_RESUME_PENDING
                     AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.TIMEOUT ->
                         ParticipantLocalConvergenceState.TIMEOUT_PENDING_CANONICAL
-                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABANDON ->
+                    AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.ABORT ->
                         ParticipantLocalConvergenceState.ABANDONED_UNRESOLVED
                     else ->
                         ParticipantLocalConvergenceState.LOCAL_COMPLETION_PENDING_DELIVERY
@@ -925,32 +925,31 @@ data class ReconciliationSignal(
             // Each Android-originated information item is routed through the shared boundary
             // contract.  The resulting BoundaryDecision governs whether the item appears in
             // the foreground payload or is suppressed.
-            val Contract = AndroidDualRepoHiddenVisibleBoundaryContract
-            val blockerDecision = Contract.classify(
-                Contract.BoundaryInput(
-                    infoOriginClass = Contract.AndroidInfoOriginClass.BLOCKER,
+            val blockerDecision = AndroidDualRepoHiddenVisibleBoundaryContract.classify(
+                AndroidDualRepoHiddenVisibleBoundaryContract.BoundaryInput(
+                    infoOriginClass = AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.BLOCKER,
                     blockerReason = rawBlockerReason,
                     isCanonicalClosureBlocked = canonicalClosureBlocked,
                     isExecutionFailed = hasFailureBlocker
                 )
             )
-            val confirmationDecision = Contract.classify(
-                Contract.BoundaryInput(
-                    infoOriginClass = Contract.AndroidInfoOriginClass.CONFIRMATION_NEEDED,
+            val confirmationDecision = AndroidDualRepoHiddenVisibleBoundaryContract.classify(
+                AndroidDualRepoHiddenVisibleBoundaryContract.BoundaryInput(
+                    infoOriginClass = AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.CONFIRMATION_NEEDED,
                     confirmationNeeded = confirmationNeeded,
                     isTerminalSignal = isTerminal,
                     closureReadyForAcceptance = closureReadyForAcceptance
                 )
             )
-            val deviceStateDecision = Contract.classify(
-                Contract.BoundaryInput(
-                    infoOriginClass = Contract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY,
+            val deviceStateDecision = AndroidDualRepoHiddenVisibleBoundaryContract.classify(
+                AndroidDualRepoHiddenVisibleBoundaryContract.BoundaryInput(
+                    infoOriginClass = AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY,
                     deviceStateStage = stage
                 )
             )
-            val lifecycleDecision = Contract.classify(
-                Contract.BoundaryInput(
-                    infoOriginClass = Contract.AndroidInfoOriginClass.LIFECYCLE_STATE,
+            val lifecycleDecision = AndroidDualRepoHiddenVisibleBoundaryContract.classify(
+                AndroidDualRepoHiddenVisibleBoundaryContract.BoundaryInput(
+                    infoOriginClass = AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.LIFECYCLE_STATE,
                     lifecycleStage = stage
                 )
             )
@@ -1035,13 +1034,13 @@ data class ReconciliationSignal(
                 // V2 reads this section to know which Android-originated items are foreground-
                 // eligible and which have been classified as BACKGROUND or OPERATOR_ONLY.
                 KEY_VISIBILITY_BOUNDARY to mapOf(
-                    Contract.AndroidInfoOriginClass.BLOCKER.wireValue to
+                    AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.BLOCKER.wireValue to
                         blockerDecision.toWireMap(),
-                    Contract.AndroidInfoOriginClass.CONFIRMATION_NEEDED.wireValue to
+                    AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.CONFIRMATION_NEEDED.wireValue to
                         confirmationDecision.toWireMap(),
-                    Contract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY.wireValue to
+                    AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.DEVICE_STATE_VISIBILITY.wireValue to
                         deviceStateDecision.toWireMap(),
-                    Contract.AndroidInfoOriginClass.LIFECYCLE_STATE.wireValue to
+                    AndroidDualRepoHiddenVisibleBoundaryContract.AndroidInfoOriginClass.LIFECYCLE_STATE.wireValue to
                         lifecycleDecision.toWireMap()
                 )
             )

@@ -11,6 +11,7 @@ import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskSubmitContext
 import com.ufo.galaxy.protocol.TaskSubmitPayload
@@ -382,7 +383,7 @@ class InputRouter(
         }
         val envelope = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             correlation_id = taskId,
             device_id = deviceId,
             trace_id = taskId,      // use task_id as the initial trace_id for this submission

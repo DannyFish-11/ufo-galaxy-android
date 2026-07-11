@@ -22,6 +22,7 @@ import com.ufo.galaxy.protocol.TaskAssignPayload
 import com.ufo.galaxy.protocol.TaskCancelPayload
 import com.ufo.galaxy.runtime.AndroidContinuityIntegration
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
+import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.transport.AipTransportManager
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -84,11 +85,15 @@ class TaskHandler(
         try {
             // Route to agent bridge when eligible, else local execution
             val bridge = UFOGalaxyApplication.agentRuntimeBridge
-            val handoffResult = if (payload.requireLocalAgent != true) {
+            val handoffResult = if (!payload.require_local_agent) {
                 bridge.handoff(
-                    runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
-                    traceId = inboundTraceId,
-                    routeMode = GalaxyConnectionService.ROUTE_MODE_CROSS_DEVICE
+                    AgentRuntimeBridge.HandoffRequest(
+                        traceId = inboundTraceId ?: "",
+                        taskId = taskId,
+                        goal = payload.goal,
+                        sessionId = UFOGalaxyApplication.runtimeSessionId,
+                        routeMode = GalaxyConnectionService.ROUTE_MODE_CROSS_DEVICE
+                    )
                 )
             } else {
                 null
@@ -122,13 +127,13 @@ class TaskHandler(
             // Build GoalExecutionPayload from TaskAssignPayload
             val goalPayload = GoalExecutionPayload(
                 task_id = taskId,
-                goal = payload.goal ?: "",
-                max_steps = payload.maxSteps ?: 10,
-                context = payload.context ?: emptyMap()
+                goal = payload.goal,
+                max_steps = payload.max_steps,
+                execution_context = payload.execution_context
             )
 
             // Execute via AutonomousExecutionPipeline
-            val result = withTimeoutOrNull(payload.timeoutMs ?: 300_000L) {
+            val result = withTimeoutOrNull(GoalExecutionPayload.MAX_TIMEOUT_MS) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(goalPayload)
             }
 
@@ -143,7 +148,6 @@ class TaskHandler(
                 task_id = taskId,
                 status = result.status,
                 result = result.result,
-                stop_reason = result.stopReason,
                 error = result.error
             )
             onSendGoalResult(taskId, resultPayload, traceId)
@@ -174,7 +178,7 @@ class TaskHandler(
 
         try {
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
-            val result = withTimeoutOrNull(payload.timeoutMs ?: 300_000L) {
+            val result = withTimeoutOrNull(payload.effectiveTimeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
             }
 
@@ -187,7 +191,6 @@ class TaskHandler(
                 task_id = taskId,
                 status = result.status,
                 result = result.result,
-                stop_reason = result.stopReason,
                 error = result.error
             )
             onSendGoalResult(taskId, resultPayload, traceId)
@@ -212,12 +215,13 @@ class TaskHandler(
             ?: java.util.UUID.randomUUID().toString()
 
         try {
-            // Parse and execute subtask
-            val subtaskPayload = gson.fromJson(payloadJson, com.ufo.galaxy.protocol.ParallelSubtaskPayload::class.java)
-            val parentGoal = subtaskPayload.parent_goal ?: ""
-            val subtaskGoal = subtaskPayload.subtask_goal ?: ""
+            // Parse and execute subtask. Parallel subtasks are carried on the wire as
+            // GoalExecutionPayload (there is no separate ParallelSubtaskPayload); the
+            // parallel-group identity travels in group_id / subtask_index.
+            val subtaskPayload = gson.fromJson(payloadJson, GoalExecutionPayload::class.java)
+            val subtaskGoal = subtaskPayload.goal
 
-            if (parentGoal.isBlank() || subtaskGoal.isBlank()) {
+            if (subtaskGoal.isBlank()) {
                 Log.w(TAG, "parallel_subtask rejected: blank goal task_id=$taskId")
                 onSendGoalError(taskId, null, null, "blank_subtask_goal", traceId)
                 return
@@ -225,14 +229,9 @@ class TaskHandler(
 
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
 
-            val goalPayload = GoalExecutionPayload(
-                task_id = taskId,
-                goal = subtaskGoal,
-                max_steps = subtaskPayload.max_steps ?: 10,
-                context = mapOf("parent_goal" to parentGoal, "subtask_index" to (subtaskPayload.subtask_index ?: 0))
-            )
+            val goalPayload = subtaskPayload.copy(task_id = taskId)
 
-            val result = withTimeoutOrNull(subtaskPayload.timeoutMs ?: 300_000L) {
+            val result = withTimeoutOrNull(goalPayload.effectiveTimeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(goalPayload)
             }
 
@@ -245,7 +244,6 @@ class TaskHandler(
                 task_id = taskId,
                 status = result.status,
                 result = result.result,
-                stop_reason = result.stopReason,
                 error = result.error
             )
             onSendGoalResult(taskId, resultPayload, traceId)
