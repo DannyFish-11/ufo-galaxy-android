@@ -86,6 +86,7 @@ class UFOGalaxyApplication : Application() {
         fun isRuntimeControllerInitialized() = ::runtimeController.isInitialized
         fun isLocalInferenceRuntimeManagerInitialized() = ::localInferenceRuntimeManager.isInitialized
         fun isMetricsRecorderInitialized() = ::metricsRecorder.isInitialized
+        fun isModelDownloaderInitialized() = ::modelDownloader.isInitialized
         
         // CRITICAL-6: Use nullable var instead of lateinit so it can be cleared in onTerminate.
         // Callers should use [getInstance()] which returns a WeakReference-backed nullable.
@@ -361,7 +362,7 @@ class UFOGalaxyApplication : Application() {
         // Process termination also cleans up; this is a safety net.
         // ROUND-2-FIX: Null-safe termination — only call cancel()/stop() on components
         // that were actually initialized (lateinit isInitialized guard).
-        if (::modelDownloader.isInitialized) modelDownloader.cancel()
+        if (isModelDownloaderInitialized()) modelDownloader.cancel()
         if (isRuntimeControllerInitialized()) runtimeController.cancel()
         if (isLocalInferenceRuntimeManagerInitialized()) localInferenceRuntimeManager.cancel()
         if (isMetricsRecorderInitialized()) metricsRecorder.stop()
