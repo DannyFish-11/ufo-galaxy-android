@@ -1856,10 +1856,10 @@ class GalaxyWebSocketClient(
             return false
         }
         val ingress = AndroidGovernanceExecutionPolicyIngressContract.classifyReconciliation(kind)
-        val boundary = payload.get("ingress_boundary_class")?.asString
-        val consumption = payload.get("ingress_consumption_kind")?.asString
-        val signalClass = payload.get("ingress_signal_class")?.asString
-        val schemaVersion = payload.get("ingress_schema_version")?.asString
+        val boundary = payload?.get("ingress_boundary_class")?.asString
+        val consumption = payload?.get("ingress_consumption_kind")?.asString
+        val signalClass = payload?.get("ingress_signal_class")?.asString
+        val schemaVersion = payload?.get("ingress_schema_version")?.asString
         val matches =
             boundary == ingress.boundaryClass.wireValue &&
                 consumption == ingress.consumptionKind.wireValue &&
@@ -2039,11 +2039,11 @@ class GalaxyWebSocketClient(
     private fun applyReplayLegalityPayloadSemantics(payload: JsonObject) {
         payload.addProperty(
             ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS,
-            ReconciliationSignal.CanonicalClosureAuthorityClass.V2_CANONICAL_AUTHORITY.wireValue
+            ReconciliationSignal.Companion.CanonicalClosureAuthorityClass.V2_CANONICAL_AUTHORITY.wireValue
         )
         payload.addProperty(
             ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE,
-            ReconciliationSignal.ParticipantLocalConvergenceState
+            ReconciliationSignal.Companion.ParticipantLocalConvergenceState
                 .REPLAYED_PENDING_V2_REVALIDATION.wireValue
         )
         payload.addProperty(
@@ -2064,12 +2064,6 @@ class GalaxyWebSocketClient(
 
     private fun JsonObject.objectOrNull(key: String): JsonObject? =
         runCatching { getAsJsonObject(key) }.getOrNull()
-
-    private fun JsonObject.stringOrNull(key: String): String? =
-        get(key)?.takeUnless { it.isJsonNull }?.asString?.ifBlank { null }
-
-    private fun JsonObject.booleanOrNull(key: String): Boolean? =
-        get(key)?.takeUnless { it.isJsonNull }?.asBoolean
 
     private fun enqueueForReliableReplay(msgType: String, json: String, reason: String) {
         val dedupeAssessment = AndroidCrossRepoDedupeContract.assessEnvelopeJson(json, gson)
@@ -2219,7 +2213,9 @@ class GalaxyWebSocketClient(
             // PR-28: Tailscale IP for P2P direct transport — enables Galaxy to route
             // messages directly through Tailscale WireGuard tunnel instead of WebSocket.
             try {
-                val tsIp = com.ufo.galaxy.UFOGalaxyApplication.tailscaleAdapter.getLocalTailscaleIp()
+                val tsIp = runBlocking {
+                    com.ufo.galaxy.UFOGalaxyApplication.tailscaleAdapter.getLocalTailscaleIp()
+                }
                 if (!tsIp.isNullOrBlank()) {
                     addProperty("tailscale_ip", tsIp)
                 }
@@ -2447,7 +2443,7 @@ class GalaxyWebSocketClient(
         )
         val envelope = AipMessage(
             type = MsgType.DIAGNOSTICS_PAYLOAD,
-            payload = diagnosticsPayload,
+            payload = gson.toJsonTree(diagnosticsPayload),
             device_id = deviceId,
             trace_id = sessionTraceId,
             runtime_session_id = runtimeSessionId,
@@ -2485,7 +2481,7 @@ class GalaxyWebSocketClient(
         )
         val envelope = AipMessage(
             type = MsgType.MESH_JOIN,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = deviceId,
             trace_id = sessionTraceId,
             runtime_session_id = runtimeSessionId,
