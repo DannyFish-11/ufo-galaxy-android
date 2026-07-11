@@ -91,9 +91,9 @@ object AndroidLocalDiagnosticReasonContract {
         get() = mapOf(
             "schema_version_non_blank" to CONTRACT_SCHEMA_VERSION.isNotBlank(),
             "domains_have_unique_wire_values" to
-                DiagnosticDomain.entries.map { it.wireValue }.toSet().size == DiagnosticDomain.entries.size,
+                (DiagnosticDomain.entries.map { it.wireValue }.toSet().size == DiagnosticDomain.entries.size),
             "reasons_have_unique_wire_values" to
-                DiagnosticReason.entries.map { it.wireValue }.toSet().size == DiagnosticReason.entries.size,
+                (DiagnosticReason.entries.map { it.wireValue }.toSet().size == DiagnosticReason.entries.size),
             "every_reason_has_domain" to
                 DiagnosticReason.entries.all { it.domain in DiagnosticDomain.entries }
         )

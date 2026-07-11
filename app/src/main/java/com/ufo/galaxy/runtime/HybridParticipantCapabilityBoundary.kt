@@ -112,13 +112,13 @@ object HybridParticipantCapabilityBoundary {
 
         companion object {
             /** All wire values for this enum.  Useful for stability assertions in tests. */
-            val ALL_WIRE_VALUES: Set<String> = entries.map { it.wireValue }.toSet()
+            val ALL_WIRE_VALUES: Set<String> = HybridCapability.entries.map { it.wireValue }.toSet()
 
             /**
              * Returns the [HybridCapability] matching [wireValue], or `null` if not recognised.
              */
             fun fromValue(wireValue: String?): HybridCapability? =
-                entries.firstOrNull { it.wireValue == wireValue }
+                HybridCapability.entries.firstOrNull { it.wireValue == wireValue }
         }
     }
 
