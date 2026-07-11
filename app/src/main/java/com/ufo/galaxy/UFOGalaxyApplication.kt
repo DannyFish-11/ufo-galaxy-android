@@ -77,6 +77,9 @@ class UFOGalaxyApplication : Application() {
          * The static reference is cleared in [onTerminate] to allow GC of all heavyweight objects.
          */
         private var instanceRef: WeakReference<UFOGalaxyApplication> = WeakReference(null)
+        // @JvmName 消除与 `var instance` 生成的 getter getInstance() 的 JVM 签名冲突
+        // (Platform declaration clash)。此函数 Kotlin 侧无调用者,改 JVM 名零影响。
+        @JvmName("getInstanceWeakRef")
         fun getInstance(): UFOGalaxyApplication? = instanceRef.get()
 
         // companion 里的 lateinit 就绪判断必须在 companion 内做:从【实例方法】直接写
