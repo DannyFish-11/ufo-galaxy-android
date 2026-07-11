@@ -60,6 +60,10 @@ android {
         buildConfigField "int", "PLANNER_TIMEOUT_MS", "30000"
         buildConfigField "int", "GROUNDING_TIMEOUT_MS", "15000"
         buildConfigField "int", "SCALED_MAX_EDGE", "720"
+        // OAuth 客户端 ID(OAuthManager 读 BuildConfig.OAUTH_*_CLIENT_ID;缺失会编译报
+        // Unresolved,故在此声明占位值,发布前用 -PoauthGoogleClientId=... 等覆盖)
+        buildConfigField "String", "OAUTH_GOOGLE_CLIENT_ID", '"YOUR_GOOGLE_WEB_CLIENT_ID"'
+        buildConfigField "String", "OAUTH_GITHUB_CLIENT_ID", '"YOUR_GITHUB_CLIENT_ID"'
     }
 
     buildTypes {
@@ -185,6 +189,13 @@ dependencies {
     
     // 数据存储
     implementation 'androidx.datastore:datastore-preferences:1.0.0'
+    // 加密本地存储(AppSettings 的 EncryptedSharedPreferences / MasterKey;MasterKey
+    // 在 1.1.0-alpha 起提供)
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+
+    // Google 登录(OAuthManager 的 GoogleSignIn / GoogleSignInAccount / ApiException /
+    // Tasks —— com.google.android.gms.auth.* 都来自这里)
+    implementation 'com.google.android.gms:play-services-auth:21.2.0'
     // C8-FIX: WorkManager for deferrable background tasks (log upload, metrics,
     // heartbeat alignment in Doze mode). Uses androidx.work:work-runtime-ktx for
     // coroutine-friendly APIs.
