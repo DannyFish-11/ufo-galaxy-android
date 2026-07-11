@@ -1,12 +1,12 @@
 package com.ufo.galaxy.ui
 
-import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
  * switch between local-only and cross-device execution without opening the
  * full settings screen.
  */
-class FloatingIslandActivity : Activity() {
+class FloatingIslandActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "FloatingIslandActivity"

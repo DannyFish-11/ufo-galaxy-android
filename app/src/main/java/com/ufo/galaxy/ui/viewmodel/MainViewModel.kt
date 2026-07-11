@@ -22,6 +22,7 @@ import com.ufo.galaxy.runtime.PhaseStateMachine
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
 import com.ufo.galaxy.speech.SpeechInputManager
 import com.ufo.galaxy.speech.SpeechState
+import com.ufo.galaxy.transport.AipTransportManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -305,7 +306,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(error = error, isLoading = false) }
         }
 
-        override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
+        override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String?) {
             pushTaskId(taskId, OUTCOME_RECEIVED)
         }
     }
@@ -1209,7 +1210,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             traceStore = UFOGalaxyApplication.localLoopTraceStore,
             configProvider = { UFOGalaxyApplication.localLoopConfig },
             historyStore = UFOGalaxyApplication.sessionHistoryStore,
-            coroutineScope = viewModelScope,
             lastGoalProvider = { _lastGoal },
             rerunGoalAction = { goal -> sendMessage(goal) }
         )
@@ -1246,4 +1246,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .substringBefore("/")
         // Placeholder patterns: contains 'x' (e.g. "100.x.x.x") or is empty
         if (host.isBlank()) return false
-        if (host.contains('x', ignoreCase = true) && !host.matches(Regex("[0-9a-fA-F:.
+        // Placeholder like "100.x.x.x": the host contains a literal 'x' octet and is not a
+        // valid numeric/hex/IPv6 address (which never legitimately contains the letter 'x').
+        if (host.contains('x', ignoreCase = true) && !host.matches(Regex("[0-9a-fA-F:.]+"))) return false
+        return true
+    }
+}

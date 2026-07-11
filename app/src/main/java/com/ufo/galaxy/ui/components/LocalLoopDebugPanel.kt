@@ -278,7 +278,7 @@ private fun SessionHistoryContent(history: List<SessionHistorySummary>, maxShown
     val shown = history.take(maxShown)
     shown.forEachIndexed { index, entry ->
         if (index > 0) {
-            HorizontalDivider(
+            Divider(
                 modifier = Modifier.padding(vertical = 4.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )

@@ -465,7 +465,7 @@ private fun GitHubLogo(
     Canvas(modifier = modifier) {
         val scaleFactor = size.width.coerceAtMost(size.height) / 24f
         drawContext.canvas.save()
-        drawContext.canvas.scale(scaleFactor, scaleFactor, 0f, 0f)
+        drawContext.canvas.scale(scaleFactor, scaleFactor)
         val path = pathNodes.toPath()
         drawPath(
             path = path,

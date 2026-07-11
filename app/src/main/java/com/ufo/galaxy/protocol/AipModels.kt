@@ -3259,7 +3259,26 @@ data class DeviceExecutionEventPayload(
     val uplink_lineage_execution_id: String? = null,
     val uplink_lineage_emission_id: String? = null,
     val uplink_lineage_dedupe_key: String? = null,
-    val uplink_lineage_recovery_basis: String? = null
+    val uplink_lineage_recovery_basis: String? = null,
+
+    // ── Completion/closure + tracing fields mirrored from GoalResultPayload ─────────────────────
+    // Populated by GalaxyConnectionService.deviceExecutionEventSink at emission time so V2 can
+    // consume execution-event closure semantics through the same field contract as goal results.
+    // All optional / null-defaulted for backward compatibility.
+    //
+    // trace_id: End-to-end trace identifier for full-chain observability correlation.
+    // degraded_condition_class: Wire value of the reported degraded-condition classification.
+    // schema_version / completion_closure_contract_version: closure-uplink contract versions.
+    // completion_emission_id: stable emission identity for this completion signal.
+    // idempotency_key: per-send dedupe key for safe replay.
+    // is_v2_confirmed_canonical_truth: true when the outward truth surface is V2-confirmed canonical.
+    val trace_id: String? = null,
+    val degraded_condition_class: String? = null,
+    val schema_version: String? = null,
+    val completion_closure_contract_version: String? = null,
+    val completion_emission_id: String? = null,
+    val idempotency_key: String? = null,
+    val is_v2_confirmed_canonical_truth: Boolean? = null
 ) {
     /**
      * PR-3: V2-compatible event timestamp in seconds since epoch.

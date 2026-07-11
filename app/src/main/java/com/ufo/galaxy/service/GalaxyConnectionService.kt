@@ -22,6 +22,7 @@ import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.HandoffContractValidator
 import com.ufo.galaxy.agent.HandoffEnvelopeV2
 import com.ufo.galaxy.agent.TaskCancelRegistry
+import com.ufo.galaxy.agent.TakeoverEligibilityAssessor
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
 import com.ufo.galaxy.agent.TakeoverResponseEnvelope
 import com.ufo.galaxy.agent.TakeoverHandlingResult
@@ -80,6 +81,7 @@ import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
 import com.ufo.galaxy.runtime.FlowAwareResultConvergenceDecision
 import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
+import com.ufo.galaxy.runtime.PhaseStateMachine
 import com.ufo.galaxy.runtime.PolicyRoutingContext
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
@@ -143,6 +145,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -716,7 +719,7 @@ class GalaxyConnectionService : Service() {
                 payload.phase == DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE
             val eventTruthOwnershipBoundary = deriveTruthOwnershipBoundary(
                 executionBusy = (eventStamp.executionBusy == true) || eventHasCanonicalTruthSignal,
-                sourceRuntimePosture = runtimeController.hostSessionSnapshot?.posture
+                sourceRuntimePosture = runtimeController.hostSessionSnapshot.value?.posture
                     ?: SourceRuntimePosture.CONTROL_ONLY,
                 takeoverActive = eventRepresentsHandoff,
                 sessionId = UFOGalaxyApplication.runtimeSessionId,
@@ -739,7 +742,7 @@ class GalaxyConnectionService : Service() {
                 AndroidDistributedRuntimeParticipationBoundaryContract.derive(
                     AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
                         sourceRuntimePosture = UFOGalaxyApplication.runtimeController
-                            .hostSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                            .hostSessionSnapshot.value?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
                         executionBusy = eventStamp.executionBusy == true,
                         executionModeStateWire = modeState.executionModeState,
                         crossDeviceEnabled = UFOGalaxyApplication.appSettings.crossDeviceEnabled,
@@ -2212,7 +2215,7 @@ class GalaxyConnectionService : Service() {
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleGoalExecution(payload)
             }
-            if (isActive) {
+            if (coroutineContext.isActive) {
                 // Enrich result with posture and send with full trace context.
                 val enriched = result.takeIf { it.source_runtime_posture != null }
                     ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
@@ -2476,7 +2479,7 @@ class GalaxyConnectionService : Service() {
             val result = withTimeout(timeoutMs) {
                 UFOGalaxyApplication.autonomousExecutionPipeline.handleParallelSubtask(payload)
             }
-            if (isActive) {
+            if (coroutineContext.isActive) {
                 // Enrich result with posture and send with full trace context.
                 val enriched = result.takeIf { it.source_runtime_posture != null }
                     ?: result.copy(source_runtime_posture = payload.source_runtime_posture)
@@ -2716,7 +2719,7 @@ class GalaxyConnectionService : Service() {
         )
         val envelope = AipMessage(
             type = MsgType.CANCEL_RESULT,
-            payload = cancelResult,
+            payload = gson.toJsonTree(cancelResult),
             correlation_id = taskId,
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
@@ -2805,12 +2808,14 @@ class GalaxyConnectionService : Service() {
         }
 
         val ack = AckPayload(
-            ack_for_type = MsgType.STATE_EVENT.value,
+            message_id = traceId ?: java.util.UUID.randomUUID().toString(),
+            type_acked = MsgType.STATE_EVENT.value,
+            device_id = localDeviceId,
             status = "ok"
         )
         val envelope = AipMessage(
             type = MsgType.ACK,
-            payload = ack,
+            payload = gson.toJsonTree(ack),
             correlation_id = "",
             device_id = localDeviceId,
             trace_id = traceId,
@@ -2820,6 +2825,22 @@ class GalaxyConnectionService : Service() {
     }
 
     // ── LIQUID-ISLAND: Liquid event handler ────────────────────────────────────
+
+    /**
+     * Lightweight in-process sink for LIQUID-ISLAND capsule UI events.
+     *
+     * No external event-bus dependency (e.g. greenrobot EventBus) is wired into this
+     * module, so capsule events are buffered into an internal [MutableSharedFlow] that a
+     * Compose surface may collect via [capsuleEvents].  Exposes a [post] method so the
+     * existing `eventBus.post(...)` call sites remain unchanged.
+     */
+    private val _capsuleEvents = MutableSharedFlow<Any>(extraBufferCapacity = 16)
+    val capsuleEvents = _capsuleEvents
+    private val eventBus = object {
+        fun post(event: Any) {
+            _capsuleEvents.tryEmit(event)
+        }
+    }
 
     /**
      * Handles an inbound liquid_event message from V2 (LIQUID-ISLAND
@@ -3312,7 +3333,7 @@ class GalaxyConnectionService : Service() {
     ) {
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.correlation_id,
             device_id = localDeviceId,
             trace_id = traceId,
@@ -3631,7 +3652,7 @@ class GalaxyConnectionService : Service() {
                 resolvedGoalCompletionSignaled ||
                 resolvedGoalClosureReady,
             sourceRuntimePosture = result.source_runtime_posture
-                ?: UFOGalaxyApplication.runtimeController.hostSessionSnapshot?.posture
+                ?: UFOGalaxyApplication.runtimeController.hostSessionSnapshot.value?.posture
                 ?: SourceRuntimePosture.CONTROL_ONLY,
             takeoverActive = false,
             sessionId = runtimeSession,
@@ -3650,7 +3671,7 @@ class GalaxyConnectionService : Service() {
         val resultParticipationBoundary = AndroidDistributedRuntimeParticipationBoundaryContract.derive(
             AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
                 sourceRuntimePosture = result.source_runtime_posture
-                    ?: UFOGalaxyApplication.runtimeController.hostSessionSnapshot?.posture
+                    ?: UFOGalaxyApplication.runtimeController.hostSessionSnapshot.value?.posture
                     ?: SourceRuntimePosture.CONTROL_ONLY,
                 executionBusy = resolvedGoalResultReturned && !isHoldStatus,
                 executionModeStateWire = resolvedModeState,
@@ -3854,7 +3875,7 @@ class GalaxyConnectionService : Service() {
         fun buildEnvelope(payload: GoalResultPayload) =
             AipMessage(
                 type = MsgType.GOAL_EXECUTION_RESULT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 correlation_id = payload.correlation_id ?: payload.task_id,
                 device_id = payload.device_id.ifEmpty { localDeviceId },
                 trace_id = traceId,
@@ -4119,7 +4140,7 @@ class GalaxyConnectionService : Service() {
         )
         val envelope = AipMessage(
             type = MsgType.ACK,
-            payload = ackPayload,
+            payload = gson.toJsonTree(ackPayload),
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(ackPayload.message_id, MsgType.ACK)
@@ -4154,7 +4175,7 @@ class GalaxyConnectionService : Service() {
             )
             val envelope = AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = localDeviceId,
                 trace_id = signal.traceId,
                 correlation_id = signal.taskId,
@@ -4519,7 +4540,7 @@ class GalaxyConnectionService : Service() {
                 return gson.toJson(
                     AipMessage(
                         type = MsgType.RECONCILIATION_SIGNAL,
-                        payload = payload,
+                        payload = gson.toJsonTree(payload),
                         device_id = localDeviceId,
                         correlation_id = signal.taskId,
                         idempotency_key = stableDedupeKey,
@@ -4656,7 +4677,7 @@ class GalaxyConnectionService : Service() {
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_READINESS_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_READINESS_REPORT)
@@ -5118,7 +5139,7 @@ class GalaxyConnectionService : Service() {
                         durableSessionId = durableRecord?.durableSessionId,
                         durableParticipantId = snapshotDurableParticipantId,
                         participantIdentityFreshness = snapshotParticipantFreshness,
-                        sessionContinuityEpoch = durableRecord?.sessionContinuityEpoch,
+                        sessionContinuityEpoch = durableRecord?.sessionContinuityEpoch?.toLong(),
                         offlineQueueDepth = offlineQueueDepth,
                         queueSessionTagMatchesCurrent = snapshotQueueSessionTagMatches
                     )
@@ -5140,9 +5161,9 @@ class GalaxyConnectionService : Service() {
             }
             val readinessSurfaceSnapshot = delegatedRuntimeReadinessEvaluator.buildSnapshot(deviceId)
             val acceptanceSurfaceSnapshot = delegatedRuntimeAcceptanceEvaluator.buildSnapshot(deviceId)
-            val dispatchReadiness = runtimeController.currentDispatchReadiness()
+            val dispatchReadiness = UFOGalaxyApplication.runtimeController.currentDispatchReadiness()
             val authoritativeParticipationSnapshot =
-                runtimeController.evaluateAuthoritativeParticipationSnapshot(
+                UFOGalaxyApplication.runtimeController.evaluateAuthoritativeParticipationSnapshot(
                     readinessSatisfied = modeState.crossDeviceEligibility,
                     distributedRuntimeActivity = snapshotStamp.executionBusy,
                     capabilityVisible = hasVisibleCrossDeviceCapability(
@@ -5308,7 +5329,7 @@ class GalaxyConnectionService : Service() {
                 AndroidDistributedRuntimeParticipationBoundaryContract.derive(
                     AndroidDistributedRuntimeParticipationBoundaryContract.ParticipationBoundaryDerivationInput(
                         sourceRuntimePosture = UFOGalaxyApplication.runtimeController
-                            .hostSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                            .hostSessionSnapshot.value?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
                         executionBusy = snapshotStamp.executionBusy == true,
                         executionModeStateWire = modeState.executionModeState,
                         crossDeviceEnabled = settings.crossDeviceEnabled,
@@ -5325,7 +5346,7 @@ class GalaxyConnectionService : Service() {
             val snapshotTruthOwnershipBoundary = deriveTruthOwnershipBoundary(
                 executionBusy = snapshotStamp.executionBusy == true,
                 sourceRuntimePosture = UFOGalaxyApplication.runtimeController
-                    .hostSessionSnapshot?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
+                    .hostSessionSnapshot.value?.posture ?: SourceRuntimePosture.CONTROL_ONLY,
                 takeoverActive = false,
                 sessionId = UFOGalaxyApplication.runtimeSessionId,
                 isSessionRecoveryActive =
@@ -5645,7 +5666,7 @@ class GalaxyConnectionService : Service() {
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_STATE_SNAPSHOT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 idempotency_key = buildIdempotencyKey(deviceId, MsgType.DEVICE_STATE_SNAPSHOT)
@@ -5764,7 +5785,7 @@ class GalaxyConnectionService : Service() {
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_GOVERNANCE_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_GOVERNANCE_REPORT)
@@ -5854,7 +5875,7 @@ class GalaxyConnectionService : Service() {
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_ACCEPTANCE_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_ACCEPTANCE_REPORT)
@@ -5944,7 +5965,7 @@ class GalaxyConnectionService : Service() {
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_STRATEGY_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_STRATEGY_REPORT)
@@ -6054,7 +6075,7 @@ class GalaxyConnectionService : Service() {
     private fun sendHybridResult(payload: HybridResultPayload) {
         val envelope = AipMessage(
             type = MsgType.HYBRID_RESULT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             correlation_id = payload.correlation_id ?: payload.task_id,
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
@@ -6088,7 +6109,7 @@ class GalaxyConnectionService : Service() {
         )
         val envelope = AipMessage(
             type = MsgType.HYBRID_DEGRADE,
-            payload = degradePayload,
+            payload = gson.toJsonTree(degradePayload),
             correlation_id = taskId.ifEmpty { null },
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
@@ -6327,7 +6348,7 @@ class GalaxyConnectionService : Service() {
         )
         val envelope = AipMessage(
             type = MsgType.ACK,
-            payload = ackPayload,
+            payload = gson.toJsonTree(ackPayload),
             device_id = localDeviceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(syncId, MsgType.COORD_SYNC)
@@ -6913,7 +6934,7 @@ class GalaxyConnectionService : Service() {
     private fun sendTakeoverResponse(response: TakeoverResponseEnvelope) {
         val envelope = AipMessage(
             type = MsgType.TAKEOVER_RESPONSE,
-            payload = response,
+            payload = gson.toJsonTree(response),
             correlation_id = response.task_id.ifEmpty { null },
             device_id = localDeviceId,
             trace_id = response.trace_id,
@@ -7345,7 +7366,7 @@ class GalaxyConnectionService : Service() {
     private fun sendOperatorActionResult(result: OperatorActionResultPayload) {
         val envelope = AipMessage(
             type = MsgType.OPERATOR_ACTION_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.task_id,
             device_id = localDeviceId,
             trace_id = result.trace_id,
@@ -7768,7 +7789,7 @@ class GalaxyConnectionService : Service() {
         )
     }
 
-    private fun storeMemoryEntry(
+    private suspend fun storeMemoryEntry(
         taskId: String,
         goal: String,
         status: String,

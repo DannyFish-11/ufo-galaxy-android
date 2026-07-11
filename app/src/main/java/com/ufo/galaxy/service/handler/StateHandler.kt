@@ -13,8 +13,14 @@ import com.ufo.galaxy.protocol.DeviceStrategyReportPayload
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
 import com.ufo.galaxy.runtime.AndroidNonClosureSignalBoundaryContract
+import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceEvaluator
+import com.ufo.galaxy.runtime.DelegatedRuntimeAcceptanceSnapshot
+import com.ufo.galaxy.runtime.DelegatedRuntimeGovernanceSnapshot
+import com.ufo.galaxy.runtime.DelegatedRuntimePostGraduationGovernanceEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessEvaluator
 import com.ufo.galaxy.runtime.DelegatedRuntimeReadinessSnapshot
+import com.ufo.galaxy.runtime.DelegatedRuntimeStrategyEvaluator
+import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
 import com.ufo.galaxy.runtime.NativeInferenceLoader
 import com.ufo.galaxy.runtime.RuntimeStateTruthSequencer
 import com.ufo.galaxy.transport.AipTransportManager
@@ -35,6 +41,13 @@ class StateHandler(
     companion object {
         private const val TAG = "GalaxyConnectionService:StateHandler"
     }
+
+    // Local evaluators for governance / acceptance / strategy artifacts. These mirror the
+    // no-arg evaluators used by GalaxyConnectionService and produce a baseline (all-UNKNOWN)
+    // snapshot when no dimension observations have been recorded yet.
+    private val delegatedRuntimeGovernanceEvaluator = DelegatedRuntimePostGraduationGovernanceEvaluator()
+    private val delegatedRuntimeAcceptanceEvaluator = DelegatedRuntimeAcceptanceEvaluator()
+    private val delegatedRuntimeStrategyEvaluator = DelegatedRuntimeStrategyEvaluator()
 
     // ── Device Readiness Report ───────────────────────────────────────────────
 
@@ -85,7 +98,7 @@ class StateHandler(
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_READINESS_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_READINESS_REPORT, null)
@@ -192,9 +205,9 @@ class StateHandler(
 
             val payload = DeviceStateSnapshotPayload(
                 device_id = deviceId,
-                session_id = UFOGalaxyApplication.runtimeSessionId,
-                snapshot_id = snapshotStamp.snapshotId,
-                reported_at_ms = snapshotStamp.reportedAtMs,
+                snapshot_ts = snapshotStamp.timestampMs,
+                snapshot_sequence = snapshotStamp.snapshotSequence,
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
                 active_runtime_type = activeRuntimeType,
                 warmup_result = warmupResult,
                 model_ready = modelReady,
@@ -202,26 +215,33 @@ class StateHandler(
                 overlay_ready = overlayReady,
                 local_loop_ready = localLoopReady,
                 degraded_reasons = degradedReasons,
+                model_id = null,
+                runtime_type = null,
+                checksum_ok = null,
                 mobilevlm_present = mobilevlmPresent,
+                mobilevlm_checksum_ok = null,
                 seeclick_present = seeClickPresent,
                 pending_first_download = pendingFirstDownload,
                 offline_queue_depth = offlineQueueDepth,
                 current_fallback_tier = currentFallbackTier,
+                active_execution_count = snapshotStamp.activeExecutionCount,
+                execution_busy = snapshotStamp.executionBusy,
                 local_loop_config = localLoopConfigMap,
                 llama_cpp_available = llamaCppAvailable,
                 ncnn_available = ncnnAvailable
             )
 
+            val snapshotKey = snapshotStamp.snapshotSequence.toString()
             val envelope = AipMessage(
                 type = MsgType.DEVICE_STATE_SNAPSHOT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
-                idempotency_key = buildIdempotencyKey(snapshotStamp.snapshotId, MsgType.DEVICE_STATE_SNAPSHOT, null)
+                idempotency_key = buildIdempotencyKey(snapshotKey, MsgType.DEVICE_STATE_SNAPSHOT, null)
             )
 
             val sent = transportManager.sendJson(gson.toJson(envelope))
-            Log.i(TAG, "[DEVICE_STATE_SNAPSHOT] sent snapshot_id=${snapshotStamp.snapshotId} sent=$sent")
+            Log.i(TAG, "[DEVICE_STATE_SNAPSHOT] sent snapshot_sequence=${snapshotStamp.snapshotSequence} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_STATE_SNAPSHOT] error: ${e.message}", e)
         }
@@ -232,24 +252,55 @@ class StateHandler(
     fun sendDeviceGovernanceReport() {
         try {
             val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: return
-            val governanceTruth = UFOGalaxyApplication.runtimeController.buildGovernanceSnapshot()
+            val snapshot = delegatedRuntimeGovernanceEvaluator.buildSnapshot(deviceId = deviceId)
+            val artifact = snapshot.artifact
+
+            val dimensionStates: Map<String, String> = snapshot.dimensionStates.entries
+                .associate { (dim, state) -> dim.wireValue to state.status.wireValue }
+
+            val missingDimensions: List<String> =
+                snapshot.dimensionStates.entries
+                    .filter { (_, state) ->
+                        state.status == DelegatedRuntimeGovernanceSnapshot.DimensionStatus.UNKNOWN
+                    }
+                    .map { (dim, _) -> dim.wireValue }
+
+            val firstRegressionReason: String? =
+                snapshot.dimensionStates.values
+                    .firstOrNull { it.status == DelegatedRuntimeGovernanceSnapshot.DimensionStatus.REGRESSION }
+                    ?.regressionReason
+
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_GOVERNANCE_REPORT)
 
             val payload = DeviceGovernanceReportPayload(
+                artifact_tag = artifact.semanticTag,
+                snapshot_id = snapshot.snapshotId,
                 device_id = deviceId,
                 session_id = UFOGalaxyApplication.runtimeSessionId,
-                governance_snapshot = governanceTruth,
-                reported_at_ms = System.currentTimeMillis()
+                reported_at_ms = snapshot.reportedAtMs,
+                dimension_states = dimensionStates,
+                first_regression_reason = firstRegressionReason,
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion,
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_GOVERNANCE_REPORT)?.wireValue ?: "unknown",
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_GOVERNANCE_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
-                runtime_session_id = UFOGalaxyApplication.runtimeSessionId
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_GOVERNANCE_REPORT, null)
             )
 
             val sent = transportManager.sendJson(gson.toJson(envelope))
-            Log.i(TAG, "[DEVICE_GOVERNANCE_REPORT] sent=$sent")
+            Log.i(TAG, "[DEVICE_GOVERNANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_GOVERNANCE_REPORT] error: ${e.message}", e)
         }
@@ -260,22 +311,55 @@ class StateHandler(
     fun sendDeviceAcceptanceReport() {
         try {
             val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: return
+            val snapshot = delegatedRuntimeAcceptanceEvaluator.buildSnapshot(deviceId = deviceId)
+            val artifact = snapshot.artifact
+
+            val dimensionStates: Map<String, String> = snapshot.dimensionStates.entries
+                .associate { (dim, state) -> dim.wireValue to state.status.wireValue }
+
+            val missingDimensions: List<String> =
+                snapshot.dimensionStates.entries
+                    .filter { (_, state) ->
+                        state.status == DelegatedRuntimeAcceptanceSnapshot.DimensionStatus.UNKNOWN
+                    }
+                    .map { (dim, _) -> dim.wireValue }
+
+            val firstGapReason: String? =
+                snapshot.dimensionStates.values
+                    .firstOrNull { it.status == DelegatedRuntimeAcceptanceSnapshot.DimensionStatus.GAP }
+                    ?.gapReason
+
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_ACCEPTANCE_REPORT)
+
             val payload = DeviceAcceptanceReportPayload(
+                artifact_tag = artifact.semanticTag,
+                snapshot_id = snapshot.snapshotId,
                 device_id = deviceId,
                 session_id = UFOGalaxyApplication.runtimeSessionId,
-                reported_at_ms = System.currentTimeMillis(),
-                acceptance_dimensions = emptyMap()
+                reported_at_ms = snapshot.reportedAtMs,
+                dimension_states = dimensionStates,
+                first_gap_reason = firstGapReason,
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion,
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_ACCEPTANCE_REPORT)?.wireValue ?: "unknown",
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_ACCEPTANCE_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
-                runtime_session_id = UFOGalaxyApplication.runtimeSessionId
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_ACCEPTANCE_REPORT, null)
             )
 
             val sent = transportManager.sendJson(gson.toJson(envelope))
-            Log.i(TAG, "[DEVICE_ACCEPTANCE_REPORT] sent=$sent")
+            Log.i(TAG, "[DEVICE_ACCEPTANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_ACCEPTANCE_REPORT] error: ${e.message}", e)
         }
@@ -286,22 +370,55 @@ class StateHandler(
     fun sendDeviceStrategyReport() {
         try {
             val deviceId = localDeviceId.takeIf { it.isNotBlank() } ?: return
+            val snapshot = delegatedRuntimeStrategyEvaluator.buildSnapshot(deviceId = deviceId)
+            val artifact = snapshot.artifact
+
+            val dimensionStates: Map<String, String> = snapshot.dimensionStates.entries
+                .associate { (dim, state) -> dim.wireValue to state.status.wireValue }
+
+            val missingDimensions: List<String> =
+                snapshot.dimensionStates.entries
+                    .filter { (_, state) ->
+                        state.status == DelegatedRuntimeStrategySnapshot.DimensionStatus.UNKNOWN
+                    }
+                    .map { (dim, _) -> dim.wireValue }
+
+            val firstRiskReason: String? =
+                snapshot.dimensionStates.values
+                    .firstOrNull { it.status == DelegatedRuntimeStrategySnapshot.DimensionStatus.AT_RISK }
+                    ?.riskReason
+
+            val ingress = AndroidGovernanceExecutionPolicyIngressContract
+                .classifyMsgType(MsgType.DEVICE_STRATEGY_REPORT)
+
             val payload = DeviceStrategyReportPayload(
+                artifact_tag = artifact.semanticTag,
+                snapshot_id = snapshot.snapshotId,
                 device_id = deviceId,
                 session_id = UFOGalaxyApplication.runtimeSessionId,
-                reported_at_ms = System.currentTimeMillis(),
-                strategy_indicators = emptyMap()
+                reported_at_ms = snapshot.reportedAtMs,
+                dimension_states = dimensionStates,
+                first_risk_reason = firstRiskReason,
+                missing_dimensions = missingDimensions,
+                ingress_boundary_class = ingress.boundaryClass.wireValue,
+                ingress_consumption_kind = ingress.consumptionKind.wireValue,
+                ingress_signal_class = ingress.signalClass.wireValue,
+                ingress_schema_version = ingress.schemaVersion,
+                non_closure_signal_class = AndroidNonClosureSignalBoundaryContract
+                    .classify(MsgType.DEVICE_STRATEGY_REPORT)?.wireValue ?: "unknown",
+                non_closure_schema_version = AndroidNonClosureSignalBoundaryContract.SCHEMA_VERSION
             )
 
             val envelope = AipMessage(
                 type = MsgType.DEVICE_STRATEGY_REPORT,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = deviceId,
-                runtime_session_id = UFOGalaxyApplication.runtimeSessionId
+                runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
+                idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_STRATEGY_REPORT, null)
             )
 
             val sent = transportManager.sendJson(gson.toJson(envelope))
-            Log.i(TAG, "[DEVICE_STRATEGY_REPORT] sent=$sent")
+            Log.i(TAG, "[DEVICE_STRATEGY_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_STRATEGY_REPORT] error: ${e.message}", e)
         }

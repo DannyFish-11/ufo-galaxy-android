@@ -157,6 +157,8 @@ dependencies {
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.animation:animation'
     implementation 'androidx.compose.foundation:foundation'
+    // 扩展图标集(BugReport / Mic / ContentCopy 等语义图标不在 core 集里,由 BOM 统一版本)
+    implementation 'androidx.compose.material:material-icons-extended'
     
     // Material Design
     implementation 'com.google.android.material:material:1.11.0'
