@@ -1540,7 +1540,7 @@ class GalaxyWebSocketClient(
             val correlationId = tryExtractField(canonicalJson, "correlation_id")
             val taskId = tryExtractField(canonicalJson, "task_id") ?: tryExtractFieldNested(canonicalJson, "payload", "task_id")
             val deviceId = tryExtractField(canonicalJson, "device_id")
-            Log.i(TAG, "[WS:UPLINK] type=$canonicalMsgType task_id=$taskId correlation_id=$correlationId device_id=${maskDeviceId(deviceId)}")
+            Log.i(TAG, "[WS:UPLINK] type=$canonicalMsgType task_id=$taskId correlation_id=$correlationId device_id=${maskDeviceId(deviceId ?: "")}")
         } else {
             Log.d(TAG, "发送 JSON: ${canonicalJson.take(100)}...")
         }
