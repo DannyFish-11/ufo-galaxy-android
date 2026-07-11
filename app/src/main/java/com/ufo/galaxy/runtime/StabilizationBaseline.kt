@@ -2621,8 +2621,8 @@ object StabilizationBaseline {
             rationale =
                 "PR-118 — Android continuity runtime 最小可观测诊断面。" +
                 "把关键 continuity 决策——reconnect classification、offline replay、" +
-                "recovery artifact 决策、reconciliation flush——从"内部日志可见"推进到" +
-                ""service/runtime-visible diagnostics 可见"。" +
+                "recovery artifact 决策、reconciliation flush——从「内部日志可见」推进到" +
+                "「service/runtime-visible diagnostics 可见」。" +
                 "引入 ContinuityDiagnosticsEvent sealed class（4 子类型）：" +
                 "ReconnectClassificationOutcome（WS 状态转换分类）、" +
                 "OfflineReplayEvent（QUEUED/FLUSHED）、" +

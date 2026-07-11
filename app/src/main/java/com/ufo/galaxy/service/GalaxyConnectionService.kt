@@ -561,7 +561,7 @@ class GalaxyConnectionService : Service() {
                 )
             val reconnectState = UFOGalaxyApplication.runtimeController
                 .reconnectRecoveryState.value.wireValue
-            val eventOfflineQueueDepth = offlineTaskQueue.queueDepth()
+            val eventOfflineQueueDepth = webSocketClient.queueSize.value
             val eventDegradedReasons = if (managerStateDegraded()) {
                 listOf("runtime_manager_degraded")
             } else {
