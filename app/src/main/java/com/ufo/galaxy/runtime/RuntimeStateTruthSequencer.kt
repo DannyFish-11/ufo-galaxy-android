@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
+import com.ufo.galaxy.runtime.AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -128,20 +129,19 @@ class RuntimeStateTruthSequencer(
         phase: String,
         previousLifecyclePhase: AndroidExecutionLifecycleContract.ExecutionLifecyclePhase?
     ): AndroidExecutionLifecycleContract.ExecutionLifecyclePhase {
-        val P = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
         return when (phase) {
             DeviceExecutionEventPayload.PHASE_EXECUTION_STARTED -> when (previousLifecyclePhase) {
-                P.RETRYING -> P.ACTIVATING
-                else -> P.ACTIVE
+                ExecutionLifecyclePhase.RETRYING -> ExecutionLifecyclePhase.ACTIVATING
+                else -> ExecutionLifecyclePhase.ACTIVE
             }
-            DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS -> P.ACTIVE
-            DeviceExecutionEventPayload.PHASE_COMPLETED -> P.COMPLETED
+            DeviceExecutionEventPayload.PHASE_EXECUTION_PROGRESS -> ExecutionLifecyclePhase.ACTIVE
+            DeviceExecutionEventPayload.PHASE_COMPLETED -> ExecutionLifecyclePhase.COMPLETED
             DeviceExecutionEventPayload.PHASE_FAILED,
             DeviceExecutionEventPayload.PHASE_STAGNATION_DETECTED,
-            DeviceExecutionEventPayload.PHASE_CANCELLED -> P.FAILED
-            DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION -> P.INTERRUPTED
-            DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE -> P.RETRYING
-            else -> P.UNKNOWN
+            DeviceExecutionEventPayload.PHASE_CANCELLED -> ExecutionLifecyclePhase.FAILED
+            DeviceExecutionEventPayload.PHASE_FALLBACK_TRANSITION -> ExecutionLifecyclePhase.INTERRUPTED
+            DeviceExecutionEventPayload.PHASE_TAKEOVER_MILESTONE -> ExecutionLifecyclePhase.RETRYING
+            else -> ExecutionLifecyclePhase.UNKNOWN
         }
     }
 }

@@ -37,6 +37,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.runtime.AndroidDeviceSurfaceSourceContract
 import com.ufo.galaxy.runtime.CrossDeviceSetupError
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
+import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.ui.MainActivity
 import com.ufo.galaxy.ui.components.EdgeTriggerDetector
 import com.ufo.galaxy.ui.viewmodel.UnifiedResultPresentation
@@ -458,7 +459,7 @@ class EnhancedFloatingService : Service() {
         )
         val notification = NotificationCompat.Builder(this, UFOGalaxyApplication.CHANNEL_ALERTS)
             .setContentTitle("UFO Galaxy 需要悬浮窗权限")
-            .setContentText("点击此通知前往设置，启用"显示在其他应用上层"权限以使用灵动岛功能。")
+            .setContentText("点击此通知前往设置，启用「显示在其他应用上层」权限以使用灵动岛功能。")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
@@ -634,7 +635,7 @@ class EnhancedFloatingService : Service() {
                 statusText?.post { updateStatusLabel() }
             }
 
-            override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String) {
+            override fun onTaskAssign(taskId: String, taskAssignPayloadJson: String, traceId: String?) {
                 lastTaskId = taskId
                 taskStatus = STATUS_RUNNING
                 statusText?.post { updateStatusLabel() }
@@ -642,7 +643,7 @@ class EnhancedFloatingService : Service() {
                 Log.i(TAG, "[FLOAT] task_assign task_id=$taskId")
             }
 
-            override fun onGoalExecution(taskId: String, goalPayloadJson: String) {
+            override fun onGoalExecution(taskId: String, goalPayloadJson: String, traceId: String?) {
                 lastTaskId = taskId
                 taskStatus = STATUS_RUNNING
                 statusText?.post { updateStatusLabel() }
@@ -966,4 +967,17 @@ class EnhancedFloatingService : Service() {
                         return true
                     }
                 }
-                MotionEvent.ACTION_UP -> 
+                MotionEvent.ACTION_UP -> {
+                    // A tap (no drag) is delegated to the view's OnClickListener,
+                    // which toggles the island's expand/collapse state.
+                    if (!isDragging) {
+                        v.performClick()
+                    }
+                    isDragging = false
+                    return false
+                }
+            }
+            return false
+        }
+    }
+} 
