@@ -244,7 +244,8 @@ class GalaxyWebSocketClient(
          */
         fun buildOkHttpClient(
             allowSelfSigned: Boolean = false,
-            isDebugBuild: Boolean = BuildConfig.DEBUG
+            isDebugBuild: Boolean = BuildConfig.DEBUG,
+            pinHost: String? = null
         ): OkHttpClient {
             val builder = OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -290,11 +291,15 @@ class GalaxyWebSocketClient(
                             "openssl dgst -sha256 -binary | openssl enc -base64"
                     )
                 } else {
+                    // 只钉写死的 galaxy.ufo.ai 时,自建网关(自有域名/IP)
+                    // 即使配置了真实 pin 也永远不会被匹配——pin 声明了但
+                    // 不生效。改为优先钉实际配置的网关主机。
+                    val effectivePinHost = pinHost?.takeIf { it.isNotBlank() } ?: "galaxy.ufo.ai"
                     val certificatePinner = CertificatePinner.Builder()
-                        .add("galaxy.ufo.ai", pinHash)
+                        .add(effectivePinHost, pinHash)
                         .build()
                     builder.certificatePinner(certificatePinner)
-                    Log.i(TAG, "[WS:CONNECT] Certificate pinning enabled for release build")
+                    Log.i(TAG, "[WS:CONNECT] Certificate pinning enabled for release build host=$effectivePinHost")
                 }
             }
             return builder.build()
@@ -303,6 +308,17 @@ class GalaxyWebSocketClient(
         // -----------------------------------------------------------------
         // DUAL-FORMAT: MessagePack helpers (merged from second companion)
         // -----------------------------------------------------------------
+
+        /**
+         * Extract the hostname from a ws/wss/http/https URL for certificate
+         * pinning. Returns null when the URL cannot be parsed(此时退回
+         * 默认 pin 主机)。
+         */
+        fun extractHostForPinning(url: String): String? = try {
+            java.net.URI(url.replaceFirst("ws://", "http://").replaceFirst("wss://", "https://")).host
+        } catch (_: Exception) {
+            null
+        }
 
         private const val TAG_COMPANION = "GalaxyWebSocket"
 
@@ -541,7 +557,10 @@ class GalaxyWebSocketClient(
         ) = Unit
     }
     
-    private val client = buildOkHttpClient(allowSelfSigned)
+    private val client = buildOkHttpClient(
+        allowSelfSigned,
+        pinHost = extractHostForPinning(serverUrl)
+    )
 
     private val gson = Gson()
     private var webSocket: WebSocket? = null
@@ -567,6 +586,16 @@ class GalaxyWebSocketClient(
     private val CONNECT_TIMEOUT_MS = 30_000L
     /** Job that fires if [onOpen] is not received within [CONNECT_TIMEOUT_MS]. */
     private var connectTimeoutJob: Job? = null
+
+    // ── PR-AUTH-UNIFIED: 客户端认证状态机(补齐 AuthMessage 契约的第 3/4 步)──
+    /** Auth handshake states for the post-connect auth frame. */
+    private enum class AuthState { UNAUTHENTICATED, PENDING, AUTHENTICATED, FAILED }
+    /** 当前认证状态;配置了 token 时心跳按契约钉在 AUTHENTICATED 之后。 */
+    @Volatile private var authState = AuthState.UNAUTHENTICATED
+    /** 等 auth_ok/auth_failed 的最长时间;旧网关不应答时超时放行(兼容降级,有告警)。 */
+    private val AUTH_RESPONSE_TIMEOUT_MS = 10_000L
+    /** 网关始终不应答 auth 帧时触发的兼容放行定时器。 */
+    private var authTimeoutJob: Job? = null
 
     // ── Heartbeat pong timeout detection (WS-1) ─────────────────────────────
     /** Timestamp of the last received heartbeat_ack (or initial connection). */
@@ -1167,6 +1196,10 @@ class GalaxyWebSocketClient(
         
         shouldReconnect = true
         reconnectJob?.cancel()
+        // PR-AUTH-UNIFIED: 新连接从干净认证状态开始。
+        authTimeoutJob?.cancel()
+        authTimeoutJob = null
+        authState = AuthState.UNAUTHENTICATED
 
         // WS-3: start a guard timer so that a connect() that never reaches onOpen
         // (e.g. half-open TCP, frozen intermediary) does not hang forever.
@@ -1226,12 +1259,33 @@ class GalaxyWebSocketClient(
                 lastPongTime = System.currentTimeMillis()
                 missedHeartbeats = 0
                 listeners.forEach { it.onConnected() }
-                startHeartbeat()
 
                 // PR-AUTH-UNIFIED: Send WebSocket auth message post-connect (unified with Wear OS).
                 // The HTTP Authorization header is retained as a compatibility fallback for
                 // legacy gateways; the WebSocket auth message is the canonical auth path.
-                sendAuthMessage()
+                //
+                // AuthMessage 契约第 4 步:配置了 token 时,心跳在 auth_ok 之后
+                // 才启动;未配置 token(开放网关/本地模式)保持旧行为立即启动。
+                // 旧网关可能不应答 auth 帧——超时兼容放行并告警,不让心跳饿死。
+                if (gatewayToken.isBlank()) {
+                    authState = AuthState.UNAUTHENTICATED
+                    startHeartbeat()
+                } else {
+                    authState = AuthState.PENDING
+                    sendAuthMessage()
+                    authTimeoutJob?.cancel()
+                    authTimeoutJob = scope.launch {
+                        delay(AUTH_RESPONSE_TIMEOUT_MS)
+                        if (authState == AuthState.PENDING && isConnected) {
+                            Log.w(
+                                TAG,
+                                "[WS:AUTH] No auth response within ${AUTH_RESPONSE_TIMEOUT_MS}ms — " +
+                                    "legacy gateway compat: starting heartbeat without auth_ok"
+                            )
+                            startHeartbeat()
+                        }
+                    }
+                }
 
                 // 发送握手消息
                 sendHandshake()
@@ -1353,6 +1407,13 @@ class GalaxyWebSocketClient(
             val root = gson.fromJson(text, JsonObject::class.java)
             val msgTypeStr = root.get("type")?.asString
             val traceId = root.get("trace_id")?.asString
+
+            // PR-AUTH-UNIFIED: 认证应答在进入 MsgType 枚举分发之前拦截
+            // (auth_ok/auth_failed/auth_invalid 不属于业务枚举)。
+            if (msgTypeStr == "auth_ok" || msgTypeStr == "auth_failed" || msgTypeStr == "auth_invalid") {
+                handleAuthResponse(msgTypeStr, root)
+                return
+            }
             val msgType = try {
                 msgTypeStr?.let { com.ufo.galaxy.shared.protocol.MsgType.fromValue(it) }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2141,6 +2202,36 @@ class GalaxyWebSocketClient(
         }
         val sent = webSocket?.send(json) ?: false
         Log.i(TAG, "[WS:AUTH] Auth message sent device_id=${maskDeviceId(deviceId)} sent=$sent")
+    }
+
+    /**
+     * PR-AUTH-UNIFIED: Handle the gateway's `auth_ok` / `auth_failed` /
+     * `auth_invalid` response (AuthMessage 契约第 3/4 步)。
+     *
+     * - `auth_ok` → AUTHENTICATED;若心跳因门控未启动则现在启动。
+     *   服务端会诚实携带 `auth_enforced`(false = 网关未开启校验)。
+     * - `auth_failed` / `auth_invalid` → FAILED;令牌错误几乎不会自愈,
+     *   停止自动重连(避免用错误令牌打重连风暴),通知监听者并主动断开。
+     */
+    private fun handleAuthResponse(type: String, root: JsonObject) {
+        authTimeoutJob?.cancel()
+        authTimeoutJob = null
+        if (type == "auth_ok") {
+            authState = AuthState.AUTHENTICATED
+            val enforced = try { root.get("auth_enforced")?.asBoolean ?: true } catch (_: Exception) { true }
+            Log.i(TAG, "[WS:AUTH] auth_ok received (auth_enforced=$enforced)")
+            if (heartbeatJob == null || heartbeatJob?.isActive != true) {
+                startHeartbeat()
+            }
+            return
+        }
+        authState = AuthState.FAILED
+        val reason = try { root.get("reason")?.asString ?: type } catch (_: Exception) { type }
+        Log.e(TAG, "[WS:AUTH] Authentication rejected by gateway: $reason — stopping reconnect")
+        listeners.forEach { it.onError("gateway_auth_failed: $reason") }
+        shouldReconnect = false
+        stopHeartbeat()
+        webSocket?.close(4401, "auth_failed")
     }
 
     /**
@@ -3076,8 +3167,49 @@ class GalaxyWebSocketClient(
     private fun getDeviceId(): String =
         sanitizeDeviceId(
             configuredDeviceId.takeIf { it.isNotBlank() }
-                ?: "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+                ?: persistedInstallDeviceId()
         )
+
+    /** [persistedInstallDeviceId] 在 Context 不可用时的进程内兜底缓存。 */
+    @Volatile private var inMemoryDeviceIdFallback: String? = null
+
+    /**
+     * 持久化安装身份:`厂商_型号-8位随机hex`,首次生成后写入
+     * SharedPreferences,此后跨重启稳定。
+     *
+     * 裸 "厂商_型号" 兜底有两个实际问题:(1) 可被猜测;(2) 两台同型号
+     * 设备的 device_id 直接碰撞,中心侧身份互踩。协议契约(AuthMessage
+     * 文档)也明确要求 stable persisted id。Context 不可用时退化为
+     * 进程内稳定随机后缀(仍防碰撞,重启会变,打 WARN)。
+     */
+    private fun persistedInstallDeviceId(): String {
+        val base = "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}"
+        val ctx = context
+        if (ctx == null) {
+            inMemoryDeviceIdFallback?.let { return it }
+            val generated = "$base-${java.util.UUID.randomUUID().toString().replace("-", "").take(8)}"
+            inMemoryDeviceIdFallback = generated
+            Log.w(TAG, "[WS:IDENTITY] No Context — device identity is process-scoped only (not persisted)")
+            return generated
+        }
+        return try {
+            val prefs = ctx.getSharedPreferences("galaxy_device_identity", Context.MODE_PRIVATE)
+            val existing = prefs.getString("install_device_id", null)
+            if (!existing.isNullOrBlank()) {
+                existing
+            } else {
+                val generated = "$base-${java.util.UUID.randomUUID().toString().replace("-", "").take(8)}"
+                prefs.edit().putString("install_device_id", generated).apply()
+                Log.i(TAG, "[WS:IDENTITY] Generated persisted install device id ${maskDeviceId(generated)}")
+                generated
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[WS:IDENTITY] SharedPreferences unavailable (${e.message}) — falling back to process-scoped id")
+            inMemoryDeviceIdFallback ?: "$base-${java.util.UUID.randomUUID().toString().replace("-", "").take(8)}".also {
+                inMemoryDeviceIdFallback = it
+            }
+        }
+    }
 
     private fun sanitizeDeviceId(rawDeviceId: String): String =
         rawDeviceId
