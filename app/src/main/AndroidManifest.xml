@@ -158,7 +158,44 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_provider_paths" />
         </provider>
-        
+
+        <!-- 原生表面①:主屏小组件(AI 常驻桌面,对标 Friends 一体感)。 -->
+        <receiver
+            android:name=".widget.PresenceWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/presence_widget_info" />
+        </receiver>
+
+        <!-- 原生表面②:快捷设置磁贴(下拉即见的系统级唤醒开关)。 -->
+        <service
+            android:name=".tile.PresenceTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="@string/presence_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- 原生表面③:全局文本入口(任意 App 选中文字→"问 Galaxy")。 -->
+        <activity
+            android:name=".text.ProcessTextActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:label="@string/presence_tile_label">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

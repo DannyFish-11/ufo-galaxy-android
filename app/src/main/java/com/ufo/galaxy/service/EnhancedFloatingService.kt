@@ -75,6 +75,10 @@ class EnhancedFloatingService : Service() {
         internal const val STATUS_SUCCESS = "success"
         internal const val STATUS_ERROR = "error"
 
+        // 启动即展开:供原生表面(小组件/磁贴)以 startForegroundService 唤醒,
+        // 避免"服务未运行时广播丢失"与接收器注册竞态。
+        const val ACTION_WAKE_EXPAND = "com.ufo.galaxy.island.WAKE_EXPAND"
+
         // 状态
         var isExpanded = false
             private set
@@ -231,10 +235,15 @@ class EnhancedFloatingService : Service() {
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "增强版悬浮窗服务启动")
-        
+
         startForeground(NOTIFICATION_ID, createNotification())
         showFloatingView()
-        
+
+        // 原生表面唤醒:启动即展开灵动岛(服务此刻已在跑,直接展开无竞态)。
+        if (intent?.action == ACTION_WAKE_EXPAND) {
+            expandIsland()
+        }
+
         return START_STICKY
     }
     
@@ -683,7 +692,10 @@ class EnhancedFloatingService : Service() {
      * Posts a status-label update to the UI thread.
      */
     private fun updateStatusLabel() {
-        statusText?.post { statusText?.text = buildStatusLabel() }
+        val label = buildStatusLabel()
+        statusText?.post { statusText?.text = label }
+        // 同步进在场状态源 → 小组件/磁贴/背屏显示同一句状态(口径一致)。
+        com.ufo.galaxy.surface.PresenceStateStore.update(this, statusText = label)
     }
 
     /**

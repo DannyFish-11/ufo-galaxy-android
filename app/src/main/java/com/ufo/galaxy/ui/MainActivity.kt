@@ -124,8 +124,27 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // 全局文本入口:选中文字"问 Galaxy"带来的预填(singleTask 首启走此处)。
+        handlePrefillIntent(intent)
     }
-    
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePrefillIntent(intent)
+    }
+
+    /** 消费 ProcessTextActivity 转来的选中文本,预填进聊天输入。 */
+    private fun handlePrefillIntent(intent: Intent?) {
+        if (intent?.action != com.ufo.galaxy.text.ProcessTextActivity.ACTION_PREFILL_CHAT) return
+        val text = intent.getStringExtra(com.ufo.galaxy.text.ProcessTextActivity.EXTRA_PREFILL)
+            ?.trim().orEmpty()
+        if (text.isNotEmpty()) {
+            mainViewModel.updateInput(text)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         mainViewModel.onResume()
