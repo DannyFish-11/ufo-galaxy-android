@@ -177,8 +177,8 @@ sealed class LocalTruthEmitDecision {
      */
     data class SuppressDueToPostureConflict(
         val unitId: String,
-        val generatedPosture: SourceRuntimePosture,
-        val currentPosture: SourceRuntimePosture
+        val generatedPosture: String,
+        val currentPosture: String
     ) : LocalTruthEmitDecision() {
         override val semanticTag: String =
             AndroidLocalTruthOwnershipCoordinator.DECISION_SUPPRESS_DUE_TO_POSTURE_CONFLICT
