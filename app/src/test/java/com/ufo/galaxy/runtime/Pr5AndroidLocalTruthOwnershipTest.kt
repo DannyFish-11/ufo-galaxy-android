@@ -192,8 +192,8 @@ class Pr5AndroidLocalTruthOwnershipTest {
 
     private fun postureBoundContext(
         unitId: String = "unit-1",
-        generatedPosture: SourceRuntimePosture,
-        currentPosture: SourceRuntimePosture
+        generatedPosture: String,
+        currentPosture: String
     ) = context(
         unitId = unitId,
         truthClass = AndroidLocalTruthOwnershipCoordinator.TruthClass.POSTURE_BOUND_TRUTH,
