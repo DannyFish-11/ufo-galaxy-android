@@ -575,17 +575,17 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
     // ── GalaxyLogger — new tag constants ─────────────────────────────────────
 
     @Test
-    fun `TAG_FORMATION_REBALANCE value is 'GALAXY:FORMATION:REBALANCE'`() {
+    fun `TAG_FORMATION_REBALANCE value is 'GALAXY -FORMATION -REBALANCE'`() {
         assertEquals("GALAXY:FORMATION:REBALANCE", GalaxyLogger.TAG_FORMATION_REBALANCE)
     }
 
     @Test
-    fun `TAG_FORMATION_ROLE value is 'GALAXY:FORMATION:ROLE'`() {
+    fun `TAG_FORMATION_ROLE value is 'GALAXY -FORMATION -ROLE'`() {
         assertEquals("GALAXY:FORMATION:ROLE", GalaxyLogger.TAG_FORMATION_ROLE)
     }
 
     @Test
-    fun `TAG_FORMATION_HEALTH value is 'GALAXY:FORMATION:HEALTH'`() {
+    fun `TAG_FORMATION_HEALTH value is 'GALAXY -FORMATION -HEALTH'`() {
         assertEquals("GALAXY:FORMATION:HEALTH", GalaxyLogger.TAG_FORMATION_HEALTH)
     }
 
@@ -819,7 +819,7 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         withTimeoutOrNull(100) { controller.formationRebalanceEvent.first() }
 
         // WS error while recovering → FAILED
-        client.simulateError("connection refused")
+        client.simulateDisconnected()
 
         val event = withTimeoutOrNull(200) { controller.formationRebalanceEvent.first() }
         assertNotNull("Expected a formation rebalance event after WS error", event)

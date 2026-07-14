@@ -164,10 +164,10 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
     @Test
     fun `fromWireValue returns correct kind for each value`() {
         val k = AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind
-        assertEquals(k.TAKEOVER_INTERACTIVE, k.fromWireValue("takeover_interactive"))
-        assertEquals(k.DELEGATED_EXECUTION, k.fromWireValue("delegated_execution"))
-        assertEquals(k.LOCAL_ASSISTIVE, k.fromWireValue("local_assistive"))
-        assertEquals(k.DEGRADED_FALLBACK, k.fromWireValue("degraded_fallback"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.TAKEOVER_INTERACTIVE, k.fromWireValue("takeover_interactive"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DELEGATED_EXECUTION, k.fromWireValue("delegated_execution"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.LOCAL_ASSISTIVE, k.fromWireValue("local_assistive"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DEGRADED_FALLBACK, k.fromWireValue("degraded_fallback"))
     }
 
     @Test
@@ -180,10 +180,10 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
     @Test
     fun `fromRuntimeKind maps all four kinds`() {
         val k = AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind
-        assertEquals(k.TAKEOVER_INTERACTIVE, k.fromRuntimeKind("takeover_interactive"))
-        assertEquals(k.DELEGATED_EXECUTION, k.fromRuntimeKind("delegated_execution"))
-        assertEquals(k.LOCAL_ASSISTIVE, k.fromRuntimeKind("local_assistive"))
-        assertEquals(k.DEGRADED_FALLBACK, k.fromRuntimeKind("degraded_fallback"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.TAKEOVER_INTERACTIVE, k.fromRuntimeKind("takeover_interactive"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DELEGATED_EXECUTION, k.fromRuntimeKind("delegated_execution"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.LOCAL_ASSISTIVE, k.fromRuntimeKind("local_assistive"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DEGRADED_FALLBACK, k.fromRuntimeKind("degraded_fallback"))
     }
 
     @Test
@@ -197,10 +197,10 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
     @Test
     fun `only TAKEOVER_INTERACTIVE has canSignalProblemSolved true`() {
         val k = AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind
-        assertTrue(k.TAKEOVER_INTERACTIVE.canSignalProblemSolved)
-        assertFalse(k.DELEGATED_EXECUTION.canSignalProblemSolved)
-        assertFalse(k.LOCAL_ASSISTIVE.canSignalProblemSolved)
-        assertFalse(k.DEGRADED_FALLBACK.canSignalProblemSolved)
+        assertTrue(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.TAKEOVER_INTERACTIVE.canSignalProblemSolved)
+        assertFalse(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DELEGATED_EXECUTION.canSignalProblemSolved)
+        assertFalse(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.LOCAL_ASSISTIVE.canSignalProblemSolved)
+        assertFalse(AndroidNlDrivenExecutionSpineContract.ExecutionSpineParticipationKind.DEGRADED_FALLBACK.canSignalProblemSolved)
     }
 
     @Test
@@ -256,11 +256,11 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
     @Test
     fun `ProblemSolvingClosureClass fromWireValue returns correct class for each value`() {
         val c = AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass
-        assertEquals(c.TASK_COMPLETED_PROBLEM_SOLVED, c.fromWireValue("task_completed_problem_solved"))
-        assertEquals(c.TASK_COMPLETED_PROBLEM_PARTIAL, c.fromWireValue("task_completed_problem_partial"))
-        assertEquals(c.TASK_COMPLETED_PROBLEM_OPEN, c.fromWireValue("task_completed_problem_open"))
-        assertEquals(c.TASK_INCOMPLETE_PROBLEM_OPEN, c.fromWireValue("task_incomplete_problem_open"))
-        assertEquals(c.EXECUTION_DELEGATED_FURTHER, c.fromWireValue("execution_delegated_further"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_COMPLETED_PROBLEM_SOLVED, c.fromWireValue("task_completed_problem_solved"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_COMPLETED_PROBLEM_PARTIAL, c.fromWireValue("task_completed_problem_partial"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_COMPLETED_PROBLEM_OPEN, c.fromWireValue("task_completed_problem_open"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.TASK_INCOMPLETE_PROBLEM_OPEN, c.fromWireValue("task_incomplete_problem_open"))
+        assertEquals(AndroidNlDrivenExecutionSpineContract.ProblemSolvingClosureClass.EXECUTION_DELEGATED_FURTHER, c.fromWireValue("execution_delegated_further"))
     }
 
     @Test

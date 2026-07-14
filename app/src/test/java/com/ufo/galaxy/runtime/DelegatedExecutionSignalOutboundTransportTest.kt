@@ -298,7 +298,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
         val payload = signal.toOutboundPayload(deviceId = "device-x")
         val envelope = com.ufo.galaxy.protocol.AipMessage(
             type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-x",
             trace_id = signal.traceId,
             correlation_id = signal.taskId,
@@ -316,7 +316,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
         val payload = signal.toOutboundPayload(deviceId = "device-x")
         val envelope = com.ufo.galaxy.protocol.AipMessage(
             type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-x",
             trace_id = signal.traceId,
             correlation_id = signal.taskId,
@@ -333,7 +333,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
         val envelopeJson = gson.toJson(
             com.ufo.galaxy.protocol.AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = "device-x",
                 trace_id = signal.traceId,
                 correlation_id = signal.taskId,
@@ -352,7 +352,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
         val envelopeJson = gson.toJson(
             com.ufo.galaxy.protocol.AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = "device-x",
                 trace_id = signal.traceId,
                 correlation_id = signal.taskId,
@@ -381,7 +381,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
             val payload = signal.toOutboundPayload(deviceId = "chain-device")
             val envelope = com.ufo.galaxy.protocol.AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = "chain-device",
                 trace_id = signal.traceId,
                 correlation_id = signal.taskId,
@@ -410,7 +410,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
             val payload = signal.toOutboundPayload(deviceId = "chain-device")
             val envelope = com.ufo.galaxy.protocol.AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = "chain-device",
                 trace_id = signal.traceId,
                 correlation_id = signal.taskId,
@@ -439,7 +439,7 @@ class DelegatedExecutionSignalOutboundTransportTest {
             val payload = signal.toOutboundPayload(deviceId = "device-x")
             val envelope = com.ufo.galaxy.protocol.AipMessage(
                 type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = "device-x",
                 trace_id = signal.traceId,
                 correlation_id = signal.taskId,

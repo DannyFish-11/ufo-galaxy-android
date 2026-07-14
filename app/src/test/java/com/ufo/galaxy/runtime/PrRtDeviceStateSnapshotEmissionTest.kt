@@ -497,7 +497,7 @@ class PrRtDeviceStateSnapshotEmissionTest {
         val snap = fullyReadySnapshot()
         val envelope = AipMessage(
             type = MsgType.DEVICE_STATE_SNAPSHOT,
-            payload = snap,
+            payload = gson.toJsonTree(snap),
             device_id = snap.device_id,
             runtime_session_id = "test-runtime-session-1"
         )
@@ -510,7 +510,7 @@ class PrRtDeviceStateSnapshotEmissionTest {
         val snap = fullyReadySnapshot(deviceId)
         val envelope = AipMessage(
             type = MsgType.DEVICE_STATE_SNAPSHOT,
-            payload = snap,
+            payload = gson.toJsonTree(snap),
             device_id = deviceId,
             runtime_session_id = "test-runtime-session-2"
         )
@@ -523,7 +523,7 @@ class PrRtDeviceStateSnapshotEmissionTest {
         val sessionId = "test-runtime-session-3"
         val envelope = AipMessage(
             type = MsgType.DEVICE_STATE_SNAPSHOT,
-            payload = snap,
+            payload = gson.toJsonTree(snap),
             device_id = snap.device_id,
             runtime_session_id = sessionId
         )
@@ -542,7 +542,7 @@ class PrRtDeviceStateSnapshotEmissionTest {
         val snap = fullyReadySnapshot(deviceId)
         val envelope = AipMessage(
             type = MsgType.DEVICE_STATE_SNAPSHOT,
-            payload = snap,
+            payload = gson.toJsonTree(snap),
             device_id = deviceId,
             runtime_session_id = "rt-session-roundtrip",
             idempotency_key = "idem-key-001"

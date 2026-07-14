@@ -158,7 +158,7 @@ class SourceRuntimePosturePropagationTest {
     fun `AipMessage carries source_runtime_posture in envelope`() {
         val msg = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = "{}",
+            payload = com.google.gson.JsonObject(),
             source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         assertEquals(SourceRuntimePosture.JOIN_RUNTIME, msg.source_runtime_posture)
@@ -166,7 +166,7 @@ class SourceRuntimePosturePropagationTest {
 
     @Test
     fun `AipMessage defaults source_runtime_posture to null (backwards-safe)`() {
-        val msg = AipMessage(type = MsgType.HEARTBEAT, payload = "{}")
+        val msg = AipMessage(type = MsgType.HEARTBEAT, payload = com.google.gson.JsonObject())
         assertNull(msg.source_runtime_posture)
     }
 
@@ -204,7 +204,7 @@ class SourceRuntimePosturePropagationTest {
         return AgentRuntimeBridge(
             gatewayClient = client,
             settings = settings,
-            metricsRecorder = MetricsRecorder(InMemoryAppSettings())
+            metricsRecorder = MetricsRecorder(InMemoryAppSettings(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
         )
     }
 
@@ -290,7 +290,7 @@ class SourceRuntimePosturePropagationTest {
         val bridge = AgentRuntimeBridge(
             gatewayClient = client,
             settings = settings,
-            metricsRecorder = MetricsRecorder(InMemoryAppSettings())
+            metricsRecorder = MetricsRecorder(InMemoryAppSettings(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
         )
         val req = AgentRuntimeBridge.HandoffRequest(
             traceId = UUID.randomUUID().toString(),

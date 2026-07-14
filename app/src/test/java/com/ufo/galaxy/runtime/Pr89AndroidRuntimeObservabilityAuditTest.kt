@@ -169,12 +169,12 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `ExecutionPathTag fromWireValue returns correct tag for each value`() {
         val t = AndroidRuntimeObservabilityAuditContract.ExecutionPathTag
-        assertEquals(t.LOCAL_PATH, t.fromWireValue("local_path"))
-        assertEquals(t.CROSS_DEVICE_PATH, t.fromWireValue("cross_device_path"))
-        assertEquals(t.DELEGATED_PATH, t.fromWireValue("delegated_path"))
-        assertEquals(t.TAKEOVER_PATH, t.fromWireValue("takeover_path"))
-        assertEquals(t.DEGRADED_PATH, t.fromWireValue("degraded_path"))
-        assertEquals(t.UNKNOWN, t.fromWireValue("unknown"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.LOCAL_PATH, t.fromWireValue("local_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.CROSS_DEVICE_PATH, t.fromWireValue("cross_device_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DELEGATED_PATH, t.fromWireValue("delegated_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.TAKEOVER_PATH, t.fromWireValue("takeover_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DEGRADED_PATH, t.fromWireValue("degraded_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.UNKNOWN, t.fromWireValue("unknown"))
     }
 
     @Test
@@ -248,15 +248,15 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `AuditContributionClass fromWireValue returns correct class for each value`() {
         val c = AndroidRuntimeObservabilityAuditContract.AuditContributionClass
-        assertEquals(c.PARTICIPATION_ATTESTATION, c.fromWireValue("participation_attestation"))
-        assertEquals(c.EXECUTION_CONTRIBUTION, c.fromWireValue("execution_contribution"))
-        assertEquals(c.EXECUTION_OUTCOME, c.fromWireValue("execution_outcome"))
-        assertEquals(c.INTERRUPTION_RECORD, c.fromWireValue("interruption_record"))
-        assertEquals(c.RECOVERY_CONTRIBUTION, c.fromWireValue("recovery_contribution"))
-        assertEquals(c.TAKEOVER_CONTRIBUTION, c.fromWireValue("takeover_contribution"))
-        assertEquals(c.DELEGATED_CONTRIBUTION, c.fromWireValue("delegated_contribution"))
-        assertEquals(c.OPERATOR_ACTION_OUTCOME, c.fromWireValue("operator_action_outcome"))
-        assertEquals(c.INFORMATIONAL, c.fromWireValue("informational"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.PARTICIPATION_ATTESTATION, c.fromWireValue("participation_attestation"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_CONTRIBUTION, c.fromWireValue("execution_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_OUTCOME, c.fromWireValue("execution_outcome"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.INTERRUPTION_RECORD, c.fromWireValue("interruption_record"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.RECOVERY_CONTRIBUTION, c.fromWireValue("recovery_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.TAKEOVER_CONTRIBUTION, c.fromWireValue("takeover_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.DELEGATED_CONTRIBUTION, c.fromWireValue("delegated_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.OPERATOR_ACTION_OUTCOME, c.fromWireValue("operator_action_outcome"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.INFORMATIONAL, c.fromWireValue("informational"))
     }
 
     @Test
@@ -306,11 +306,11 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `ObservabilityReliabilityClass fromWireValue returns correct class for each value`() {
         val r = AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass
-        assertEquals(r.HIGH_FIDELITY, r.fromWireValue("high_fidelity"))
-        assertEquals(r.REDUCED_FIDELITY, r.fromWireValue("reduced_fidelity"))
-        assertEquals(r.STALE, r.fromWireValue("stale"))
-        assertEquals(r.INTERRUPTED, r.fromWireValue("interrupted"))
-        assertEquals(r.UNKNOWN, r.fromWireValue("unknown"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.HIGH_FIDELITY, r.fromWireValue("high_fidelity"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.REDUCED_FIDELITY, r.fromWireValue("reduced_fidelity"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.STALE, r.fromWireValue("stale"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.INTERRUPTED, r.fromWireValue("interrupted"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.UNKNOWN, r.fromWireValue("unknown"))
     }
 
     @Test

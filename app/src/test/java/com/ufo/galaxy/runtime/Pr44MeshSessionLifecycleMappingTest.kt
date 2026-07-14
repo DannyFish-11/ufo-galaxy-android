@@ -129,10 +129,10 @@ class Pr44MeshSessionLifecycleMappingTest {
     fun `MeshSessionLifecycleHint ALL_WIRE_VALUES contains all four values`() {
         val all = V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint.ALL_WIRE_VALUES
         val hint = V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint
-        assertTrue(all.contains(hint.CREATE_ACTIVATE.wireValue))
-        assertTrue(all.contains(hint.RESTORE_ACTIVATE.wireValue))
-        assertTrue(all.contains(hint.SUSPEND.wireValue))
-        assertTrue(all.contains(hint.TERMINATE.wireValue))
+        assertTrue(all.contains(V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint.CREATE_ACTIVATE.wireValue))
+        assertTrue(all.contains(V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint.RESTORE_ACTIVATE.wireValue))
+        assertTrue(all.contains(V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint.SUSPEND.wireValue))
+        assertTrue(all.contains(V2MultiDeviceLifecycleEvent.MeshSessionLifecycleHint.TERMINATE.wireValue))
     }
 
     @Test
@@ -579,7 +579,7 @@ class Pr44MeshSessionLifecycleMappingTest {
     }
 
     @Test
-    fun `all PR-44 entries reference com.ufo.galaxy packagePath`() {
+    fun `all PR-44 entries reference com ufo galaxy packagePath`() {
         val pr44Entries = StabilizationBaseline.entries.filter { it.introducedPr == 44 }
         pr44Entries.forEach { entry ->
             assertTrue(

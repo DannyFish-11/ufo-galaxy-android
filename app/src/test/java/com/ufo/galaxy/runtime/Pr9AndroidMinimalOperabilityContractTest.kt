@@ -225,16 +225,16 @@ class Pr9AndroidMinimalOperabilityContractTest {
     @Test
     fun `OperabilityPathStep fromWireValue returns correct step for each wire value`() {
         val S = AndroidMinimalOperabilityContract.OperabilityPathStep
-        assertEquals(S.CLONE_REPO, S.fromWireValue("clone_repo"))
-        assertEquals(S.BUILD_APK, S.fromWireValue("build_apk"))
-        assertEquals(S.INSTALL_APK, S.fromWireValue("install_apk"))
-        assertEquals(S.CONFIGURE_V2_SERVER, S.fromWireValue("configure_v2_server"))
-        assertEquals(S.ESTABLISH_WS_CONNECTION, S.fromWireValue("establish_ws_connection"))
-        assertEquals(S.REPORT_DEVICE_TRUTH, S.fromWireValue("report_device_truth"))
-        assertEquals(S.RECEIVE_DELEGATED_TASK, S.fromWireValue("receive_delegated_task"))
-        assertEquals(S.UPLINK_RESULT, S.fromWireValue("uplink_result"))
-        assertEquals(S.ASSESS_LOCAL_MODE_READINESS, S.fromWireValue("assess_local_mode_readiness"))
-        assertEquals(S.DIAGNOSE_FAILURE, S.fromWireValue("diagnose_failure"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.CLONE_REPO, S.fromWireValue("clone_repo"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.BUILD_APK, S.fromWireValue("build_apk"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.INSTALL_APK, S.fromWireValue("install_apk"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.CONFIGURE_V2_SERVER, S.fromWireValue("configure_v2_server"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.ESTABLISH_WS_CONNECTION, S.fromWireValue("establish_ws_connection"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.REPORT_DEVICE_TRUTH, S.fromWireValue("report_device_truth"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.RECEIVE_DELEGATED_TASK, S.fromWireValue("receive_delegated_task"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.UPLINK_RESULT, S.fromWireValue("uplink_result"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.ASSESS_LOCAL_MODE_READINESS, S.fromWireValue("assess_local_mode_readiness"))
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.DIAGNOSE_FAILURE, S.fromWireValue("diagnose_failure"))
     }
 
     @Test
@@ -336,12 +336,12 @@ class Pr9AndroidMinimalOperabilityContractTest {
     @Test
     fun `PathBlockCondition fromWireValue returns correct condition for each wire value`() {
         val BC = AndroidMinimalOperabilityContract.PathBlockCondition
-        assertEquals(BC.MISSING_JDK_OR_SDK, BC.fromWireValue("missing_jdk_or_sdk"))
-        assertEquals(BC.GATEWAY_URL_IS_PLACEHOLDER, BC.fromWireValue("gateway_url_is_placeholder"))
-        assertEquals(BC.CROSS_DEVICE_DISABLED, BC.fromWireValue("cross_device_disabled"))
-        assertEquals(BC.WS_HOST_UNREACHABLE, BC.fromWireValue("ws_host_unreachable"))
-        assertEquals(BC.MODE_NOT_CROSS_DEVICE_ACTIVE, BC.fromWireValue("mode_not_cross_device_active"))
-        assertEquals(BC.GOAL_EXECUTION_DISABLED, BC.fromWireValue("goal_execution_disabled"))
+        assertEquals(AndroidMinimalOperabilityContract.PathBlockCondition.MISSING_JDK_OR_SDK, BC.fromWireValue("missing_jdk_or_sdk"))
+        assertEquals(AndroidMinimalOperabilityContract.PathBlockCondition.GATEWAY_URL_IS_PLACEHOLDER, BC.fromWireValue("gateway_url_is_placeholder"))
+        assertEquals(AndroidMinimalOperabilityContract.PathBlockCondition.CROSS_DEVICE_DISABLED, BC.fromWireValue("cross_device_disabled"))
+        assertEquals(AndroidMinimalOperabilityContract.PathBlockCondition.WS_HOST_UNREACHABLE, BC.fromWireValue("ws_host_unreachable"))
+        assertEquals(AndroidMinimalOperabilityContract.PathBlockCondition.MODE_NOT_CROSS_DEVICE_ACTIVE, BC.fromWireValue("mode_not_cross_device_active"))
+        assertEquals(AndroidMinimalOperabilityContract.PathBlockCondition.GOAL_EXECUTION_DISABLED, BC.fromWireValue("goal_execution_disabled"))
     }
 
     @Test
@@ -408,11 +408,11 @@ class Pr9AndroidMinimalOperabilityContractTest {
     @Test
     fun `CapabilityDegradationKind fromWireValue returns correct kind`() {
         val D = AndroidMinimalOperabilityContract.CapabilityDegradationKind
-        assertEquals(D.LOCAL_LLM_NOT_LOADED, D.fromWireValue("local_llm_not_loaded"))
-        assertEquals(D.ACCESSIBILITY_PERMISSION_NOT_GRANTED, D.fromWireValue("accessibility_permission_not_granted"))
-        assertEquals(D.OVERLAY_PERMISSION_NOT_GRANTED, D.fromWireValue("overlay_permission_not_granted"))
-        assertEquals(D.EXTERNAL_INFERENCE_SERVER_UNAVAILABLE, D.fromWireValue("external_inference_server_unavailable"))
-        assertEquals(D.CONNECTION_DEGRADED, D.fromWireValue("connection_degraded"))
+        assertEquals(AndroidMinimalOperabilityContract.CapabilityDegradationKind.LOCAL_LLM_NOT_LOADED, D.fromWireValue("local_llm_not_loaded"))
+        assertEquals(AndroidMinimalOperabilityContract.CapabilityDegradationKind.ACCESSIBILITY_PERMISSION_NOT_GRANTED, D.fromWireValue("accessibility_permission_not_granted"))
+        assertEquals(AndroidMinimalOperabilityContract.CapabilityDegradationKind.OVERLAY_PERMISSION_NOT_GRANTED, D.fromWireValue("overlay_permission_not_granted"))
+        assertEquals(AndroidMinimalOperabilityContract.CapabilityDegradationKind.EXTERNAL_INFERENCE_SERVER_UNAVAILABLE, D.fromWireValue("external_inference_server_unavailable"))
+        assertEquals(AndroidMinimalOperabilityContract.CapabilityDegradationKind.CONNECTION_DEGRADED, D.fromWireValue("connection_degraded"))
     }
 
     @Test
@@ -639,11 +639,11 @@ class Pr9AndroidMinimalOperabilityContractTest {
     @Test
     fun `DelegatedExecutionBlockKind fromWireValue returns correct kind`() {
         val DK = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind
-        assertEquals(DK.CROSS_DEVICE_RUNTIME_INACTIVE, DK.fromWireValue("cross_device_runtime_inactive"))
-        assertEquals(DK.GOAL_EXECUTION_FEATURE_DISABLED, DK.fromWireValue("goal_execution_feature_disabled"))
-        assertEquals(DK.PARALLEL_EXECUTION_FEATURE_DISABLED, DK.fromWireValue("parallel_execution_feature_disabled"))
-        assertEquals(DK.POLICY_ROUTING_REJECTED, DK.fromWireValue("policy_routing_rejected"))
-        assertEquals(DK.MODE_TRANSITIONING_HOLD, DK.fromWireValue("mode_transitioning_hold"))
+        assertEquals(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.CROSS_DEVICE_RUNTIME_INACTIVE, DK.fromWireValue("cross_device_runtime_inactive"))
+        assertEquals(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.GOAL_EXECUTION_FEATURE_DISABLED, DK.fromWireValue("goal_execution_feature_disabled"))
+        assertEquals(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.PARALLEL_EXECUTION_FEATURE_DISABLED, DK.fromWireValue("parallel_execution_feature_disabled"))
+        assertEquals(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.POLICY_ROUTING_REJECTED, DK.fromWireValue("policy_routing_rejected"))
+        assertEquals(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.MODE_TRANSITIONING_HOLD, DK.fromWireValue("mode_transitioning_hold"))
     }
 
     @Test
@@ -733,15 +733,15 @@ class Pr9AndroidMinimalOperabilityContractTest {
     @Test
     fun `FailureDiagnosticKind fromWireValue returns correct kind`() {
         val FK = AndroidMinimalOperabilityContract.FailureDiagnosticKind
-        assertEquals(FK.BUILD_FAILED_MISSING_PREREQUISITES, FK.fromWireValue("build_failed_missing_prerequisites"))
-        assertEquals(FK.CONNECT_FAILED_INVALID_GATEWAY_URL, FK.fromWireValue("connect_failed_invalid_gateway_url"))
-        assertEquals(FK.CONNECT_FAILED_CROSS_DEVICE_DISABLED, FK.fromWireValue("connect_failed_cross_device_disabled"))
-        assertEquals(FK.CONNECT_FAILED_HOST_UNREACHABLE, FK.fromWireValue("connect_failed_host_unreachable"))
-        assertEquals(FK.DEVICE_TRUTH_UPLINK_FAILED, FK.fromWireValue("device_truth_uplink_failed"))
-        assertEquals(FK.DELEGATED_TASK_REJECTED_PIPELINE_DISABLED, FK.fromWireValue("delegated_task_rejected_pipeline_disabled"))
-        assertEquals(FK.RESULT_UPLINK_QUEUED_PENDING_RECONNECT, FK.fromWireValue("result_uplink_queued_pending_reconnect"))
-        assertEquals(FK.LOCAL_MODE_BLOCKED_LLM_NOT_LOADED, FK.fromWireValue("local_mode_blocked_llm_not_loaded"))
-        assertEquals(FK.LOCAL_MODE_BLOCKED_ACCESSIBILITY_NOT_GRANTED, FK.fromWireValue("local_mode_blocked_accessibility_not_granted"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.BUILD_FAILED_MISSING_PREREQUISITES, FK.fromWireValue("build_failed_missing_prerequisites"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.CONNECT_FAILED_INVALID_GATEWAY_URL, FK.fromWireValue("connect_failed_invalid_gateway_url"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.CONNECT_FAILED_CROSS_DEVICE_DISABLED, FK.fromWireValue("connect_failed_cross_device_disabled"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.CONNECT_FAILED_HOST_UNREACHABLE, FK.fromWireValue("connect_failed_host_unreachable"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.DEVICE_TRUTH_UPLINK_FAILED, FK.fromWireValue("device_truth_uplink_failed"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.DELEGATED_TASK_REJECTED_PIPELINE_DISABLED, FK.fromWireValue("delegated_task_rejected_pipeline_disabled"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.RESULT_UPLINK_QUEUED_PENDING_RECONNECT, FK.fromWireValue("result_uplink_queued_pending_reconnect"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.LOCAL_MODE_BLOCKED_LLM_NOT_LOADED, FK.fromWireValue("local_mode_blocked_llm_not_loaded"))
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.LOCAL_MODE_BLOCKED_ACCESSIBILITY_NOT_GRANTED, FK.fromWireValue("local_mode_blocked_accessibility_not_granted"))
     }
 
     @Test

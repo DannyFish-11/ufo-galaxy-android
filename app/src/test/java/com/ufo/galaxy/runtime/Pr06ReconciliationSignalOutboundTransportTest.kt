@@ -130,7 +130,7 @@ class Pr06ReconciliationSignalOutboundTransportTest {
         val payload = toPayload(signal, deviceId)
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = deviceId,
             correlation_id = signal.taskId,
             idempotency_key = signal.signalId
@@ -406,7 +406,7 @@ class Pr06ReconciliationSignalOutboundTransportTest {
         val payload = toPayload(signal)
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-x",
             correlation_id = signal.taskId,
             idempotency_key = signal.signalId
@@ -441,7 +441,7 @@ class Pr06ReconciliationSignalOutboundTransportTest {
             val payload = toPayload(signal)
             val envelope = AipMessage(
                 type = MsgType.RECONCILIATION_SIGNAL,
-                payload = payload,
+                payload = gson.toJsonTree(payload),
                 device_id = "device-x",
                 correlation_id = signal.taskId,
                 idempotency_key = signal.signalId
@@ -460,7 +460,7 @@ class Pr06ReconciliationSignalOutboundTransportTest {
         val payload = toPayload(signal)
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-x",
             correlation_id = signal.taskId,
             idempotency_key = signal.signalId

@@ -89,11 +89,12 @@ import org.junit.Test
  *  - INTRODUCED_PR is 7
  *  - INTRODUCED_PR_TITLE is non-blank
  */
+private typealias Out = DelegatedTakeoverRecoveryContract.TakeoverInterruptionOutcome
+private typealias S = MultiDeviceParticipantOrchestrationState.OrchestrationState
+
 class Pr7DelegatedTakeoverRecoveryContractTest {
 
     private val C = DelegatedTakeoverRecoveryContract
-    private val Out = DelegatedTakeoverRecoveryContract.TakeoverInterruptionOutcome
-    private val S = MultiDeviceParticipantOrchestrationState.OrchestrationState
 
     // ── TakeoverInterruptionOutcome — wire values ─────────────────────────────
 

@@ -235,7 +235,7 @@ class CrossRepoSignalClosureValidationTest {
         )
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-01",
             correlation_id = signal.taskId,
             idempotency_key = signal.signalId
@@ -350,7 +350,7 @@ class CrossRepoSignalClosureValidationTest {
         )
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = ack,
+            payload = gson.toJsonTree(ack),
             device_id = "device-closure-01",
             trace_id = "tr-closure-01"
         )
@@ -451,7 +451,7 @@ class CrossRepoSignalClosureValidationTest {
         val payload = ackSignal.toOutboundPayload(deviceId = "device-closure-01")
         val envelope = AipMessage(
             type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-closure-01",
             correlation_id = ackSignal.taskId,
             idempotency_key = ackSignal.signalId
@@ -546,7 +546,7 @@ class CrossRepoSignalClosureValidationTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_READINESS_REPORT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-closure-01",
             idempotency_key = "snap-closure-rt-01"
         )

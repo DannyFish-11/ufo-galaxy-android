@@ -67,6 +67,8 @@ import org.junit.Test
  */
 class UnifiedResultAndContinuityContractClosureTest {
 
+    private val gson = com.google.gson.Gson()
+
     private lateinit var continuityIntegration: AndroidContinuityIntegration
 
     @Before
@@ -100,7 +102,7 @@ class UnifiedResultAndContinuityContractClosureTest {
         )
         return AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
-            payload = errorResult,
+            payload = gson.toJsonTree(errorResult),
             correlation_id = taskId,
             device_id = "test-device",
             trace_id = traceId,
@@ -177,7 +179,7 @@ class UnifiedResultAndContinuityContractClosureTest {
             errorMsg = errorMsg,
             traceId = "trace-fc-001"
         )
-        val payload = envelope.payload as GoalResultPayload
+        val payload = gson.fromJson(envelope.payload, GoalResultPayload::class.java)
         assertEquals("task-field-check-001", payload.task_id)
         assertEquals(errorMsg, payload.error)
         assertEquals(EdgeExecutor.STATUS_ERROR, payload.status)

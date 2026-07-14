@@ -150,6 +150,8 @@ import org.junit.Test
  */
 class Pr47RuntimeObservabilityCompatibilityTest {
 
+    private val gson = com.google.gson.Gson()
+
     // ── Fakes ─────────────────────────────────────────────────────────────────
 
     private class FakeScreenshot : EdgeExecutor.ScreenshotProvider {
@@ -775,7 +777,7 @@ class Pr47RuntimeObservabilityCompatibilityTest {
     fun `AipMessage dispatch_trace_id defaults to null`() {
         val msg = AipMessage(
             type = MsgType.TASK_ASSIGN,
-            payload = "test"
+            payload = gson.toJsonTree("test")
         )
         assertNull(
             "dispatch_trace_id must default to null for backward compatibility",
@@ -787,7 +789,7 @@ class Pr47RuntimeObservabilityCompatibilityTest {
     fun `AipMessage session_correlation_id defaults to null`() {
         val msg = AipMessage(
             type = MsgType.TASK_ASSIGN,
-            payload = "test"
+            payload = gson.toJsonTree("test")
         )
         assertNull(
             "session_correlation_id must default to null for backward compatibility",
@@ -799,7 +801,7 @@ class Pr47RuntimeObservabilityCompatibilityTest {
     fun `AipMessage accepts both PR-G fields simultaneously`() {
         val msg = AipMessage(
             type = MsgType.TASK_ASSIGN,
-            payload = "test",
+            payload = gson.toJsonTree("test"),
             dispatch_trace_id = "dt-msg-abc",
             session_correlation_id = "sc-msg-xyz"
         )
@@ -811,7 +813,7 @@ class Pr47RuntimeObservabilityCompatibilityTest {
     fun `Existing AipMessage fields are unaffected by PR-G additions`() {
         val msg = AipMessage(
             type = MsgType.TASK_ASSIGN,
-            payload = "test",
+            payload = gson.toJsonTree("test"),
             trace_id = "trace-abc",
             session_id = "sess-xyz",
             device_id = "dev-123",

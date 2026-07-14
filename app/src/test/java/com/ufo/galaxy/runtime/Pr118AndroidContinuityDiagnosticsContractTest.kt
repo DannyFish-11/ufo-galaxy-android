@@ -376,7 +376,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
                 }
             }
         }
-        client.simulateError("connection refused")
+        client.simulateDisconnected()
         val event = deferred.await()
         val outcome = event as AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome
         assertEquals(ReconnectRecoveryState.RECOVERING.wireValue, outcome.fromState)

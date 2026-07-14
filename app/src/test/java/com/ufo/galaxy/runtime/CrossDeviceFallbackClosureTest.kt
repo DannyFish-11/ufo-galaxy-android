@@ -202,11 +202,12 @@ class CrossDeviceFallbackClosureTest {
         job.join()
 
         assertNotNull(collected)
-        assertEquals("takeoverId must match", "to-abc", collected!!.takeoverId)
-        assertEquals("taskId must match", "task-xyz", collected.taskId)
-        assertEquals("traceId must match", "trace-789", collected.traceId)
-        assertEquals("reason must match", "pipeline_timeout", collected.reason)
-        assertEquals("cause must be TIMEOUT", TakeoverFallbackEvent.Cause.TIMEOUT, collected.cause)
+        val collectedEvent = collected!!
+        assertEquals("takeoverId must match", "to-abc", collectedEvent.takeoverId)
+        assertEquals("taskId must match", "task-xyz", collectedEvent.taskId)
+        assertEquals("traceId must match", "trace-789", collectedEvent.traceId)
+        assertEquals("reason must match", "pipeline_timeout", collectedEvent.reason)
+        assertEquals("cause must be TIMEOUT", TakeoverFallbackEvent.Cause.TIMEOUT, collectedEvent.cause)
     }
 
     // ── All failure causes ────────────────────────────────────────────────────
@@ -281,20 +282,22 @@ class CrossDeviceFallbackClosureTest {
 
         assertNotNull("MainViewModel subscriber must receive the event", mainViewModelEvent)
         assertNotNull("EnhancedFloatingService subscriber must receive the event", floatingServiceEvent)
+        val mainEvent = mainViewModelEvent!!
+        val floatingEvent = floatingServiceEvent!!
         assertEquals(
             "Both subscribers must receive identical cause",
-            mainViewModelEvent!!.cause,
-            floatingServiceEvent!!.cause
+            mainEvent.cause,
+            floatingEvent.cause
         )
         assertEquals(
             "Both subscribers must receive identical takeoverId",
-            mainViewModelEvent.takeoverId,
-            floatingServiceEvent.takeoverId
+            mainEvent.takeoverId,
+            floatingEvent.takeoverId
         )
         assertEquals(
             "Both subscribers must receive identical reason",
-            mainViewModelEvent.reason,
-            floatingServiceEvent.reason
+            mainEvent.reason,
+            floatingEvent.reason
         )
     }
 

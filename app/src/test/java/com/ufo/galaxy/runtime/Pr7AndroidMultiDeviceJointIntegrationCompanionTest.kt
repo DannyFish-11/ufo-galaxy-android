@@ -114,12 +114,13 @@ import org.junit.Test
  *  - SCENARIO_COUNT matches terminatingScenarios + no-active-takeover total
  *  - all orchestration states appear in at least one valid transition
  */
+private typealias OS = MultiDeviceParticipantOrchestrationState.OrchestrationState
+
 class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     private val S = MultiDeviceParticipantOrchestrationState
     private val G = CapabilityHonestyGuard
     private val C = DelegatedTakeoverRecoveryContract
-    private val OS = MultiDeviceParticipantOrchestrationState.OrchestrationState
 
     // ── State transition coverage — all six states reachable ──────────────────
 
@@ -329,7 +330,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `CONNECTED ACTIVE full capabilities report is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES + G.CAPABILITY_LOCAL_MODEL_INFERENCE,
             orchestrationState = OS.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -339,7 +340,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `CONNECTED DEGRADED inference base-only report is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES,
             orchestrationState = OS.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DEGRADED
@@ -349,7 +350,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `CONNECTED DEGRADED inference with inference advertised is dishonest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES + G.CAPABILITY_LOCAL_MODEL_INFERENCE,
             orchestrationState = OS.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DEGRADED
@@ -360,7 +361,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `DEGRADED state with base only is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES,
             orchestrationState = OS.DEGRADED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -370,7 +371,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `DEGRADED state advertising inference is dishonest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES + G.CAPABILITY_LOCAL_MODEL_INFERENCE,
             orchestrationState = OS.DEGRADED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -380,7 +381,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `RECOVERING state with no capabilities is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = emptySet(),
             orchestrationState = OS.RECOVERING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -390,7 +391,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `RECOVERING state advertising any capability is dishonest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf("autonomous_goal_execution"),
             orchestrationState = OS.RECOVERING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -400,7 +401,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `RECONNECTING state with no capabilities is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = emptySet(),
             orchestrationState = OS.RECONNECTING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -410,7 +411,7 @@ class Pr7AndroidMultiDeviceJointIntegrationCompanionTest {
 
     @Test
     fun `DISCONNECTED state with no capabilities is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = emptySet(),
             orchestrationState = OS.DISCONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DISABLED

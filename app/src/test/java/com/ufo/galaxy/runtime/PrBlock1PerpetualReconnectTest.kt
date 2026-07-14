@@ -156,7 +156,7 @@ class PrBlock1PerpetualReconnectTest {
         // the client back to a connected state (isConnected=true via simulateConnected).
         val (_, client) = buildController()
 
-        client.simulateError("max attempts reached")
+        client.simulateDisconnected()
         // simulateError sets isConnected=false but shouldReconnect is not a public field;
         // the key observable contract is that the client accepts a subsequent connect simulation.
         assertFalse(
@@ -187,7 +187,7 @@ class PrBlock1PerpetualReconnectTest {
             ReconnectRecoveryState.RECOVERING,
             controller.reconnectRecoveryState.value
         )
-        client.simulateError("connection refused — watchdog cycle entered")
+        client.simulateDisconnected()
         assertEquals(
             "Precondition: must be FAILED after error",
             ReconnectRecoveryState.FAILED,
@@ -218,7 +218,7 @@ class PrBlock1PerpetualReconnectTest {
 
         // Drive to FAILED.
         client.simulateDisconnected()
-        client.simulateError("network unreachable")
+        client.simulateDisconnected()
 
         assertEquals(
             "Precondition: recovery state must be FAILED",
@@ -247,7 +247,7 @@ class PrBlock1PerpetualReconnectTest {
 
         // Drive to FAILED and back.
         client.simulateDisconnected()
-        client.simulateError("host unreachable")
+        client.simulateDisconnected()
         client.simulateConnected()
 
         assertEquals(
@@ -288,7 +288,7 @@ class PrBlock1PerpetualReconnectTest {
         controller.setActiveForTest()
 
         client.simulateDisconnected()
-        client.simulateError("max reconnect attempts")
+        client.simulateDisconnected()
 
         assertEquals(
             "Precondition: recovery state must be FAILED before stop",
@@ -311,7 +311,7 @@ class PrBlock1PerpetualReconnectTest {
         controller.setActiveForTest()
 
         client.simulateDisconnected()
-        client.simulateError("host unreachable")
+        client.simulateDisconnected()
 
         controller.stop()
 
@@ -331,7 +331,7 @@ class PrBlock1PerpetualReconnectTest {
 
         // ── Cycle 1 ────────────────────────────────────────────────────────
         client.simulateDisconnected()
-        client.simulateError("cycle 1 — connection refused")
+        client.simulateDisconnected()
         assertEquals(
             "Cycle 1: must be FAILED after error",
             ReconnectRecoveryState.FAILED,
@@ -356,7 +356,7 @@ class PrBlock1PerpetualReconnectTest {
             ReconnectRecoveryState.RECOVERING,
             controller.reconnectRecoveryState.value
         )
-        client.simulateError("cycle 2 — host unreachable")
+        client.simulateDisconnected()
         assertEquals(
             "Cycle 2: must be FAILED after second error",
             ReconnectRecoveryState.FAILED,

@@ -6,8 +6,8 @@ import com.ufo.galaxy.agent.AccessibilityExecutor
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.NoOpImageScaler
 import com.ufo.galaxy.data.InMemoryAppSettings
-import com.ufo.galaxy.inference.LocalGroundingService
-import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.inference.NoOpGroundingService
+import com.ufo.galaxy.inference.NoOpPlannerService
 import com.ufo.galaxy.loop.ExecutorBridge
 import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
@@ -130,16 +130,21 @@ class Pr8ManifestationPresenceHintsTest {
         val dir = tmpFolder.newFolder()
         val assetManager = ModelAssetManager(dir)
         val downloader = ModelDownloader(dir)
-        val planner = LocalPlanner(LocalPlannerService())
-        val grounding = LocalGroundingService()
-        val executor = AccessibilityExecutor(NoOpImageScaler())
-        val bridge = ExecutorBridge(executor as EdgeExecutor)
+        val planner = LocalPlanner(NoOpPlannerService())
+        val grounding = NoOpGroundingService()
+        val executor = object : AccessibilityExecutor {
+            override fun execute(action: AccessibilityExecutor.AccessibilityAction): Boolean = true
+        }
+        val screenshotProvider = object : EdgeExecutor.ScreenshotProvider {
+            override fun captureJpeg(): ByteArray = ByteArray(0)
+        }
+        val bridge = ExecutorBridge(grounding, executor, NoOpImageScaler())
         return LoopController(
             localPlanner = planner,
-            groundingService = grounding,
             executorBridge = bridge,
-            assetManager = assetManager,
-            downloader = downloader
+            screenshotProvider = screenshotProvider,
+            modelAssetManager = assetManager,
+            modelDownloader = downloader
         )
     }
 

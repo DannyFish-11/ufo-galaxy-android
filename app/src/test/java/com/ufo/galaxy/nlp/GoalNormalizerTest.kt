@@ -250,7 +250,7 @@ class GoalNormalizerTest {
     }
 
     @Test
-    fun `combined: please launch fb without ads`() {
+    fun `combined - please launch fb without ads`() {
         val result = GoalNormalizer.normalize("please launch fb without ads")
         assertFalse(result.normalizedText.lowercase().startsWith("please"))
         assertTrue(result.normalizedText.contains("open", ignoreCase = true))

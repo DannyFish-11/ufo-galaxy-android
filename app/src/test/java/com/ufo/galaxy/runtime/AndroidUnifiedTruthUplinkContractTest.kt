@@ -332,17 +332,17 @@ class AndroidUnifiedTruthUplinkContractTest {
         val state = AndroidUnifiedTruthUplinkContract.GovernanceState
         assertEquals("local_autonomous", state.LOCAL_AUTONOMOUS.wireValue)
         assertEquals("v2_governed", state.V2_GOVERNED.wireValue)
-        assertEquals("delegated_execution", state.DELEGATED_EXECUTION.wireValue)
-        assertEquals("governance_blocked", state.GOVERNANCE_BLOCKED.wireValue)
+        assertEquals("delegated_execution", AndroidUnifiedTruthUplinkContract.GovernanceState.DELEGATED_EXECUTION.wireValue)
+        assertEquals("governance_blocked", AndroidUnifiedTruthUplinkContract.GovernanceState.GOVERNANCE_BLOCKED.wireValue)
         assertEquals(4, state.ALL_WIRE_VALUES.size)
     }
 
     @Test
     fun `TakeoverState wire values are stable`() {
         val state = AndroidUnifiedTruthUplinkContract.TakeoverState
-        assertEquals("inactive", state.INACTIVE.wireValue)
-        assertEquals("pending", state.PENDING.wireValue)
-        assertEquals("active", state.ACTIVE.wireValue)
+        assertEquals("inactive", AndroidUnifiedTruthUplinkContract.TakeoverState.INACTIVE.wireValue)
+        assertEquals("pending", AndroidUnifiedTruthUplinkContract.TakeoverState.PENDING.wireValue)
+        assertEquals("active", AndroidUnifiedTruthUplinkContract.TakeoverState.ACTIVE.wireValue)
         assertEquals(3, state.ALL_WIRE_VALUES.size)
     }
 
@@ -453,11 +453,11 @@ class AndroidUnifiedTruthUplinkContractTest {
     @Test
     fun `LocalCapabilityState fromWireValue returns correct value for each state`() {
         val LCS = AndroidUnifiedTruthUplinkContract.LocalCapabilityState
-        assertEquals(LCS.FULL, LCS.fromWireValue("full"))
-        assertEquals(LCS.PARTIAL, LCS.fromWireValue("partial"))
-        assertEquals(LCS.DEGRADED, LCS.fromWireValue("degraded"))
-        assertEquals(LCS.UNAVAILABLE, LCS.fromWireValue("unavailable"))
-        assertEquals(LCS.UNKNOWN, LCS.fromWireValue("unknown"))
+        assertEquals(AndroidUnifiedTruthUplinkContract.LocalCapabilityState.FULL, LCS.fromWireValue("full"))
+        assertEquals(AndroidUnifiedTruthUplinkContract.LocalCapabilityState.PARTIAL, LCS.fromWireValue("partial"))
+        assertEquals(AndroidUnifiedTruthUplinkContract.LocalCapabilityState.DEGRADED, LCS.fromWireValue("degraded"))
+        assertEquals(AndroidUnifiedTruthUplinkContract.LocalCapabilityState.UNAVAILABLE, LCS.fromWireValue("unavailable"))
+        assertEquals(AndroidUnifiedTruthUplinkContract.LocalCapabilityState.UNKNOWN, LCS.fromWireValue("unknown"))
     }
 
     @Test

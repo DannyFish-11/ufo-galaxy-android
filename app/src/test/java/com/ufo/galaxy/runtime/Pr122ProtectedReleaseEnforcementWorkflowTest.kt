@@ -2,7 +2,6 @@ package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.nio.file.Files
 import java.nio.file.Paths
 
 /**
@@ -12,7 +11,7 @@ class Pr122ProtectedReleaseEnforcementWorkflowTest {
 
     private fun workflowText(): String {
         val path = Paths.get(".github", "workflows", "android-ci.yml")
-        return Files.readString(path)
+        return path.toFile().readText()
     }
 
     @Test

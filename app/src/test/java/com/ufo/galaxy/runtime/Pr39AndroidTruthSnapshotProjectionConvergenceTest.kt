@@ -505,7 +505,7 @@ class Pr39AndroidTruthSnapshotProjectionConvergenceTest {
         assertEquals(HostFacingProjectionContract.ContractStability.DEPRECATED, entry!!.stability)
     }
 
-    @Test fun `forId returns null for unknown surfaceId`() {
+    @Test fun `forId returns null for unknown surfaceId on host-facing projection contract`() {
         assertNull(HostFacingProjectionContract.forId("completely-unknown-contract-surface-xyz"))
     }
 

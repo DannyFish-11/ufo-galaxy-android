@@ -795,7 +795,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `CanonicalSessionAxis carriersForFamily DURABLE_RUNTIME_SESSION returns 2 entries`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val carriers = axis.carriersForFamily(CanonicalSessionFamily.DURABLE_RUNTIME_SESSION)
         assertEquals(
             "DURABLE_RUNTIME_SESSION family must have exactly 2 carrier entries",
@@ -806,7 +806,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `CanonicalSessionAxis carriersForLayer DURABLE returns 2 entries`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val carriers = axis.carriersForLayer(SessionContinuityLayer.DURABLE)
         assertEquals(
             "DURABLE layer must have exactly 2 carrier entries",
@@ -817,7 +817,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `CanonicalSessionAxis includes DurableSessionContinuityRecord carrier`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val entry = axis.entryForCarrier("DurableSessionContinuityRecord.durableSessionId")
         assertNotNull(
             "CanonicalSessionAxis must include entry for DurableSessionContinuityRecord.durableSessionId",
@@ -835,7 +835,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `CanonicalSessionAxis includes AttachedRuntimeHostSessionSnapshot durable carrier`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val entry = axis.entryForCarrier("AttachedRuntimeHostSessionSnapshot.durableSessionId")
         assertNotNull(
             "CanonicalSessionAxis must include entry for AttachedRuntimeHostSessionSnapshot.durableSessionId",
@@ -853,7 +853,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `continuity model for DURABLE_RUNTIME_SESSION survives reconnect`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val model = axis.continuityModelFor(CanonicalSessionFamily.DURABLE_RUNTIME_SESSION)
         assertNotNull("DURABLE_RUNTIME_SESSION must have a continuity model", model)
         assertTrue(
@@ -864,7 +864,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `continuity model for DURABLE_RUNTIME_SESSION does not survive invalidation`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val model = axis.continuityModelFor(CanonicalSessionFamily.DURABLE_RUNTIME_SESSION)
         assertNotNull("DURABLE_RUNTIME_SESSION must have a continuity model", model)
         assertFalse(
@@ -875,7 +875,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `continuity model for DURABLE_RUNTIME_SESSION uses DURABLE_ACROSS_ACTIVATION behavior`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         val model = axis.continuityModelFor(CanonicalSessionFamily.DURABLE_RUNTIME_SESSION)
         assertNotNull(model)
         assertEquals(
@@ -886,7 +886,7 @@ class Pr1DurableSessionRuntimeFoundationTest {
 
     @Test
     fun `all CanonicalSessionFamily values including DURABLE_RUNTIME_SESSION have continuity models`() {
-        val axis = CanonicalSessionAxis()
+        val axis = CanonicalSessionAxis
         for (family in CanonicalSessionFamily.values()) {
             assertNotNull(
                 "CanonicalSessionAxis must have a continuity model for family $family",
