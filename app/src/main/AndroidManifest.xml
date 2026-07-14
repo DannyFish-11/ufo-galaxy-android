@@ -196,6 +196,37 @@
             </intent-filter>
         </activity>
 
+        <!-- 原生表面④:默认助理角色(ROLE_ASSISTANT)。设为默认助理后,
+             长按电源/侧滑手势唤起 Galaxy 而非 Gemini —— 系统级身份入口。 -->
+        <service
+            android:name=".assist.GalaxyVoiceInteractionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/interaction_service" />
+        </service>
+
+        <service
+            android:name=".assist.GalaxyVoiceInteractionSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <service
+            android:name=".assist.GalaxyRecognitionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
+
     </application>
 
 </manifest>

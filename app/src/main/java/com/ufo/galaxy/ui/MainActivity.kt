@@ -95,6 +95,30 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "灵动岛功能需要悬浮窗权限", Toast.LENGTH_SHORT).show()
         }
     }
+
+    // 默认助理角色(ROLE_ASSISTANT)申请:成功后长按电源/侧滑唤起 Galaxy。
+    private val assistantRoleLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val held = com.ufo.galaxy.assist.AssistantRoleHelper.isRoleHeld(this)
+        Toast.makeText(
+            this,
+            if (held) "Galaxy 已设为默认助理" else "未设为默认助理(可稍后在系统设置里更改)",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    /** 供设置界面调用:发起"设为默认助理"系统弹窗;不可用时如实提示。 */
+    fun requestAssistantRole() {
+        val intent = com.ufo.galaxy.assist.AssistantRoleHelper.createRequestIntent(this)
+        if (intent != null) {
+            assistantRoleLauncher.launch(intent)
+        } else if (com.ufo.galaxy.assist.AssistantRoleHelper.isRoleHeld(this)) {
+            Toast.makeText(this, "Galaxy 已是默认助理", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "本机不支持默认助理角色申请(可到系统设置手动选择)", Toast.LENGTH_LONG).show()
+        }
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
