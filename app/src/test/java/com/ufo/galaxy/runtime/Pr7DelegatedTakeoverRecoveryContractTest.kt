@@ -90,7 +90,7 @@ import org.junit.Test
  *  - INTRODUCED_PR_TITLE is non-blank
  */
 private typealias Out = DelegatedTakeoverRecoveryContract.TakeoverInterruptionOutcome
-private typealias S = MultiDeviceParticipantOrchestrationState.OrchestrationState
+private typealias OrchState = MultiDeviceParticipantOrchestrationState.OrchestrationState
 
 class Pr7DelegatedTakeoverRecoveryContractTest {
 
@@ -209,37 +209,37 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
     @Test
     fun `connected_to_reconnecting_with_active_takeover scenario exists`() {
         assertNotNull(
-            C.scenarioFor(S.CONNECTED, S.RECONNECTING)
+            C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)
         )
     }
 
     @Test
     fun `connected_to_reconnecting requires TERMINATED_WITH_SIGNAL`() {
-        val s = C.scenarioFor(S.CONNECTED, S.RECONNECTING)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)!!
         assertEquals(Out.TERMINATED_WITH_SIGNAL, s.interruptionOutcome)
     }
 
     @Test
     fun `connected_to_reconnecting requiredSignalKind is result`() {
-        val s = C.scenarioFor(S.CONNECTED, S.RECONNECTING)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)!!
         assertEquals(DelegatedExecutionSignal.Kind.RESULT.wireValue, s.requiredSignalKind)
     }
 
     @Test
     fun `connected_to_reconnecting requiredResultKind is failed`() {
-        val s = C.scenarioFor(S.CONNECTED, S.RECONNECTING)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)!!
         assertEquals(DelegatedExecutionSignal.ResultKind.FAILED.wireValue, s.requiredResultKind)
     }
 
     @Test
     fun `connected_to_reconnecting reasonPrefix is participant_disconnected`() {
-        val s = C.scenarioFor(S.CONNECTED, S.RECONNECTING)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)!!
         assertEquals(C.REASON_PARTICIPANT_DISCONNECTED, s.requiredReasonPrefix)
     }
 
     @Test
     fun `connected_to_reconnecting mayResumeAfterReconnect is false`() {
-        val s = C.scenarioFor(S.CONNECTED, S.RECONNECTING)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)!!
         assertFalse(s.mayResumeAfterReconnect)
     }
 
@@ -247,18 +247,18 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
 
     @Test
     fun `connected_to_disconnected_with_active_takeover scenario exists`() {
-        assertNotNull(C.scenarioFor(S.CONNECTED, S.DISCONNECTED))
+        assertNotNull(C.scenarioFor(OrchState.CONNECTED, OrchState.DISCONNECTED))
     }
 
     @Test
     fun `connected_to_disconnected requires TERMINATED_WITH_SIGNAL`() {
-        val s = C.scenarioFor(S.CONNECTED, S.DISCONNECTED)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.DISCONNECTED)!!
         assertEquals(Out.TERMINATED_WITH_SIGNAL, s.interruptionOutcome)
     }
 
     @Test
     fun `connected_to_disconnected mayResumeAfterReconnect is false`() {
-        val s = C.scenarioFor(S.CONNECTED, S.DISCONNECTED)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.DISCONNECTED)!!
         assertFalse(s.mayResumeAfterReconnect)
     }
 
@@ -266,18 +266,18 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
 
     @Test
     fun `connected_to_degraded_with_active_takeover scenario exists`() {
-        assertNotNull(C.scenarioFor(S.CONNECTED, S.DEGRADED))
+        assertNotNull(C.scenarioFor(OrchState.CONNECTED, OrchState.DEGRADED))
     }
 
     @Test
     fun `connected_to_degraded requires DRAIN_THEN_TERMINATE`() {
-        val s = C.scenarioFor(S.CONNECTED, S.DEGRADED)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.DEGRADED)!!
         assertEquals(Out.DRAIN_THEN_TERMINATE, s.interruptionOutcome)
     }
 
     @Test
     fun `connected_to_degraded reason prefix is participant_degraded`() {
-        val s = C.scenarioFor(S.CONNECTED, S.DEGRADED)!!
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.DEGRADED)!!
         assertEquals(C.REASON_PARTICIPANT_DEGRADED, s.requiredReasonPrefix)
     }
 
@@ -285,18 +285,18 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
 
     @Test
     fun `reconnecting_to_connected_no_active_takeover scenario exists`() {
-        assertNotNull(C.scenarioFor(S.RECONNECTING, S.CONNECTED))
+        assertNotNull(C.scenarioFor(OrchState.RECONNECTING, OrchState.CONNECTED))
     }
 
     @Test
     fun `reconnecting_to_connected has NO_ACTIVE_TAKEOVER outcome`() {
-        val s = C.scenarioFor(S.RECONNECTING, S.CONNECTED)!!
+        val s = C.scenarioFor(OrchState.RECONNECTING, OrchState.CONNECTED)!!
         assertEquals(Out.NO_ACTIVE_TAKEOVER, s.interruptionOutcome)
     }
 
     @Test
     fun `reconnecting_to_connected mayResumeAfterReconnect is false`() {
-        val s = C.scenarioFor(S.RECONNECTING, S.CONNECTED)!!
+        val s = C.scenarioFor(OrchState.RECONNECTING, OrchState.CONNECTED)!!
         assertFalse(s.mayResumeAfterReconnect)
     }
 
@@ -304,12 +304,12 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
 
     @Test
     fun `recovering_to_connected_no_active_takeover scenario exists`() {
-        assertNotNull(C.scenarioFor(S.RECOVERING, S.CONNECTED))
+        assertNotNull(C.scenarioFor(OrchState.RECOVERING, OrchState.CONNECTED))
     }
 
     @Test
     fun `recovering_to_connected has NO_ACTIVE_TAKEOVER outcome`() {
-        val s = C.scenarioFor(S.RECOVERING, S.CONNECTED)!!
+        val s = C.scenarioFor(OrchState.RECOVERING, OrchState.CONNECTED)!!
         assertEquals(Out.NO_ACTIVE_TAKEOVER, s.interruptionOutcome)
     }
 
@@ -317,7 +317,7 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
 
     @Test
     fun `capability_limited_no_active_takeover scenario exists`() {
-        assertNotNull(C.scenarioFor(S.CONNECTED, S.CAPABILITY_LIMITED))
+        assertNotNull(C.scenarioFor(OrchState.CONNECTED, OrchState.CAPABILITY_LIMITED))
     }
 
     // ── terminatingScenarios ──────────────────────────────────────────────────
@@ -331,7 +331,7 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
     fun `terminatingScenarios includes connected_to_reconnecting`() {
         assertTrue(
             C.terminatingScenarios.any {
-                it.fromState == S.CONNECTED && it.toState == S.RECONNECTING
+                it.fromState == OrchState.CONNECTED && it.toState == OrchState.RECONNECTING
             }
         )
     }
@@ -340,7 +340,7 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
     fun `terminatingScenarios includes connected_to_disconnected`() {
         assertTrue(
             C.terminatingScenarios.any {
-                it.fromState == S.CONNECTED && it.toState == S.DISCONNECTED
+                it.fromState == OrchState.CONNECTED && it.toState == OrchState.DISCONNECTED
             }
         )
     }
@@ -349,7 +349,7 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
     fun `terminatingScenarios includes connected_to_degraded`() {
         assertTrue(
             C.terminatingScenarios.any {
-                it.fromState == S.CONNECTED && it.toState == S.DEGRADED
+                it.fromState == OrchState.CONNECTED && it.toState == OrchState.DEGRADED
             }
         )
     }
@@ -358,7 +358,7 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
     fun `terminatingScenarios does not include reconnecting_to_connected`() {
         assertFalse(
             C.terminatingScenarios.any {
-                it.fromState == S.RECONNECTING && it.toState == S.CONNECTED
+                it.fromState == OrchState.RECONNECTING && it.toState == OrchState.CONNECTED
             }
         )
     }
@@ -398,14 +398,14 @@ class Pr7DelegatedTakeoverRecoveryContractTest {
 
     @Test
     fun `scenarioFor returns null for unregistered transition`() {
-        assertNull(C.scenarioFor(S.RECOVERING, S.DEGRADED))
+        assertNull(C.scenarioFor(OrchState.RECOVERING, OrchState.DEGRADED))
     }
 
     @Test
     fun `scenarioFor returns correct scenario for registered transition`() {
-        val s = C.scenarioFor(S.CONNECTED, S.RECONNECTING)
+        val s = C.scenarioFor(OrchState.CONNECTED, OrchState.RECONNECTING)
         assertNotNull(s)
-        assertEquals(S.CONNECTED, s!!.fromState)
-        assertEquals(S.RECONNECTING, s.toState)
+        assertEquals(OrchState.CONNECTED, s!!.fromState)
+        assertEquals(OrchState.RECONNECTING, s.toState)
     }
 }

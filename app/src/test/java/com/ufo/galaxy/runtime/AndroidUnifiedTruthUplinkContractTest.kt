@@ -1,5 +1,8 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract.ConstraintSemantics
+import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract.GovernanceState
+import com.ufo.galaxy.runtime.AndroidUnifiedTruthUplinkContract.TruthCategory
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -150,14 +153,17 @@ class AndroidUnifiedTruthUplinkContractTest {
 
     @Test
     fun `TruthCategory fromWireValue returns correct value for each category`() {
-        val C = AndroidUnifiedTruthUplinkContract.TruthCategory
-        assertEquals(C.PARTICIPATION, C.fromWireValue("participation"))
-        assertEquals(C.MODE, C.fromWireValue("mode"))
-        assertEquals(C.GOVERNANCE, C.fromWireValue("governance"))
-        assertEquals(C.EXECUTION, C.fromWireValue("execution"))
-        assertEquals(C.CLOSURE_UPSTREAM, C.fromWireValue("closure_upstream"))
-        assertEquals(C.CONTINUITY, C.fromWireValue("continuity"))
-        assertEquals(C.LOCAL_CAPABILITY, C.fromWireValue("local_capability"))
+        // 主源 TruthCategory 现为 enum class:枚举条目只能经类型名【静态限定】访问
+        // (AndroidUnifiedTruthUplinkContract.TruthCategory.ENTRY),不能经把类型名当
+        // 表达式绑定的 val 别名——那样别名绑到 companion,条目不在其上。故直接用
+        // import 进来的类型名完全限定;fromWireValue 亦经同一类型名静态调用。
+        assertEquals(TruthCategory.PARTICIPATION, TruthCategory.fromWireValue("participation"))
+        assertEquals(TruthCategory.MODE, TruthCategory.fromWireValue("mode"))
+        assertEquals(TruthCategory.GOVERNANCE, TruthCategory.fromWireValue("governance"))
+        assertEquals(TruthCategory.EXECUTION, TruthCategory.fromWireValue("execution"))
+        assertEquals(TruthCategory.CLOSURE_UPSTREAM, TruthCategory.fromWireValue("closure_upstream"))
+        assertEquals(TruthCategory.CONTINUITY, TruthCategory.fromWireValue("continuity"))
+        assertEquals(TruthCategory.LOCAL_CAPABILITY, TruthCategory.fromWireValue("local_capability"))
     }
 
     @Test
@@ -235,13 +241,12 @@ class AndroidUnifiedTruthUplinkContractTest {
 
     @Test
     fun `ConstraintSemantics fromWireValue returns correct value for each semantic`() {
-        val CS = AndroidUnifiedTruthUplinkContract.ConstraintSemantics
-        assertEquals(CS.NONE, CS.fromWireValue("none"))
-        assertEquals(CS.RUNTIME_CONSTRAINED, CS.fromWireValue("runtime_constrained"))
-        assertEquals(CS.RUNTIME_DEFERRED, CS.fromWireValue("runtime_deferred"))
-        assertEquals(CS.LOCAL_MODE_GATE_DEFERRED, CS.fromWireValue("local_mode_gate_deferred"))
-        assertEquals(CS.EXECUTION_PRESSURE, CS.fromWireValue("execution_pressure"))
-        assertEquals(CS.HOLD, CS.fromWireValue("hold"))
+        assertEquals(ConstraintSemantics.NONE, ConstraintSemantics.fromWireValue("none"))
+        assertEquals(ConstraintSemantics.RUNTIME_CONSTRAINED, ConstraintSemantics.fromWireValue("runtime_constrained"))
+        assertEquals(ConstraintSemantics.RUNTIME_DEFERRED, ConstraintSemantics.fromWireValue("runtime_deferred"))
+        assertEquals(ConstraintSemantics.LOCAL_MODE_GATE_DEFERRED, ConstraintSemantics.fromWireValue("local_mode_gate_deferred"))
+        assertEquals(ConstraintSemantics.EXECUTION_PRESSURE, ConstraintSemantics.fromWireValue("execution_pressure"))
+        assertEquals(ConstraintSemantics.HOLD, ConstraintSemantics.fromWireValue("hold"))
     }
 
     @Test
@@ -330,10 +335,10 @@ class AndroidUnifiedTruthUplinkContractTest {
     @Test
     fun `GovernanceState wire values are stable`() {
         val state = AndroidUnifiedTruthUplinkContract.GovernanceState
-        assertEquals("local_autonomous", state.LOCAL_AUTONOMOUS.wireValue)
-        assertEquals("v2_governed", state.V2_GOVERNED.wireValue)
-        assertEquals("delegated_execution", AndroidUnifiedTruthUplinkContract.GovernanceState.DELEGATED_EXECUTION.wireValue)
-        assertEquals("governance_blocked", AndroidUnifiedTruthUplinkContract.GovernanceState.GOVERNANCE_BLOCKED.wireValue)
+        assertEquals("local_autonomous", GovernanceState.LOCAL_AUTONOMOUS.wireValue)
+        assertEquals("v2_governed", GovernanceState.V2_GOVERNED.wireValue)
+        assertEquals("delegated_execution", GovernanceState.DELEGATED_EXECUTION.wireValue)
+        assertEquals("governance_blocked", GovernanceState.GOVERNANCE_BLOCKED.wireValue)
         assertEquals(4, state.ALL_WIRE_VALUES.size)
     }
 

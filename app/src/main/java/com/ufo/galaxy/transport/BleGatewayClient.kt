@@ -82,7 +82,19 @@ class BleGatewayClient(
 
     /** Discovered peers: device_address → device_name */
     val discoveredPeers: Map<String, String>
-        get() = scanResults.mapValues { it.value.name ?: "Unknown" }
+        get() = scanResults.mapValues { safeDeviceName(it.value) }
+
+    /**
+     * Reading [BluetoothDevice.name] requires BLUETOOTH_CONNECT on Android 12+;
+     * without it the platform throws SecurityException. Fall back to "Unknown"
+     * rather than crashing — the address remains the stable identifier.
+     */
+    private fun safeDeviceName(device: BluetoothDevice): String = try {
+        device.name ?: "Unknown"
+    } catch (e: SecurityException) {
+        Log.w(TAG, "BLUETOOTH_CONNECT not granted — device name unavailable")
+        "Unknown"
+    }
 
     // LOW-FIX: Optional message callback for incoming BLE payloads.
     // Set by upstream code to receive JSON messages from the BLE transport.
@@ -115,7 +127,7 @@ class BleGatewayClient(
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
                 val address = device.address
-                val name = device.name ?: "Unknown"
+                val name = safeDeviceName(device)
 
                 if (!scanResults.containsKey(address)) {
                     scanResults[address] = device

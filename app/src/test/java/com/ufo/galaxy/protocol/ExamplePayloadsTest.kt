@@ -3,6 +3,7 @@ package com.ufo.galaxy.protocol
 import com.ufo.galaxy.shared.protocol.MsgType
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -38,7 +39,7 @@ class ExamplePayloadsTest {
     fun `device_register example - AipMessage envelope has correct protocol and version`() {
         val envelope = AipMessage(
             type       = MsgType.DEVICE_REGISTER,
-            payload    = "{}",
+            payload    = JsonObject(),
             device_id  = "android_pixel8_01"
         )
         assertEquals("AIP/1.0", envelope.protocol)
@@ -50,7 +51,7 @@ class ExamplePayloadsTest {
     fun `device_register example - envelope serialises type as device_register`() {
         val envelope = AipMessage(
             type    = MsgType.DEVICE_REGISTER,
-            payload = "{}",
+            payload = JsonObject(),
         )
         val json = gson.toJson(envelope)
         assertTrue("JSON must contain device_register", json.contains("device_register"))
@@ -69,7 +70,7 @@ class ExamplePayloadsTest {
     fun `heartbeat example - AipMessage envelope contains heartbeat type`() {
         val envelope = AipMessage(
             type    = MsgType.HEARTBEAT,
-            payload = mapOf("status" to "online")
+            payload = gson.toJsonTree(mapOf("status" to "online"))
         )
         assertEquals("3.0", envelope.version)
         assertEquals("AIP/1.0", envelope.protocol)
@@ -94,7 +95,7 @@ class ExamplePayloadsTest {
     fun `capability_report example - AipMessage envelope has version 3_0`() {
         val envelope = AipMessage(
             type    = MsgType.CAPABILITY_REPORT,
-            payload = "{}",
+            payload = JsonObject(),
         )
         assertEquals("3.0", envelope.version)
         assertEquals("AIP/1.0", envelope.protocol)
@@ -173,7 +174,7 @@ class ExamplePayloadsTest {
         )
         val envelope = AipMessage(
             type           = MsgType.TASK_ASSIGN,
-            payload        = payload,
+            payload        = gson.toJsonTree(payload),
             correlation_id = "task-uuid-001"
         )
         val json = gson.toJson(envelope)
@@ -231,7 +232,7 @@ class ExamplePayloadsTest {
         )
         val envelope = AipMessage(
             type           = MsgType.COMMAND_RESULT,
-            payload        = payload,
+            payload        = gson.toJsonTree(payload),
             correlation_id = "task-uuid-001",
             device_id      = "android_pixel8_01"
         )
@@ -291,7 +292,7 @@ class ExamplePayloadsTest {
         )
         val envelope = AipMessage(
             type           = MsgType.TASK_SUBMIT,
-            payload        = payload,
+            payload        = gson.toJsonTree(payload),
             correlation_id = "task-001",
             device_id      = "android_pixel8_01"
         )
@@ -331,7 +332,7 @@ class ExamplePayloadsTest {
             MsgType.TASK_SUBMIT
         )
         coreTypes.forEach { msgType ->
-            val envelope = AipMessage(type = msgType, payload = "{}")
+            val envelope = AipMessage(type = msgType, payload = JsonObject())
             assertEquals("version must be 3.0 for $msgType", "3.0", envelope.version)
             assertEquals("protocol must be AIP/1.0 for $msgType", "AIP/1.0", envelope.protocol)
         }

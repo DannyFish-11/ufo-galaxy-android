@@ -165,10 +165,21 @@ class DelegatedTakeoverExecutorTest {
         throw RuntimeException()   // message is null
     }
 
+    /**
+     * TimeoutCancellationException's constructor became internal in kotlinx.coroutines;
+     * build a real instance reflectively so the executor's TimeoutCancellationException
+     * catch branch is exercised with a controlled message.
+     */
+    private fun timeoutCancellationException(message: String): TimeoutCancellationException =
+        TimeoutCancellationException::class.java
+            .getDeclaredConstructor(String::class.java)
+            .apply { isAccessible = true }
+            .newInstance(message)
+
     private fun timeoutPipeline(
         message: String = "execution_timed_out"
     ): GoalExecutionPipeline = GoalExecutionPipeline { _ ->
-        throw TimeoutCancellationException(message)
+        throw timeoutCancellationException(message)
     }
 
     private fun cancelPipeline(

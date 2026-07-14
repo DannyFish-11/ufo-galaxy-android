@@ -1,6 +1,8 @@
 package com.ufo.galaxy.observability
 
 import com.ufo.galaxy.data.InMemoryAppSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
@@ -17,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class LocalLoopMetricsTest {
 
-    private fun buildMetrics(): MetricsRecorder = MetricsRecorder(InMemoryAppSettings())
+    private fun buildMetrics(): MetricsRecorder = MetricsRecorder(InMemoryAppSettings(), CoroutineScope(Dispatchers.Unconfined))
 
     /** Counting fake exporter for verifying calls. */
     private inner class CountingExporter : TelemetryExporter {

@@ -133,7 +133,7 @@ class ReconciliationSignalReliableReplayTest {
         )
         val envelope = AipMessage(
             type = MsgType.RECONCILIATION_SIGNAL,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-reliable",
             correlation_id = signal.taskId,
             idempotency_key = signal.stableDedupeKey
@@ -338,12 +338,12 @@ class ReconciliationSignalReliableReplayTest {
         assertTrue(payload.has("uplink_lineage_recovery_basis"))
         val nestedPayload = payload.getAsJsonObject("payload")
         assertEquals(
-            ReconciliationSignal.CanonicalClosureAuthorityClass
+            ReconciliationSignal.Companion.CanonicalClosureAuthorityClass
                 .V2_CANONICAL_AUTHORITY.wireValue,
             nestedPayload.get(ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS).asString
         )
         assertEquals(
-            ReconciliationSignal.ParticipantLocalConvergenceState
+            ReconciliationSignal.Companion.ParticipantLocalConvergenceState
                 .REPLAYED_PENDING_V2_REVALIDATION.wireValue,
             nestedPayload.get(ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE).asString
         )
@@ -558,12 +558,12 @@ class ReconciliationSignalReliableReplayTest {
             payload.get(AndroidContinuityRecoveryStateModel.KEY_CONTINUITY_RECOVERY_STATE).asString
         )
         assertEquals(
-            ReconciliationSignal.CanonicalClosureAuthorityClass
+            ReconciliationSignal.Companion.CanonicalClosureAuthorityClass
                 .V2_CANONICAL_AUTHORITY.wireValue,
             payload.get(ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS).asString
         )
         assertEquals(
-            ReconciliationSignal.ParticipantLocalConvergenceState
+            ReconciliationSignal.Companion.ParticipantLocalConvergenceState
                 .REPLAYED_PENDING_V2_REVALIDATION.wireValue,
             payload.get(ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE).asString
         )

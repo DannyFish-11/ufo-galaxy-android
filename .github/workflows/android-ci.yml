@@ -358,6 +358,18 @@ jobs:
       - name: Run lint
         run: ./gradlew lintDebug
 
+      - name: Print full lint report on failure
+        if: failure()
+        run: |
+          for f in app/build/intermediates/lint_intermediate_text_report/debug/lint-results-debug.txt \
+                   app/build/reports/lint-results-debug.txt; do
+            if [ -f "$f" ]; then
+              echo "===== $f ====="
+              cat "$f"
+              break
+            fi
+          done
+
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v4

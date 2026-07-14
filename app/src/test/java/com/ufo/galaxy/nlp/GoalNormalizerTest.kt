@@ -105,8 +105,8 @@ class GoalNormalizerTest {
     fun `go back is normalized to back`() {
         val result = GoalNormalizer.normalize("go back to the previous screen")
         assertTrue(
-            result.normalizedText.lowercase().contains("back"),
-            "Expected 'back' in '${result.normalizedText}'"
+            "Expected 'back' in '${result.normalizedText}'",
+            result.normalizedText.lowercase().contains("back")
         )
         assertFalse(result.normalizedText.lowercase().contains("go back"))
     }
@@ -206,8 +206,8 @@ class GoalNormalizerTest {
     fun `extracts 'without ads' constraint`() {
         val result = GoalNormalizer.normalize("play the video without ads")
         assertTrue(
-            result.extractedConstraints.any { it.contains("ads", ignoreCase = true) },
-            "Expected 'ads' in constraints but got ${result.extractedConstraints}"
+            "Expected 'ads' in constraints but got ${result.extractedConstraints}",
+            result.extractedConstraints.any { it.contains("ads", ignoreCase = true) }
         )
     }
 
@@ -215,8 +215,8 @@ class GoalNormalizerTest {
     fun `extracts 'using wifi only' constraint`() {
         val result = GoalNormalizer.normalize("download the file using wifi only")
         assertTrue(
-            result.extractedConstraints.any { it.contains("wifi", ignoreCase = true) },
-            "Expected 'wifi' in constraints but got ${result.extractedConstraints}"
+            "Expected 'wifi' in constraints but got ${result.extractedConstraints}",
+            result.extractedConstraints.any { it.contains("wifi", ignoreCase = true) }
         )
     }
 

@@ -1,6 +1,8 @@
 package com.ufo.galaxy.observability
 
 import com.ufo.galaxy.data.InMemoryAppSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -20,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class ObservabilityMetricsTest {
 
     private fun buildMetrics(): MetricsRecorder =
-        MetricsRecorder(InMemoryAppSettings())
+        MetricsRecorder(InMemoryAppSettings(), CoroutineScope(Dispatchers.Unconfined))
 
     // ── Signaling counters ────────────────────────────────────────────────────
 

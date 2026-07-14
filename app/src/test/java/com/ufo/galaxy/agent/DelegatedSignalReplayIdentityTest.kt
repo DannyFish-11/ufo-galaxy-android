@@ -118,8 +118,19 @@ class DelegatedSignalReplayIdentityTest {
     private fun failingPipeline(message: String = "simulated failure"): GoalExecutionPipeline =
         GoalExecutionPipeline { _ -> throw RuntimeException(message) }
 
+    /**
+     * TimeoutCancellationException's constructor became internal in kotlinx.coroutines;
+     * build a real instance reflectively so the executor's TimeoutCancellationException
+     * catch branch is exercised with a controlled message.
+     */
+    private fun timeoutCancellationException(message: String): TimeoutCancellationException =
+        TimeoutCancellationException::class.java
+            .getDeclaredConstructor(String::class.java)
+            .apply { isAccessible = true }
+            .newInstance(message)
+
     private fun timeoutPipeline(): GoalExecutionPipeline =
-        GoalExecutionPipeline { _ -> throw TimeoutCancellationException("timeout") }
+        GoalExecutionPipeline { _ -> throw timeoutCancellationException("timeout") }
 
     private fun cancellationPipeline(): GoalExecutionPipeline =
         GoalExecutionPipeline { _ -> throw CancellationException("cancelled") }
