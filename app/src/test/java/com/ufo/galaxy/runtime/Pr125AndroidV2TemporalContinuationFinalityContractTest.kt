@@ -78,7 +78,7 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
         override fun unloadModel() {}
         override fun isModelLoaded() = true
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
-            LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+            LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {

@@ -50,7 +50,7 @@ class Pr128AndroidPresenceParticipationProjectionTest {
         override fun unloadModel() {}
         override fun isModelLoaded() = true
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
-            LocalGroundingService.GroundingResult(x = 100, y = 200, confidence = 0.9f)
+            LocalGroundingService.GroundingResult(x = 100, y = 200, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {

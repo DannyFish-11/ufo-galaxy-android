@@ -664,7 +664,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         override fun unloadModel() {}
         override fun isModelLoaded() = true
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
-            LocalGroundingService.GroundingResult(x = 540, y = 960, confidence = 0.9f)
+            LocalGroundingService.GroundingResult(x = 540, y = 960, confidence = 0.9f, element_description = "")
     }
 
     private class OkAccessibility : AccessibilityExecutor {

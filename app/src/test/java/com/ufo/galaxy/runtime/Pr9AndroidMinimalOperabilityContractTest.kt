@@ -119,24 +119,24 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `OperabilityPathStep has exactly 10 steps`() {
-        assertEquals(10, C.OperabilityPathStep.entries.size)
+        assertEquals(10, AndroidMinimalOperabilityContract.OperabilityPathStep.entries.size)
     }
 
     @Test
     fun `OperabilityPathStep stepIndex is continuous from 1 to 10`() {
-        val indices = C.OperabilityPathStep.entries.map { it.stepIndex }.sorted()
+        val indices = AndroidMinimalOperabilityContract.OperabilityPathStep.entries.map { it.stepIndex }.sorted()
         assertEquals((1..10).toList(), indices)
     }
 
     @Test
     fun `all OperabilityPathStep wire values are unique`() {
-        val values = C.OperabilityPathStep.ALL_WIRE_VALUES
+        val values = AndroidMinimalOperabilityContract.OperabilityPathStep.ALL_WIRE_VALUES
         assertEquals(values.size, values.toSet().size)
     }
 
     @Test
     fun `orderedPath is sorted by stepIndex ascending`() {
-        val ordered = C.OperabilityPathStep.orderedPath
+        val ordered = AndroidMinimalOperabilityContract.OperabilityPathStep.orderedPath
         for (i in 0 until ordered.size - 1) {
             assertTrue(ordered[i].stepIndex < ordered[i + 1].stepIndex)
         }
@@ -144,7 +144,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `CLONE_REPO stepIndex=1 wireValue=clone_repo isAndroidLocal=true`() {
-        val step = C.OperabilityPathStep.CLONE_REPO
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.CLONE_REPO
         assertEquals(1, step.stepIndex)
         assertEquals("clone_repo", step.wireValue)
         assertTrue(step.isAndroidLocal)
@@ -152,7 +152,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `BUILD_APK stepIndex=2 wireValue=build_apk isAndroidLocal=true`() {
-        val step = C.OperabilityPathStep.BUILD_APK
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.BUILD_APK
         assertEquals(2, step.stepIndex)
         assertEquals("build_apk", step.wireValue)
         assertTrue(step.isAndroidLocal)
@@ -160,7 +160,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `INSTALL_APK stepIndex=3 wireValue=install_apk isAndroidLocal=true`() {
-        val step = C.OperabilityPathStep.INSTALL_APK
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.INSTALL_APK
         assertEquals(3, step.stepIndex)
         assertEquals("install_apk", step.wireValue)
         assertTrue(step.isAndroidLocal)
@@ -168,7 +168,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `CONFIGURE_V2_SERVER stepIndex=4 wireValue=configure_v2_server isAndroidLocal=false`() {
-        val step = C.OperabilityPathStep.CONFIGURE_V2_SERVER
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.CONFIGURE_V2_SERVER
         assertEquals(4, step.stepIndex)
         assertEquals("configure_v2_server", step.wireValue)
         assertFalse(step.isAndroidLocal)
@@ -176,7 +176,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `ESTABLISH_WS_CONNECTION stepIndex=5 wireValue=establish_ws_connection isAndroidLocal=false`() {
-        val step = C.OperabilityPathStep.ESTABLISH_WS_CONNECTION
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.ESTABLISH_WS_CONNECTION
         assertEquals(5, step.stepIndex)
         assertEquals("establish_ws_connection", step.wireValue)
         assertFalse(step.isAndroidLocal)
@@ -184,7 +184,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `REPORT_DEVICE_TRUTH stepIndex=6 wireValue=report_device_truth isAndroidLocal=false`() {
-        val step = C.OperabilityPathStep.REPORT_DEVICE_TRUTH
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.REPORT_DEVICE_TRUTH
         assertEquals(6, step.stepIndex)
         assertEquals("report_device_truth", step.wireValue)
         assertFalse(step.isAndroidLocal)
@@ -192,7 +192,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `RECEIVE_DELEGATED_TASK stepIndex=7 wireValue=receive_delegated_task isAndroidLocal=false`() {
-        val step = C.OperabilityPathStep.RECEIVE_DELEGATED_TASK
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.RECEIVE_DELEGATED_TASK
         assertEquals(7, step.stepIndex)
         assertEquals("receive_delegated_task", step.wireValue)
         assertFalse(step.isAndroidLocal)
@@ -200,7 +200,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `UPLINK_RESULT stepIndex=8 wireValue=uplink_result isAndroidLocal=false`() {
-        val step = C.OperabilityPathStep.UPLINK_RESULT
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.UPLINK_RESULT
         assertEquals(8, step.stepIndex)
         assertEquals("uplink_result", step.wireValue)
         assertFalse(step.isAndroidLocal)
@@ -208,7 +208,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `ASSESS_LOCAL_MODE_READINESS stepIndex=9 wireValue=assess_local_mode_readiness isAndroidLocal=true`() {
-        val step = C.OperabilityPathStep.ASSESS_LOCAL_MODE_READINESS
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.ASSESS_LOCAL_MODE_READINESS
         assertEquals(9, step.stepIndex)
         assertEquals("assess_local_mode_readiness", step.wireValue)
         assertTrue(step.isAndroidLocal)
@@ -216,7 +216,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `DIAGNOSE_FAILURE stepIndex=10 wireValue=diagnose_failure isAndroidLocal=true`() {
-        val step = C.OperabilityPathStep.DIAGNOSE_FAILURE
+        val step = AndroidMinimalOperabilityContract.OperabilityPathStep.DIAGNOSE_FAILURE
         assertEquals(10, step.stepIndex)
         assertEquals("diagnose_failure", step.wireValue)
         assertTrue(step.isAndroidLocal)
@@ -224,7 +224,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `OperabilityPathStep fromWireValue returns correct step for each wire value`() {
-        val S = C.OperabilityPathStep
+        val S = AndroidMinimalOperabilityContract.OperabilityPathStep
         assertEquals(S.CLONE_REPO, S.fromWireValue("clone_repo"))
         assertEquals(S.BUILD_APK, S.fromWireValue("build_apk"))
         assertEquals(S.INSTALL_APK, S.fromWireValue("install_apk"))
@@ -239,13 +239,13 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `OperabilityPathStep fromWireValue returns null for unknown value`() {
-        assertNull(C.OperabilityPathStep.fromWireValue("unknown_step"))
-        assertNull(C.OperabilityPathStep.fromWireValue(null))
+        assertNull(AndroidMinimalOperabilityContract.OperabilityPathStep.fromWireValue("unknown_step"))
+        assertNull(AndroidMinimalOperabilityContract.OperabilityPathStep.fromWireValue(null))
     }
 
     @Test
     fun `ALL_WIRE_VALUES contains exactly 10 entries`() {
-        assertEquals(10, C.OperabilityPathStep.ALL_WIRE_VALUES.size)
+        assertEquals(10, AndroidMinimalOperabilityContract.OperabilityPathStep.ALL_WIRE_VALUES.size)
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -254,88 +254,88 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `PathBlockCondition has exactly 6 entries`() {
-        assertEquals(6, C.PathBlockCondition.entries.size)
+        assertEquals(6, AndroidMinimalOperabilityContract.PathBlockCondition.entries.size)
     }
 
     @Test
     fun `MISSING_JDK_OR_SDK blocksStep=BUILD_APK isSelfHealable=false`() {
-        val cond = C.PathBlockCondition.MISSING_JDK_OR_SDK
-        assertEquals(C.OperabilityPathStep.BUILD_APK, cond.blocksStep)
+        val cond = AndroidMinimalOperabilityContract.PathBlockCondition.MISSING_JDK_OR_SDK
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.BUILD_APK, cond.blocksStep)
         assertFalse(cond.isSelfHealable)
         assertEquals("missing_jdk_or_sdk", cond.wireValue)
     }
 
     @Test
     fun `GATEWAY_URL_IS_PLACEHOLDER blocksStep=CONFIGURE_V2_SERVER isSelfHealable=false`() {
-        val cond = C.PathBlockCondition.GATEWAY_URL_IS_PLACEHOLDER
-        assertEquals(C.OperabilityPathStep.CONFIGURE_V2_SERVER, cond.blocksStep)
+        val cond = AndroidMinimalOperabilityContract.PathBlockCondition.GATEWAY_URL_IS_PLACEHOLDER
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.CONFIGURE_V2_SERVER, cond.blocksStep)
         assertFalse(cond.isSelfHealable)
         assertEquals("gateway_url_is_placeholder", cond.wireValue)
     }
 
     @Test
     fun `CROSS_DEVICE_DISABLED blocksStep=ESTABLISH_WS_CONNECTION isSelfHealable=false`() {
-        val cond = C.PathBlockCondition.CROSS_DEVICE_DISABLED
-        assertEquals(C.OperabilityPathStep.ESTABLISH_WS_CONNECTION, cond.blocksStep)
+        val cond = AndroidMinimalOperabilityContract.PathBlockCondition.CROSS_DEVICE_DISABLED
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.ESTABLISH_WS_CONNECTION, cond.blocksStep)
         assertFalse(cond.isSelfHealable)
         assertEquals("cross_device_disabled", cond.wireValue)
     }
 
     @Test
     fun `WS_HOST_UNREACHABLE blocksStep=ESTABLISH_WS_CONNECTION isSelfHealable=false`() {
-        val cond = C.PathBlockCondition.WS_HOST_UNREACHABLE
-        assertEquals(C.OperabilityPathStep.ESTABLISH_WS_CONNECTION, cond.blocksStep)
+        val cond = AndroidMinimalOperabilityContract.PathBlockCondition.WS_HOST_UNREACHABLE
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.ESTABLISH_WS_CONNECTION, cond.blocksStep)
         assertFalse(cond.isSelfHealable)
         assertEquals("ws_host_unreachable", cond.wireValue)
     }
 
     @Test
     fun `MODE_NOT_CROSS_DEVICE_ACTIVE blocksStep=RECEIVE_DELEGATED_TASK isSelfHealable=true`() {
-        val cond = C.PathBlockCondition.MODE_NOT_CROSS_DEVICE_ACTIVE
-        assertEquals(C.OperabilityPathStep.RECEIVE_DELEGATED_TASK, cond.blocksStep)
+        val cond = AndroidMinimalOperabilityContract.PathBlockCondition.MODE_NOT_CROSS_DEVICE_ACTIVE
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.RECEIVE_DELEGATED_TASK, cond.blocksStep)
         assertTrue(cond.isSelfHealable)
         assertEquals("mode_not_cross_device_active", cond.wireValue)
     }
 
     @Test
     fun `GOAL_EXECUTION_DISABLED blocksStep=RECEIVE_DELEGATED_TASK isSelfHealable=false`() {
-        val cond = C.PathBlockCondition.GOAL_EXECUTION_DISABLED
-        assertEquals(C.OperabilityPathStep.RECEIVE_DELEGATED_TASK, cond.blocksStep)
+        val cond = AndroidMinimalOperabilityContract.PathBlockCondition.GOAL_EXECUTION_DISABLED
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.RECEIVE_DELEGATED_TASK, cond.blocksStep)
         assertFalse(cond.isSelfHealable)
         assertEquals("goal_execution_disabled", cond.wireValue)
     }
 
     @Test
     fun `forStep BUILD_APK returns MISSING_JDK_OR_SDK`() {
-        val conditions = C.PathBlockCondition.forStep(C.OperabilityPathStep.BUILD_APK)
-        assertEquals(listOf(C.PathBlockCondition.MISSING_JDK_OR_SDK), conditions)
+        val conditions = AndroidMinimalOperabilityContract.PathBlockCondition.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.BUILD_APK)
+        assertEquals(listOf(AndroidMinimalOperabilityContract.PathBlockCondition.MISSING_JDK_OR_SDK), conditions)
     }
 
     @Test
     fun `forStep ESTABLISH_WS_CONNECTION returns CROSS_DEVICE_DISABLED and WS_HOST_UNREACHABLE`() {
-        val conditions = C.PathBlockCondition.forStep(C.OperabilityPathStep.ESTABLISH_WS_CONNECTION)
-        assertTrue(conditions.contains(C.PathBlockCondition.CROSS_DEVICE_DISABLED))
-        assertTrue(conditions.contains(C.PathBlockCondition.WS_HOST_UNREACHABLE))
+        val conditions = AndroidMinimalOperabilityContract.PathBlockCondition.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.ESTABLISH_WS_CONNECTION)
+        assertTrue(conditions.contains(AndroidMinimalOperabilityContract.PathBlockCondition.CROSS_DEVICE_DISABLED))
+        assertTrue(conditions.contains(AndroidMinimalOperabilityContract.PathBlockCondition.WS_HOST_UNREACHABLE))
         assertEquals(2, conditions.size)
     }
 
     @Test
     fun `forStep RECEIVE_DELEGATED_TASK returns MODE_NOT_CROSS_DEVICE_ACTIVE and GOAL_EXECUTION_DISABLED`() {
-        val conditions = C.PathBlockCondition.forStep(C.OperabilityPathStep.RECEIVE_DELEGATED_TASK)
-        assertTrue(conditions.contains(C.PathBlockCondition.MODE_NOT_CROSS_DEVICE_ACTIVE))
-        assertTrue(conditions.contains(C.PathBlockCondition.GOAL_EXECUTION_DISABLED))
+        val conditions = AndroidMinimalOperabilityContract.PathBlockCondition.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.RECEIVE_DELEGATED_TASK)
+        assertTrue(conditions.contains(AndroidMinimalOperabilityContract.PathBlockCondition.MODE_NOT_CROSS_DEVICE_ACTIVE))
+        assertTrue(conditions.contains(AndroidMinimalOperabilityContract.PathBlockCondition.GOAL_EXECUTION_DISABLED))
         assertEquals(2, conditions.size)
     }
 
     @Test
     fun `forStep CONFIGURE_V2_SERVER returns GATEWAY_URL_IS_PLACEHOLDER`() {
-        val conditions = C.PathBlockCondition.forStep(C.OperabilityPathStep.CONFIGURE_V2_SERVER)
-        assertEquals(listOf(C.PathBlockCondition.GATEWAY_URL_IS_PLACEHOLDER), conditions)
+        val conditions = AndroidMinimalOperabilityContract.PathBlockCondition.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.CONFIGURE_V2_SERVER)
+        assertEquals(listOf(AndroidMinimalOperabilityContract.PathBlockCondition.GATEWAY_URL_IS_PLACEHOLDER), conditions)
     }
 
     @Test
     fun `PathBlockCondition fromWireValue returns correct condition for each wire value`() {
-        val BC = C.PathBlockCondition
+        val BC = AndroidMinimalOperabilityContract.PathBlockCondition
         assertEquals(BC.MISSING_JDK_OR_SDK, BC.fromWireValue("missing_jdk_or_sdk"))
         assertEquals(BC.GATEWAY_URL_IS_PLACEHOLDER, BC.fromWireValue("gateway_url_is_placeholder"))
         assertEquals(BC.CROSS_DEVICE_DISABLED, BC.fromWireValue("cross_device_disabled"))
@@ -346,13 +346,13 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `PathBlockCondition fromWireValue returns null for unknown value`() {
-        assertNull(C.PathBlockCondition.fromWireValue("unknown_block"))
-        assertNull(C.PathBlockCondition.fromWireValue(null))
+        assertNull(AndroidMinimalOperabilityContract.PathBlockCondition.fromWireValue("unknown_block"))
+        assertNull(AndroidMinimalOperabilityContract.PathBlockCondition.fromWireValue(null))
     }
 
     @Test
     fun `all PathBlockCondition wire values are unique`() {
-        val values = C.PathBlockCondition.ALL_WIRE_VALUES
+        val values = AndroidMinimalOperabilityContract.PathBlockCondition.ALL_WIRE_VALUES
         assertEquals(values.size, values.toSet().size)
     }
 
@@ -362,12 +362,12 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `CapabilityDegradationKind has exactly 5 entries`() {
-        assertEquals(5, C.CapabilityDegradationKind.entries.size)
+        assertEquals(5, AndroidMinimalOperabilityContract.CapabilityDegradationKind.entries.size)
     }
 
     @Test
     fun `LOCAL_LLM_NOT_LOADED wireValue and isRecoverable`() {
-        val dk = C.CapabilityDegradationKind.LOCAL_LLM_NOT_LOADED
+        val dk = AndroidMinimalOperabilityContract.CapabilityDegradationKind.LOCAL_LLM_NOT_LOADED
         assertEquals("local_llm_not_loaded", dk.wireValue)
         assertTrue(dk.isRecoverable)
         assertEquals("local_model_inference", dk.affectedCapability)
@@ -375,7 +375,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `ACCESSIBILITY_PERMISSION_NOT_GRANTED wireValue and isRecoverable`() {
-        val dk = C.CapabilityDegradationKind.ACCESSIBILITY_PERMISSION_NOT_GRANTED
+        val dk = AndroidMinimalOperabilityContract.CapabilityDegradationKind.ACCESSIBILITY_PERMISSION_NOT_GRANTED
         assertEquals("accessibility_permission_not_granted", dk.wireValue)
         assertFalse(dk.isRecoverable)
         assertEquals("accessibility_action_execution", dk.affectedCapability)
@@ -383,7 +383,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `OVERLAY_PERMISSION_NOT_GRANTED wireValue and isRecoverable`() {
-        val dk = C.CapabilityDegradationKind.OVERLAY_PERMISSION_NOT_GRANTED
+        val dk = AndroidMinimalOperabilityContract.CapabilityDegradationKind.OVERLAY_PERMISSION_NOT_GRANTED
         assertEquals("overlay_permission_not_granted", dk.wireValue)
         assertFalse(dk.isRecoverable)
         assertEquals("floating_overlay_display", dk.affectedCapability)
@@ -391,7 +391,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `EXTERNAL_INFERENCE_SERVER_UNAVAILABLE wireValue and isRecoverable`() {
-        val dk = C.CapabilityDegradationKind.EXTERNAL_INFERENCE_SERVER_UNAVAILABLE
+        val dk = AndroidMinimalOperabilityContract.CapabilityDegradationKind.EXTERNAL_INFERENCE_SERVER_UNAVAILABLE
         assertEquals("external_inference_server_unavailable", dk.wireValue)
         assertTrue(dk.isRecoverable)
         assertEquals("local_vlm_planning", dk.affectedCapability)
@@ -399,7 +399,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `CONNECTION_DEGRADED wireValue and isRecoverable`() {
-        val dk = C.CapabilityDegradationKind.CONNECTION_DEGRADED
+        val dk = AndroidMinimalOperabilityContract.CapabilityDegradationKind.CONNECTION_DEGRADED
         assertEquals("connection_degraded", dk.wireValue)
         assertTrue(dk.isRecoverable)
         assertEquals("full_cross_device_capability", dk.affectedCapability)
@@ -407,7 +407,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `CapabilityDegradationKind fromWireValue returns correct kind`() {
-        val D = C.CapabilityDegradationKind
+        val D = AndroidMinimalOperabilityContract.CapabilityDegradationKind
         assertEquals(D.LOCAL_LLM_NOT_LOADED, D.fromWireValue("local_llm_not_loaded"))
         assertEquals(D.ACCESSIBILITY_PERMISSION_NOT_GRANTED, D.fromWireValue("accessibility_permission_not_granted"))
         assertEquals(D.OVERLAY_PERMISSION_NOT_GRANTED, D.fromWireValue("overlay_permission_not_granted"))
@@ -417,13 +417,13 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `CapabilityDegradationKind fromWireValue returns null for unknown value`() {
-        assertNull(C.CapabilityDegradationKind.fromWireValue("unknown_degradation"))
-        assertNull(C.CapabilityDegradationKind.fromWireValue(null))
+        assertNull(AndroidMinimalOperabilityContract.CapabilityDegradationKind.fromWireValue("unknown_degradation"))
+        assertNull(AndroidMinimalOperabilityContract.CapabilityDegradationKind.fromWireValue(null))
     }
 
     @Test
     fun `all CapabilityDegradationKind wire values are unique`() {
-        val values = C.CapabilityDegradationKind.ALL_WIRE_VALUES
+        val values = AndroidMinimalOperabilityContract.CapabilityDegradationKind.ALL_WIRE_VALUES
         assertEquals(values.size, values.toSet().size)
     }
 
@@ -599,12 +599,12 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `DelegatedExecutionBlockKind has exactly 5 entries`() {
-        assertEquals(5, C.DelegatedExecutionBlockKind.entries.size)
+        assertEquals(5, AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.entries.size)
     }
 
     @Test
     fun `CROSS_DEVICE_RUNTIME_INACTIVE blocksTaskTypes covers all three task types`() {
-        val kinds = C.DelegatedExecutionBlockKind.CROSS_DEVICE_RUNTIME_INACTIVE.blocksTaskTypes
+        val kinds = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.CROSS_DEVICE_RUNTIME_INACTIVE.blocksTaskTypes
         assertTrue(kinds.contains("goal_execution"))
         assertTrue(kinds.contains("parallel_subtask"))
         assertTrue(kinds.contains("task_assign"))
@@ -612,25 +612,25 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `MODE_TRANSITIONING_HOLD blocksTaskTypes contains wildcard`() {
-        val kinds = C.DelegatedExecutionBlockKind.MODE_TRANSITIONING_HOLD.blocksTaskTypes
+        val kinds = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.MODE_TRANSITIONING_HOLD.blocksTaskTypes
         assertTrue(kinds.contains("*"))
     }
 
     @Test
     fun `GOAL_EXECUTION_FEATURE_DISABLED blocksTaskTypes contains only goal_execution`() {
-        val kinds = C.DelegatedExecutionBlockKind.GOAL_EXECUTION_FEATURE_DISABLED.blocksTaskTypes
+        val kinds = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.GOAL_EXECUTION_FEATURE_DISABLED.blocksTaskTypes
         assertEquals(listOf("goal_execution"), kinds)
     }
 
     @Test
     fun `PARALLEL_EXECUTION_FEATURE_DISABLED blocksTaskTypes contains only parallel_subtask`() {
-        val kinds = C.DelegatedExecutionBlockKind.PARALLEL_EXECUTION_FEATURE_DISABLED.blocksTaskTypes
+        val kinds = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.PARALLEL_EXECUTION_FEATURE_DISABLED.blocksTaskTypes
         assertEquals(listOf("parallel_subtask"), kinds)
     }
 
     @Test
     fun `POLICY_ROUTING_REJECTED wireValue is correct`() {
-        val kind = C.DelegatedExecutionBlockKind.POLICY_ROUTING_REJECTED
+        val kind = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.POLICY_ROUTING_REJECTED
         assertEquals("policy_routing_rejected", kind.wireValue)
         assertTrue(kind.blocksTaskTypes.contains("goal_execution"))
         assertTrue(kind.blocksTaskTypes.contains("parallel_subtask"))
@@ -638,7 +638,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `DelegatedExecutionBlockKind fromWireValue returns correct kind`() {
-        val DK = C.DelegatedExecutionBlockKind
+        val DK = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind
         assertEquals(DK.CROSS_DEVICE_RUNTIME_INACTIVE, DK.fromWireValue("cross_device_runtime_inactive"))
         assertEquals(DK.GOAL_EXECUTION_FEATURE_DISABLED, DK.fromWireValue("goal_execution_feature_disabled"))
         assertEquals(DK.PARALLEL_EXECUTION_FEATURE_DISABLED, DK.fromWireValue("parallel_execution_feature_disabled"))
@@ -648,13 +648,13 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `DelegatedExecutionBlockKind fromWireValue returns null for unknown`() {
-        assertNull(C.DelegatedExecutionBlockKind.fromWireValue("unknown_block_kind"))
-        assertNull(C.DelegatedExecutionBlockKind.fromWireValue(null))
+        assertNull(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.fromWireValue("unknown_block_kind"))
+        assertNull(AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.fromWireValue(null))
     }
 
     @Test
     fun `all DelegatedExecutionBlockKind wire values are unique`() {
-        val values = C.DelegatedExecutionBlockKind.ALL_WIRE_VALUES
+        val values = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.ALL_WIRE_VALUES
         assertEquals(values.size, values.toSet().size)
     }
 
@@ -664,12 +664,12 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `FailureDiagnosticKind has exactly 9 entries`() {
-        assertEquals(9, C.FailureDiagnosticKind.entries.size)
+        assertEquals(9, AndroidMinimalOperabilityContract.FailureDiagnosticKind.entries.size)
     }
 
     @Test
     fun `all FailureDiagnosticKind actionableHints are non-empty`() {
-        C.FailureDiagnosticKind.entries.forEach { kind ->
+        AndroidMinimalOperabilityContract.FailureDiagnosticKind.entries.forEach { kind ->
             assertTrue(
                 "actionableHint for ${kind.wireValue} must not be blank",
                 kind.actionableHint.isNotBlank()
@@ -679,20 +679,20 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `all FailureDiagnosticKind wire values are unique`() {
-        val values = C.FailureDiagnosticKind.ALL_WIRE_VALUES
+        val values = AndroidMinimalOperabilityContract.FailureDiagnosticKind.ALL_WIRE_VALUES
         assertEquals(values.size, values.toSet().size)
     }
 
     @Test
     fun `forStep BUILD_APK returns BUILD_FAILED_MISSING_PREREQUISITES`() {
-        val diagnostics = C.FailureDiagnosticKind.forStep(C.OperabilityPathStep.BUILD_APK)
+        val diagnostics = AndroidMinimalOperabilityContract.FailureDiagnosticKind.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.BUILD_APK)
         assertEquals(1, diagnostics.size)
-        assertEquals(C.FailureDiagnosticKind.BUILD_FAILED_MISSING_PREREQUISITES, diagnostics.first())
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.BUILD_FAILED_MISSING_PREREQUISITES, diagnostics.first())
     }
 
     @Test
     fun `forStep ESTABLISH_WS_CONNECTION returns three connection failure entries`() {
-        val diagnostics = C.FailureDiagnosticKind.forStep(C.OperabilityPathStep.ESTABLISH_WS_CONNECTION)
+        val diagnostics = AndroidMinimalOperabilityContract.FailureDiagnosticKind.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.ESTABLISH_WS_CONNECTION)
         val wires = diagnostics.map { it.wireValue }
         assertTrue(wires.contains("connect_failed_invalid_gateway_url"))
         assertTrue(wires.contains("connect_failed_cross_device_disabled"))
@@ -702,7 +702,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `forStep ASSESS_LOCAL_MODE_READINESS returns two local mode block entries`() {
-        val diagnostics = C.FailureDiagnosticKind.forStep(C.OperabilityPathStep.ASSESS_LOCAL_MODE_READINESS)
+        val diagnostics = AndroidMinimalOperabilityContract.FailureDiagnosticKind.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.ASSESS_LOCAL_MODE_READINESS)
         val wires = diagnostics.map { it.wireValue }
         assertTrue(wires.contains("local_mode_blocked_llm_not_loaded"))
         assertTrue(wires.contains("local_mode_blocked_accessibility_not_granted"))
@@ -711,28 +711,28 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `forStep RECEIVE_DELEGATED_TASK returns delegated task rejected entry`() {
-        val diagnostics = C.FailureDiagnosticKind.forStep(C.OperabilityPathStep.RECEIVE_DELEGATED_TASK)
+        val diagnostics = AndroidMinimalOperabilityContract.FailureDiagnosticKind.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.RECEIVE_DELEGATED_TASK)
         assertEquals(1, diagnostics.size)
-        assertEquals(C.FailureDiagnosticKind.DELEGATED_TASK_REJECTED_PIPELINE_DISABLED, diagnostics.first())
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.DELEGATED_TASK_REJECTED_PIPELINE_DISABLED, diagnostics.first())
     }
 
     @Test
     fun `forStep UPLINK_RESULT returns result uplink queued entry`() {
-        val diagnostics = C.FailureDiagnosticKind.forStep(C.OperabilityPathStep.UPLINK_RESULT)
+        val diagnostics = AndroidMinimalOperabilityContract.FailureDiagnosticKind.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.UPLINK_RESULT)
         assertEquals(1, diagnostics.size)
-        assertEquals(C.FailureDiagnosticKind.RESULT_UPLINK_QUEUED_PENDING_RECONNECT, diagnostics.first())
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.RESULT_UPLINK_QUEUED_PENDING_RECONNECT, diagnostics.first())
     }
 
     @Test
     fun `forStep REPORT_DEVICE_TRUTH returns device truth uplink failed entry`() {
-        val diagnostics = C.FailureDiagnosticKind.forStep(C.OperabilityPathStep.REPORT_DEVICE_TRUTH)
+        val diagnostics = AndroidMinimalOperabilityContract.FailureDiagnosticKind.forStep(AndroidMinimalOperabilityContract.OperabilityPathStep.REPORT_DEVICE_TRUTH)
         assertEquals(1, diagnostics.size)
-        assertEquals(C.FailureDiagnosticKind.DEVICE_TRUTH_UPLINK_FAILED, diagnostics.first())
+        assertEquals(AndroidMinimalOperabilityContract.FailureDiagnosticKind.DEVICE_TRUTH_UPLINK_FAILED, diagnostics.first())
     }
 
     @Test
     fun `FailureDiagnosticKind fromWireValue returns correct kind`() {
-        val FK = C.FailureDiagnosticKind
+        val FK = AndroidMinimalOperabilityContract.FailureDiagnosticKind
         assertEquals(FK.BUILD_FAILED_MISSING_PREREQUISITES, FK.fromWireValue("build_failed_missing_prerequisites"))
         assertEquals(FK.CONNECT_FAILED_INVALID_GATEWAY_URL, FK.fromWireValue("connect_failed_invalid_gateway_url"))
         assertEquals(FK.CONNECT_FAILED_CROSS_DEVICE_DISABLED, FK.fromWireValue("connect_failed_cross_device_disabled"))
@@ -746,8 +746,8 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `FailureDiagnosticKind fromWireValue returns null for unknown value`() {
-        assertNull(C.FailureDiagnosticKind.fromWireValue("unknown_diagnostic"))
-        assertNull(C.FailureDiagnosticKind.fromWireValue(null))
+        assertNull(AndroidMinimalOperabilityContract.FailureDiagnosticKind.fromWireValue("unknown_diagnostic"))
+        assertNull(AndroidMinimalOperabilityContract.FailureDiagnosticKind.fromWireValue(null))
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -756,16 +756,16 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `FailureDiagnosticKind wire values do not overlap with PathBlockCondition wire values`() {
-        val failureWires = C.FailureDiagnosticKind.ALL_WIRE_VALUES
-        val blockWires = C.PathBlockCondition.ALL_WIRE_VALUES
+        val failureWires = AndroidMinimalOperabilityContract.FailureDiagnosticKind.ALL_WIRE_VALUES
+        val blockWires = AndroidMinimalOperabilityContract.PathBlockCondition.ALL_WIRE_VALUES
         val overlap = failureWires.intersect(blockWires)
         assertTrue("Wire value 重叠：$overlap", overlap.isEmpty())
     }
 
     @Test
     fun `FailureDiagnosticKind wire values do not overlap with CapabilityDegradationKind wire values`() {
-        val failureWires = C.FailureDiagnosticKind.ALL_WIRE_VALUES
-        val degradeWires = C.CapabilityDegradationKind.ALL_WIRE_VALUES
+        val failureWires = AndroidMinimalOperabilityContract.FailureDiagnosticKind.ALL_WIRE_VALUES
+        val degradeWires = AndroidMinimalOperabilityContract.CapabilityDegradationKind.ALL_WIRE_VALUES
         val overlap = failureWires.intersect(degradeWires)
         assertTrue("Wire value 重叠：$overlap", overlap.isEmpty())
     }
@@ -824,7 +824,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
     fun `toContractMetaWireMap values are consistent with contract`() {
         val map = C.toContractMetaWireMap()
         assertEquals(C.SCHEMA_VERSION, map["operability_contract_schema_version"])
-        assertEquals(C.OperabilityPathStep.entries.size, map["operability_path_step_count"])
+        assertEquals(AndroidMinimalOperabilityContract.OperabilityPathStep.entries.size, map["operability_path_step_count"])
         assertEquals(C.OPERABILITY_INVARIANTS.size, map["operability_invariant_count"])
         assertEquals(C.INTRODUCED_PR, map["introduced_pr"])
     }
@@ -868,7 +868,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `INV-OPR-01 OperabilityPathStep has exactly 10 steps with indices 1 to 10`() {
-        val entries = C.OperabilityPathStep.entries
+        val entries = AndroidMinimalOperabilityContract.OperabilityPathStep.entries
         assertEquals("INV-OPR-01 违反：步骤数量应为 10", 10, entries.size)
         val indices = entries.map { it.stepIndex }.sorted()
         assertEquals("INV-OPR-01 违反：stepIndex 应从 1 到 10", (1..10).toList(), indices)
@@ -876,7 +876,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `INV-OPR-02 orderedPath is strictly ascending without gaps`() {
-        val ordered = C.OperabilityPathStep.orderedPath
+        val ordered = AndroidMinimalOperabilityContract.OperabilityPathStep.orderedPath
         for (i in ordered.indices) {
             assertEquals("INV-OPR-02 违反：第 ${i + 1} 个步骤的 stepIndex 应为 ${i + 1}", i + 1, ordered[i].stepIndex)
         }
@@ -885,15 +885,15 @@ class Pr9AndroidMinimalOperabilityContractTest {
     @Test
     fun `INV-OPR-03 each PathBlockCondition has exactly one blocksStep`() {
         // 本测试验证每个 PathBlockCondition 有明确的 blocksStep，且不为 null
-        C.PathBlockCondition.entries.forEach { cond ->
+        AndroidMinimalOperabilityContract.PathBlockCondition.entries.forEach { cond ->
             assertNotNull("INV-OPR-03 违反：${cond.wireValue} 的 blocksStep 不应为 null", cond.blocksStep)
         }
     }
 
     @Test
     fun `INV-OPR-04 CapabilityDegradationKind wire values do not appear in PathBlockCondition`() {
-        val degradeWires = C.CapabilityDegradationKind.ALL_WIRE_VALUES
-        val blockWires = C.PathBlockCondition.ALL_WIRE_VALUES
+        val degradeWires = AndroidMinimalOperabilityContract.CapabilityDegradationKind.ALL_WIRE_VALUES
+        val blockWires = AndroidMinimalOperabilityContract.PathBlockCondition.ALL_WIRE_VALUES
         val overlap = degradeWires.intersect(blockWires)
         assertTrue("INV-OPR-04 违反：wire value 重叠 = $overlap", overlap.isEmpty())
     }
@@ -922,7 +922,7 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `INV-OPR-07 CROSS_DEVICE_RUNTIME_INACTIVE blocksTaskTypes has all three types`() {
-        val kinds = C.DelegatedExecutionBlockKind.CROSS_DEVICE_RUNTIME_INACTIVE.blocksTaskTypes
+        val kinds = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.CROSS_DEVICE_RUNTIME_INACTIVE.blocksTaskTypes
         assertTrue("INV-OPR-07 违反：应包含 goal_execution", kinds.contains("goal_execution"))
         assertTrue("INV-OPR-07 违反：应包含 parallel_subtask", kinds.contains("parallel_subtask"))
         assertTrue("INV-OPR-07 违反：应包含 task_assign", kinds.contains("task_assign"))
@@ -930,22 +930,22 @@ class Pr9AndroidMinimalOperabilityContractTest {
 
     @Test
     fun `INV-OPR-08 MODE_TRANSITIONING_HOLD blocksTaskTypes contains wildcard`() {
-        val kinds = C.DelegatedExecutionBlockKind.MODE_TRANSITIONING_HOLD.blocksTaskTypes
+        val kinds = AndroidMinimalOperabilityContract.DelegatedExecutionBlockKind.MODE_TRANSITIONING_HOLD.blocksTaskTypes
         assertTrue("INV-OPR-08 违反：应包含通配符 *", kinds.contains("*"))
     }
 
     @Test
     fun `INV-OPR-09 all FailureDiagnosticKind actionableHints are non-empty`() {
-        C.FailureDiagnosticKind.entries.forEach { kind ->
+        AndroidMinimalOperabilityContract.FailureDiagnosticKind.entries.forEach { kind ->
             assertTrue("INV-OPR-09 违反：${kind.wireValue} 的 actionableHint 不应为空白", kind.actionableHint.isNotBlank())
         }
     }
 
     @Test
     fun `INV-OPR-10 FailureDiagnosticKind wire values globally unique across all enums`() {
-        val allWires = C.FailureDiagnosticKind.ALL_WIRE_VALUES +
-            C.PathBlockCondition.ALL_WIRE_VALUES +
-            C.CapabilityDegradationKind.ALL_WIRE_VALUES
+        val allWires = AndroidMinimalOperabilityContract.FailureDiagnosticKind.ALL_WIRE_VALUES +
+            AndroidMinimalOperabilityContract.PathBlockCondition.ALL_WIRE_VALUES +
+            AndroidMinimalOperabilityContract.CapabilityDegradationKind.ALL_WIRE_VALUES
         val set = allWires.toSet()
         assertEquals(
             "INV-OPR-10 违反：三个枚举合并后存在重复 wire value，合并数=${allWires.size}，去重数=${set.size}",

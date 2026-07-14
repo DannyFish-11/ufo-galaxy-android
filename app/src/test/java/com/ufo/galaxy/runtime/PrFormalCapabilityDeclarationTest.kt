@@ -859,9 +859,13 @@ class PrFormalCapabilityDeclarationTest {
             )
         }
 
-        override fun groundElement(
+        override fun ground(
+            intent: String,
             screenshotBase64: String,
-            elementDescription: String
-        ) = com.ufo.galaxy.inference.LocalGroundingService.GroundingResult(null, null, "stub")
+            width: Int,
+            height: Int
+        ) = com.ufo.galaxy.inference.LocalGroundingService.GroundingResult(
+            x = 0, y = 0, confidence = 0f, element_description = "", error = "stub"
+        )
     }
 }
