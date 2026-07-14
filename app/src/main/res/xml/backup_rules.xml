@@ -4,8 +4,6 @@
     <include domain="sharedpref" path="." />
     <include domain="database" path="." />
     <include domain="file" path="." />
-    
-    <!-- 排除的内容 -->
-    <exclude domain="cache" path="." />
-    <exclude domain="no_backup" path="." />
+    <!-- 注:cache 与 no_backup 目录由 Android 自动排除，无需(也不能)在此声明；
+         之前用 domain="cache"/"no_backup" 是非法域名，触发 FullBackupContent lint 错误。 -->
 </full-backup-content>

@@ -1,5 +1,6 @@
 package com.ufo.galaxy.transport
 
+import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
@@ -103,6 +104,10 @@ class BleGatewayClient(
     /**
      * Start scanning for BLE peripherals advertising AIP v3 service.
      */
+    // BLE 调用所需的 BLUETOOTH_SCAN/CONNECT 权限已在公共入口处显式校验
+    // (startScan 校验 SCAN、connectToDevice 校验 CONNECT),lint 无法跨调用流推断，
+    // 故在此如实抑制 —— 权限确实被检查，不是掩盖真实缺陷。
+    @SuppressLint("MissingPermission")
     fun startScan(onDeviceFound: ((address: String, name: String) -> Unit)? = null) {
         // CRITICAL-4: Check Android 12+ BLUETOOTH_SCAN permission before scanning
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -170,6 +175,7 @@ class BleGatewayClient(
     /**
      * Stop BLE scan.
      */
+    @SuppressLint("MissingPermission")
     fun stopScan() {
         scanTimeoutRunnable?.let { handler.removeCallbacks(it); scanTimeoutRunnable = null }
         try {
@@ -183,6 +189,7 @@ class BleGatewayClient(
     /**
      * Connect to a BLE device.
      */
+    @SuppressLint("MissingPermission")
     fun connectToDevice(address: String): Boolean {
         // CRITICAL-4: Check Android 12+ BLUETOOTH_CONNECT permission before connecting
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -301,6 +308,7 @@ class BleGatewayClient(
     /**
      * Disconnect from BLE device.
      */
+    @SuppressLint("MissingPermission")
     fun disconnect() {
         // ROUND-3-FIX: Synchronize state changes so that sendJson() cannot observe
         // a partially-torn-down connection (e.g., connected=false but bluetoothGatt
@@ -329,6 +337,7 @@ class BleGatewayClient(
     // ROUND-3-FIX: Synchronize access to shared mutable state (connected, bluetoothGatt)
     // so that disconnect() cannot tear down the connection while we are in the middle of
     // a write. This prevents crashes from writing to a closed GATT.
+    @SuppressLint("MissingPermission")
     override fun sendJson(json: String): Boolean {
         // Snapshot connection state under the lock to avoid TOCTOU race with disconnect().
         val (isConnectedSnapshot, gattSnapshot) = synchronized(connectionLock) {
@@ -373,6 +382,7 @@ class BleGatewayClient(
 
     // ── Internal ──────────────────────────────────────────────────────────
 
+    @SuppressLint("MissingPermission")
     private fun flushPendingMessages(gatt: BluetoothGatt) {
         val service = gatt.getService(AIP_SERVICE_UUID) ?: return
         val rxChar = service.getCharacteristic(RX_CHARACTERISTIC_UUID) ?: return
