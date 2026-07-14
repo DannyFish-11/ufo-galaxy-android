@@ -58,7 +58,7 @@ class AndroidParticipantProtocolGuardTest {
      */
     @Test
     fun `device_register envelope version is 3_0`() {
-        val envelope = AipMessage(type = MsgType.DEVICE_REGISTER, payload = "{}")
+        val envelope = AipMessage(type = MsgType.DEVICE_REGISTER, payload = JsonObject())
         assertEquals(
             "AIP v3 contract: version must be '3.0'",
             "3.0",
@@ -68,7 +68,7 @@ class AndroidParticipantProtocolGuardTest {
 
     @Test
     fun `device_register envelope protocol is AIP 1_0`() {
-        val envelope = AipMessage(type = MsgType.DEVICE_REGISTER, payload = "{}")
+        val envelope = AipMessage(type = MsgType.DEVICE_REGISTER, payload = JsonObject())
         assertEquals(
             "AIP v3 contract: protocol must be 'AIP/1.0'",
             "AIP/1.0",
@@ -90,7 +90,7 @@ class AndroidParticipantProtocolGuardTest {
         val deviceId = "android_pixel8_guard_01"
         val envelope = AipMessage(
             type = MsgType.DEVICE_REGISTER,
-            payload = "{}",
+            payload = JsonObject(),
             device_id = deviceId
         )
         assertEquals(
@@ -104,7 +104,7 @@ class AndroidParticipantProtocolGuardTest {
     fun `device_register envelope serialises to JSON with correct type field`() {
         val envelope = AipMessage(
             type = MsgType.DEVICE_REGISTER,
-            payload = "{}",
+            payload = JsonObject(),
             device_id = "guard-device-01"
         )
         val json = gson.toJson(envelope)
@@ -391,7 +391,7 @@ class AndroidParticipantProtocolGuardTest {
         // Device must be able to construct a valid device_register envelope for re-register
         val reRegisterEnvelope = AipMessage(
             type = MsgType.DEVICE_REGISTER,
-            payload = "{}",
+            payload = JsonObject(),
             device_id = "reconnect-device-01"
         )
         assertEquals("3.0", reRegisterEnvelope.version)

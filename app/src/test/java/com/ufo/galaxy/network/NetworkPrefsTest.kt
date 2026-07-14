@@ -2,6 +2,8 @@ package com.ufo.galaxy.network
 
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -251,13 +253,13 @@ class MetricsRecorderCounterTest {
 
     @Test
     fun `wsReconnects starts at 0`() {
-        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings())
+        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings(), CoroutineScope(Dispatchers.Unconfined))
         assertEquals(0, m.wsReconnects.get())
     }
 
     @Test
     fun `recordWsReconnect increments counter`() {
-        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings())
+        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings(), CoroutineScope(Dispatchers.Unconfined))
         m.recordWsReconnect()
         m.recordWsReconnect()
         assertEquals(2, m.wsReconnects.get())
@@ -265,14 +267,14 @@ class MetricsRecorderCounterTest {
 
     @Test
     fun `recordRegistrationFailure increments counter`() {
-        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings())
+        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings(), CoroutineScope(Dispatchers.Unconfined))
         m.recordRegistrationFailure()
         assertEquals(1, m.registrationFailures.get())
     }
 
     @Test
     fun `recordTaskSuccess and recordTaskFailure increment independently`() {
-        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings())
+        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings(), CoroutineScope(Dispatchers.Unconfined))
         m.recordTaskSuccess()
         m.recordTaskSuccess()
         m.recordTaskFailure()
@@ -282,7 +284,7 @@ class MetricsRecorderCounterTest {
 
     @Test
     fun `snapshot contains all metric keys`() {
-        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings())
+        val m = com.ufo.galaxy.observability.MetricsRecorder(makeSettings(), CoroutineScope(Dispatchers.Unconfined))
         m.recordWsReconnect()
         m.recordTaskSuccess()
         val snap = m.snapshot()

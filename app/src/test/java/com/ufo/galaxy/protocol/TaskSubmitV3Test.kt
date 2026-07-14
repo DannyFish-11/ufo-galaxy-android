@@ -74,7 +74,7 @@ class TaskSubmitV3Test {
     fun `AipMessage envelope contains protocol AIP_1_0 by default`() {
         val msg = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = "test"
+            payload = gson.toJsonTree("test")
         )
         assertEquals("AIP/1.0", msg.protocol)
     }
@@ -83,7 +83,7 @@ class TaskSubmitV3Test {
     fun `AipMessage envelope version defaults to 3_0`() {
         val msg = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = "test"
+            payload = gson.toJsonTree("test")
         )
         assertEquals("3.0", msg.version)
     }
@@ -98,7 +98,7 @@ class TaskSubmitV3Test {
         )
         val envelope = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             correlation_id = "task-002",
             device_id = "dev-002"
         )
@@ -113,7 +113,7 @@ class TaskSubmitV3Test {
     fun `AipMessage task_submit envelope contains task_submit type in JSON`() {
         val envelope = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = TaskSubmitPayload("do something", "dev-x", "sess-x", "task-x")
+            payload = gson.toJsonTree(TaskSubmitPayload("do something", "dev-x", "sess-x", "task-x"))
         )
         val json = gson.toJson(envelope)
         assertTrue("Serialised JSON must contain task_submit", json.contains("task_submit"))

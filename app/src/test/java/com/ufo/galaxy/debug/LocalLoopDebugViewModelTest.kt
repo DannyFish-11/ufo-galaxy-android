@@ -8,7 +8,6 @@ import com.ufo.galaxy.local.LocalLoopState
 import com.ufo.galaxy.trace.LocalLoopTrace
 import com.ufo.galaxy.trace.LocalLoopTraceStore
 import com.ufo.galaxy.trace.TerminalResult
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -52,7 +51,7 @@ class LocalLoopDebugViewModelTest {
             override fun getReadiness(): LocalLoopReadiness = readiness
         }
 
-    /** Builds a VM whose coroutines run on [Dispatchers.Unconfined] for synchronous test execution. */
+    /** Builds a VM whose launched coroutines run on [Dispatchers.Unconfined] for synchronous test execution. */
     private fun viewModel(
         readiness: LocalLoopReadiness = readyReadiness(),
         store: LocalLoopTraceStore = LocalLoopTraceStore(),
@@ -65,7 +64,6 @@ class LocalLoopDebugViewModelTest {
         traceStore = store,
         configProvider = if (config != null) ({ config }) else null,
         historyStore = historyStore,
-        coroutineScope = CoroutineScope(Dispatchers.Unconfined),
         ioDispatcher = Dispatchers.Unconfined,
         lastGoalProvider = if (lastGoal != null) ({ lastGoal }) else null,
         rerunGoalAction = rerunAction

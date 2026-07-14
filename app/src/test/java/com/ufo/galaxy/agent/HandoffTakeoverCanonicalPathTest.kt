@@ -6,6 +6,8 @@ import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.runtime.SourceRuntimePosture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -361,7 +363,7 @@ class HandoffTakeoverCanonicalPathTest {
         return AgentRuntimeBridge(
             gatewayClient = client,
             settings = settings,
-            metricsRecorder = MetricsRecorder(InMemoryAppSettings())
+            metricsRecorder = MetricsRecorder(InMemoryAppSettings(), CoroutineScope(Dispatchers.Unconfined))
         )
     }
 
@@ -422,7 +424,7 @@ class HandoffTakeoverCanonicalPathTest {
         val bridge = AgentRuntimeBridge(
             gatewayClient = client,
             settings = settings,
-            metricsRecorder = MetricsRecorder(InMemoryAppSettings())
+            metricsRecorder = MetricsRecorder(InMemoryAppSettings(), CoroutineScope(Dispatchers.Unconfined))
         )
 
         // Simulate what GalaxyConnectionService now does: propagate posture from inbound payload.
@@ -457,7 +459,7 @@ class HandoffTakeoverCanonicalPathTest {
         val bridge = AgentRuntimeBridge(
             gatewayClient = client,
             settings = settings,
-            metricsRecorder = MetricsRecorder(InMemoryAppSettings())
+            metricsRecorder = MetricsRecorder(InMemoryAppSettings(), CoroutineScope(Dispatchers.Unconfined))
         )
 
         // Simulate a legacy TaskAssignPayload with no source_runtime_posture (null).

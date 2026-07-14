@@ -1,5 +1,6 @@
 package com.ufo.galaxy.config
 
+import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -61,7 +62,7 @@ class RemoteConfigFetcherTest {
     // ── fetchConfig v1-first ───────────────────────────────────────────────
 
     @Test
-    fun `fetchConfig returns JSONObject when v1 endpoint returns 200`() {
+    fun `fetchConfig returns JSONObject when v1 endpoint returns 200`() = runBlocking {
         val f = fetcher(routingClient(v1Code = 200, legacyCode = 500, v1Body = sampleConfig))
         val result = f.fetchConfig()
         assertNotNull("fetchConfig must return non-null on v1 200", result)
@@ -69,7 +70,7 @@ class RemoteConfigFetcherTest {
     }
 
     @Test
-    fun `fetchConfig hits v1 path first`() {
+    fun `fetchConfig hits v1 path first`() = runBlocking {
         val urls = mutableListOf<String>()
         val interceptor = Interceptor { chain ->
             urls += chain.request().url.toString()
@@ -92,7 +93,7 @@ class RemoteConfigFetcherTest {
     // ── 404 fallback ───────────────────────────────────────────────────────
 
     @Test
-    fun `fetchConfig falls back to legacy when v1 returns 404`() {
+    fun `fetchConfig falls back to legacy when v1 returns 404`() = runBlocking {
         val f = fetcher(
             routingClient(v1Code = 404, legacyCode = 200, legacyBody = sampleConfig)
         )
@@ -102,13 +103,13 @@ class RemoteConfigFetcherTest {
     }
 
     @Test
-    fun `fetchConfig returns null when both v1 and legacy return 404`() {
+    fun `fetchConfig returns null when both v1 and legacy return 404`() = runBlocking {
         val f = fetcher(routingClient(v1Code = 404, legacyCode = 404))
         assertNull("fetchConfig must return null when both endpoints return 404", f.fetchConfig())
     }
 
     @Test
-    fun `fetchConfig returns null when v1 returns 404 and legacy returns non-2xx`() {
+    fun `fetchConfig returns null when v1 returns 404 and legacy returns non-2xx`() = runBlocking {
         val f = fetcher(routingClient(v1Code = 404, legacyCode = 500))
         assertNull("fetchConfig must return null when legacy also fails", f.fetchConfig())
     }
@@ -116,7 +117,7 @@ class RemoteConfigFetcherTest {
     // ── No fallback on non-404 errors ──────────────────────────────────────
 
     @Test
-    fun `fetchConfig does NOT fall back to legacy when v1 returns 500`() {
+    fun `fetchConfig does NOT fall back to legacy when v1 returns 500`() = runBlocking {
         val urls = mutableListOf<String>()
         val interceptor = Interceptor { chain ->
             urls += chain.request().url.toString()
@@ -139,7 +140,7 @@ class RemoteConfigFetcherTest {
     }
 
     @Test
-    fun `fetchConfig does NOT fall back to legacy when v1 returns 401`() {
+    fun `fetchConfig does NOT fall back to legacy when v1 returns 401`() = runBlocking {
         val urls = mutableListOf<String>()
         val interceptor = Interceptor { chain ->
             urls += chain.request().url.toString()
@@ -163,7 +164,7 @@ class RemoteConfigFetcherTest {
     // ── Network errors ─────────────────────────────────────────────────────
 
     @Test
-    fun `fetchConfig returns null on network exception`() {
+    fun `fetchConfig returns null on network exception`() = runBlocking {
         val f = fetcher(errorClient())
         assertNull("fetchConfig must return null on network exception", f.fetchConfig())
     }

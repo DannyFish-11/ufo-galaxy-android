@@ -1,5 +1,6 @@
 package com.ufo.galaxy.memory
 
+import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -65,31 +66,31 @@ class OpenClawdMemoryBackflowTest {
     // ── store() ────────────────────────────────────────────────────────────────
 
     @Test
-    fun `store returns true when server responds with 200`() {
+    fun `store returns true when server responds with 200`() = runBlocking {
         val bf = backflow(fakeClient(200, "{}"))
         assertTrue("store must return true on 200", bf.store(sampleEntry()))
     }
 
     @Test
-    fun `store returns true when server responds with 201`() {
+    fun `store returns true when server responds with 201`() = runBlocking {
         val bf = backflow(fakeClient(201, "{}"))
         assertTrue("store must return true on 201", bf.store(sampleEntry()))
     }
 
     @Test
-    fun `store returns false when server responds with 500`() {
+    fun `store returns false when server responds with 500`() = runBlocking {
         val bf = backflow(fakeClient(500))
         assertFalse("store must return false on 500", bf.store(sampleEntry()))
     }
 
     @Test
-    fun `store returns false when server responds with 400`() {
+    fun `store returns false when server responds with 400`() = runBlocking {
         val bf = backflow(fakeClient(400))
         assertFalse("store must return false on 400", bf.store(sampleEntry()))
     }
 
     @Test
-    fun `store returns false on network exception`() {
+    fun `store returns false on network exception`() = runBlocking {
         val bf = backflow(errorClient())
         assertFalse("store must return false on network exception", bf.store(sampleEntry()))
     }
@@ -97,7 +98,7 @@ class OpenClawdMemoryBackflowTest {
     // ── queryByTaskId() ────────────────────────────────────────────────────────
 
     @Test
-    fun `queryByTaskId returns entry when server responds with single JSON object`() {
+    fun `queryByTaskId returns entry when server responds with single JSON object`() = runBlocking {
         val json = sampleJson("q-001")
         val bf = backflow(fakeClient(200, json))
 
@@ -111,7 +112,7 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `queryByTaskId returns first entry when server responds with JSON array`() {
+    fun `queryByTaskId returns first entry when server responds with JSON array`() = runBlocking {
         val json = """[${sampleJson("arr-001")},${sampleJson("arr-002")}]"""
         val bf = backflow(fakeClient(200, json))
 
@@ -122,19 +123,19 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `queryByTaskId returns null when server responds with 404`() {
+    fun `queryByTaskId returns null when server responds with 404`() = runBlocking {
         val bf = backflow(fakeClient(404))
         assertNull("result must be null for 404", bf.queryByTaskId("missing-id"))
     }
 
     @Test
-    fun `queryByTaskId returns null on network exception`() {
+    fun `queryByTaskId returns null on network exception`() = runBlocking {
         val bf = backflow(errorClient())
         assertNull("result must be null on network exception", bf.queryByTaskId("t-001"))
     }
 
     @Test
-    fun `queryByTaskId returns null when response body is empty`() {
+    fun `queryByTaskId returns null when response body is empty`() = runBlocking {
         val bf = backflow(fakeClient(200, ""))
         // Empty body should not crash; returns null from parse failure
         val result = bf.queryByTaskId("empty-body")
@@ -142,7 +143,7 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `queryByTaskId returns null when JSON array is empty`() {
+    fun `queryByTaskId returns null when JSON array is empty`() = runBlocking {
         val bf = backflow(fakeClient(200, "[]"))
         assertNull(bf.queryByTaskId("t-empty"))
     }
@@ -234,7 +235,7 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `store falls back to legacy endpoint when v1 returns 404`() {
+    fun `store falls back to legacy endpoint when v1 returns 404`() = runBlocking {
         // v1 returns 404; legacy returns 200
         val client = routingClient(v1Code = 404, legacyCode = 200)
         val bf = backflow(client)
@@ -242,14 +243,14 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `store returns false when both v1 and legacy return non-2xx`() {
+    fun `store returns false when both v1 and legacy return non-2xx`() = runBlocking {
         val client = routingClient(v1Code = 404, legacyCode = 500)
         val bf = backflow(client)
         assertFalse("store must return false when legacy also fails", bf.store(sampleEntry()))
     }
 
     @Test
-    fun `store uses v1 endpoint and does not call legacy when v1 succeeds`() {
+    fun `store uses v1 endpoint and does not call legacy when v1 succeeds`() = runBlocking {
         // v1 returns 200; legacy would fail with 500 (should never be reached)
         val client = routingClient(v1Code = 200, legacyCode = 500)
         val bf = backflow(client)
@@ -257,7 +258,7 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `queryByTaskId falls back to legacy endpoint when v1 returns 404`() {
+    fun `queryByTaskId falls back to legacy endpoint when v1 returns 404`() = runBlocking {
         val legacyBody = sampleJson("fallback-q-001")
         val client = routingClient(v1Code = 404, legacyCode = 200, legacyBody = legacyBody)
         val bf = backflow(client)
@@ -269,7 +270,7 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `queryByTaskId returns null when both v1 and legacy return 404`() {
+    fun `queryByTaskId returns null when both v1 and legacy return 404`() = runBlocking {
         val client = routingClient(v1Code = 404, legacyCode = 404)
         val bf = backflow(client)
         assertNull("queryByTaskId must return null when both endpoints return 404", bf.queryByTaskId("missing"))

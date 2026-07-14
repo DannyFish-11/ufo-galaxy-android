@@ -1,8 +1,11 @@
 package com.ufo.galaxy.agent
 
+import com.google.gson.Gson
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.MetricsRecorder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -22,6 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * All tests run on the JVM without Android framework dependencies.
  */
 class AgentRuntimeBridgeTest {
+
+    private val gson = Gson()
 
     // ── Fake GatewayClient implementations ───────────────────────────────────
 
@@ -58,7 +63,7 @@ class AgentRuntimeBridgeTest {
      * Uses a no-op AppSettings so no HTTP posts are made.
      */
     private fun buildMetrics(): MetricsRecorder =
-        MetricsRecorder(InMemoryAppSettings())
+        MetricsRecorder(InMemoryAppSettings(), CoroutineScope(Dispatchers.Unconfined))
 
     // ── Builder helpers ───────────────────────────────────────────────────────
 
@@ -367,7 +372,7 @@ class AgentRuntimeBridgeTest {
     fun `AipMessage accepts trace_id and route_mode fields`() {
         val msg = com.ufo.galaxy.protocol.AipMessage(
             type = com.ufo.galaxy.shared.protocol.MsgType.TASK_RESULT,
-            payload = mapOf("status" to "success"),
+            payload = gson.toJsonTree(mapOf("status" to "success")),
             correlation_id = "task-1",
             device_id = "phone-1",
             trace_id = "trace-abc",
@@ -381,7 +386,7 @@ class AgentRuntimeBridgeTest {
     fun `AipMessage trace_id and route_mode default to null for backward compat`() {
         val msg = com.ufo.galaxy.protocol.AipMessage(
             type = com.ufo.galaxy.shared.protocol.MsgType.HEARTBEAT,
-            payload = emptyMap<String, Any>()
+            payload = gson.toJsonTree(emptyMap<String, Any>())
         )
         assertNull("trace_id must default to null for backward compat", msg.trace_id)
         assertNull("route_mode must default to null for backward compat", msg.route_mode)

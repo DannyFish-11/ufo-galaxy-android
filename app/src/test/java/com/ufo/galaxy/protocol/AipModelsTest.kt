@@ -1,5 +1,6 @@
 package com.ufo.galaxy.protocol
 
+import com.google.gson.Gson
 import com.ufo.galaxy.shared.protocol.MsgType
 
 import org.junit.Assert.*
@@ -19,6 +20,8 @@ import org.junit.Test
  *  - Snapshot data class
  */
 class AipModelsTest {
+
+    private val gson = Gson()
 
     // ── MsgType ───────────────────────────────────────────────────────────────
 
@@ -41,7 +44,7 @@ class AipModelsTest {
         val before = System.currentTimeMillis()
         val msg = AipMessage(
             type = MsgType.TASK_SUBMIT,
-            payload = "test"
+            payload = gson.toJsonTree("test")
         )
         val after = System.currentTimeMillis()
 
@@ -57,7 +60,7 @@ class AipModelsTest {
     fun `AipMessage carries correlation_id for reply routing`() {
         val msg = AipMessage(
             type = MsgType.TASK_RESULT,
-            payload = "result",
+            payload = gson.toJsonTree("result"),
             correlation_id = "task-abc-123"
         )
 
@@ -69,7 +72,7 @@ class AipModelsTest {
     fun `AipMessage accepts session_id and device_id`() {
         val msg = AipMessage(
             type = MsgType.TASK_ASSIGN,
-            payload = "payload",
+            payload = gson.toJsonTree("payload"),
             session_id = "sess-001",
             device_id = "dev-001"
         )
@@ -474,7 +477,7 @@ class AipModelsTest {
         )
         val envelope = AipMessage(
             type = MsgType.DIAGNOSTICS_PAYLOAD,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "d1",
             trace_id = "trace-001"
         )
@@ -735,7 +738,7 @@ class AipModelsTest {
     @Test
     fun `AckPayload wraps in AipMessage with ACK type`() {
         val payload = AckPayload(message_id = "m", type_acked = "wake_event", device_id = "d")
-        val envelope = AipMessage(type = MsgType.ACK, payload = payload)
+        val envelope = AipMessage(type = MsgType.ACK, payload = gson.toJsonTree(payload))
 
         assertEquals(MsgType.ACK, envelope.type)
         assertEquals("AIP/1.0", envelope.protocol)

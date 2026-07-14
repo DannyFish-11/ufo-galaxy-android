@@ -764,7 +764,7 @@ class HandoffEnvelopeV2ConsumptionTest {
         val result = buildSuccessResult()
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.correlation_id,
             device_id = result.device_id,
             trace_id = result.trace_id,
@@ -779,7 +779,7 @@ class HandoffEnvelopeV2ConsumptionTest {
         val result = buildSuccessResult(taskId = "task-aip")
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.correlation_id,
             device_id = result.device_id,
             trace_id = result.trace_id,
@@ -793,7 +793,7 @@ class HandoffEnvelopeV2ConsumptionTest {
         val result = buildSuccessResult(traceId = "trace-aip-001")
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.correlation_id,
             device_id = result.device_id,
             trace_id = result.trace_id,
@@ -807,7 +807,7 @@ class HandoffEnvelopeV2ConsumptionTest {
         val result = buildSuccessResult()
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.correlation_id,
             device_id = result.device_id,
             trace_id = result.trace_id,
@@ -821,7 +821,7 @@ class HandoffEnvelopeV2ConsumptionTest {
         val result = buildSuccessResult()
         val envelope = AipMessage(
             type = MsgType.HANDOFF_ENVELOPE_V2_RESULT,
-            payload = result,
+            payload = gson.toJsonTree(result),
             correlation_id = result.correlation_id,
             device_id = result.device_id,
             trace_id = result.trace_id,

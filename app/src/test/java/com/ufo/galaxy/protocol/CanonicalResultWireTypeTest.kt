@@ -2,6 +2,7 @@ package com.ufo.galaxy.protocol
 
 import com.ufo.galaxy.shared.protocol.MsgType
 
+import com.google.gson.Gson
 import com.ufo.galaxy.network.OfflineTaskQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -59,6 +60,8 @@ import org.junit.Test
  */
 class CanonicalResultWireTypeTest {
 
+    private val gson = Gson()
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun buildNormalResult(
@@ -109,7 +112,7 @@ class CanonicalResultWireTypeTest {
         routeMode: String?
     ) = AipMessage(
         type = MsgType.GOAL_EXECUTION_RESULT,
-        payload = result,
+        payload = gson.toJsonTree(result),
         correlation_id = result.correlation_id ?: result.task_id,
         device_id = result.device_id,
         trace_id = traceId,
