@@ -64,4 +64,6 @@
     <string name="setup_test_success">Connection successful!</string>
     <string name="setup_test_failed">Connection failed. You can still save and retry later.</string>
     <string name="setup_saved">Configuration saved. Starting UFO Galaxy…</string>
+    <string name="presence_widget_description">Galaxy 在场:一眼看它在听/在想/在做,点按唤醒</string>
+    <string name="presence_tile_label">Galaxy</string>
 </resources>

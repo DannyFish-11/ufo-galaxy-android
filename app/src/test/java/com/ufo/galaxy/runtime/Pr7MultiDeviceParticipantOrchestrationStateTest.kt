@@ -118,37 +118,37 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
 
     @Test
     fun `CONNECTED wireValue is connected`() {
-        assertEquals("connected", S.OrchestrationState.CONNECTED.wireValue)
+        assertEquals("connected", MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED.wireValue)
     }
 
     @Test
     fun `DISCONNECTED wireValue is disconnected`() {
-        assertEquals("disconnected", S.OrchestrationState.DISCONNECTED.wireValue)
+        assertEquals("disconnected", MultiDeviceParticipantOrchestrationState.OrchestrationState.DISCONNECTED.wireValue)
     }
 
     @Test
     fun `RECONNECTING wireValue is reconnecting`() {
-        assertEquals("reconnecting", S.OrchestrationState.RECONNECTING.wireValue)
+        assertEquals("reconnecting", MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING.wireValue)
     }
 
     @Test
     fun `DEGRADED wireValue is degraded`() {
-        assertEquals("degraded", S.OrchestrationState.DEGRADED.wireValue)
+        assertEquals("degraded", MultiDeviceParticipantOrchestrationState.OrchestrationState.DEGRADED.wireValue)
     }
 
     @Test
     fun `RECOVERING wireValue is recovering`() {
-        assertEquals("recovering", S.OrchestrationState.RECOVERING.wireValue)
+        assertEquals("recovering", MultiDeviceParticipantOrchestrationState.OrchestrationState.RECOVERING.wireValue)
     }
 
     @Test
     fun `CAPABILITY_LIMITED wireValue is capability_limited`() {
-        assertEquals("capability_limited", S.OrchestrationState.CAPABILITY_LIMITED.wireValue)
+        assertEquals("capability_limited", MultiDeviceParticipantOrchestrationState.OrchestrationState.CAPABILITY_LIMITED.wireValue)
     }
 
     @Test
     fun `all six wire values are distinct`() {
-        val wires = S.OrchestrationState.entries.map { it.wireValue }
+        val wires = MultiDeviceParticipantOrchestrationState.OrchestrationState.entries.map { it.wireValue }
         assertEquals(
             "All OrchestrationState wire values must be distinct",
             wires.size,
@@ -160,7 +160,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
 
     @Test
     fun `all six states have non-blank descriptions`() {
-        S.OrchestrationState.entries.forEach { state ->
+        MultiDeviceParticipantOrchestrationState.OrchestrationState.entries.forEach { state ->
             assertTrue(
                 "OrchestrationState.${state.name} description must be non-blank",
                 state.description.isNotBlank()
@@ -177,7 +177,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
 
     @Test
     fun `OrchestrationState entries has exactly ORCHESTRATION_STATE_COUNT entries`() {
-        assertEquals(S.ORCHESTRATION_STATE_COUNT, S.OrchestrationState.entries.size)
+        assertEquals(S.ORCHESTRATION_STATE_COUNT, MultiDeviceParticipantOrchestrationState.OrchestrationState.entries.size)
     }
 
     // ── VALID_TRANSITIONS — structural invariants ─────────────────────────────
@@ -230,8 +230,8 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `DISCONNECTED to RECONNECTING transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.DISCONNECTED,
-                S.OrchestrationState.RECONNECTING
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.DISCONNECTED,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING
             )
         )
     }
@@ -240,16 +240,16 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `CONNECTED to RECONNECTING transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.CONNECTED,
-                S.OrchestrationState.RECONNECTING
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING
             )
         )
     }
 
     @Test
     fun `RECONNECTING to CONNECTED transition exists with DeviceReconnected event`() {
-        val t = S.transitionsFrom(S.OrchestrationState.RECONNECTING)
-            .firstOrNull { it.toState == S.OrchestrationState.CONNECTED }
+        val t = S.transitionsFrom(MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING)
+            .firstOrNull { it.toState == MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED }
         assertNotNull("RECONNECTING → CONNECTED transition must exist", t)
         assertEquals(
             "RECONNECTING → CONNECTED must emit DeviceReconnected",
@@ -262,8 +262,8 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `RECONNECTING to DISCONNECTED transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.RECONNECTING,
-                S.OrchestrationState.DISCONNECTED
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.DISCONNECTED
             )
         )
     }
@@ -272,8 +272,8 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `CONNECTED to DEGRADED transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.CONNECTED,
-                S.OrchestrationState.DEGRADED
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.DEGRADED
             )
         )
     }
@@ -282,8 +282,8 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `CONNECTED to CAPABILITY_LIMITED transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.CONNECTED,
-                S.OrchestrationState.CAPABILITY_LIMITED
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.CAPABILITY_LIMITED
             )
         )
     }
@@ -292,16 +292,16 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `DEGRADED to RECOVERING transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.DEGRADED,
-                S.OrchestrationState.RECOVERING
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.DEGRADED,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.RECOVERING
             )
         )
     }
 
     @Test
     fun `RECOVERING to CONNECTED transition exists with DeviceHealthChanged event`() {
-        val t = S.transitionsFrom(S.OrchestrationState.RECOVERING)
-            .firstOrNull { it.toState == S.OrchestrationState.CONNECTED }
+        val t = S.transitionsFrom(MultiDeviceParticipantOrchestrationState.OrchestrationState.RECOVERING)
+            .firstOrNull { it.toState == MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED }
         assertNotNull("RECOVERING → CONNECTED transition must exist", t)
         assertEquals(
             "RECOVERING → CONNECTED must emit DeviceHealthChanged",
@@ -314,8 +314,8 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
     fun `CONNECTED to DISCONNECTED transition exists`() {
         assertTrue(
             S.isValidTransition(
-                S.OrchestrationState.CONNECTED,
-                S.OrchestrationState.DISCONNECTED
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED,
+                MultiDeviceParticipantOrchestrationState.OrchestrationState.DISCONNECTED
             )
         )
     }
@@ -330,7 +330,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.NOT_READY,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
-        assertEquals(S.OrchestrationState.RECONNECTING, derived)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.RECONNECTING, derived)
     }
 
     @Test
@@ -341,7 +341,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.NOT_READY,
             participationState = RuntimeHostDescriptor.HostParticipationState.INACTIVE
         )
-        assertEquals(S.OrchestrationState.DISCONNECTED, derived)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.DISCONNECTED, derived)
     }
 
     @Test
@@ -352,7 +352,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.NOT_READY,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
-        assertEquals(S.OrchestrationState.RECOVERING, derived)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.RECOVERING, derived)
     }
 
     @Test
@@ -363,7 +363,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.READY_WITH_FALLBACK,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
-        assertEquals(S.OrchestrationState.CAPABILITY_LIMITED, derived)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.CAPABILITY_LIMITED, derived)
     }
 
     @Test
@@ -374,7 +374,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.READY,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
-        assertEquals(S.OrchestrationState.DEGRADED, derived)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.DEGRADED, derived)
     }
 
     @Test
@@ -385,7 +385,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.READY,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
-        assertEquals(S.OrchestrationState.CONNECTED, derived)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED, derived)
     }
 
     // ── from factory — StateRecord construction ────────────────────────────────
@@ -398,7 +398,7 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
             readinessState = ParticipantReadinessState.READY,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
         )
-        assertEquals(S.OrchestrationState.CONNECTED, record.orchestrationState)
+        assertEquals(MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED, record.orchestrationState)
     }
 
     @Test
@@ -603,25 +603,25 @@ class Pr7MultiDeviceParticipantOrchestrationStateTest {
 
     @Test
     fun `transitionsFrom CONNECTED is non-empty`() {
-        assertTrue(S.transitionsFrom(S.OrchestrationState.CONNECTED).isNotEmpty())
+        assertTrue(S.transitionsFrom(MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED).isNotEmpty())
     }
 
     @Test
     fun `transitionsTo CONNECTED is non-empty`() {
-        assertTrue(S.transitionsTo(S.OrchestrationState.CONNECTED).isNotEmpty())
+        assertTrue(S.transitionsTo(MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED).isNotEmpty())
     }
 
     @Test
     fun `isValidTransition CONNECTED to DEGRADED is true`() {
         assertTrue(
-            S.isValidTransition(S.OrchestrationState.CONNECTED, S.OrchestrationState.DEGRADED)
+            S.isValidTransition(MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED, MultiDeviceParticipantOrchestrationState.OrchestrationState.DEGRADED)
         )
     }
 
     @Test
     fun `isValidTransition CONNECTED to RECOVERING is false`() {
         assertFalse(
-            S.isValidTransition(S.OrchestrationState.CONNECTED, S.OrchestrationState.RECOVERING)
+            S.isValidTransition(MultiDeviceParticipantOrchestrationState.OrchestrationState.CONNECTED, MultiDeviceParticipantOrchestrationState.OrchestrationState.RECOVERING)
         )
     }
 

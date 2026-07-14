@@ -86,8 +86,8 @@ class SignalingMessageTest {
         assertEquals("ice_candidate", restored.type)
         assertNotNull(restored.candidate)
         assertEquals(iceCandidate.candidate, restored.candidate!!.candidate)
-        assertEquals(iceCandidate.sdpMid, restored.candidate.sdpMid)
-        assertEquals(iceCandidate.sdpMLineIndex, restored.candidate.sdpMLineIndex)
+        assertEquals(iceCandidate.sdpMid, restored.candidate!!.sdpMid)
+        assertEquals(iceCandidate.sdpMLineIndex, restored.candidate!!.sdpMLineIndex)
         assertNull(restored.sdp)
         assertTrue(restored.candidates.isEmpty())
     }
@@ -208,10 +208,10 @@ class SignalingMessageTest {
 
         assertNotNull(restored.turnConfig)
         assertEquals(2, restored.turnConfig!!.urls.size)
-        assertEquals("turn:100.64.0.1:3478", restored.turnConfig.urls[0])
-        assertEquals("turns:100.64.0.1:5349", restored.turnConfig.urls[1])
-        assertEquals("galaxy_user", restored.turnConfig.username)
-        assertEquals("s3cr3t", restored.turnConfig.credential)
+        assertEquals("turn:100.64.0.1:3478", restored.turnConfig!!.urls[0])
+        assertEquals("turns:100.64.0.1:5349", restored.turnConfig!!.urls[1])
+        assertEquals("galaxy_user", restored.turnConfig!!.username)
+        assertEquals("s3cr3t", restored.turnConfig!!.credential)
         assertEquals("turn-trace", restored.traceId)
     }
 
@@ -396,7 +396,7 @@ class SignalingMessageTest {
         assertEquals(2, msg.candidates.size)
         assertNotNull(msg.turnConfig)
         assertEquals("turn:100.64.0.1:3478", msg.turnConfig!!.urls[0])
-        assertEquals("u1", msg.turnConfig.username)
+        assertEquals("u1", msg.turnConfig!!.username)
         assertEquals("trace-gw-2", msg.traceId)
     }
 }

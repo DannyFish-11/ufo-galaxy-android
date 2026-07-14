@@ -169,12 +169,12 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `ExecutionPathTag fromWireValue returns correct tag for each value`() {
         val t = AndroidRuntimeObservabilityAuditContract.ExecutionPathTag
-        assertEquals(t.LOCAL_PATH, t.fromWireValue("local_path"))
-        assertEquals(t.CROSS_DEVICE_PATH, t.fromWireValue("cross_device_path"))
-        assertEquals(t.DELEGATED_PATH, t.fromWireValue("delegated_path"))
-        assertEquals(t.TAKEOVER_PATH, t.fromWireValue("takeover_path"))
-        assertEquals(t.DEGRADED_PATH, t.fromWireValue("degraded_path"))
-        assertEquals(t.UNKNOWN, t.fromWireValue("unknown"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.LOCAL_PATH, t.fromWireValue("local_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.CROSS_DEVICE_PATH, t.fromWireValue("cross_device_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DELEGATED_PATH, t.fromWireValue("delegated_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.TAKEOVER_PATH, t.fromWireValue("takeover_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DEGRADED_PATH, t.fromWireValue("degraded_path"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.UNKNOWN, t.fromWireValue("unknown"))
     }
 
     @Test
@@ -248,15 +248,15 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `AuditContributionClass fromWireValue returns correct class for each value`() {
         val c = AndroidRuntimeObservabilityAuditContract.AuditContributionClass
-        assertEquals(c.PARTICIPATION_ATTESTATION, c.fromWireValue("participation_attestation"))
-        assertEquals(c.EXECUTION_CONTRIBUTION, c.fromWireValue("execution_contribution"))
-        assertEquals(c.EXECUTION_OUTCOME, c.fromWireValue("execution_outcome"))
-        assertEquals(c.INTERRUPTION_RECORD, c.fromWireValue("interruption_record"))
-        assertEquals(c.RECOVERY_CONTRIBUTION, c.fromWireValue("recovery_contribution"))
-        assertEquals(c.TAKEOVER_CONTRIBUTION, c.fromWireValue("takeover_contribution"))
-        assertEquals(c.DELEGATED_CONTRIBUTION, c.fromWireValue("delegated_contribution"))
-        assertEquals(c.OPERATOR_ACTION_OUTCOME, c.fromWireValue("operator_action_outcome"))
-        assertEquals(c.INFORMATIONAL, c.fromWireValue("informational"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.PARTICIPATION_ATTESTATION, c.fromWireValue("participation_attestation"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_CONTRIBUTION, c.fromWireValue("execution_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_OUTCOME, c.fromWireValue("execution_outcome"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.INTERRUPTION_RECORD, c.fromWireValue("interruption_record"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.RECOVERY_CONTRIBUTION, c.fromWireValue("recovery_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.TAKEOVER_CONTRIBUTION, c.fromWireValue("takeover_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.DELEGATED_CONTRIBUTION, c.fromWireValue("delegated_contribution"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.OPERATOR_ACTION_OUTCOME, c.fromWireValue("operator_action_outcome"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.AuditContributionClass.INFORMATIONAL, c.fromWireValue("informational"))
     }
 
     @Test
@@ -306,11 +306,11 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `ObservabilityReliabilityClass fromWireValue returns correct class for each value`() {
         val r = AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass
-        assertEquals(r.HIGH_FIDELITY, r.fromWireValue("high_fidelity"))
-        assertEquals(r.REDUCED_FIDELITY, r.fromWireValue("reduced_fidelity"))
-        assertEquals(r.STALE, r.fromWireValue("stale"))
-        assertEquals(r.INTERRUPTED, r.fromWireValue("interrupted"))
-        assertEquals(r.UNKNOWN, r.fromWireValue("unknown"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.HIGH_FIDELITY, r.fromWireValue("high_fidelity"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.REDUCED_FIDELITY, r.fromWireValue("reduced_fidelity"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.STALE, r.fromWireValue("stale"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.INTERRUPTED, r.fromWireValue("interrupted"))
+        assertEquals(AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.UNKNOWN, r.fromWireValue("unknown"))
     }
 
     @Test
@@ -332,7 +332,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath spineParticipationKind takeover_interactive gives TAKEOVER_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.TAKEOVER_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.TAKEOVER_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = "takeover_interactive",
                 executionModeState = null,
@@ -347,7 +347,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath spineParticipationKind delegated_execution gives DELEGATED_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.DELEGATED_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DELEGATED_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = "delegated_execution",
                 executionModeState = null,
@@ -362,7 +362,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath spineParticipationKind local_assistive gives LOCAL_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.LOCAL_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.LOCAL_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = "local_assistive",
                 executionModeState = null,
@@ -377,7 +377,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath spineParticipationKind degraded_fallback gives DEGRADED_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.DEGRADED_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DEGRADED_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = "degraded_fallback",
                 executionModeState = null,
@@ -392,7 +392,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath unknown spineParticipationKind gives UNKNOWN`() {
         assertEquals(
-            contract.ExecutionPathTag.UNKNOWN,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.UNKNOWN,
             contract.classifyExecutionPath(
                 spineParticipationKind = "something_unrecognized",
                 executionModeState = null,
@@ -407,7 +407,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath isTakeoverPath=true gives TAKEOVER_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.TAKEOVER_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.TAKEOVER_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = null,
@@ -422,7 +422,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath isDelegated=true gives DELEGATED_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.DELEGATED_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DELEGATED_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = null,
@@ -437,7 +437,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath cross_device_degraded mode gives DEGRADED_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.DEGRADED_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DEGRADED_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = "cross_device_degraded",
@@ -452,7 +452,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath cross_device_active with eligibility=true gives CROSS_DEVICE_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.CROSS_DEVICE_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.CROSS_DEVICE_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = "cross_device_active",
@@ -467,7 +467,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath center_delegated_with_local_fallback gives DEGRADED_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.DEGRADED_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.DEGRADED_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = null,
@@ -482,7 +482,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath local_only mode with no cross-device gives LOCAL_PATH`() {
         assertEquals(
-            contract.ExecutionPathTag.LOCAL_PATH,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.LOCAL_PATH,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = "local_only",
@@ -497,7 +497,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyExecutionPath all-null inputs gives UNKNOWN`() {
         assertEquals(
-            contract.ExecutionPathTag.UNKNOWN,
+            AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.UNKNOWN,
             contract.classifyExecutionPath(
                 spineParticipationKind = null,
                 executionModeState = null,
@@ -514,7 +514,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution participation snapshot non-recovery gives PARTICIPATION_ATTESTATION`() {
         assertEquals(
-            contract.AuditContributionClass.PARTICIPATION_ATTESTATION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.PARTICIPATION_ATTESTATION,
             contract.classifyAuditContribution(
                 eventPhase = null,
                 isTerminalPhase = false,
@@ -531,7 +531,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution participation snapshot with recovery gives RECOVERY_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.RECOVERY_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.RECOVERY_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = null,
                 isTerminalPhase = false,
@@ -548,7 +548,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution operator action event gives OPERATOR_ACTION_OUTCOME`() {
         assertEquals(
-            contract.AuditContributionClass.OPERATOR_ACTION_OUTCOME,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.OPERATOR_ACTION_OUTCOME,
             contract.classifyAuditContribution(
                 eventPhase = null,
                 isTerminalPhase = false,
@@ -565,7 +565,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution interruption phase gives INTERRUPTION_RECORD`() {
         assertEquals(
-            contract.AuditContributionClass.INTERRUPTION_RECORD,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.INTERRUPTION_RECORD,
             contract.classifyAuditContribution(
                 eventPhase = "failed",
                 isTerminalPhase = true,
@@ -582,7 +582,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution recovery phase non-snapshot gives RECOVERY_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.RECOVERY_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.RECOVERY_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "fallback_transition",
                 isTerminalPhase = false,
@@ -599,7 +599,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution takeover event gives TAKEOVER_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.TAKEOVER_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.TAKEOVER_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "takeover_milestone",
                 isTerminalPhase = false,
@@ -616,7 +616,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution delegated event gives DELEGATED_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.DELEGATED_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.DELEGATED_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "execution_started",
                 isTerminalPhase = false,
@@ -633,7 +633,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution terminal phase gives EXECUTION_OUTCOME`() {
         assertEquals(
-            contract.AuditContributionClass.EXECUTION_OUTCOME,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_OUTCOME,
             contract.classifyAuditContribution(
                 eventPhase = "completed",
                 isTerminalPhase = true,
@@ -650,7 +650,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution execution_started phase gives EXECUTION_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.EXECUTION_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "execution_started",
                 isTerminalPhase = false,
@@ -667,7 +667,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution execution_progress phase gives EXECUTION_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.EXECUTION_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "execution_progress",
                 isTerminalPhase = false,
@@ -684,7 +684,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution completed phase gives EXECUTION_OUTCOME`() {
         assertEquals(
-            contract.AuditContributionClass.EXECUTION_OUTCOME,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_OUTCOME,
             contract.classifyAuditContribution(
                 eventPhase = "completed",
                 isTerminalPhase = false,
@@ -701,7 +701,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution failed phase gives EXECUTION_OUTCOME`() {
         assertEquals(
-            contract.AuditContributionClass.EXECUTION_OUTCOME,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_OUTCOME,
             contract.classifyAuditContribution(
                 eventPhase = "failed",
                 isTerminalPhase = false,
@@ -718,7 +718,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution cancelled phase gives EXECUTION_OUTCOME`() {
         assertEquals(
-            contract.AuditContributionClass.EXECUTION_OUTCOME,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.EXECUTION_OUTCOME,
             contract.classifyAuditContribution(
                 eventPhase = "cancelled",
                 isTerminalPhase = false,
@@ -735,7 +735,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution fallback_transition phase gives RECOVERY_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.RECOVERY_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.RECOVERY_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "fallback_transition",
                 isTerminalPhase = false,
@@ -752,7 +752,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution takeover_milestone phase gives TAKEOVER_CONTRIBUTION`() {
         assertEquals(
-            contract.AuditContributionClass.TAKEOVER_CONTRIBUTION,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.TAKEOVER_CONTRIBUTION,
             contract.classifyAuditContribution(
                 eventPhase = "takeover_milestone",
                 isTerminalPhase = false,
@@ -769,7 +769,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyAuditContribution null phase non-snapshot gives INFORMATIONAL`() {
         assertEquals(
-            contract.AuditContributionClass.INFORMATIONAL,
+            AndroidRuntimeObservabilityAuditContract.AuditContributionClass.INFORMATIONAL,
             contract.classifyAuditContribution(
                 eventPhase = null,
                 isTerminalPhase = false,
@@ -788,7 +788,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability recovering state gives INTERRUPTED`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.INTERRUPTED,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.INTERRUPTED,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "positive_evidence",
                 degradedConditionClass = "nominal",
@@ -801,7 +801,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability cached_state basis gives STALE`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.STALE,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.STALE,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "positive_evidence",
                 degradedConditionClass = "nominal",
@@ -814,7 +814,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability positive_evidence nominal gives HIGH_FIDELITY`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.HIGH_FIDELITY,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.HIGH_FIDELITY,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "positive_evidence",
                 degradedConditionClass = "nominal",
@@ -827,7 +827,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability positive_evidence degraded gives REDUCED_FIDELITY`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.REDUCED_FIDELITY,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.REDUCED_FIDELITY,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "positive_evidence",
                 degradedConditionClass = "degraded",
@@ -840,7 +840,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability positive_evidence recovered gives HIGH_FIDELITY`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.HIGH_FIDELITY,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.HIGH_FIDELITY,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "positive_evidence",
                 degradedConditionClass = "recovered",
@@ -853,7 +853,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability delayed evidence gives STALE`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.STALE,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.STALE,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "delayed",
                 degradedConditionClass = null,
@@ -866,7 +866,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability partial evidence gives REDUCED_FIDELITY`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.REDUCED_FIDELITY,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.REDUCED_FIDELITY,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "partial",
                 degradedConditionClass = null,
@@ -879,7 +879,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability unknown evidence gives UNKNOWN`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.UNKNOWN,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.UNKNOWN,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "unknown",
                 degradedConditionClass = null,
@@ -892,7 +892,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability unavailable evidence gives INTERRUPTED`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.INTERRUPTED,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.INTERRUPTED,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "unavailable",
                 degradedConditionClass = null,
@@ -905,7 +905,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability failed_observation evidence gives INTERRUPTED`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.INTERRUPTED,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.INTERRUPTED,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = "failed_observation",
                 degradedConditionClass = null,
@@ -918,7 +918,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability null evidence degraded condition gives REDUCED_FIDELITY`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.REDUCED_FIDELITY,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.REDUCED_FIDELITY,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = null,
                 degradedConditionClass = "degraded",
@@ -931,7 +931,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability null evidence recovering condition gives INTERRUPTED`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.INTERRUPTED,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.INTERRUPTED,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = null,
                 degradedConditionClass = "recovering",
@@ -944,7 +944,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability null evidence nominal condition gives UNKNOWN`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.UNKNOWN,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.UNKNOWN,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = null,
                 degradedConditionClass = "nominal",
@@ -957,7 +957,7 @@ class Pr89AndroidRuntimeObservabilityAuditTest {
     @Test
     fun `classifyObservabilityReliability all-null inputs gives UNKNOWN`() {
         assertEquals(
-            contract.ObservabilityReliabilityClass.UNKNOWN,
+            AndroidRuntimeObservabilityAuditContract.ObservabilityReliabilityClass.UNKNOWN,
             contract.classifyObservabilityReliability(
                 evidencePresenceKind = null,
                 degradedConditionClass = null,

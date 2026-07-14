@@ -360,7 +360,7 @@ class Pr121AndroidCanonicalTransportPathBoundaryContractTest {
     // 11. Closure-bearing payloads require CANONICAL_PRODUCTION (INV-TRP-04)
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `gate check: AUTHORITY_RESULT may only travel via CANONICAL_PRODUCTION (INV-TRP-04)`() {
+    @Test fun `gate check - AUTHORITY_RESULT may only travel via CANONICAL_PRODUCTION (INV-TRP-04)`() {
         // Simulate: canCarryAuthorityResult = transportPathClass.isCanonicalProduction
         val nonCanonicalPaths = AndroidCanonicalTransportPathBoundaryContract.TransportPathClass.values()
             .filter { !it.isCanonicalProduction }

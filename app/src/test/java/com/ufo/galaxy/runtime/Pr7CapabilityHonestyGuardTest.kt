@@ -97,10 +97,11 @@ import org.junit.Test
  *  - INTRODUCED_PR is 7
  *  - INTRODUCED_PR_TITLE is non-blank
  */
+private typealias S = MultiDeviceParticipantOrchestrationState.OrchestrationState
+
 class Pr7CapabilityHonestyGuardTest {
 
     private val G = CapabilityHonestyGuard
-    private val S = MultiDeviceParticipantOrchestrationState.OrchestrationState
 
     // ── BASE_CAPABILITIES — constants ─────────────────────────────────────────
 
@@ -215,7 +216,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `CONNECTED ACTIVE with base plus inference is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES + G.CAPABILITY_LOCAL_MODEL_INFERENCE,
             orchestrationState = S.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -225,7 +226,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `CONNECTED ACTIVE with base only is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES,
             orchestrationState = S.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -235,7 +236,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `CONNECTED DEGRADED with base only is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES,
             orchestrationState = S.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DEGRADED
@@ -245,7 +246,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `DEGRADED with base only is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES,
             orchestrationState = S.DEGRADED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -255,7 +256,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `RECOVERING with empty capabilities is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = emptySet(),
             orchestrationState = S.RECOVERING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -265,7 +266,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `DISCONNECTED with empty capabilities is honest`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = emptySet(),
             orchestrationState = S.DISCONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DISABLED
@@ -277,7 +278,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `DISCONNECTED with base caps produces violations`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES,
             orchestrationState = S.DISCONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DISABLED
@@ -289,7 +290,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `RECONNECTING with inference produces violation for inference`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf(G.CAPABILITY_LOCAL_MODEL_INFERENCE),
             orchestrationState = S.RECONNECTING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -301,7 +302,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `RECOVERING with any capability produces violations`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf("autonomous_goal_execution"),
             orchestrationState = S.RECOVERING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -312,7 +313,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `DEGRADED with inference produces violation for inference`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES + G.CAPABILITY_LOCAL_MODEL_INFERENCE,
             orchestrationState = S.DEGRADED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -324,7 +325,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `CAPABILITY_LIMITED with inference produces violation`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf(G.CAPABILITY_LOCAL_MODEL_INFERENCE),
             orchestrationState = S.CAPABILITY_LIMITED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DEGRADED
@@ -336,7 +337,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `CONNECTED DEGRADED with inference produces violation`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = G.BASE_CAPABILITIES + G.CAPABILITY_LOCAL_MODEL_INFERENCE,
             orchestrationState = S.CONNECTED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DEGRADED
@@ -350,7 +351,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `violation violatingCapability matches the disallowed capability`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf(G.CAPABILITY_LOCAL_MODEL_INFERENCE),
             orchestrationState = S.DEGRADED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -361,7 +362,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `violation orchestrationState matches report state`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf(G.CAPABILITY_LOCAL_MODEL_INFERENCE),
             orchestrationState = S.RECONNECTING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE
@@ -372,7 +373,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `violation inferenceStatus matches report status`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf(G.CAPABILITY_LOCAL_MODEL_INFERENCE),
             orchestrationState = S.DEGRADED,
             inferenceStatus = LocalIntelligenceCapabilityStatus.DEGRADED
@@ -383,7 +384,7 @@ class Pr7CapabilityHonestyGuardTest {
 
     @Test
     fun `violation reason is non-blank`() {
-        val report = G.CapabilityReport(
+        val report = CapabilityHonestyGuard.CapabilityReport(
             advertisedCapabilities = setOf(G.CAPABILITY_LOCAL_MODEL_INFERENCE),
             orchestrationState = S.RECOVERING,
             inferenceStatus = LocalIntelligenceCapabilityStatus.ACTIVE

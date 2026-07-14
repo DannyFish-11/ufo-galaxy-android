@@ -116,7 +116,7 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         override fun isModelLoaded() = true
         override fun ground(
             intent: String, screenshotBase64: String, width: Int, height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -319,7 +319,7 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         withTimeoutOrNull(200) {
             controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
         }
-        client.simulateError("connection refused")
+        client.simulateDisconnected()
 
         val event = withTimeoutOrNull(300) {
             controller.v2LifecycleEvents.first {
@@ -345,7 +345,7 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         withTimeoutOrNull(200) {
             controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
         }
-        client.simulateError("connection refused")
+        client.simulateDisconnected()
 
         val event = withTimeoutOrNull(300) {
             controller.v2LifecycleEvents.first {
@@ -370,7 +370,7 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         withTimeoutOrNull(200) {
             controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
         }
-        client.simulateError("connection refused")
+        client.simulateDisconnected()
 
         val event = withTimeoutOrNull(300) {
             controller.v2LifecycleEvents.first {
@@ -440,7 +440,7 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
                     (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
             }
         }
-        client.simulateError("ws timeout")
+        client.simulateDisconnected()
 
         val event = withTimeoutOrNull(300) {
             controller.v2LifecycleEvents.first {
@@ -554,7 +554,7 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val recovering = recoveringEvent as V2MultiDeviceLifecycleEvent.DeviceDegraded
 
         // Trigger FAILED
-        client.simulateError("connection refused")
+        client.simulateDisconnected()
         val failedEvent = withTimeoutOrNull(300) {
             controller.v2LifecycleEvents.first {
                 it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&

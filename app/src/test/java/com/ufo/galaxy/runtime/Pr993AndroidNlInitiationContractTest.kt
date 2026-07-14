@@ -176,7 +176,7 @@ class Pr993AndroidNlInitiationContractTest {
         override fun unloadModel() {}
         override fun isModelLoaded() = true
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
-            LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+            LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -890,7 +890,7 @@ class Pr993AndroidNlInitiationContractTest {
     }
 
     @Test
-    fun `takeover scenario: authority scope remains V2_CENTRAL and no parallel bypass`() {
+    fun `takeover scenario - authority scope remains V2_CENTRAL and no parallel bypass`() {
         // During takeover (cross-device is active, takeover accepted), NL initiations
         // must still use the canonical WS uplink path and V2_CENTRAL authority.
         val gateway = FakeGatewayClient(connected = true, sendResult = true)
@@ -910,7 +910,7 @@ class Pr993AndroidNlInitiationContractTest {
     }
 
     @Test
-    fun `recovery scenario: NL initiation blocked when crossDeviceEnabled=false`() {
+    fun `recovery scenario - NL initiation blocked when crossDeviceEnabled=false`() {
         // If a recovery scenario results in cross-device being disabled (e.g. forced offline),
         // Android NL initiation must not be available — the gate must hold.
         val metadata = AndroidNlInitiationContract.build(
@@ -925,7 +925,7 @@ class Pr993AndroidNlInitiationContractTest {
     }
 
     @Test
-    fun `stale session scenario: metadata still valid with stale runtimeSessionId`() {
+    fun `stale session scenario - metadata still valid with stale runtimeSessionId`() {
         // Even if the runtimeSessionId is from a stale session, the metadata structure
         // must still be valid — stale/duplicate handling is V2's responsibility.
         val metadata = AndroidNlInitiationContract.build(
@@ -941,7 +941,7 @@ class Pr993AndroidNlInitiationContractTest {
     }
 
     @Test
-    fun `duplicate initiation scenario: each attempt has unique correlationId`() {
+    fun `duplicate initiation scenario - each attempt has unique correlationId`() {
         // Simulates user rapidly submitting the same NL input (duplicate scenario).
         // Each attempt must get a unique correlationId so V2 can detect and deduplicate.
         val ids = (1..5).map {

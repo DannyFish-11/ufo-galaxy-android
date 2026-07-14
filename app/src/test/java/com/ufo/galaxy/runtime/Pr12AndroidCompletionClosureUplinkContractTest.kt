@@ -233,7 +233,7 @@ class Pr12AndroidCompletionClosureUplinkContractTest {
                 deviceRole = "phone",
                 participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE,
                 coordinationRole = ParticipantCoordinationRole.PARTICIPANT,
-                sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME.wireValue,
+                sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME,
                 sessionId = "session-pr12",
                 sessionState = AttachedRuntimeSession.State.ATTACHED,
                 delegatedExecutionCount = 0,

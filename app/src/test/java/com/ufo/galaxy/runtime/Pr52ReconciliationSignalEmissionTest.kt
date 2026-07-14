@@ -165,7 +165,7 @@ class Pr52ReconciliationSignalEmissionTest {
         override fun isModelLoaded() = true
         override fun ground(
             intent: String, screenshotBase64: String, width: Int, height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -656,12 +656,12 @@ class Pr52ReconciliationSignalEmissionTest {
             signal.payload[AndroidRuntimeEmissionTruthSemantics.KEY_EXTERNAL_PROPAGATION_STATE]
         )
         assertEquals(
-            ReconciliationSignal.CanonicalClosureAuthorityClass
+            ReconciliationSignal.Companion.CanonicalClosureAuthorityClass
                 .V2_CANONICAL_AUTHORITY.wireValue,
             signal.payload[ReconciliationSignal.KEY_CANONICAL_CLOSURE_AUTHORITY_CLASS]
         )
         assertEquals(
-            ReconciliationSignal.ParticipantLocalConvergenceState
+            ReconciliationSignal.Companion.ParticipantLocalConvergenceState
                 .LOCAL_COMPLETION_PENDING_DELIVERY.wireValue,
             signal.payload[ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE]
         )
@@ -999,7 +999,7 @@ class Pr52ReconciliationSignalEmissionTest {
                 as Boolean
         )
         assertEquals(
-            ReconciliationSignal.ParticipantLocalConvergenceState
+            ReconciliationSignal.Companion.ParticipantLocalConvergenceState
                 .INTERRUPTION_RESUME_PENDING.wireValue,
             signal.payload[ReconciliationSignal.KEY_PARTICIPANT_LOCAL_CONVERGENCE_STATE]
         )
@@ -1177,7 +1177,7 @@ class Pr52ReconciliationSignalEmissionTest {
     }
 
     @Test
-    fun `all PR-52 entries reference com.ufo.galaxy packagePath`() {
+    fun `all PR-52 entries reference com ufo galaxy packagePath`() {
         val pr52Entries = StabilizationBaseline.entries.filter { it.introducedPr == 52 }
         pr52Entries.forEach { entry ->
             assertTrue(

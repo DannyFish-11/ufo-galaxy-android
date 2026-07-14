@@ -166,7 +166,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         override fun isModelLoaded() = true
         override fun ground(
             intent: String, screenshotBase64: String, width: Int, height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -799,7 +799,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-dc-1")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         // Simulate WS disconnect while task is active
@@ -818,7 +818,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-dc-2")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -835,7 +835,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-dc-3")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -893,7 +893,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         // No recordDelegatedTaskAccepted — participant is idle
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -911,7 +911,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         wsClient.simulateDisconnected()
         kotlinx.coroutines.delay(120)
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         controller.publishTaskResult("task-dc-late-1")
@@ -940,7 +940,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         // Disconnect then reconnect (simulates RECONNECT_RECOVERY path)
@@ -958,7 +958,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -994,7 +994,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-reconnect-reconcile-1")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -1021,7 +1021,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -1039,7 +1039,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -1057,7 +1057,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -1075,7 +1075,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         val (controller, wsClient) = buildController(buildDescriptor())
         controller.setActiveForTest()
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = kotlinx.coroutines.launch {
+        val job = launch {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -1152,7 +1152,7 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     }
 
     @Test
-    fun `all PR-62 entries have a com.ufo.galaxy or GALAXY packagePath`() {
+    fun `all PR-62 entries have a com ufo galaxy or GALAXY packagePath`() {
         val pr62Entries = StabilizationBaseline.entries.filter { it.introducedPr == 62 }
         pr62Entries.forEach { entry ->
             assertTrue(

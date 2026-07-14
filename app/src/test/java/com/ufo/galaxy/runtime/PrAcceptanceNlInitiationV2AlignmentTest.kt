@@ -146,7 +146,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
         override fun unloadModel() {}
         override fun isModelLoaded() = true
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
-            LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+            LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -334,7 +334,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `gate - cross_device=false: InputRouter returns LOCAL and sends no WS message`() {
+    fun `gate - cross_device=false - InputRouter returns LOCAL and sends no WS message`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = false)
         val gateway = FakeGatewayClient(connected = true, sendResult = true)
         val router = buildRouter(settings = settings, gateway = gateway)
@@ -345,7 +345,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `gate - cross_device=true WS connected: route is CROSS_DEVICE with exactly one WS message`() {
+    fun `gate - cross_device=true WS connected - route is CROSS_DEVICE with exactly one WS message`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
         val gateway = FakeGatewayClient(connected = true, sendResult = true)
         val router = buildRouter(settings = settings, gateway = gateway)
@@ -356,7 +356,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `gate - cross_device=true WS disconnected: route is ERROR and sends no WS message`() {
+    fun `gate - cross_device=true WS disconnected - route is ERROR and sends no WS message`() {
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
         val gateway = FakeGatewayClient(connected = false)
         val errors = mutableListOf<String>()
@@ -521,7 +521,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `complex scenario - takeover: authority scope stays V2_CENTRAL and no parallel bypass`() {
+    fun `complex scenario - takeover - authority scope stays V2_CENTRAL and no parallel bypass`() {
         // Takeover 场景：跨设备激活、takeover 已接受，NL 发起必须仍走主链并声明 v2_central。
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
         val gateway = FakeGatewayClient(connected = true, sendResult = true)
@@ -536,7 +536,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `complex scenario - recovery: gate holds when cross_device_enabled is false`() {
+    fun `complex scenario - recovery - gate holds when cross_device_enabled is false`() {
         // Recovery 场景：系统恢复过程中 cross_device 被置 false（例如强制离线恢复），
         // gate 必须严格封闭，NL 发起不允许通过。
         val metadata = AndroidNlInitiationContract.build(
@@ -548,7 +548,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `complex scenario - reconnect: lineage format stable across different sessions`() {
+    fun `complex scenario - reconnect - lineage format stable across different sessions`() {
         // Reconnect 场景：设备重连后 runtimeSessionId 改变，lineage 格式必须保持稳定，
         // 格式为 android/{deviceId}/{sessionId}。
         val before = AndroidNlInitiationContract.buildLineage("pixel8", "sess-before-reconnect")
@@ -560,7 +560,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `complex scenario - stale session: metadata structurally valid for V2 to classify`() {
+    fun `complex scenario - stale session - metadata structurally valid for V2 to classify`() {
         // Stale 场景：runtimeSessionId 来自过期 session，metadata 结构上仍必须合法，
         // V2 负责 stale 判定，Android 端不做本地裁决。
         val metadata = AndroidNlInitiationContract.build(
@@ -573,7 +573,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `complex scenario - duplicate initiations: each gets unique correlationId`() {
+    fun `complex scenario - duplicate initiations - each gets unique correlationId`() {
         // Duplicate 场景：用户快速重复提交相同 NL 输入，每次发起必须获得唯一 correlationId，
         // V2 可据此去重，Android 端不做本地去重裁决。
         val ids = (1..5).map {
@@ -586,7 +586,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `complex scenario - mixed stale and reconnect: authority scope stable`() {
+    fun `complex scenario - mixed stale and reconnect - authority scope stable`() {
         // 混合场景：stale session + reconnect。无论哪种组合，authority_scope 必须始终为 V2_CENTRAL。
         val staleReconnectMetadata = AndroidNlInitiationContract.build(
             crossDeviceEnabled = true,
@@ -606,7 +606,7 @@ class PrAcceptanceNlInitiationV2AlignmentTest {
     }
 
     @Test
-    fun `complex scenario - no local authority decision: authorityTransfersToV2 is true`() {
+    fun `complex scenario - no local authority decision - authorityTransfersToV2 is true`() {
         // 验证 Android 端不做本地裁决：authorityTransfersToV2=true 意味着发起后由 V2 主链决定。
         assertTrue(
             "ANDROID_NL_CROSS_DEVICE 必须声明 authorityTransfersToV2=true（不允许端侧隐式裁决）",

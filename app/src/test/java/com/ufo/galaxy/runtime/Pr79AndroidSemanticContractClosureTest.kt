@@ -987,7 +987,7 @@ class Pr79AndroidSemanticContractClosureTest {
     }
 
     @Test
-    fun `toWireMap schema_version is 1_0`() {
+    fun `toWireMap schema_version is 1_0 for durable participant identity`() {
         val identity = DurableParticipantIdentity.createFresh("device-001", "phone")
         assertEquals("1.0", identity.toWireMap()[DurableParticipantIdentity.KEY_SCHEMA_VERSION])
     }

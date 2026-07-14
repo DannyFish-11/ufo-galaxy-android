@@ -204,7 +204,7 @@ class Pr7AndroidPerceptionEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_PERCEPTION_EMISSION,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-1",
             correlation_id = payload.task_id,
             trace_id = payload.trace_id,

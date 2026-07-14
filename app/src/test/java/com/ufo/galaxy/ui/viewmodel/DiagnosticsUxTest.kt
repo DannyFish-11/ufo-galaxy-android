@@ -268,7 +268,7 @@ class DiagnosticsUxTest {
                 }
             }
             if (s.lastSetupFailureCategory != null) {
-                appendLine("Last setup failure: ${s.lastSetupFailureCategory.wireValue}")
+                appendLine("Last setup failure: ${s.lastSetupFailureCategory!!.wireValue}")
             }
             appendLine()
             appendLine("-- Recent Errors (last ${s.recentErrors.size}) --")

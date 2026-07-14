@@ -642,7 +642,7 @@ class Pr02v2AndroidCrossDeviceDispatchBoundaryTest {
     // 16–17. 优先级验证
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `priority: isLegacyBypassEntry beats isLegacyCompatRemapped when both true`() {
+    @Test fun `priority - isLegacyBypassEntry beats isLegacyCompatRemapped when both true`() {
         val result = derive(defaultInput(isLegacyBypassEntry = true, isLegacyCompatRemapped = true))
         assertEquals(
             AndroidCrossDeviceDispatchBoundaryContract.DispatchBoundaryClass.LEGACY_BYPASS,
@@ -650,7 +650,7 @@ class Pr02v2AndroidCrossDeviceDispatchBoundaryTest {
         )
     }
 
-    @Test fun `priority: isLegacyCompatRemapped beats isAgentBridgeFallback when both true`() {
+    @Test fun `priority - isLegacyCompatRemapped beats isAgentBridgeFallback when both true`() {
         val result = derive(defaultInput(isLegacyCompatRemapped = true, isAgentBridgeFallback = true))
         assertEquals(
             AndroidCrossDeviceDispatchBoundaryContract.DispatchBoundaryClass.COMPAT_FALLBACK,
@@ -658,7 +658,7 @@ class Pr02v2AndroidCrossDeviceDispatchBoundaryTest {
         )
     }
 
-    @Test fun `priority: isAgentBridgeCompatEntry beats isAgentBridgeFallback when both true`() {
+    @Test fun `priority - isAgentBridgeCompatEntry beats isAgentBridgeFallback when both true`() {
         val result = derive(defaultInput(isAgentBridgeCompatEntry = true, isAgentBridgeFallback = true))
         assertEquals(
             AndroidCrossDeviceDispatchBoundaryContract.DispatchBoundaryClass.COMPAT_FALLBACK,

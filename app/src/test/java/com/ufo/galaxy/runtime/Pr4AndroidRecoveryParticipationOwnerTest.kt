@@ -937,7 +937,7 @@ class Pr4AndroidRecoveryParticipationOwnerTest {
     }
 
     @Test
-    fun `NoRecoveryContext semanticTag is no_recovery_context`() {
+    fun `NoRecoveryContext semanticTag is no_recovery_context variant`() {
         assertEquals("no_recovery_context", LocalRecoveryDecision.NoRecoveryContext.semanticTag)
     }
 

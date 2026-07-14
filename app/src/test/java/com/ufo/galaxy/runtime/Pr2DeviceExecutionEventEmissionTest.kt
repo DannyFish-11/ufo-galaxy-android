@@ -420,7 +420,7 @@ class Pr2DeviceExecutionEventEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_EXECUTION_EVENT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "Pixel_8",
             correlation_id = payload.task_id,
             idempotency_key = payload.event_id
@@ -437,7 +437,7 @@ class Pr2DeviceExecutionEventEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_EXECUTION_EVENT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = payload.device_id,
             correlation_id = payload.task_id,
             idempotency_key = payload.event_id
@@ -453,7 +453,7 @@ class Pr2DeviceExecutionEventEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_EXECUTION_EVENT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             correlation_id = payload.task_id,
             idempotency_key = payload.event_id
         )
@@ -468,7 +468,7 @@ class Pr2DeviceExecutionEventEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_EXECUTION_EVENT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             idempotency_key = payload.event_id
         )
         assertEquals(payload.event_id, envelope.idempotency_key)
@@ -482,7 +482,7 @@ class Pr2DeviceExecutionEventEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_EXECUTION_EVENT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "d1",
             runtime_session_id = "rs-123",
             idempotency_key = payload.event_id
@@ -548,7 +548,7 @@ class Pr2DeviceExecutionEventEmissionTest {
 
     // ── GalaxyLogger tag stability ────────────────────────────────────────────
 
-    @Test fun `TAG_DEVICE_EXECUTION_EVENT value is GALAXY:DEVICE:EXEC:EVENT`() {
+    @Test fun `TAG_DEVICE_EXECUTION_EVENT value is GALAXY -DEVICE -EXEC -EVENT`() {
         assertEquals("GALAXY:DEVICE:EXEC:EVENT", GalaxyLogger.TAG_DEVICE_EXECUTION_EVENT)
     }
 

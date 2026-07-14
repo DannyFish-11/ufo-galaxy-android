@@ -699,7 +699,7 @@ class Pr11StabilizationBaselineTest {
     // 16. GalaxyLogger.TAG_STABILIZATION_BASELINE — stability
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `TAG_STABILIZATION_BASELINE value is GALAXY:STABILIZATION:BASELINE`() {
+    @Test fun `TAG_STABILIZATION_BASELINE value is GALAXY -STABILIZATION -BASELINE`() {
         assertEquals("GALAXY:STABILIZATION:BASELINE", GalaxyLogger.TAG_STABILIZATION_BASELINE)
     }
 

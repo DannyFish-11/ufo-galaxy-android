@@ -13,6 +13,7 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -148,7 +149,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
         override fun isModelLoaded() = true
         override fun ground(
             intent: String, screenshotBase64: String, width: Int, height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -531,7 +532,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
 
         val event = withTimeoutOrNull(500L) {
             // Collect the next event after stop()
-            val deferred = kotlinx.coroutines.async {
+            val deferred = async {
                 controller.lifecycleTransitionEvents.first()
             }
             // Small delay to let the collector register
@@ -549,7 +550,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
         controller.setActiveForTest()
 
         val event = withTimeoutOrNull(500L) {
-            val deferred = kotlinx.coroutines.async {
+            val deferred = async {
                 controller.lifecycleTransitionEvents.first()
             }
             kotlinx.coroutines.delay(10L)
@@ -631,7 +632,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
     // ── CanonicalSessionAxis.resolveDispatchAlignmentForState ─────────────────
 
     @Test
-    fun `runtime not active: RUNTIME_SESSION family is not live`() {
+    fun `runtime not active - RUNTIME_SESSION family is not live`() {
         val alignment = CanonicalSessionAxis.resolveDispatchAlignmentForState(
             runtimeState     = RuntimeController.RuntimeState.LocalOnly,
             sessionIsAttached = false
@@ -643,7 +644,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
     }
 
     @Test
-    fun `runtime active: RUNTIME_SESSION family is live`() {
+    fun `runtime active - RUNTIME_SESSION family is live`() {
         val alignment = CanonicalSessionAxis.resolveDispatchAlignmentForState(
             runtimeState     = RuntimeController.RuntimeState.Active,
             sessionIsAttached = true
@@ -655,7 +656,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
     }
 
     @Test
-    fun `runtime active, session not attached: DELEGATION_TRANSFER_SESSION is not live`() {
+    fun `runtime active, session not attached - DELEGATION_TRANSFER_SESSION is not live`() {
         val alignment = CanonicalSessionAxis.resolveDispatchAlignmentForState(
             runtimeState     = RuntimeController.RuntimeState.Active,
             sessionIsAttached = false
@@ -667,7 +668,7 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
     }
 
     @Test
-    fun `runtime active, session attached: DELEGATION_TRANSFER_SESSION is live`() {
+    fun `runtime active, session attached - DELEGATION_TRANSFER_SESSION is live`() {
         val alignment = CanonicalSessionAxis.resolveDispatchAlignmentForState(
             runtimeState     = RuntimeController.RuntimeState.Active,
             sessionIsAttached = true
@@ -809,8 +810,8 @@ class Pr37AndroidRuntimeLifecycleHardeningTest {
         val (controller, _) = buildController(timeoutMs = 50L)
         // Initiate start twice concurrently; both should return without crashing
         // (the second call should detect the guard and return false gracefully)
-        val result1 = kotlinx.coroutines.async { controller.startWithTimeout() }
-        val result2 = kotlinx.coroutines.async { controller.startWithTimeout() }
+        val result1 = async { controller.startWithTimeout() }
+        val result2 = async { controller.startWithTimeout() }
         // Both futures should complete without exception
         val r1 = result1.await()
         val r2 = result2.await()

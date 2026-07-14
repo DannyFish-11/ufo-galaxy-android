@@ -109,8 +109,30 @@ class Pr29PostReleaseTighteningTest {
     // ── Fakes ─────────────────────────────────────────────────────────────────
 
     private class TrivialPlannerService : LocalPlannerService {
-        override suspend fun plan(goal: String, context: String): List<String> =
-            listOf("step1", "step2")
+        override fun loadModel() = true
+        override fun unloadModel() {}
+        override fun isModelLoaded() = true
+        override fun plan(
+            goal: String,
+            constraints: List<String>,
+            screenshotBase64: String?
+        ): LocalPlannerService.PlanResult =
+            LocalPlannerService.PlanResult(
+                steps = listOf(
+                    LocalPlannerService.PlanStep(action_type = "tap", intent = "step1"),
+                    LocalPlannerService.PlanStep(action_type = "tap", intent = "step2")
+                )
+            )
+        override fun replan(
+            goal: String,
+            constraints: List<String>,
+            failedStep: LocalPlannerService.PlanStep,
+            error: String,
+            screenshotBase64: String?
+        ): LocalPlannerService.PlanResult =
+            LocalPlannerService.PlanResult(
+                steps = listOf(LocalPlannerService.PlanStep(action_type = "tap", intent = "step1"))
+            )
     }
 
     private class TrivialGrounder : LocalGroundingService {
@@ -119,7 +141,7 @@ class Pr29PostReleaseTighteningTest {
         override fun isModelLoaded() = true
         override fun ground(
             intent: String, screenshotBase64: String, width: Int, height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {

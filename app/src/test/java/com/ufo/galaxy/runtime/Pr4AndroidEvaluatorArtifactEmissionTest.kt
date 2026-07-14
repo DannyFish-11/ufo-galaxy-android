@@ -231,7 +231,7 @@ class Pr4AndroidEvaluatorArtifactEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_GOVERNANCE_REPORT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-gov-env-01",
             runtime_session_id = null
         )
@@ -356,7 +356,7 @@ class Pr4AndroidEvaluatorArtifactEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_ACCEPTANCE_REPORT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-acc-env-01",
             runtime_session_id = null
         )
@@ -481,7 +481,7 @@ class Pr4AndroidEvaluatorArtifactEmissionTest {
         )
         val envelope = AipMessage(
             type = MsgType.DEVICE_STRATEGY_REPORT,
-            payload = payload,
+            payload = gson.toJsonTree(payload),
             device_id = "device-str-env-01",
             runtime_session_id = null
         )

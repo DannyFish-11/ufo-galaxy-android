@@ -407,7 +407,7 @@ class Pr4bTraceRoundTripVerificationTest {
     }
 
     @Test
-    fun `TraceContext round-trip: null dispatch_trace_id in payload leaves currentDispatchTraceId null`() {
+    fun `TraceContext round-trip - null dispatch_trace_id in payload leaves currentDispatchTraceId null`() {
         val payload = GoalExecutionPayload(
             task_id = "t-rt-legacy",
             goal = "open settings"

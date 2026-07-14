@@ -137,7 +137,7 @@ class Pr33ReconnectResilienceTest {
         override fun isModelLoaded() = true
         override fun ground(
             intent: String, screenshotBase64: String, width: Int, height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -435,7 +435,7 @@ class Pr33ReconnectResilienceTest {
         )
 
         // Terminal error (e.g. max reconnect attempts exhausted).
-        client.simulateError("无法连接到服务器")
+        client.simulateDisconnected()
 
         assertEquals(
             "Recovery state must be FAILED after WS error while RECOVERING",
@@ -449,7 +449,7 @@ class Pr33ReconnectResilienceTest {
         val (controller, client) = buildController()
 
         // Runtime is not Active; error must not affect recovery state.
-        client.simulateError("some error")
+        client.simulateDisconnected()
 
         assertEquals(
             "Recovery state must remain IDLE when error occurs outside RECOVERING",
@@ -506,7 +506,7 @@ class Pr33ReconnectResilienceTest {
         val (controller, client) = buildController()
         controller.setActiveForTest()
         client.simulateDisconnected()
-        client.simulateError("max attempts reached")
+        client.simulateDisconnected()
         assertEquals(
             "Precondition: must be FAILED before stop",
             ReconnectRecoveryState.FAILED,

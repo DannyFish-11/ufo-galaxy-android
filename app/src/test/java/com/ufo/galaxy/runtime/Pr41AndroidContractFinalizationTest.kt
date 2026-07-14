@@ -922,9 +922,7 @@ class Pr41AndroidContractFinalizationTest {
         crossDeviceAllowed = false,
         delegatedExecutionAllowed = false,
         fallbackToLocalAllowed = false,
-        goalExecutionAllowed = false,
-        stagedMeshAllowed = false,
-        killSwitchActive = false
+        goalExecutionAllowed = false
     )
 
     @Test fun `resolveContractFinalizedPaths excludes COMPATIBILITY path by default`() {

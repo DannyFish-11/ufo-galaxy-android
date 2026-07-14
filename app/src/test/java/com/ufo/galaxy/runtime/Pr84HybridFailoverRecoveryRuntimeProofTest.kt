@@ -23,6 +23,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.GoalExecutionPayload
+import com.ufo.galaxy.protocol.GoalResultPayload
 import com.ufo.galaxy.shared.protocol.MsgType
 import okhttp3.Request
 import okhttp3.WebSocket
@@ -64,7 +65,7 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
             screenshotBase64: String,
             width: Int,
             height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {
@@ -178,7 +179,7 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
 
         val envelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
-            payload = resumedResult,
+            payload = gson.toJsonTree(resumedResult),
             correlation_id = resumedResult.correlation_id,
             device_id = "test-device",
             trace_id = "trace-hybrid-proof"
@@ -270,7 +271,7 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
 
         val delegatedSignalEnvelope = AipMessage(
             type = MsgType.DELEGATED_EXECUTION_SIGNAL,
-            payload = terminalSignal.toOutboundPayload(deviceId = "test-device"),
+            payload = gson.toJsonTree(terminalSignal.toOutboundPayload(deviceId = "test-device")),
             correlation_id = delegatedUnit.taskId,
             device_id = "test-device",
             trace_id = delegatedUnit.traceId,
@@ -298,9 +299,11 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
 
         val resumedEnvelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,
-            payload = outcome.goalResult.copy(
-                task_id = delegatedUnit.taskId,
-                correlation_id = delegatedUnit.taskId
+            payload = gson.toJsonTree(
+                outcome.goalResult.copy(
+                    task_id = delegatedUnit.taskId,
+                    correlation_id = delegatedUnit.taskId
+                )
             ),
             correlation_id = delegatedUnit.taskId,
             device_id = "test-device",

@@ -169,20 +169,20 @@ class Pr12AndroidGovernanceAlignmentVerificationTest {
     @Test
     fun `interruption retry recovery lifecycle remains valid and semantically distinct`() {
         val P = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase
-        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(P.ACTIVE, P.INTERRUPTED))
-        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(P.INTERRUPTED, P.RETRYING))
-        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(P.RETRYING, P.ACTIVATING))
-        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(P.ACTIVATING, P.ACTIVE))
-        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(P.ACTIVE, P.COMPLETED))
+        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE, AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.INTERRUPTED))
+        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.INTERRUPTED, AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.RETRYING))
+        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.RETRYING, AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVATING))
+        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVATING, AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE))
+        assertTrue(AndroidExecutionLifecycleContract.isValidTransition(AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVE, AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.COMPLETED))
 
         assertEquals(
             AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_INTERRUPTION,
-            AndroidCanonicalRuntimeTruthContract.classifyResultUplink(P.INTERRUPTED)
+            AndroidCanonicalRuntimeTruthContract.classifyResultUplink(AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.INTERRUPTED)
         )
         assertEquals(
             AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_RECOVERY,
             AndroidCanonicalRuntimeTruthContract.classifyResultUplink(
-                P.COMPLETED,
+                AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.COMPLETED,
                 priorPhaseWasInterruption = true
             )
         )

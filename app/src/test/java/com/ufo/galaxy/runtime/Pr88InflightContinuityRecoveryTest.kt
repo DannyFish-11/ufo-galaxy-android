@@ -57,7 +57,7 @@ class Pr88InflightContinuityRecoveryTest {
             screenshotBase64: String,
             width: Int,
             height: Int
-        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f)
+        ) = LocalGroundingService.GroundingResult(x = 540, y = 1170, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibilityExecutor : AccessibilityExecutor {

@@ -47,7 +47,7 @@ class Pr130AndroidCanonicalContinuousIngressBackboneTest {
         override fun unloadModel() {}
         override fun isModelLoaded() = true
         override fun ground(intent: String, screenshotBase64: String, width: Int, height: Int) =
-            LocalGroundingService.GroundingResult(x = 10, y = 20)
+            LocalGroundingService.GroundingResult(x = 10, y = 20, confidence = 0.9f, element_description = "")
     }
 
     private class FakeAccessibility : AccessibilityExecutor {

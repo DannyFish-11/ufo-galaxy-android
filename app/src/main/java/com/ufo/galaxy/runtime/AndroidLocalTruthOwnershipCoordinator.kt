@@ -191,8 +191,8 @@ class AndroidLocalTruthOwnershipCoordinator {
     data class EmitContext(
         val unitId: String,
         val truthClass: TruthClass,
-        val generatedPosture: SourceRuntimePosture? = null,
-        val currentPosture: SourceRuntimePosture? = null,
+        val generatedPosture: String? = null,
+        val currentPosture: String? = null,
         val reason: String = ""
     )
 

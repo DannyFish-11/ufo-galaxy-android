@@ -632,7 +632,7 @@ class PrA1AndroidFullMeshRuntimeCapabilityTest {
         executor: HybridExecuteFullCoordinator.LocalStepExecutor =
             HybridExecuteFullCoordinator.LocalStepExecutor { makeGoalResult() },
         deviceId: String = "android-test-device"
-    ) = HybridExecuteFullCoordinator(executor = executor, deviceId = deviceId)
+    ) = HybridExecuteFullCoordinator(localExecutor = executor, deviceId = deviceId)
 
     private fun makeHybridPayload(
         taskId: String = "hybrid-task-pr-a1",

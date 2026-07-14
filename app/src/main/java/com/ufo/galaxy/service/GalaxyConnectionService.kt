@@ -1197,6 +1197,10 @@ class GalaxyConnectionService : Service() {
         wsListener = object : GalaxyWebSocketClient.Listener {
             override fun onConnected() {
                 Log.d(TAG, "已连接到 Galaxy")
+                // 原生表面在场状态源:连接态置真,驱动小组件/磁贴/背屏刷新。
+                com.ufo.galaxy.surface.PresenceStateStore.update(
+                    this@GalaxyConnectionService, connected = true
+                )
                 updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot())
                 updateNotification("已连接")
                 crossRepoRegressionHooks.recordConnection(ScenarioOutcomeStatus.PASSED)
@@ -1219,6 +1223,9 @@ class GalaxyConnectionService : Service() {
             
             override fun onDisconnected() {
                 Log.d(TAG, "与 Galaxy 断开连接")
+                com.ufo.galaxy.surface.PresenceStateStore.update(
+                    this@GalaxyConnectionService, connected = false
+                )
                 updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot())
                 updateNotification("已断开")
                 crossRepoRegressionHooks.recordConnection(
@@ -1631,6 +1638,15 @@ class GalaxyConnectionService : Service() {
         serviceScope.launch {
             UFOGalaxyApplication.runtimeController.reconciliationSignals.collect { signal ->
                 sendReconciliationSignal(signal)
+            }
+        }
+
+        // 原生表面在场状态源:相位变化 → PresenceStateStore,驱动小组件/磁贴刷新。
+        serviceScope.launch {
+            UFOGalaxyApplication.phaseStateMachine.currentPhase.collect { phase ->
+                com.ufo.galaxy.surface.PresenceStateStore.update(
+                    this@GalaxyConnectionService, phase = phase.wireValue
+                )
             }
         }
 

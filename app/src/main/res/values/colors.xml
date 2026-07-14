@@ -36,4 +36,11 @@
     <!-- 灵动岛 -->
     <color name="island_background">#000000</color>
     <color name="island_content">#FFFFFF</color>
+    <!-- 星云在场配色(与桌面/图标同源) -->
+    <color name="nebula_core">#F3F1FF</color>
+    <color name="nebula_peri">#97A4EF</color>
+    <color name="nebula_rose">#E79EC5</color>
+    <color name="nebula_indigo">#6C6EE0</color>
+    <color name="nebula_offline">#5A5A66</color>
+    <color name="nebula_bg">#0D0D12</color>
 </resources>

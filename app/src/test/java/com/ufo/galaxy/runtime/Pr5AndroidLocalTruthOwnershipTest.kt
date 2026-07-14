@@ -154,8 +154,8 @@ class Pr5AndroidLocalTruthOwnershipTest {
         unitId: String = "unit-1",
         truthClass: AndroidLocalTruthOwnershipCoordinator.TruthClass =
             AndroidLocalTruthOwnershipCoordinator.TruthClass.EXECUTION_EVIDENCE,
-        generatedPosture: SourceRuntimePosture? = null,
-        currentPosture: SourceRuntimePosture? = null,
+        generatedPosture: String? = null,
+        currentPosture: String? = null,
         reason: String = ""
     ) = AndroidLocalTruthOwnershipCoordinator.EmitContext(
         unitId = unitId,
