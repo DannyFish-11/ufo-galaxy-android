@@ -98,6 +98,9 @@ class DevicePairingClient(
                 }
                 "denied" -> return PairingResult(ok = false, status = "denied", error = "denied_by_owner")
                 "expired" -> return PairingResult(ok = false, status = "expired", error = "request_expired")
+                "claimed" ->
+                    // token 已被领走(重试/已消费):终态,别再空轮询到超时给个误导的"超时"。
+                    return PairingResult(ok = false, status = "claimed", error = "already_claimed")
                 else -> {
                     onWaiting?.invoke(st ?: "pending")
                     delay(pollIntervalMs)
@@ -131,7 +134,10 @@ class DevicePairingClient(
 
                     override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                         response.use { resp ->
-                            val parsed = resp.body?.string()?.let {
+                            // body.string() 也可能抛(连接中途断)。OkHttp 已置 signalledCallback,
+                            // 不会再回 onFailure,若不在此兜住,continuation 永不 resume → 挂死
+                            // (pairAndClaim 永不返回、isPairing 卡住)。故读取一并 runCatching。
+                            val parsed = runCatching { resp.body?.string() }.getOrNull()?.let {
                                 runCatching { JSONObject(it) }.getOrNull()
                             }
                             if (continuation.isActive) {

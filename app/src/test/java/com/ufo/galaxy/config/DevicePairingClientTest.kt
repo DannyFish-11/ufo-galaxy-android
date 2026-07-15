@@ -197,6 +197,49 @@ class DevicePairingClientTest {
     }
 
     @Test
+    fun `pairAndClaim returns already_claimed on claimed status`() = runBlocking {
+        // claimed 是终态:不能当 pending 空轮询到超时给个误导的"超时"。
+        val c = client { url ->
+            when {
+                url.contains("/pairing/enroll") -> 200 to """{"ok":true,"request_id":"rid"}"""
+                url.contains("/pairing/status/") -> 200 to """{"ok":true,"status":"claimed"}"""
+                else -> 404 to "{}"
+            }
+        }
+        val result = pairing(c).pairAndClaim("dev-A", null, null, timeoutMs = 10_000L, pollIntervalMs = 1L)
+        assertFalse(result.ok)
+        assertEquals("claimed", result.status)
+        assertEquals("already_claimed", result.error)
+    }
+
+    @Test
+    fun `execute survives body read failure without hanging`() = runBlocking {
+        // 连接中途断:body.string() 抛 IOException 而 OkHttp 不再回 onFailure。
+        // 若不兜住,continuation 永不 resume → 挂死。此测证明会如常返回(不挂)。
+        val throwingBody = object : okhttp3.ResponseBody() {
+            override fun contentType() = JSON
+            override fun contentLength() = -1L
+            override fun source(): okio.BufferedSource = throw java.io.IOException("mid-body drop")
+        }
+        val interceptor = Interceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(throwingBody)
+                .build()
+        }
+        val c = OkHttpClient.Builder().addInterceptor(interceptor).build()
+        // withTimeout 证明不挂:enroll 读 body 失败 → null → enroll_failed(而非无限挂起)。
+        val result = kotlinx.coroutines.withTimeout(5000) {
+            pairing(c).pairAndClaim("dev-A", null, null, timeoutMs = 3000L, pollIntervalMs = 1L)
+        }
+        assertFalse(result.ok)
+        assertEquals("enroll_failed", result.error)
+    }
+
+    @Test
     fun `PATH_ENROLL constant is the expected value`() {
         assertEquals("/api/v1/pairing/enroll", DevicePairingClient.PATH_ENROLL)
     }

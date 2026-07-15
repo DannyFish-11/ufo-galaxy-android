@@ -991,7 +991,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pushError("请先在网络设置里填写网关地址(或用 Tailscale 一键填入)后再配对")
             return
         }
-        val deviceId = s.deviceId.ifBlank { "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}" }
+        // 关键:用 WS 客户端【将用于鉴权握手的那个规范 id】去登记,并持久化到设置,
+        // 使 enroll / 领取 / 之后每次握手 / 重启 全用同一 id —— 否则 token 绑到裸"厂商_型号",
+        // 而握手用"厂商_型号-8hex",id 不匹配 → 鉴权被拒("已配对"却连不上)。
+        val deviceId = UFOGalaxyApplication.webSocketClient.currentDeviceId()
+        if (s.deviceId != deviceId) s.deviceId = deviceId
         val deviceName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
         _uiState.update { it.copy(isPairing = true, pairingStatus = "正在发起配对…") }
         viewModelScope.launch {
