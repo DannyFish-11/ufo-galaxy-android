@@ -492,34 +492,36 @@ class Pr14AndroidV2ContractVersionGateTest {
     }
 
     @Test
-    fun `StabilizationBaseline CANONICAL_STABLE count is 138`() {
+    fun `StabilizationBaseline CANONICAL_STABLE count is 150`() {
         val count = StabilizationBaseline.byStability(
             StabilizationBaseline.SurfaceStability.CANONICAL_STABLE
         ).size
+        // 计数漂移收口:后续注册了新表面,CANONICAL_STABLE 实际已 150(锚点停在 138)。
+        // 按测试自身提示"update this assertion"对齐到实际值(实证:distribution 求和=156 总数)。
         assertEquals(
             "CANONICAL_STABLE count drift — register new surface or update this assertion",
-            138,
+            150,
             count
         )
     }
 
     @Test
-    fun `StabilizationBaseline total entry count is 144`() {
+    fun `StabilizationBaseline total entry count is 156`() {
         assertEquals(
             "Total entry count drift — register new surface or update this assertion",
-            144,
+            156,
             StabilizationBaseline.entries.size
         )
     }
 
     @Test
-    fun `StabilizationBaseline EXTEND guidance count is 138`() {
+    fun `StabilizationBaseline EXTEND guidance count is 150`() {
         val count = StabilizationBaseline.byGuidance(
             StabilizationBaseline.ExtensionGuidance.EXTEND
         ).size
         assertEquals(
             "EXTEND guidance count drift — update this assertion",
-            138,
+            150,
             count
         )
     }
