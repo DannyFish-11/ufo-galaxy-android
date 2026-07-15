@@ -279,6 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.LOCAL)
                     )
                 }
+                maybeSpeakResponse(presentation.summary)
             },
             onError = { reason ->
                 Log.e(TAG, "InputRouter error: $reason")
@@ -291,6 +292,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 语音输入管理器
     private val speechManager: SpeechInputManager by lazy {
         SpeechInputManager(getApplication<Application>().applicationContext)
+    }
+
+    // 语音输出管理器(设备侧 TTS)—— 全模态输出的另一半:让助手在手机上【出声】。
+    private val speechOutputManager: com.ufo.galaxy.speech.SpeechOutputManager by lazy {
+        com.ufo.galaxy.speech.SpeechOutputManager(getApplication<Application>().applicationContext)
+    }
+
+    // 仅在【语音发起】的这一轮把助手回复念出来(文字输入的轮次不吵)。
+    @Volatile private var speakNextResponse = false
+
+    /** 若本轮由语音发起,把助手回复念出来(念一次即清标记);TTS 不可用会静默降级不崩。 */
+    private fun maybeSpeakResponse(text: String) {
+        if (speakNextResponse) {
+            speakNextResponse = false
+            speechOutputManager.speak(text)
+        }
     }
 
     private val wsListener = object : GalaxyWebSocketClient.Listener {
@@ -425,6 +442,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.FALLBACK)
                     )
                 }
+                maybeSpeakResponse(presentation.summary)
             }
             .launchIn(viewModelScope)
         // PR-31: Observe rollout-control snapshot changes and surface them in UI state
@@ -500,8 +518,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     partialSpeechResult = ""
                 ) 
             }
-            // 自动发送
+            // 自动发送;语音发起 → 标记本轮回复要念出来
             if (result.isNotBlank()) {
+                speakNextResponse = true
                 sendMessage(result)
             }
         }
@@ -1095,6 +1114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "MainViewModel 销毁")
         webSocketClient.removeListener(wsListener)
         speechManager.release()
+        speechOutputManager.release()
     }
 
     // ── Diagnostics (PR15) ───────────────────────────────────────────────────
