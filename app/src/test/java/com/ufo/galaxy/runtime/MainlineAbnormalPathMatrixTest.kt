@@ -15,6 +15,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -265,9 +266,11 @@ class MainlineAbnormalPathMatrixTest {
 
         // notifyTakeoverFailed alone must NOT clear the block — onRemoteTaskFinished() is
         // the caller's responsibility, typically in a finally block.
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertTrue(
             "Loop must remain blocked after notifyTakeoverFailed — only onRemoteTaskFinished clears it",
@@ -283,9 +286,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController(loopController = loopController)
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-f", "t-f", "tr-f", "pipeline_error", TakeoverFallbackEvent.Cause.FAILED)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
         controller.onRemoteTaskFinished()  // finally-block equivalent
 
         val localResult = loopController.execute("open camera")
@@ -302,9 +307,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController(loopController = loopController)
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-t", "t-t", "tr-t", "timed_out", TakeoverFallbackEvent.Cause.TIMEOUT)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
         controller.onRemoteTaskFinished()
 
         val localResult = loopController.execute("open camera")
@@ -321,9 +328,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController(loopController = loopController)
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-c", "t-c", "tr-c", "user_cancelled", TakeoverFallbackEvent.Cause.CANCELLED)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
         controller.onRemoteTaskFinished()
 
         val localResult = loopController.execute("tap the button")
@@ -340,9 +349,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController(loopController = loopController)
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-d", "t-d", "tr-d", "ws_disconnected", TakeoverFallbackEvent.Cause.DISCONNECT)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
         controller.onRemoteTaskFinished()
 
         val localResult = loopController.execute("tap the button")
@@ -371,7 +382,9 @@ class MainlineAbnormalPathMatrixTest {
         assertEquals(LoopController.STOP_BLOCKED_BY_REMOTE, blockedResult.stopReason)
 
         // Step 2: remote task fails → failure event emitted.
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "to-full-failed",
             taskId = "t-full",
@@ -379,7 +392,7 @@ class MainlineAbnormalPathMatrixTest {
             reason = "execution_pipeline_error",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
 
         // Step 3: finally-block clears the remote-task block.
         controller.onRemoteTaskFinished()
@@ -405,7 +418,9 @@ class MainlineAbnormalPathMatrixTest {
         controller.onRemoteTaskStarted()
 
         // Simulate disconnect while task in flight.
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "to-disc",
             taskId = "t-disc",
@@ -413,7 +428,7 @@ class MainlineAbnormalPathMatrixTest {
             reason = "gateway_disconnected",
             cause = TakeoverFallbackEvent.Cause.DISCONNECT
         )
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
         controller.onRemoteTaskFinished()
 
         val localResult = loopController.execute("navigate home after disconnect fallback")
@@ -438,7 +453,9 @@ class MainlineAbnormalPathMatrixTest {
         causes.forEachIndexed { index, cause ->
             controller.onRemoteTaskStarted()
 
-            val failJob = launch { controller.takeoverFailure.first() }
+            // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+            // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+            val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
             controller.notifyTakeoverFailed(
                 takeoverId = "to-cycle-$index",
                 taskId = "t-cycle-$index",
@@ -446,7 +463,7 @@ class MainlineAbnormalPathMatrixTest {
                 reason = "cycle_failure_$index",
                 cause = cause
             )
-            failJob.join()
+            withTimeout(2000) { failJob.join() }
             controller.onRemoteTaskFinished()
 
             val localResult = loopController.execute("local task after cycle $index")
@@ -465,9 +482,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController()
 
         val sessionBefore = controller.attachedSession.value  // null — no session opened yet
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals(
             "attachedSession must be unchanged after takeover failure — session is not invalidated by task failures",
@@ -481,9 +500,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController()
 
         val snapshotBefore = controller.hostSessionSnapshot.value
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.TIMEOUT)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals(
             "hostSessionSnapshot must be unchanged after takeover failure — snapshot is not re-derived by task failures",
@@ -497,9 +518,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController()
 
         val projectionBefore = controller.targetReadinessProjection.value
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.CANCELLED)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals(
             "targetReadinessProjection must be unchanged after takeover failure — selection truth not disturbed by task-level failures",
@@ -703,7 +726,9 @@ class MainlineAbnormalPathMatrixTest {
         controller.onRemoteTaskStarted()
 
         var failureEmittedBeforeUnblock = false
-        val job = launch {
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             controller.takeoverFailure.first()
             // At the moment this collector fires, the loop should still be blocked — the
             // caller hasn't called onRemoteTaskFinished() yet.
@@ -713,7 +738,7 @@ class MainlineAbnormalPathMatrixTest {
         controller.notifyTakeoverFailed(
             "to-order", "t-order", "tr-order", "pipeline_error", TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertTrue(
             "takeoverFailure must be observed while loop is still blocked — failure event precedes unblock",
@@ -731,9 +756,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController(loopController = loopController)
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.TIMEOUT)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
 
         // onRemoteTaskFinished must not throw or corrupt state.
         controller.onRemoteTaskFinished()
@@ -750,9 +777,11 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController(loopController = loopController)
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-2", "t-2", "tr-2", "err", TakeoverFallbackEvent.Cause.CANCELLED)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
 
         // Simulate both the WS disconnect handler and the task's finally block both
         // calling onRemoteTaskFinished().
@@ -776,7 +805,9 @@ class MainlineAbnormalPathMatrixTest {
         val snapshotBefore = controller.hostSessionSnapshot.value
         val projectionBefore = controller.targetReadinessProjection.value
 
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "to-authority",
             taskId = "t-authority",
@@ -784,7 +815,7 @@ class MainlineAbnormalPathMatrixTest {
             reason = "authority_check",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals("state must not change after takeover failure", stateBefore, controller.state.value)
         assertEquals("attachedSession must not change after takeover failure", sessionBefore, controller.attachedSession.value)
@@ -802,9 +833,11 @@ class MainlineAbnormalPathMatrixTest {
         settings.crossDeviceEnabled = true
         val (controller, _) = buildController(settings = settings)
 
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-s", "t-s", "tr-s", "err", TakeoverFallbackEvent.Cause.DISCONNECT)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertTrue(
             "settings.crossDeviceEnabled must remain true after takeover failure — recovery must not require re-enable",
@@ -824,9 +857,12 @@ class MainlineAbnormalPathMatrixTest {
             }
         }
 
-        val takeoverJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        // (registrationJob above is already self-bounded via its internal withTimeoutOrNull.)
+        val takeoverJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-reg", "t-reg", "tr-reg", "err", TakeoverFallbackEvent.Cause.FAILED)
-        takeoverJob.join()
+        withTimeout(2000) { takeoverJob.join() }
         registrationJob.join()
 
         assertFalse(
@@ -866,9 +902,11 @@ class MainlineAbnormalPathMatrixTest {
         val initialState = controller.state.value
 
         controller.onRemoteTaskStarted()
-        val failJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val failJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-next", "t-next", "tr-next", "err", TakeoverFallbackEvent.Cause.FAILED)
-        failJob.join()
+        withTimeout(2000) { failJob.join() }
         controller.onRemoteTaskFinished()
 
         // State must be unchanged — runtime is still ready.
@@ -889,7 +927,10 @@ class MainlineAbnormalPathMatrixTest {
         val (controller, _) = buildController()
 
         val events = mutableListOf<TakeoverFallbackEvent>()
-        val collectJob = launch {
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow) for the initial subscription below; withTimeout bounds
+        // the overall wait so a lost race fails fast instead of hanging CI.
+        val collectJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             repeat(4) { events.add(controller.takeoverFailure.first()) }
         }
 
@@ -897,7 +938,7 @@ class MainlineAbnormalPathMatrixTest {
         controller.notifyTakeoverFailed("to-2", "t-2", "tr-2", "e2", TakeoverFallbackEvent.Cause.TIMEOUT)
         controller.notifyTakeoverFailed("to-3", "t-3", "tr-3", "e3", TakeoverFallbackEvent.Cause.CANCELLED)
         controller.notifyTakeoverFailed("to-4", "t-4", "tr-4", "e4", TakeoverFallbackEvent.Cause.DISCONNECT)
-        collectJob.join()
+        withTimeout(2000) { collectJob.join() }
 
         assertEquals("All 4 distinct failure events must be received", 4, events.size)
         assertEquals("First event must be FAILED", TakeoverFallbackEvent.Cause.FAILED, events[0].cause)

@@ -15,6 +15,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -169,7 +170,9 @@ class CrossDeviceFallbackClosureTest {
         val (controller, _) = buildController()
 
         var received: TakeoverFallbackEvent? = null
-        val job = launch {
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             received = controller.takeoverFailure.first()
         }
 
@@ -180,7 +183,7 @@ class CrossDeviceFallbackClosureTest {
             reason = "execution_error",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertNotNull("takeoverFailure must emit after notifyTakeoverFailed", received)
     }
@@ -190,7 +193,9 @@ class CrossDeviceFallbackClosureTest {
         val (controller, _) = buildController()
 
         var collected: TakeoverFallbackEvent? = null
-        val job = launch { collected = controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { collected = controller.takeoverFailure.first() }
 
         controller.notifyTakeoverFailed(
             takeoverId = "to-abc",
@@ -199,7 +204,7 @@ class CrossDeviceFallbackClosureTest {
             reason = "pipeline_timeout",
             cause = TakeoverFallbackEvent.Cause.TIMEOUT
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertNotNull(collected)
         val collectedEvent = collected!!
@@ -216,9 +221,11 @@ class CrossDeviceFallbackClosureTest {
     fun `notifyTakeoverFailed with FAILED cause emits FAILED event`() = runBlocking {
         val (controller, _) = buildController()
         var received: TakeoverFallbackEvent? = null
-        val job = launch { received = controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertEquals(TakeoverFallbackEvent.Cause.FAILED, received?.cause)
     }
 
@@ -226,9 +233,11 @@ class CrossDeviceFallbackClosureTest {
     fun `notifyTakeoverFailed with TIMEOUT cause emits TIMEOUT event`() = runBlocking {
         val (controller, _) = buildController()
         var received: TakeoverFallbackEvent? = null
-        val job = launch { received = controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-2", "t-2", "tr-2", "timeout", TakeoverFallbackEvent.Cause.TIMEOUT)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertEquals(TakeoverFallbackEvent.Cause.TIMEOUT, received?.cause)
     }
 
@@ -236,9 +245,11 @@ class CrossDeviceFallbackClosureTest {
     fun `notifyTakeoverFailed with CANCELLED cause emits CANCELLED event`() = runBlocking {
         val (controller, _) = buildController()
         var received: TakeoverFallbackEvent? = null
-        val job = launch { received = controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-3", "t-3", "tr-3", "cancelled", TakeoverFallbackEvent.Cause.CANCELLED)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertEquals(TakeoverFallbackEvent.Cause.CANCELLED, received?.cause)
     }
 
@@ -246,9 +257,11 @@ class CrossDeviceFallbackClosureTest {
     fun `notifyTakeoverFailed with DISCONNECT cause emits DISCONNECT event`() = runBlocking {
         val (controller, _) = buildController()
         var received: TakeoverFallbackEvent? = null
-        val job = launch { received = controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-4", "t-4", "tr-4", "disconnect", TakeoverFallbackEvent.Cause.DISCONNECT)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertEquals(TakeoverFallbackEvent.Cause.DISCONNECT, received?.cause)
     }
 
@@ -266,8 +279,10 @@ class CrossDeviceFallbackClosureTest {
         var mainViewModelEvent: TakeoverFallbackEvent? = null
         var floatingServiceEvent: TakeoverFallbackEvent? = null
 
-        val job1 = launch { mainViewModelEvent = controller.takeoverFailure.first() }
-        val job2 = launch { floatingServiceEvent = controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { mainViewModelEvent = controller.takeoverFailure.first() }
+        val job2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { floatingServiceEvent = controller.takeoverFailure.first() }
 
         controller.notifyTakeoverFailed(
             takeoverId = "to-multi",
@@ -277,8 +292,10 @@ class CrossDeviceFallbackClosureTest {
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
 
-        job1.join()
-        job2.join()
+        withTimeout(2000) {
+            job1.join()
+            job2.join()
+        }
 
         assertNotNull("MainViewModel subscriber must receive the event", mainViewModelEvent)
         assertNotNull("EnhancedFloatingService subscriber must receive the event", floatingServiceEvent)
@@ -306,9 +323,11 @@ class CrossDeviceFallbackClosureTest {
     @Test
     fun `state remains Idle after notifyTakeoverFailed`() = runBlocking {
         val (controller, _) = buildController()
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertTrue(
             "Runtime state must remain Idle after a takeover failure (not a registration failure)",
             controller.state.value is RuntimeController.RuntimeState.Idle
@@ -319,9 +338,11 @@ class CrossDeviceFallbackClosureTest {
     fun `state remains LocalOnly after stop then notifyTakeoverFailed`() = runBlocking {
         val (controller, _) = buildController()
         controller.stop()
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.CANCELLED)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertTrue(
             "Runtime state must remain LocalOnly after stop() + notifyTakeoverFailed",
             controller.state.value is RuntimeController.RuntimeState.LocalOnly
@@ -332,9 +353,11 @@ class CrossDeviceFallbackClosureTest {
     fun `attachedSession is null before any session and stays null after failure with no session`() = runBlocking {
         val (controller, _) = buildController()
         assertNull("attachedSession must be null initially", controller.attachedSession.value)
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNull(
             "attachedSession must remain null after notifyTakeoverFailed when no session exists",
             controller.attachedSession.value
@@ -350,9 +373,11 @@ class CrossDeviceFallbackClosureTest {
         assertTrue("isRemoteTaskActive must be true after onRemoteTaskStarted", loopController.isRemoteTaskActive)
 
         // notifyTakeoverFailed does NOT clear isRemoteTaskActive — caller must do that in finally.
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
         // isRemoteTaskActive is not cleared by notifyTakeoverFailed alone.
         // It is the caller's responsibility to call onRemoteTaskFinished() in the finally block.
         controller.onRemoteTaskFinished()
@@ -398,9 +423,12 @@ class CrossDeviceFallbackClosureTest {
             }
         }
 
-        val takeoverJob = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        // (registrationJob above is already self-bounded via its internal withTimeoutOrNull.)
+        val takeoverJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        takeoverJob.join()
+        withTimeout(2000) { takeoverJob.join() }
         registrationJob.join()
 
         assertFalse(
@@ -416,9 +444,11 @@ class CrossDeviceFallbackClosureTest {
         val (controller, _) = buildController()
         val stateBefore = controller.state.value
 
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals(
             "Runtime state must be unchanged after notifyTakeoverFailed — still ready for the next task",
@@ -432,9 +462,11 @@ class CrossDeviceFallbackClosureTest {
         val loopController = buildLoopController()
         val (controller, _) = buildController(loopController = loopController)
 
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.TIMEOUT)
-        job.join()
+        withTimeout(2000) { job.join() }
         controller.onRemoteTaskFinished()
 
         // Should not throw — the system is ready to accept the next task.
@@ -450,7 +482,10 @@ class CrossDeviceFallbackClosureTest {
         val (controller, _) = buildController()
 
         val receivedEvents = mutableListOf<TakeoverFallbackEvent>()
-        val job = launch {
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow) for the initial subscription below; withTimeout bounds
+        // the overall wait so a lost race fails fast instead of hanging CI.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             // Collect 3 events.
             repeat(3) {
                 receivedEvents.add(controller.takeoverFailure.first())
@@ -461,7 +496,7 @@ class CrossDeviceFallbackClosureTest {
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err1", TakeoverFallbackEvent.Cause.FAILED)
         controller.notifyTakeoverFailed("to-2", "t-2", "tr-2", "err2", TakeoverFallbackEvent.Cause.TIMEOUT)
         controller.notifyTakeoverFailed("to-3", "t-3", "tr-3", "err3", TakeoverFallbackEvent.Cause.CANCELLED)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals("All 3 failure events must be received", 3, receivedEvents.size)
         assertEquals("First event cause must be FAILED", TakeoverFallbackEvent.Cause.FAILED, receivedEvents[0].cause)
@@ -523,7 +558,10 @@ class CrossDeviceFallbackClosureTest {
             }
         }
 
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        // (registrationJob above is already self-bounded via its internal withTimeoutOrNull.)
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "to-dup",
             taskId = "t-dup",
@@ -531,7 +569,7 @@ class CrossDeviceFallbackClosureTest {
             reason = "duplicate_check",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
         registrationJob.join()
 
         assertFalse(
@@ -560,9 +598,11 @@ class CrossDeviceFallbackClosureTest {
         // Start cross-device (simulated — just set in settings directly for this test).
         settings.crossDeviceEnabled = true
 
-        val job = launch { controller.takeoverFailure.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed("to-1", "t-1", "tr-1", "err", TakeoverFallbackEvent.Cause.FAILED)
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertTrue(
             "settings.crossDeviceEnabled must remain true after notifyTakeoverFailed — " +
