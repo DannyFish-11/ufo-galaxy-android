@@ -2543,7 +2543,7 @@ object StabilizationBaseline {
             rationale =
                 "PR-14Android — 最小必要 Android ↔ V2 契约 schema / version gate。" +
                 "集中固化四类最关键 Android ↔ V2 cross-repo 契约边界的版本标识与一致性断言：" +
-                "1) AIP_MSG_TYPE_SCHEMA — MsgType 枚举数量锚点（EXPECTED_MSG_TYPE_COUNT=54）、" +
+                "1) AIP_MSG_TYPE_SCHEMA — MsgType 枚举数量锚点（EXPECTED_MSG_TYPE_COUNT=64）、" +
                 "AIP 协议版本（AIP/1.0）与 AIP spec 版本（3.0）；" +
                 "2) RUNTIME_TRUTH_UPLINK — AndroidDistributedTruthOwnershipUplinkContract SCHEMA_VERSION；" +
                 "3) COMPLETION_CLOSURE_UPLINK — AndroidCompletionClosureUplinkContract SCHEMA_VERSION；" +
