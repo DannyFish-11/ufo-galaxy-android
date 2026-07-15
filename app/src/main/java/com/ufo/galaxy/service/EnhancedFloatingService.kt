@@ -30,6 +30,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
@@ -181,13 +182,12 @@ class EnhancedFloatingService : Service() {
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         
-        // 注册唤醒广播
+        // 注册唤醒广播 —— 用 ContextCompat 统一带上导出标志（应用内广播，NOT_EXPORTED），
+        // 跨全部 API 级别正确处理，消除 UnspecifiedRegisterReceiverFlag lint 错误。
         val filter = IntentFilter(ACTION_WAKE_UP)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(wakeUpReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(wakeUpReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this, wakeUpReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         
         // 创建悬浮视图
         createFloatingView()
