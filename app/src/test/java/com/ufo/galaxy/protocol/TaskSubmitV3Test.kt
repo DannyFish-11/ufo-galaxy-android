@@ -169,14 +169,17 @@ class TaskSubmitV3Test {
 
     @Test
     fun `LEGACY_TYPE_MAP maps task_execute to task_assign`() {
-        assertEquals("task_assign", MsgType.toV3Type("task_execute"),
-            "task_execute must be remapped to task_assign for Task Manager unification")
+        // JUnit4 assertEquals 签名是 (message, expected, actual) —— message 在最前。
+        // 原来把 message 放最后,导致 expected=toV3Type 结果、actual=消息串,必然 ComparisonFailure。
+        // LEGACY_TYPE_MAP 映射本身正确(task_execute→task_assign),这是测试传参顺序 bug。
+        assertEquals("task_execute must be remapped to task_assign for Task Manager unification",
+            "task_assign", MsgType.toV3Type("task_execute"))
     }
 
     @Test
     fun `LEGACY_TYPE_MAP maps task_status_query to task_assign`() {
-        assertEquals("task_assign", MsgType.toV3Type("task_status_query"),
-            "task_status_query must be remapped to task_assign for Task Manager unification")
+        assertEquals("task_status_query must be remapped to task_assign for Task Manager unification",
+            "task_assign", MsgType.toV3Type("task_status_query"))
     }
 
     @Test
