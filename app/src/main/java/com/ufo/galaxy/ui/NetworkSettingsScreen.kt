@@ -59,6 +59,12 @@ fun NetworkSettingsScreen(
     onAutoDiscover: () -> Unit,
     onFillTailscaleIp: () -> Unit,
     onRunDiagnostics: () -> Unit,
+    /** 配对进行中 —— 按钮置灰、显示进度。 */
+    isPairing: Boolean = false,
+    /** 配对可读状态(等待批准…/已配对 ✓);null = 未在配对。 */
+    pairingStatus: String? = null,
+    /** 点击"配对此设备":零输入发起配对,别处批准后领取本机专属 token。 */
+    onPairDevice: () -> Unit = {},
     onClose: () -> Unit
 ) {
     // Form state
@@ -250,6 +256,42 @@ fun NetworkSettingsScreen(
                 ) {
                     Text("一键填入 Tailscale")
                 }
+            }
+
+            // ── 设备配对(零输入·别处批准)────────────────────────────────────
+            SectionTitle("设备配对")
+
+            Text(
+                "本设备无需扫码或手填 token:点下方按钮发起配对,再到【已信任设备】" +
+                    "(桌面/手机)上经智能体判断后批准,本机即自动领取专属 token 并接入。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Button(
+                onClick = onPairDevice,
+                enabled = !isPairing,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isPairing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("配对中…")
+                } else {
+                    Text("配对此设备")
+                }
+            }
+
+            pairingStatus?.let { st ->
+                Text(
+                    st,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
 
             // ── 网络诊断 ─────────────────────────────────────────────────────

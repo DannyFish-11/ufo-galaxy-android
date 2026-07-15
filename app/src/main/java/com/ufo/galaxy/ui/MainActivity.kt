@@ -494,6 +494,9 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             onAutoDiscover = { viewModel.autoDiscoverTailscale() },
             onFillTailscaleIp = { viewModel.fillTailscaleIp() },
             onRunDiagnostics = { viewModel.runNetworkDiagnostics() },
+            isPairing = uiState.isPairing,
+            pairingStatus = uiState.pairingStatus,
+            onPairDevice = { viewModel.pairThisDevice() },
             onClose = { viewModel.closeNetworkSettings() }
         )
         return

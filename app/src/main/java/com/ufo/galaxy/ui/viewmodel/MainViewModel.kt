@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.ChatMessage
 import com.ufo.galaxy.data.MessageRole
+import com.ufo.galaxy.config.DevicePairingClient
 import com.ufo.galaxy.debug.LocalLoopDebugViewModel
 import com.ufo.galaxy.input.InputRouter
 import com.ufo.galaxy.local.LocalLoopOptions
@@ -207,7 +208,15 @@ data class MainUiState(
     val inflightContinuityTaskId: String? = null,
     // C9-FIX: Current three-phase state (SILENT / LIMINAL / MANIFEST) for UI visualization.
     // Updated by observing PhaseStateMachine.currentPhase in MainViewModel.
-    val currentPhase: PhaseStateMachine.Phase = PhaseStateMachine.Phase.SILENT
+    val currentPhase: PhaseStateMachine.Phase = PhaseStateMachine.Phase.SILENT,
+    // ── 设备配对(零输入·别处批准)──────────────────────────────────────────────
+    /**
+     * 配对进行中的可读状态(供设置页显示"等待批准…/已配对/被拒"等);null=未在配对。
+     * 由 [MainViewModel.pairThisDevice] 驱动,配对结束(成功/失败)后回落 null 或终态短语。
+     */
+    val pairingStatus: String? = null,
+    /** True 期间"配对此设备"按钮置灰,防重复发起。 */
+    val isPairing: Boolean = false
 )
 
 /**
@@ -961,6 +970,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(TAG, "fillTailscaleIp: $ip")
             } else {
                 pushError("未检测到 Tailscale 网络，请确认已安装并登录 Tailscale")
+            }
+        }
+    }
+
+    /**
+     * 零输入配对本设备:向网关发起入伙请求 → 轮询等你在【已信任设备】(桌面/手机)经
+     * 智能体判断后批准 → 批准后一次性领取本设备【专属 token】并落进加密存储,随即重连。
+     *
+     * 全程本设备不扫码、不填 token、不手动打 IP —— 只需网关 REST 地址(restBaseUrl,已在
+     * 网络设置里配置或经 Tailscale 一键填入)。被拒/过期/超时都会如实反馈,绝不伪装成功。
+     *
+     * 与既有连接流程解耦:只有用户主动点"配对此设备"才触发,不改动自动连接路径。
+     */
+    fun pairThisDevice() {
+        if (_uiState.value.isPairing) return
+        val s = UFOGalaxyApplication.appSettings
+        val restBase = s.effectiveRestBaseUrl()
+        if (restBase.isBlank()) {
+            pushError("请先在网络设置里填写网关地址(或用 Tailscale 一键填入)后再配对")
+            return
+        }
+        val deviceId = s.deviceId.ifBlank { "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}" }
+        val deviceName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
+        _uiState.update { it.copy(isPairing = true, pairingStatus = "正在发起配对…") }
+        viewModelScope.launch {
+            val result = try {
+                DevicePairingClient(restBaseUrl = restBase).pairAndClaim(
+                    deviceId = deviceId,
+                    deviceType = "android",
+                    name = deviceName,
+                    onWaiting = { st ->
+                        _uiState.update { it.copy(pairingStatus = "等待批准…（$st）") }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "pairThisDevice failed", e)
+                DevicePairingClient.PairingResult(ok = false, error = e.message ?: "unknown")
+            }
+            if (result.ok && !result.token.isNullOrBlank()) {
+                s.gatewayToken = result.token!!
+                Log.i(TAG, "pairThisDevice: approved, token stored; reconnecting")
+                _uiState.update { it.copy(isPairing = false, pairingStatus = "已配对 ✓") }
+                // 用新 token 刷新 WS 配置并(若已开跨设备)重连,口径与 saveNetworkSettings 一致。
+                UFOGalaxyApplication.webSocketClient.updateRuntimeConnectionConfig(
+                    serverUrl = s.effectiveGatewayWsUrl(),
+                    gatewayToken = s.gatewayToken,
+                    runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
+                    deviceId = deviceId
+                )
+                if (_uiState.value.crossDeviceEnabled) {
+                    UFOGalaxyApplication.runtimeController.reconnect()
+                }
+            } else {
+                val why = when (result.error) {
+                    "denied_by_owner" -> "配对被拒绝"
+                    "request_expired" -> "配对请求已过期,请重试"
+                    "approval_timeout" -> "等待批准超时,请重试"
+                    "enroll_failed" -> "无法发起配对(检查网关地址/网络)"
+                    "claim_failed" -> "已批准但领取 token 失败,请重试"
+                    else -> "配对失败:${result.error ?: "未知原因"}"
+                }
+                Log.w(TAG, "pairThisDevice: $why (status=${result.status})")
+                _uiState.update { it.copy(isPairing = false, pairingStatus = null) }
+                pushError(why)
             }
         }
     }
