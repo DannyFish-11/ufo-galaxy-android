@@ -12,7 +12,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 /**
- * DevicePairingClient — 设备端配对客户端(与 V2 后端 /api/v1/pairing/* 对接)。
+ * DevicePairingClient — 设备端配对客户端(与 V2 后端 /api/v1/pairing/ 端点对接)。
+ *
+ * 注:KDoc 内避免出现字面 "斜杠星" 序列——Kotlin 块注释可嵌套,会吞掉本段的收尾。
  *
  * 这是"别处批准 + 智能体准入"配对流程的设备半边,新设备【零输入】:
  *   1. [enroll]  提交入伙请求(带自己的 device_id/type/name),拿到 request_id;
