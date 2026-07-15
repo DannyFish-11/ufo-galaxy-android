@@ -126,8 +126,20 @@ class E2EContractTest {
             meta.containsKey("accessibility_ready"))
         assertTrue("metadata must contain overlay_ready",
             meta.containsKey("overlay_ready"))
+        // 计数漂移收口:AppSettings.toMetadataMap() 已从 8 键增至 12 键 —— 新增了
+        // degraded_mode / local_intelligence_status / local_inference_ready /
+        // local_inference_available(端侧推理就绪度等正当能力字段),但本测试的期望数没跟上。
+        // 代码为准,补上四键断言并把期望改为 12(类同 MsgType count 锚点的修法)。
+        assertTrue("metadata must contain degraded_mode",
+            meta.containsKey("degraded_mode"))
+        assertTrue("metadata must contain local_intelligence_status",
+            meta.containsKey("local_intelligence_status"))
+        assertTrue("metadata must contain local_inference_ready",
+            meta.containsKey("local_inference_ready"))
+        assertTrue("metadata must contain local_inference_available",
+            meta.containsKey("local_inference_available"))
 
-        assertEquals(8, meta.size)
+        assertEquals(12, meta.size)
     }
 
     @Test
