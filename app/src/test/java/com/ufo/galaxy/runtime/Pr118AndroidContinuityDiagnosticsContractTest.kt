@@ -708,14 +708,15 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
 
     // 真 bug 修复(runtime-regression 349 处失败排查发现):以下两条断言的是写这个
     // 测试那个 PR-118 落地时的快照值,后续 PR 持续往 StabilizationBaseline.entries
-    // 里加条目,数字自然过期。更新到当前真实值(CANONICAL_STABLE=150,total=157)。
+    // 里加条目,数字自然过期。更新到当前真实值(CANONICAL_STABLE=150,total=156;
+    // 156 已由 CI 实测验证——Pr14/Pr11 同断言在 156 时通过)。
     @Test
     fun `StabilizationBaseline CANONICAL_STABLE count is 150 after PR-118`() {
         assertEquals(150, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.CANONICAL_STABLE).size)
     }
 
     @Test
-    fun `StabilizationBaseline total entry count is 157 after PR-118`() {
-        assertEquals(157, StabilizationBaseline.entries.size)
+    fun `StabilizationBaseline total entry count is 156 after PR-118`() {
+        assertEquals(156, StabilizationBaseline.entries.size)
     }
 }

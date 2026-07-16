@@ -1439,6 +1439,14 @@ class RuntimeController(
             webSocketClient.disconnect()
         }
         closeAttachedSession(AttachedRuntimeSession.DetachCause.DISABLE)
+        // PR-29 边界修复:closeAttachedSession 在没有已附着会话时会提前 return,
+        // 跳过内部的去重集清理。而 notifyTakeoverFailed 不要求会话存在即可登记
+        // 去重条目,这些条目会泄漏到下一个运行时纪元,永久抑制复用相同
+        // takeoverId 的真实失败事件。stop() 结束的是整个会话生命周期
+        // (durableSessionId/attachment era 均被重置),去重集必须无条件清空。
+        synchronized(_emittedFailureTakeoverIds) {
+            _emittedFailureTakeoverIds.clear()
+        }
         // PR-29: A runtime stop should also clear any in-flight remote execution state
         // so that surface layers do not display a stale loading/in-control indicator.
         _isRemoteExecutionActive.value = false

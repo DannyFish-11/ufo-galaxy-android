@@ -13,6 +13,8 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -946,10 +948,12 @@ class MainlineAbnormalPathMatrixTest {
 
         val events = mutableListOf<TakeoverFallbackEvent>()
         // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
-        // no-replay SharedFlow) for the initial subscription below; withTimeout bounds
-        // the overall wait so a lost race fails fast instead of hanging CI.
+        // no-replay SharedFlow); withTimeout bounds the overall wait. A single persistent
+        // take(4).collect subscription is required here — repeat(4){ first() } unsubscribes
+        // after every element, and emits landing in the gap between two first() calls are
+        // permanently dropped (replay=0), making the join deterministically time out.
         val collectJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-            repeat(4) { events.add(controller.takeoverFailure.first()) }
+            controller.takeoverFailure.take(4).toList(events)
         }
 
         controller.recordDelegatedTaskAccepted(taskId = "t-1")

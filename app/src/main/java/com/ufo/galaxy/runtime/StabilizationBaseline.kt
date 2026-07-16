@@ -410,6 +410,8 @@ object StabilizationBaseline {
             stability = SurfaceStability.RETIREMENT_GATED,
             extensionGuidance = ExtensionGuidance.CONVERGE,
             canonicalReplacement = "RuntimeController.setupError (SharedFlow<CrossDeviceSetupError>)",
+            retirementGate = "confirmation that no external registrationError call sites remain " +
+                "(all known consumers migrated to setupError in PR-36)",
             rationale = "Deprecated in PR-36 after all known consumers (MainViewModel, EnhancedFloatingService) " +
                 "were migrated to setupError. Surface is @Deprecated but retained for backward compatibility " +
                 "pending confirmation that no external call sites remain.",

@@ -996,17 +996,29 @@ class EndToEndRegressionClosureTest {
         val serverP = UnifiedResultPresentation.fromServerMessage(serverMsg)
         val fallbackP = UnifiedResultPresentation.fromFallbackEvent(fallbackEvent)
 
-        // Each path produces a distinct outcome
+        // Each path produces the correct success classification
         assertTrue("Local success is success", localP.isSuccess)
         assertTrue("Server message is success", serverP.isSuccess)
         assertFalse("Fallback is not success", fallbackP.isSuccess)
 
-        // Outcomes are distinct between paths
-        val outcomes = setOf(localP.outcome, serverP.outcome, fallbackP.outcome)
+        // 原断言要求三条路径的 outcome 互不相同,但这与 UnifiedResultPresentation
+        // 的设计意图相反:outcome 是"结果分类"(wire-level outcome string),不是
+        // "路径标识"——本地成功与服务端成功同为 "success" 是有意为之(类文档明确
+        // 要求呈现层不暴露内部执行路径)。"不共享状态"的真正不变量是:各工厂
+        // 方法互不影响、各自产出正确的分类与摘要。
+        assertEquals("Local success outcome", LocalLoopResult.STATUS_SUCCESS, localP.outcome)
+        assertEquals("Server message outcome", "success", serverP.outcome)
         assertEquals(
-            "All three presentation paths must produce distinct outcome values",
+            "Fallback outcome",
+            TakeoverFallbackEvent.Cause.FAILED.wireValue,
+            fallbackP.outcome
+        )
+        // Summaries remain independently derived per path (no cross-path state bleed).
+        val summaries = setOf(localP.summary, serverP.summary, fallbackP.summary)
+        assertEquals(
+            "All three presentation paths must produce their own distinct summaries",
             3,
-            outcomes.size
+            summaries.size
         )
     }
 }
