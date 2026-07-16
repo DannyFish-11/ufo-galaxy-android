@@ -12,6 +12,8 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
@@ -617,16 +619,23 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
 
     // ── 7. RuntimeController TASK_RESULT carries temporal finality keys ────────
 
+    // 测试修复:reconciliationSignals 是 replay=0 的热流,生产方在 runBlocking 主体里
+    // 同步 tryEmit;"先 publish 后 first()" 的顺序必然丢信号。以下各测试统一改为先以
+    // async(start = CoroutineStart.UNDISPATCHED) 订阅(挂起在 first)再触发生产方;
+    // recordDelegatedTaskAccepted 放在订阅之前,使其 TASK_ACCEPTED 信号不被捕获。
+
     @Test
     fun `publishTaskResult TASK_RESULT carries temporal_continuation_finality_class`() =
         runBlocking {
             val controller = buildController()
             controller.recordDelegatedTaskAccepted("task-result-125")
-            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.publishTaskResult("task-result-125")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_RESULT signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
             assertTrue(
@@ -639,11 +648,13 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
         runBlocking {
             val controller = buildController()
             controller.recordDelegatedTaskAccepted("task-no-temporal-125")
-            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.publishTaskResult("task-no-temporal-125")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_RESULT signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
             assertEquals(
@@ -660,11 +671,13 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 "task-temporal-125",
                 temporalWorkflowRunId = "wf-run-125-result"
             )
-            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.publishTaskResult("task-temporal-125")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_RESULT signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
             assertEquals(
@@ -681,11 +694,13 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 "task-temporal-final-125",
                 temporalWorkflowRunId = "wf-run-125-final"
             )
-            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.publishTaskResult("task-temporal-final-125")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_RESULT signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
             assertEquals(
@@ -702,11 +717,13 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 "task-temporal-runid-125",
                 temporalWorkflowRunId = "wf-run-125-payload"
             )
-            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.publishTaskResult("task-temporal-runid-125")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_RESULT signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
             assertEquals(
@@ -721,6 +738,12 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
     fun `notifyTakeoverFailed without temporalWorkflowRunId emits NOT_TEMPORAL_WORKFLOW_PATH`() =
         runBlocking {
             val controller = buildController()
+            // 测试修复:notifyTakeoverFailed 受 shouldSuppressTerminalSignal 守卫,须先
+            // recordDelegatedTaskAccepted 登记同一 taskId,否则终态信号被静默抑制。
+            controller.recordDelegatedTaskAccepted("task-no-temporal-tf-125")
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.notifyTakeoverFailed(
                 takeoverId = "to-no-temporal-125",
@@ -730,7 +753,7 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 cause = TakeoverFallbackEvent.Cause.FAILED
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
             assertEquals(
@@ -747,6 +770,11 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 "task-temporal-timeout-125",
                 temporalWorkflowRunId = "wf-run-125-timeout"
             )
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) {
+                    controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
+                }
+            }
 
             controller.notifyTakeoverFailed(
                 takeoverId = "to-timeout-125",
@@ -756,9 +784,7 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 cause = TakeoverFallbackEvent.Cause.TIMEOUT
             )
 
-            val signal = withTimeoutOrNull(300) {
-                controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
-            }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertEquals(
                 AndroidV2TemporalContinuationFinalityContract.ContinuationFinalityClass.WORKFLOW_INTERRUPTED_RESUME_PENDING.wireValue,
@@ -770,6 +796,11 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
     fun `notifyTakeoverFailed TASK_FAILED signal has temporal_continuation_finality_schema_version`() =
         runBlocking {
             val controller = buildController()
+            // 测试修复:同上,守卫要求先登记活跃任务;并先订阅再触发生产方。
+            controller.recordDelegatedTaskAccepted("task-schema-tf-125")
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.notifyTakeoverFailed(
                 takeoverId = "to-schema-125",
@@ -779,7 +810,7 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 cause = TakeoverFallbackEvent.Cause.TIMEOUT
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertTrue(
                 ReconciliationSignal.KEY_TEMPORAL_CONTINUATION_FINALITY_SCHEMA_VERSION in signal!!.payload
@@ -799,7 +830,9 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
             )
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = launch {
+            // 测试修复:simulateDisconnected 在监听器回调里同步 tryEmit TASK_FAILED,默认
+            // launch 的收集协程要等父协程挂起后才启动,信号在订阅前已丢失;改 UNDISPATCHED。
+            val job = launch(start = CoroutineStart.UNDISPATCHED) {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 
@@ -829,7 +862,8 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
             )
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = launch {
+            // 测试修复:同上,断连的 TASK_FAILED 为同步发射,须 UNDISPATCHED 先订阅。
+            val job = launch(start = CoroutineStart.UNDISPATCHED) {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 
@@ -856,7 +890,8 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
             controller.recordDelegatedTaskAccepted("task-interrupt-no-temporal-125")
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = launch {
+            // 测试修复:同上,断连的 TASK_FAILED 为同步发射,须 UNDISPATCHED 先订阅。
+            val job = launch(start = CoroutineStart.UNDISPATCHED) {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 
@@ -882,12 +917,16 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
         runBlocking {
             val controller = buildController()
 
+            // 测试修复:先以 UNDISPATCHED 订阅再触发生产方(同步 tryEmit,订阅后发丢失)。
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
             controller.recordDelegatedTaskAccepted(
                 taskId = "task-accepted-temporal-125",
                 temporalWorkflowRunId = "wf-run-125-accepted"
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_ACCEPTED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_ACCEPTED, signal!!.kind)
             assertEquals(
@@ -901,12 +940,16 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
         runBlocking {
             val controller = buildController()
 
+            // 测试修复:先订阅再触发生产方。
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
             controller.recordDelegatedTaskAccepted(
                 taskId = "task-accepted-continuation-125",
                 temporalWorkflowRunId = "wf-run-125-continuation"
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_ACCEPTED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_ACCEPTED, signal!!.kind)
             assertEquals(
@@ -920,9 +963,13 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
         runBlocking {
             val controller = buildController()
 
+            // 测试修复:先订阅再触发生产方。
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
             controller.recordDelegatedTaskAccepted(taskId = "task-accepted-no-temporal-125")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_ACCEPTED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_ACCEPTED, signal!!.kind)
             assertEquals(
@@ -940,14 +987,16 @@ class Pr125AndroidV2TemporalContinuationFinalityContractTest {
                 taskId = "task-status-temporal-125",
                 temporalWorkflowRunId = "wf-run-125-status"
             )
-            withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
 
             controller.publishTaskStatusUpdate(
                 taskId = "task-status-temporal-125",
                 progressDetail = "continuing"
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = deferred.await()
             assertNotNull("Expected TASK_STATUS_UPDATE signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
             assertEquals(

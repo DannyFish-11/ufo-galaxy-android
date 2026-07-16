@@ -229,8 +229,10 @@ class AttachedRuntimeSessionTest {
     }
 
     @Test
-    fun `DetachCause has exactly four entries`() {
-        assertEquals(4, AttachedRuntimeSession.DetachCause.entries.size)
+    fun `DetachCause has exactly five entries`() {
+        // 过期断言:协议对齐轮次为 DetachCause 增补了 NORMAL(正常生命周期收尾),
+        // 与 V2 协议的 detach_cause 枚举保持一致,更新计数。
+        assertEquals(5, AttachedRuntimeSession.DetachCause.entries.size)
     }
 
     // ── create factory ────────────────────────────────────────────────────────

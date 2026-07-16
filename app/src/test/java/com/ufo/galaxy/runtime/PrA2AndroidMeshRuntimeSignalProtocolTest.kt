@@ -13,10 +13,15 @@ class PrA2AndroidMeshRuntimeSignalProtocolTest {
 
     @Test
     fun `derive emits live participation readiness for active mesh runtime`() {
+        // 测试修复:原场景用 barrier=WAITING 制造 PARTIAL 证明等级,但 BARRIER_WAITING
+        // 生命周期按设计不接受新子任务(isAcceptingSubtasks 明确排除),
+        // isParticipationReady 必然为 false,与断言矛盾。改用 health=DEGRADED +
+        // barrier=NOT_APPLICABLE:生命周期为 DEGRADED(可接受、带保留),
+        // 证明等级同样是 PARTIAL,且就绪/参与语义与测试意图一致。
         val report = AndroidMeshParticipationRuntimeContract.derive(
             rollout = rollout(crossDeviceAllowed = true, delegatedExecutionAllowed = true),
-            healthState = ParticipantHealthState.HEALTHY,
-            barrierState = BarrierParticipationState.WAITING,
+            healthState = ParticipantHealthState.DEGRADED,
+            barrierState = BarrierParticipationState.NOT_APPLICABLE,
             collaborationState = CollaborationLifecycleState.EXECUTING,
             fallbackActive = false,
             participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
@@ -46,9 +51,12 @@ class PrA2AndroidMeshRuntimeSignalProtocolTest {
 
     @Test
     fun `snapshot payload serializes mesh readiness proof and closure fields`() {
+        // 测试修复:同上,BARRIER_WAITING 生命周期不接受新子任务,
+        // mesh_participation_ready 必然序列化为 false;改用 DEGRADED 生命周期
+        // (可接受、带保留)以匹配下方的 ready=true 断言。
         val report = AndroidMeshParticipationRuntimeContract.MeshRuntimeStateReport(
-            participationLifecycle = MeshParticipationLifecycleState.BARRIER_WAITING,
-            barrierState = BarrierParticipationState.WAITING,
+            participationLifecycle = MeshParticipationLifecycleState.DEGRADED,
+            barrierState = BarrierParticipationState.NOT_APPLICABLE,
             collaborationLifecycle = CollaborationLifecycleState.EXECUTING,
             constrainedReasons = emptyList(),
             proofQuality = MeshRuntimeProofQuality.PARTIAL
@@ -87,7 +95,7 @@ class PrA2AndroidMeshRuntimeSignalProtocolTest {
         assertTrue(json.get("mesh_runtime_engaged").asBoolean)
         assertFalse(json.get("mesh_runtime_closed").asBoolean)
         assertEquals("partial", json.get("mesh_runtime_proof_quality").asString)
-        assertEquals("waiting", json.get("barrier_participation_state").asString)
+        assertEquals("not_applicable", json.get("barrier_participation_state").asString)
     }
 
     @Test

@@ -326,7 +326,12 @@ object AndroidAuthoritativePathAlignmentAudit {
 
         BehaviorEntry(
             behaviorId = "device_strategy_report",
-            tier = BehaviorTier.CANONICAL_DEFAULT,
+            // 注册表数据修复:本条目自述"advisory/observation-only"、语义为
+            // OBSERVATION_SIGNAL 且带 deferralNote(晋升需未来 V2 侧决策),
+            // 按注册表自身分层不变量应属 OBSERVATION_ONLY;PR-251 落地时误标为
+            // CANONICAL_DEFAULT(违反"CANONICAL_DEFAULT 必须是 CANONICAL_PARTICIPANT_EVIDENCE
+            // 且不得出现在 deferredEntries"两条不变量)。
+            tier = BehaviorTier.OBSERVATION_ONLY,
             label = "Device strategy report on service start (advisory/observation-only)",
             description = "GalaxyConnectionService emits an initial device program strategy / " +
                 "evolution posture report immediately after service start via " +
@@ -560,14 +565,21 @@ object AndroidAuthoritativePathAlignmentAudit {
 
     // ── Behavior tier counts ──────────────────────────────────────────────────
 
-    /** Expected count of [BehaviorTier.CANONICAL_DEFAULT] entries in [entries]. */
-    const val CANONICAL_DEFAULT_COUNT = 7
+    /**
+     * Expected count of [BehaviorTier.CANONICAL_DEFAULT] entries in [entries].
+     *
+     * 注册表数据修复:PR-65 之后陆续有 PR 往 entries 里追加 CANONICAL_DEFAULT
+     * 条目但未同步更新本常量(7 → 实际 9,含 device_governance_report /
+     * device_acceptance_report 等;device_strategy_report 已按其自述语义
+     * 重新归入 OBSERVATION_ONLY)。
+     */
+    const val CANONICAL_DEFAULT_COUNT = 9
 
     /** Expected count of [BehaviorTier.COMPAT_ALLOWED] entries in [entries]. */
     const val COMPAT_ALLOWED_COUNT = 3
 
-    /** Expected count of [BehaviorTier.OBSERVATION_ONLY] entries in [entries]. */
-    const val OBSERVATION_ONLY_COUNT = 3
+    /** Expected count of [BehaviorTier.OBSERVATION_ONLY] entries in [entries](含重新归层的 device_strategy_report). */
+    const val OBSERVATION_ONLY_COUNT = 4
 
     /** Expected count of [BehaviorTier.DEPRECATED_BUT_LIVE] entries in [entries]. */
     const val DEPRECATED_BUT_LIVE_COUNT = 3

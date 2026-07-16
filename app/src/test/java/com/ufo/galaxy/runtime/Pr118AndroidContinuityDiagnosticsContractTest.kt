@@ -381,7 +381,9 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
                 }
             }
         }
-        client.simulateDisconnected()
+        // 测试修复:RECOVERING→FAILED 只在 onError 通路发生(trigger="ws_error"),
+        // 重复 disconnect 不会触发;改用 simulateError()。
+        client.simulateError()
         val event = deferred.await()
         val outcome = event as AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome
         assertEquals(ReconnectRecoveryState.RECOVERING.wireValue, outcome.fromState)

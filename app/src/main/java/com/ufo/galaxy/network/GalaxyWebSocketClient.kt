@@ -3314,6 +3314,24 @@ class GalaxyWebSocketClient(
     }
 
     /**
+     * PR-33 — For testing only: fires [Listener.onError] on all registered listeners
+     * without a real WebSocket failure.
+     *
+     * Allows unit tests to drive the `RECOVERING → FAILED` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController]'s permanent WS listener (that transition
+     * only happens on the error callback, not on a repeated disconnect).
+     *
+     * 补齐:Pr33ReconnectResilienceTest 的 KDoc 一直引用本方法,但方法从未被实现,
+     * 相关测试只能用 simulateDisconnected() 顶替——而重复 disconnect 并不会走
+     * onError 通路,导致 RECOVERING→FAILED 断言必然失败。
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateError(error: String = "simulated_ws_error") {
+        listeners.forEach { it.onError(error) }
+    }
+
+    /**
      * PR-BIDIRECTIONAL: Send a task with target device specified.
      * Used when user wants to control a specific device (e.g., "control PC").
      *

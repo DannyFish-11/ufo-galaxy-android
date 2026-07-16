@@ -497,8 +497,12 @@ object AndroidDistributedTruthOwnershipUplinkContract {
         }
 
         // ── 优先级 4/5: 默认/待机/posture 信号 ──────────────────────────────
+        // 真 bug 修复:此前 executionBusy 在兜底分支无条件给出 AUTHORITY_RUNTIME,
+        // 完全绕过了优先级 3 的 posture 门禁(要求 join_runtime 且 crossDeviceEnabled)
+        // ——control_only 设备本地忙碌时会错误地向 V2 宣称自己是权威运行时,
+        // 污染分布式任务真相链。非权威的忙碌状态是"投影",不是"权威"。
         val defaultAuthorityClass = when {
-            input.executionBusy -> AuthoritySignalClass.AUTHORITY_RUNTIME
+            input.executionBusy -> AuthoritySignalClass.SUMMARY_PROJECTION
             else -> AuthoritySignalClass.OWNERSHIP_HANDOFF
         }
         return TruthOwnershipUplinkSnapshot(

@@ -592,10 +592,17 @@ class Pr03TakeoverMetadataUnificationTest {
     }
 
     @Test
-    fun `logLabel for unrecognized value produces canonical=null eligible=false`() {
+    fun `logLabel for unrecognized value produces canonical=null eligible=true`() {
+        // 断言修正:按 ExecutorTargetType 的前向兼容契约(类 KDoc 明确:未知值解析为
+        // null="unspecified",ANDROID_ELIGIBLE_VALUES 包含 null,Android 不拒绝未知
+        // 目标类型),未知值的 eligible 是 true,不是 false。
         val label = ExecutorTargetType.logLabel("unknown_value")
         assertTrue("logLabel must include canonical=null for unrecognized values", label.contains("canonical=null"))
-        assertTrue("logLabel must include eligible=false for unrecognized target types", label.contains("eligible=false"))
+        assertTrue(
+            "logLabel must include eligible=true for unrecognized target types " +
+                "(forward-compat: unknown = unspecified = backward-compatible pass-through)",
+            label.contains("eligible=true")
+        )
     }
 
     @Test

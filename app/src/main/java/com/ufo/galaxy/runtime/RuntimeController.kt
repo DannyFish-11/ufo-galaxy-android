@@ -1016,6 +1016,11 @@ class RuntimeController(
                         newRecoveryState = ReconnectRecoveryState.RECOVERED
                     )
                 }
+                // PR-62 快照发射时序修复:重连空闲真相快照必须在 RECOVERED 转换 +
+                // syncUnifiedRecoveryPhase() 之后发出,才能携带已解析的恢复相位
+                // (resumed-cleanly / requires-reconciliation),而不是恒为 recovering。
+                // 原发射点在 openAttachedSession 内部(转换之前),详见该处注释。
+                emitReconnectIdleTruthSnapshot()
             }
 
         }
@@ -3285,60 +3290,73 @@ class RuntimeController(
             }
             emitV2LifecycleEvent(v2Event)
         }
-        // PR-62: On reconnect, emit a RUNTIME_TRUTH_SNAPSHOT with IDLE active task state.
-        // This is the canonical post-reconnect truth reset: V2 learns that Android has no
-        // in-flight task after reconnect, so it can apply its own fallback policy for any
-        // task that was interrupted by the disconnect.
-        if (source == SessionOpenSource.RECONNECT_RECOVERY) {
-            val descriptor = hostDescriptor
-            if (descriptor != null) {
-                val epoch = nextReconciliationEpoch()
-                val participationSnapshot = evaluateAuthoritativeParticipationSnapshot(
-                    readinessSatisfied = false,
-                    distributedRuntimeActivity = false
-                )
-                val inflightRecovery = inflightContinuityRecovery.value
-                val unifiedPhase = unifiedRecoveryPhase.value
-                val routingDecision =
-                    AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(unifiedPhase)
-                val idleTruth = AndroidParticipantRuntimeTruth.from(
-                    descriptor = descriptor,
-                    sessionSnapshot = currentHostSessionSnapshot(),
-                    healthState = _lastKnownHealthState,
-                    readinessState = ParticipantReadinessState.UNKNOWN,
-                    activeTaskId = null,
-                    activeTaskStatus = null,
-                    inflightContinuityState = unifiedPhase.wireValue,
-                    inflightContinuityTaskId = inflightRecovery.taskId,
-                    inflightContinuitySource = inflightRecovery.source,
-                    inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
-                    carrierForegroundVisible = appForegroundVisible.value,
-                    interactionSurfaceReady = settings.accessibilityReady && settings.overlayReady,
-                    authoritativeParticipationState = participationSnapshot.state.wireValue,
-                    authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
-                    authoritativeParticipationTransitionTrigger = participationSnapshot.lastTransitionTrigger,
-                    authoritativeParticipationTransitionHistory = participationSnapshot.transitionHistoryWire,
-                    reconciliationEpoch = epoch
-                )
-                emitReconciliationSignal(
-                    ReconciliationSignal.runtimeTruthSnapshot(
-                        idleTruth,
-                        durableSessionId = currentDurableSessionId(),
-                        sessionContinuityEpoch = currentSessionContinuityEpoch(),
-                        v2RoutingDecision = routingDecision,
-                        additionalPayload = currentSignalEmissionTruthPayload(isTerminal = false)
-                    )
-                )
-                GalaxyLogger.log(
-                    GalaxyLogger.TAG_LIVE_EXECUTION,
-                    mapOf(
-                        "event" to "reconnect_idle_truth_snapshot_emitted",
-                        "source" to source.wireValue,
-                        "reconciliation_epoch" to epoch
-                    )
-                )
-            }
-        }
+        // PR-62 快照发射时序修复:重连空闲真相快照原先在这里(openAttachedSession 内)
+        // 直接发出,但此时 _reconnectRecoveryState 仍是 RECOVERING(RECOVERED 转换发生在
+        // onConnected 里 openAttachedSession 返回之后),快照携带的统一恢复相位永远是
+        // "recovering"/PENDING_RECONNECT_VERDICT,且该路径此后不再发出任何后续快照——
+        // 违反 INV-ROUTING-07(PENDING_RECONNECT_VERDICT 意味着等待一个非 RECOVERING
+        // 相位的后续快照)与 INV-REC-05(REQUIRES_RECONCILIATION 必须经
+        // RUNTIME_TRUTH_SNAPSHOT 上报)。发射已移到 onConnected 中 RECOVERED 转换与
+        // syncUnifiedRecoveryPhase() 之后(见 emitReconnectIdleTruthSnapshot),
+        // PR-33/PR-04 的顺序保证(epoch 先于 RECOVERED 可见)不受影响。
+    }
+
+    /**
+     * PR-62: On reconnect, emit a RUNTIME_TRUTH_SNAPSHOT with IDLE active task state.
+     * This is the canonical post-reconnect truth reset: V2 learns that Android has no
+     * in-flight task after reconnect, so it can apply its own fallback policy for any
+     * task that was interrupted by the disconnect.
+     *
+     * MUST be called AFTER the RECOVERED transition + [syncUnifiedRecoveryPhase] so the
+     * snapshot carries the resolved recovery phase, not the transient RECOVERING one.
+     */
+    private fun emitReconnectIdleTruthSnapshot() {
+        val descriptor = hostDescriptor ?: return
+        val epoch = nextReconciliationEpoch()
+        val participationSnapshot = evaluateAuthoritativeParticipationSnapshot(
+            readinessSatisfied = false,
+            distributedRuntimeActivity = false
+        )
+        val inflightRecovery = inflightContinuityRecovery.value
+        val unifiedPhase = unifiedRecoveryPhase.value
+        val routingDecision =
+            AndroidCrossRepoRecoveryStateRoutingContract.routeRecoveryPhase(unifiedPhase)
+        val idleTruth = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor,
+            sessionSnapshot = currentHostSessionSnapshot(),
+            healthState = _lastKnownHealthState,
+            readinessState = ParticipantReadinessState.UNKNOWN,
+            activeTaskId = null,
+            activeTaskStatus = null,
+            inflightContinuityState = unifiedPhase.wireValue,
+            inflightContinuityTaskId = inflightRecovery.taskId,
+            inflightContinuitySource = inflightRecovery.source,
+            inflightContinuityObservedAtMs = inflightRecovery.observedAtMs,
+            carrierForegroundVisible = appForegroundVisible.value,
+            interactionSurfaceReady = settings.accessibilityReady && settings.overlayReady,
+            authoritativeParticipationState = participationSnapshot.state.wireValue,
+            authoritativeParticipationTransitionSequence = participationSnapshot.transitionSequence,
+            authoritativeParticipationTransitionTrigger = participationSnapshot.lastTransitionTrigger,
+            authoritativeParticipationTransitionHistory = participationSnapshot.transitionHistoryWire,
+            reconciliationEpoch = epoch
+        )
+        emitReconciliationSignal(
+            ReconciliationSignal.runtimeTruthSnapshot(
+                idleTruth,
+                durableSessionId = currentDurableSessionId(),
+                sessionContinuityEpoch = currentSessionContinuityEpoch(),
+                v2RoutingDecision = routingDecision,
+                additionalPayload = currentSignalEmissionTruthPayload(isTerminal = false)
+            )
+        )
+        GalaxyLogger.log(
+            GalaxyLogger.TAG_LIVE_EXECUTION,
+            mapOf(
+                "event" to "reconnect_idle_truth_snapshot_emitted",
+                "source" to SessionOpenSource.RECONNECT_RECOVERY.wireValue,
+                "reconciliation_epoch" to epoch
+            )
+        )
     }
 
     /**
