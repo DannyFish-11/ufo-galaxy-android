@@ -1260,9 +1260,16 @@ class GalaxyConnectionService : Service() {
                 val activeId = activeTakeoverId
                 if (activeId != null) {
                     serviceScope.launch {
+                        // 真 bug 修复(与上面 recordDelegatedTaskAccepted 那处同一轮排查
+                        // 发现):这里此前硬编码 taskId = ""——即便 shouldSuppressTerminalSignal
+                        // 守卫的主根因修好,这条路径仍会因为传的是空字符串、永远对不上真实
+                        // _activeTaskId 而被抑制。RuntimeController.activeTaskId 是既有的
+                        // 公开只读属性(见 RuntimeController.kt:864),直接读当前在飞的任务 id;
+                        // 确实没有在飞任务时(理论上不会发生在这条"断线时有 activeTakeoverId"
+                        // 分支里,但保留空字符串兜底,不改变"没有匹配任务时应被抑制"的既有语义)。
                         UFOGalaxyApplication.runtimeController.notifyTakeoverFailed(
                             takeoverId = activeId,
-                            taskId = "",
+                            taskId = UFOGalaxyApplication.runtimeController.activeTaskId ?: "",
                             traceId = "",
                             reason = "ws_disconnect_during_takeover",
                             cause = TakeoverFallbackEvent.Cause.DISCONNECT
@@ -6733,11 +6740,23 @@ class GalaxyConnectionService : Service() {
                 )
             }
 
-            // PR-14: Record that a delegated execution has been accepted under the current
-            // attached session.  This increments the session's delegatedExecutionCount without
-            // re-creating the session or changing its identity — multiple tasks can flow
-            // through the same session without any per-task session re-init.
-            UFOGalaxyApplication.runtimeController.recordDelegatedExecutionAccepted()
+            // 真 bug 修复(runtime-regression 349 处失败排查发现):这里此前一直调用
+            // PR-14 时代的旧方法 recordDelegatedExecutionAccepted(),从未升级到 PR-62
+            // 引入的 recordDelegatedTaskAccepted(taskId, ...)——后者内部第一步就是调用
+            // 前者(严格超集),额外还会设置 _activeTaskId/_activeTaskStatus。这两个字段
+            // 是 shouldSuppressTerminalSignal() 守卫的唯一判据,只在这里被赋值——旧方法
+            // 从不触碰它们。结果:_activeTaskId 在真机上的 App 生命周期内永远是 null,
+            // notifyTakeoverFailed/publishTaskResult/publishTaskCancelled/
+            // publishTaskStatusUpdate 这四类"终态信号"的守卫永远判定"抑制",V2 后端
+            // 从未真正收到过手机这边的接管失败/任务完成/任务取消/状态更新——静默失效,
+            // 直到这批 runtime 测试第一次真正跑完(此前一直因 CI 挂起而从未执行到)才
+            // 暴露。改用 recordDelegatedTaskAccepted 后,原有的 delegatedExecutionCount
+            // 递增行为保留(内部仍会调用旧方法),额外正确设置 active task 状态,并按其
+            // 文档注释顺带发出一个 TASK_ACCEPTED 信号(此前同样从未发出过)。
+            UFOGalaxyApplication.runtimeController.recordDelegatedTaskAccepted(
+                taskId = envelope.task_id,
+                correlationId = envelope.trace_id
+            )
 
             // PR-12: The executor owns all lifecycle transitions (PENDING → ACTIVATING →
             // ACTIVE → COMPLETED/FAILED); do not pre-advance the record here.
