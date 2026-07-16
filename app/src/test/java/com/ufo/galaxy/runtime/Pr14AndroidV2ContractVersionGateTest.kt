@@ -506,10 +506,15 @@ class Pr14AndroidV2ContractVersionGateTest {
     }
 
     @Test
-    fun `StabilizationBaseline total entry count is 156`() {
+    fun `StabilizationBaseline total entry count is 157`() {
+        // 真 bug 修复(runtime-regression 349 处失败排查发现):这里断言的是写这个测试
+        // 那个 PR 落地时的快照值(156),后续 PR 持续往 StabilizationBaseline.entries
+        // 里加条目,数字自然过期(现在实际是 157)。这个断言本身设计上就是"写死数字、
+        // 每次新增条目都要回来改一次"的脆弱模式,暂不重构(改成 >= 需要连带改测试名,
+        // 本仓库无本地编译器核实,倾向最小改动),先更新到当前真实值。
         assertEquals(
             "Total entry count drift — register new surface or update this assertion",
-            156,
+            157,
             StabilizationBaseline.entries.size
         )
     }

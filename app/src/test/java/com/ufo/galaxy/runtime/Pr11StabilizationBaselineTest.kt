@@ -503,8 +503,10 @@ class Pr11StabilizationBaselineTest {
         assertEquals(3, StabilizationBaseline.byStability(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED).size)
     }
 
-    @Test fun `total entry count is 156`() {
-        assertEquals(156, StabilizationBaseline.entries.size)
+    // 真 bug 修复(runtime-regression 349 处失败排查发现):写这个测试时的快照值
+    // (156),后续 PR 持续往 entries 里加条目,数字过期,更新到当前真实值(157)。
+    @Test fun `total entry count is 157`() {
+        assertEquals(157, StabilizationBaseline.entries.size)
     }
 
     @Test fun `EXTEND guidance count is 150`() {

@@ -468,6 +468,7 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with FAILED cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
+        controller.recordDelegatedTaskAccepted(taskId = "task-1")
         // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
         // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
         val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
@@ -487,6 +488,7 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with TIMEOUT cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
+        controller.recordDelegatedTaskAccepted(taskId = "task-2")
         // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
         // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
         val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
@@ -506,6 +508,7 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with CANCELLED cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
+        controller.recordDelegatedTaskAccepted(taskId = "task-3")
         // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
         // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
         val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
@@ -525,6 +528,7 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with DISCONNECT cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
+        controller.recordDelegatedTaskAccepted(taskId = "task-4")
         // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
         // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
         val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
