@@ -367,7 +367,9 @@ class Pr3CanonicalSessionAxisTest {
             CanonicalSessionFamily.ATTACHED_RUNTIME_SESSION to SessionContinuityLayer.ATTACHMENT,
             CanonicalSessionFamily.DELEGATION_TRANSFER_SESSION to SessionContinuityLayer.TRANSFER,
             CanonicalSessionFamily.CONVERSATION_SESSION to SessionContinuityLayer.CONVERSATION,
-            CanonicalSessionFamily.MESH_SESSION to SessionContinuityLayer.MESH
+            CanonicalSessionFamily.MESH_SESSION to SessionContinuityLayer.MESH,
+            // PR-1 引入第七个会话族:DURABLE_RUNTIME_SESSION 对应 DURABLE 连续性层(补齐映射表)。
+            CanonicalSessionFamily.DURABLE_RUNTIME_SESSION to SessionContinuityLayer.DURABLE
         )
         CanonicalSessionAxis.carriers.forEach { entry ->
             val expected = expectedLayerByFamily[entry.sessionFamily]

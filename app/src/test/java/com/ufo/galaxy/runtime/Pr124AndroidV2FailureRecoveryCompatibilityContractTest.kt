@@ -12,6 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
@@ -476,9 +477,11 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
     }
 
     @Test
-    fun `FAILURE_RECOVERY_INVARIANTS has exactly 15 entries`() {
+    fun `FAILURE_RECOVERY_INVARIANTS has exactly 16 entries`() {
+        // 过期快照:生产端已有意新增 v2_alignment_map_covers_all_classes 不变量
+        // (V2_FAILURE_RECOVERY_ALIGNMENT_MAP 已登记进 StabilizationBaseline),15→16。
         assertEquals(
-            15,
+            16,
             AndroidV2FailureRecoveryCompatibilityContract.FAILURE_RECOVERY_INVARIANTS.size
         )
     }
@@ -523,7 +526,16 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
     fun `notifyTakeoverFailed TIMEOUT carries CLEAN_TIMEOUT failure_recovery_class`() =
         runBlocking {
             val controller = buildController()
+            // 终态信号守卫:必须先登记同 taskId 的受理记录,否则 notifyTakeoverFailed 静默 no-op。
+            controller.recordDelegatedTaskAccepted("task-timeout-124")
 
+            // 先以 UNDISPATCHED 订阅(过滤 TASK_FAILED,跳过登记时的 TASK_ACCEPTED)再触发,
+            // 规避 replay=0 热流订阅-发射竞态。
+            val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) {
+                    controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
+                }
+            }
             controller.notifyTakeoverFailed(
                 takeoverId = "to-timeout-124",
                 taskId = "task-timeout-124",
@@ -532,7 +544,7 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
                 cause = TakeoverFallbackEvent.Cause.TIMEOUT
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = signalJob.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
             assertEquals(
@@ -545,7 +557,15 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
     fun `notifyTakeoverFailed FAILED carries EXECUTION_FAILED failure_recovery_class`() =
         runBlocking {
             val controller = buildController()
+            // 终态信号守卫:必须先登记同 taskId 的受理记录,否则 notifyTakeoverFailed 静默 no-op。
+            controller.recordDelegatedTaskAccepted("task-failed-124")
 
+            // 同上:先订阅(UNDISPATCHED,过滤 TASK_FAILED)再触发。
+            val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) {
+                    controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
+                }
+            }
             controller.notifyTakeoverFailed(
                 takeoverId = "to-failed-124",
                 taskId = "task-failed-124",
@@ -554,7 +574,7 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
                 cause = TakeoverFallbackEvent.Cause.FAILED
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = signalJob.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
             assertEquals(
@@ -567,7 +587,15 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
     fun `notifyTakeoverFailed DISCONNECT carries SESSION_INTERRUPTED failure_recovery_class`() =
         runBlocking {
             val controller = buildController()
+            // 终态信号守卫:必须先登记同 taskId 的受理记录,否则 notifyTakeoverFailed 静默 no-op。
+            controller.recordDelegatedTaskAccepted("task-disconnect-124")
 
+            // 同上:先订阅(UNDISPATCHED,过滤 TASK_FAILED)再触发。
+            val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) {
+                    controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
+                }
+            }
             controller.notifyTakeoverFailed(
                 takeoverId = "to-disconnect-124",
                 taskId = "task-disconnect-124",
@@ -576,7 +604,7 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
                 cause = TakeoverFallbackEvent.Cause.DISCONNECT
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = signalJob.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
             assertEquals(
@@ -589,7 +617,15 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
     fun `notifyTakeoverFailed TASK_FAILED signal has failure_is_retry_eligible key`() =
         runBlocking {
             val controller = buildController()
+            // 终态信号守卫:必须先登记同 taskId 的受理记录,否则 notifyTakeoverFailed 静默 no-op。
+            controller.recordDelegatedTaskAccepted("task-retry-124")
 
+            // 同上:先订阅(UNDISPATCHED,过滤 TASK_FAILED)再触发。
+            val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) {
+                    controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_FAILED }
+                }
+            }
             controller.notifyTakeoverFailed(
                 takeoverId = "to-retry-124",
                 taskId = "task-retry-124",
@@ -598,7 +634,7 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
                 cause = TakeoverFallbackEvent.Cause.TIMEOUT
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = signalJob.await()
             assertNotNull("Expected TASK_FAILED signal", signal)
             assertTrue(
                 ReconciliationSignal.KEY_FAILURE_IS_RETRY_ELIGIBLE in signal!!.payload
@@ -615,7 +651,8 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
             controller.recordDelegatedTaskAccepted("task-interrupt-124")
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = launch {
+            // UNDISPATCHED:让 collector 在断连触发前同步执行到订阅点,规避热流订阅-发射竞态。
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 
@@ -643,7 +680,8 @@ class Pr124AndroidV2FailureRecoveryCompatibilityContractTest {
             controller.recordDelegatedTaskAccepted("task-schema-124")
 
             val signals = mutableListOf<ReconciliationSignal>()
-            val job = launch {
+            // UNDISPATCHED:让 collector 在断连触发前同步执行到订阅点,规避热流订阅-发射竞态。
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                 controller.reconciliationSignals.collect { signals.add(it) }
             }
 

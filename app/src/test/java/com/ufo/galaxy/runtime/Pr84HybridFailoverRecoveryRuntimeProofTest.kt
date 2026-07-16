@@ -171,7 +171,10 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
                 ),
                 is_resumable = true,
                 interruption_reason = "disconnect_during_execution",
-                policy_routing_outcome = PolicyRoutingContext.RoutingOutcome.RESUMED.wireValue
+                policy_routing_outcome = PolicyRoutingContext.RoutingOutcome.RESUMED.wireValue,
+                // posture gate(PR #533 契约):缺省 null 按 control_only 拦截(STATUS_DISABLED),
+                // 显式声明 join_runtime 才允许本机恢复执行。
+                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
             )
         )
         assertTrue(resumedResult.status == EdgeExecutor.STATUS_SUCCESS)
