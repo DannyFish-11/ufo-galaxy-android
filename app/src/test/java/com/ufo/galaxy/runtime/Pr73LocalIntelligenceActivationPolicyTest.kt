@@ -52,7 +52,17 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        val assetManager = ModelAssetManager(tmpDir)
+        // MOBILEVLM_SHA256 是硬编码强校验:测试写入的 "stub" 内容必然校验失败(CORRUPTED),
+        // 导致 start() 在 MODEL_FILES 阶段被拒。按 ModelAssetManagerTest 的既定做法,
+        // 用 checksumOverrides 显式禁用校验,让激活策略测试专注于 warmup 语义本身。
+        val assetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
         planner = StubPlannerService()
         grounding = StubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, assetManager)
@@ -671,9 +681,12 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         grounding.warmupSucceeds = false
         manager.start()
 
+        // 过期断言:start() 管线内的双侧失败按生产语义进入 FailedStartup(启动期失败);
+        // Failed 仅保留给启动成功之后的运行期崩溃(见 ManagerState.FailedStartup KDoc)。
+        // 两者对能力面的效果一致(均映射 DISABLED / UNAVAILABLE_FAILED)。
         assertTrue(
-            "Pre-condition: state must be Failed after both runtimes fail",
-            manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed
+            "Pre-condition: state must be FailedStartup after both runtimes fail",
+            manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup
         )
 
         val snapshot = LocalIntelligenceActivationPolicySurface.buildSnapshot(

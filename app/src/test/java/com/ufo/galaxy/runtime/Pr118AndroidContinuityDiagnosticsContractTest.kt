@@ -12,6 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -311,13 +312,17 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
     // ══════════════════════════════════════════════════════════════════════════
     // 4. Reconnect classification — observable after reconnect state transition
     // ══════════════════════════════════════════════════════════════════════════
+    // 测试修复(超时排查):continuityDiagnosticsEvents 是 replay=0 的热流,生产方在
+    // runBlocking 主体里同步 tryEmit;默认 async 要等父协程挂起后才开始收集,事件在订阅
+    // 前已发出并丢失,导致 withTimeout 超时。以下各测试统一改用
+    // async(start = CoroutineStart.UNDISPATCHED),确保先订阅(挂起在 first)再触发生产方。
 
     @Test
     fun `WS disconnect emits ReconnectClassificationOutcome IDLE to RECOVERING`() = runBlocking {
         val (controller, client) = buildController()
         controller.setActiveForTest()
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome &&
@@ -343,7 +348,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
         // Verify precondition
         assertEquals(ReconnectRecoveryState.RECOVERING, controller.reconnectRecoveryState.value)
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome &&
@@ -367,7 +372,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
         client.simulateDisconnected()
         assertEquals(ReconnectRecoveryState.RECOVERING, controller.reconnectRecoveryState.value)
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome &&
@@ -390,7 +395,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
             val (controller, client) = buildController()
             controller.setActiveForTest()
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconnectClassificationOutcome
@@ -418,7 +423,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
             settings.crossDeviceEnabled = false // no artifact → RESUMED_CLEANLY
             val (controller, _) = buildController(settings = settings)
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.RecoveryArtifactResolved &&
@@ -450,7 +455,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
             settings.crossDeviceEnabled = false // → LOST_INFLIGHT path
             val (controller, _) = buildController(settings = settings)
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.RecoveryArtifactResolved &&
@@ -480,7 +485,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
         settings.crossDeviceEnabled = true // → REQUIRES_RECONCILIATION path
         val (controller, _) = buildController(settings = settings)
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.RecoveryArtifactResolved &&
@@ -519,7 +524,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
             settings.lastDurableSessionId = newSessionId
             val (controller, _) = buildController(settings = settings)
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.RecoveryArtifactResolved
@@ -547,7 +552,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
             val (controller, _) = buildController(settings = settings)
             controller.setActiveForTest()
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconciliationSignalDiagnostic &&
@@ -582,7 +587,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
         val (controller, _) = buildController(settings = settings)
         controller.setActiveForTest()
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.ReconciliationSignalDiagnostic
@@ -604,7 +609,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
     fun `recordOfflineReplayQueued emits OfflineReplayEvent with QUEUED kind`() = runBlocking {
         val (controller, _) = buildController()
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent &&
@@ -626,7 +631,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
     fun `recordOfflineReplayFlushed emits OfflineReplayEvent with FLUSHED kind`() = runBlocking {
         val (controller, _) = buildController()
 
-        val deferred = async {
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
             withTimeout(2_000L) {
                 controller.continuityDiagnosticsEvents.first {
                     it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent &&
@@ -647,7 +652,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
         runBlocking {
             val (controller, _) = buildController()
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent
@@ -670,7 +675,7 @@ class Pr118AndroidContinuityDiagnosticsContractTest {
             val (controller, _) = buildController()
             // No session opened yet
 
-            val deferred = async {
+            val deferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(2_000L) {
                     controller.continuityDiagnosticsEvents.first {
                         it is AndroidContinuityDiagnosticsContract.ContinuityDiagnosticsEvent.OfflineReplayEvent

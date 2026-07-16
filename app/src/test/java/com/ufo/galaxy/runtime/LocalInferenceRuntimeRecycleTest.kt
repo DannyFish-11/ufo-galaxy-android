@@ -40,7 +40,17 @@ class LocalInferenceRuntimeRecycleTest {
         File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
 
-        val assetManager = ModelAssetManager(tmpDir)
+        // MOBILEVLM_SHA256 是硬编码强校验:测试写入的 "stub" 内容必然校验失败(CORRUPTED),
+        // 导致 start() 在 MODEL_FILES 阶段被拒。按 ModelAssetManagerTest 的既定做法,
+        // 用 checksumOverrides 显式禁用校验,让回收/恢复测试专注于 warmup 语义本身。
+        val assetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
         planner = CrashableStubPlannerService()
         grounding = CrashableStubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, assetManager)
@@ -521,7 +531,16 @@ class LocalInferenceRuntimeRecycleTest {
     fun `downloadSpecsForMissing returns bin spec when only bin is missing`() {
         // Remove only the bin file
         File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).delete()
-        val mam = ModelAssetManager(tmpDir)
+        // MOBILEVLM_SHA256 强校验会把 "stub" 内容判为 CORRUPTED,使 vlmSpec 意外出现;
+        // 本测试只关心"仅 bin 缺失"的下载规格,故禁用校验。
+        val mam = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
         mam.verifyAll()
 
         val specs = mam.downloadSpecsForMissing()

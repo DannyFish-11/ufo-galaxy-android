@@ -31,7 +31,18 @@ class LocalInferenceRuntimeManagerTest {
         File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        modelAssetManager = ModelAssetManager(tmpDir)
+        // MOBILEVLM_SHA256 是硬编码强校验(security 审计后每次 verify 都强制执行):
+        // 测试写入的 "stub" 内容必然校验失败(CORRUPTED),导致 start() 在 MODEL_FILES
+        // 阶段被拒。按 ModelAssetManagerTest 的既定做法,用 checksumOverrides 显式禁用
+        // 校验,让生命周期测试专注于 warmup 语义本身。
+        modelAssetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
         planner = StubPlannerService()
         grounding = StubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, modelAssetManager)
