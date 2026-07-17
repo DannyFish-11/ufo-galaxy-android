@@ -115,7 +115,17 @@ class FirstTimeSetupActivity : AppCompatActivity() {
                 val settings = AppSettings.getInstance(applicationContext)
                 settings.gatewayHost = host
                 settings.gatewayPort = port
-                settings.useTls = cbTailscale.isChecked && host.startsWith("https")
+                // TLS-FIX: the old expression `cbTailscale.isChecked && host.startsWith("https")`
+                // was dead logic — the host field holds a bare IP/hostname (validated above to
+                // reject URL forms), so it never starts with "https" and useTls was therefore
+                // ALWAYS overwritten to false, silently disabling TLS (contradicting the
+                // SECURITY-FIX-R5 default of true). Correct semantics: Tailscale traffic is
+                // already encrypted by WireGuard, so plain ws:// is intentional there; for any
+                // other host preserve the existing setting (the Network Settings screen has a
+                // dedicated TLS switch for changing it).
+                if (cbTailscale.isChecked) {
+                    settings.useTls = false
+                }
 
                 Log.i(TAG, "Configuration saved: host=$host, port=$port")
                 Toast.makeText(this, getString(R.string.setup_saved), Toast.LENGTH_SHORT).show()

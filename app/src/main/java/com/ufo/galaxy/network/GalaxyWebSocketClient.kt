@@ -1256,7 +1256,12 @@ class GalaxyWebSocketClient(
                 reconnectAttempts = 0
                 _reconnectAttemptCount.value = 0
                 // WS-1: reset pong timeout tracking on every successful open
-                lastPongTime = System.currentTimeMillis()
+                // CLOCK-FIX: must use SystemClock.elapsedRealtime() — the same clock
+                // used by onPongReceived() and sendHeartbeat()'s timeout check.
+                // Mixing in System.currentTimeMillis() (epoch) here made the first
+                // timeSinceLastPong computation hugely negative, silently disabling
+                // dead-connection detection until the first heartbeat_ack arrived.
+                lastPongTime = SystemClock.elapsedRealtime()
                 missedHeartbeats = 0
                 listeners.forEach { it.onConnected() }
 
@@ -1335,6 +1340,9 @@ class GalaxyWebSocketClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // LEAK-FIX: OkHttp requires the (possibly non-null) failure response to be
+                // closed, otherwise its connection/body is leaked for the lifetime of the client.
+                response?.close()
                 Log.e(TAG, "[WS:DISCONNECT] WebSocket failure: ${t.message}", t)
                 GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("type" to "failure", "error" to (t.message ?: "unknown")))
                 isConnected = false
@@ -2915,7 +2923,16 @@ class GalaxyWebSocketClient(
             if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
                 Log.e(TAG, "[WS:HEARTBEAT] Max missed heartbeats ($MAX_MISSED_HEARTBEATS) — forcing reconnect")
                 missedHeartbeats = 0
-                disconnect()
+                // WS-1-FIX: tear down the dead socket WITHOUT disarming auto-reconnect.
+                // Calling disconnect() here was a bug: it sets shouldReconnect=false
+                // (and closes with code 1000, which onClosed treats as an intentional
+                // close), so the scheduleReconnect() below could never fire — the
+                // device permanently dropped out of the distributed system on a dead
+                // link, exactly the terminal dead state the watchdog design eliminates.
+                stopHeartbeat()
+                webSocket?.cancel()
+                webSocket = null
+                isConnected = false
                 if (shouldReconnect) {
                     scheduleReconnect()
                 }
