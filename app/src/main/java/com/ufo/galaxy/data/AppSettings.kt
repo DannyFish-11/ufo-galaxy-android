@@ -9,10 +9,6 @@ import com.ufo.galaxy.BuildConfig
 import com.ufo.galaxy.network.resolveAllowSelfSigned
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import java.security.KeyStoreException
 import java.security.GeneralSecurityException
 import java.util.Properties
@@ -603,17 +599,12 @@ class InMemoryAppSettings(
  * - [overlayReady]: `false` — updated by [ReadinessChecker].
  */
 /**
- * SECURITY-FIX: Uses background CoroutineScope with Dispatchers.IO for SharedPreferences writes
- * to avoid main-thread I/O. All edits are committed asynchronously on IO dispatcher.
+ * SECURITY-FIX: Uses [SharedPreferences.Editor.apply] for all writes so no caller thread
+ * performs disk I/O, while in-memory updates stay synchronous and read-after-write safe.
  */
 class SharedPrefsAppSettings(context: Context) : AppSettings {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    /** Background scope for async SharedPreferences writes — avoids main-thread I/O (P2-FIX). */
-    private val ioScope: CoroutineScope = CoroutineScope(
-        Dispatchers.IO + SupervisorJob() + kotlinx.coroutines.CoroutineName("SharedPrefsAppSettingsIO")
-    )
 
     // Secure storage for sensitive values (gatewayToken). Uses AES256-GCM via Android Keystore.
     // Declared as SharedPreferences interface so we can fall back to plain prefs if Keystore fails.
@@ -649,13 +640,27 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
     private val defaultScaledMaxEdge: Int
 
     /**
-     * SECURITY-FIX: Commits SharedPreferences edits asynchronously on IO dispatcher.
-     * Replaces synchronous apply() calls that could trigger main-thread I/O.
+     * SECURITY-FIX: Applies SharedPreferences edits without caller-thread disk I/O.
+     *
+     * BUG-FIX(round2): the previous implementation deferred [SharedPreferences.Editor.commit]
+     * to a private IO coroutine. Editor modifications are invisible to getters until
+     * commit/apply, so any read-after-write on the calling thread observed the *old*
+     * value. That broke flows which write settings and immediately read them back:
+     *  - MainViewModel.saveNetworkSettings computed `wsChanged` from stale values and
+     *    passed the OLD effectiveGatewayWsUrl() to updateRuntimeConnectionConfig;
+     *  - the M3 remote gateway-config change detector compared stale post-write values
+     *    and silently skipped reconnects;
+     *  - pairThisDevice stored the token and immediately read back an EMPTY gatewayToken
+     *    for updateRuntimeConnectionConfig;
+     *  - durableParticipantId could regress if the process died before the async commit.
+     * [SharedPreferences.Editor.apply] updates the in-memory map synchronously
+     * (read-after-write safe) and defers the disk write to the framework writer
+     * thread (no caller-thread I/O) — the canonical Android pattern.
      */
     private fun asyncCommit(editorAction: SharedPreferences.Editor.() -> Unit) {
         val editor = prefs.edit()
         editor.editorAction()
-        ioScope.launch { editor.commit() }
+        editor.apply()
     }
 
     init {
@@ -792,7 +797,12 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
      */
     override var gatewayToken: String
         get() = securePrefs.getString(KEY_GATEWAY_TOKEN, "") ?: ""
-        set(value) { ioScope.launch { securePrefs.edit().putString(KEY_GATEWAY_TOKEN, value).commit() } }
+        set(value) {
+            // BUG-FIX(round2): apply() — synchronous in-memory update (read-after-write
+            // safe, e.g. pairThisDevice stores the token and immediately passes it to
+            // updateRuntimeConnectionConfig) with framework-deferred disk I/O.
+            securePrefs.edit().putString(KEY_GATEWAY_TOKEN, value).apply()
+        }
 
     // ── PR-7: Prior durable session ID (process-recreation re-attach hint) ────
 
@@ -838,6 +848,7 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         set(value) {
             asyncCommit { putLong(KEY_PLANNER_TEMPERATURE, java.lang.Double.doubleToRawLongBits(value)) }
         }
+
 
     override var plannerTimeoutMs: Int
         get() = prefs.getInt(KEY_PLANNER_TIMEOUT_MS, defaultPlannerTimeoutMs)
