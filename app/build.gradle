@@ -94,6 +94,15 @@ android {
     // 直到 gate 6/7(唯一跑 `./gradlew :app:test`,同时构建 debug+release)第一次真正执行。
     // 改为直接从 project property 驱动判断,不再依赖不存在的反查 API；顺带把错误提示里
     // 一直承诺、但从未真正接线的 -PcertPinHash 覆盖开关落到实处。
+    //
+    // 第二轮真 bug 修复:上一轮把校验挂在 variant.preBuildProvider(preReleaseBuild)上——
+    // 但 preBuild 是 release 变体几乎所有下游任务的公共前置依赖,不仅是 assembleRelease/
+    // bundleRelease 这类真正"打包出可分发产物"的任务,也连累了 testReleaseUnitTest
+    // (纯编译+跑 release 变体 JVM 单测,产物不出仓库、不涉及签名分发,gate 6/7 因此
+    // 被这条本该只守"分发前最后一关"的护栏误伤)。护栏意图本身正确、不该削弱——
+    // 错的是钩子太靠前太宽。迁移到只在真正打包分发产物的 assemble<Variant>/
+    // bundle<Variant> 任务上触发,按任务名匹配(不依赖不稳定的 variant provider getter,
+    // 避免重蹈上一轮"属性不存在"的覆辙);占位符哈希依旧绝对进不了任何可分发产物。
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
             def pinHashOverride = project.findProperty('certPinHash')
@@ -103,16 +112,21 @@ android {
             def effectivePinHash = pinHashOverride
                 ? "\"${pinHashOverride}\"".toString()
                 : '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"'
-            variant.preBuildProvider.get().doFirst {
-                if (effectivePinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
-                    throw new GradleException(
-                        "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
-                        "Generate the real hash with:\n" +
-                        "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
-                        "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
-                        "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
-                        "Then set it in build.gradle or via -PcertPinHash=sha256/YOUR_HASH"
-                    )
+            def variantNameCap = variant.name.capitalize()
+            tasks.matching {
+                it.name == "assemble${variantNameCap}" || it.name == "bundle${variantNameCap}"
+            }.configureEach { packagingTask ->
+                packagingTask.doFirst {
+                    if (effectivePinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
+                        throw new GradleException(
+                            "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
+                            "Generate the real hash with:\n" +
+                            "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
+                            "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
+                            "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
+                            "Then set it in build.gradle or via -PcertPinHash=sha256/YOUR_HASH"
+                        )
+                    }
                 }
             }
         }
