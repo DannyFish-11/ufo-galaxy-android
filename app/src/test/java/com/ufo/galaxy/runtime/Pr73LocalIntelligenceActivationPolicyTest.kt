@@ -849,9 +849,16 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         }
 
         override fun warmupWithResult(): com.ufo.galaxy.inference.WarmupResult {
-            if (crashed) return com.ufo.galaxy.inference.WarmupResult.failure(
-                com.ufo.galaxy.inference.WarmupResult.WarmupStage.HEALTH_CHECK, "Crashed"
-            )
+            // 桩修复(与 loadModel 同语义):LocalInferenceRuntimeManager.start() 的
+            // warmup 实际走本方法;原实现 crashed=true 后永远失败且无清除路径,
+            // "成功恢复"场景在构造上不可能。语义修正为:一次成功的 warmup
+            // (warmupSucceeds=true)即修复崩溃。
+            if (crashed && !warmupSucceeds) {
+                return com.ufo.galaxy.inference.WarmupResult.failure(
+                    com.ufo.galaxy.inference.WarmupResult.WarmupStage.HEALTH_CHECK, "Crashed"
+                )
+            }
+            crashed = false
             loaded = warmupSucceeds
             return if (warmupSucceeds) com.ufo.galaxy.inference.WarmupResult.success()
             else com.ufo.galaxy.inference.WarmupResult.failure(
