@@ -235,6 +235,14 @@ class GalaxyConnectionService : Service() {
     private lateinit var webSocketClient: GalaxyWebSocketClient
     private val transportManager = AipTransportManager.getInstance()
     private val gson = Gson()
+
+    // ROUND-3-FIX: onStartCommand 会对同一个运行中的服务实例重复触发
+    // （每次 startService/startForegroundService 调用，例如 MainActivity 每次启动都会
+    // 调 startServices() → startForegroundService()）。常驻 collector 协程和一次性
+    // 模型加载只允许启动一次，否则协程会累积，V2 会收到重复上行消息
+    // （reconciliation_signal、device_state_snapshot 等），模型也会被重复加载。
+    // onStartCommand 全在主线程串行执行，普通布尔即可保证可见性。
+    private var runtimeWorkStarted = false
     // A2-FIX: Named CoroutineScope with SupervisorJob for structured concurrency cleanup.
     // scope.cancel() is called in onDestroy() to prevent coroutine leaks when Service is destroyed.
     private val serviceScope = CoroutineScope(
@@ -1625,6 +1633,14 @@ class GalaxyConnectionService : Service() {
         startForeground(NOTIFICATION_ID, createNotification(
             if (savedCrossDevice) "跨设备模式已启用" else "本地模式"
         ))
+
+        // ROUND-3-FIX: 以下均为"每服务实例一次性"的启动工作（常驻 collector 协程、
+        // 模型加载、基线报告）。onStartCommand 可重复触发，必须只执行一次。
+        if (runtimeWorkStarted) {
+            Log.d(TAG, "onStartCommand: 常驻启动工作已完成，跳过重复初始化")
+            return START_STICKY
+        }
+        runtimeWorkStarted = true
 
         // Pre-warm and then load models in background.
         // Pre-warming sends a lightweight health ping + optional dry-run to reduce cold start
