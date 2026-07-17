@@ -908,6 +908,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         reconnect: Boolean = false
     ) {
         val s = UFOGalaxyApplication.appSettings
+        // BUG-FIX(round2): AppSettings.gatewayHost throws IllegalArgumentException on blank
+        // input, and NetworkSettingsScreen only validates the port field — saving with a
+        // blank host crashed the app on the main thread. Reject the save the same way the
+        // screen rejects an invalid port: surface an error and leave all settings untouched.
+        if (gatewayHost.isBlank()) {
+            val reason = "网关主机不能为空，请填写主机地址后再保存"
+            Log.w(TAG, "saveNetworkSettings: blank gateway host rejected")
+            pushError(reason)
+            _uiState.update { it.copy(error = reason) }
+            return
+        }
         val oldEffectiveWsUrl = s.effectiveGatewayWsUrl()
         val oldEffectiveRestUrl = s.effectiveRestBaseUrl()
         s.gatewayHost = gatewayHost.trim()
