@@ -22,9 +22,9 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * when WiFi/MQTT is unavailable (e.g., offline LAN, wearable pairing).
  *
  * Uses BLE GATT:
- * - Service UUID: 0000aip3-0000-1000-8000-00805f9b34fb
- * - RX Characteristic (App → Peer): 0000aip3-0001-... (WRITE)
- * - TX Characteristic (Peer → App): 0000aip3-0002... (NOTIFY)
+ * - Service UUID: 0000a120-0000-1000-8000-00805f9b34fb
+ * - RX Characteristic (App → Peer): 0000a121-0001-... (WRITE)
+ * - TX Characteristic (Peer → App): 0000a122-0002... (NOTIFY)
  *
  * Features:
  * - BLE Central mode (scans and connects to peripherals)
@@ -45,10 +45,13 @@ class BleGatewayClient(
     companion object {
         private const val TAG = "BleGatewayClient"
 
-        // AIP v3 BLE Service and Characteristic UUIDs
-        val AIP_SERVICE_UUID: UUID = UUID.fromString("0000aip3-0000-1000-8000-00805f9b34fb")
-        val RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000aip3-0001-1000-8000-00805f9b34fb")
-        val TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000aip3-0002-1000-8000-00805f9b34fb")
+        // AIP v3 BLE Service and Characteristic UUIDs.
+        // BUG-FIX(round2): the previous "0000aip3-..." literals contained non-hex
+        // characters ('i', 'p'); UUID.fromString throws IllegalArgumentException for
+        // them, so merely loading this class crashed with ExceptionInInitializerError.
+        val AIP_SERVICE_UUID: UUID = UUID.fromString("0000a120-0000-1000-8000-00805f9b34fb")
+        val RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000a121-0000-1000-8000-00805f9b34fb")
+        val TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000a122-0000-1000-8000-00805f9b34fb")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val SCAN_TIMEOUT_MS = 10000L
