@@ -826,7 +826,13 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         private var crashed = false
 
         override fun loadModel(): Boolean {
-            if (crashed) return false
+            // 桩修复:原实现 crashed=true 后 loadModel 永远失败且无任何清除路径,
+            // "成功恢复"场景在构造上就不可能(recoverIfUnhealthy→start→loadModel
+            // 必败→FailedStartup),导致恢复类测试确定性失败。语义修正为:
+            // 一次成功的重新加载(warmupSucceeds=true)即修复崩溃——与
+            // "Recovery: planner comes back" 的测试意图一致。
+            if (crashed && !warmupSucceeds) return false
+            crashed = false
             loaded = warmupSucceeds
             return loaded
         }
