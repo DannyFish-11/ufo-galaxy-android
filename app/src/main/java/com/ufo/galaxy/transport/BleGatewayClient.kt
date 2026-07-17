@@ -262,8 +262,13 @@ class BleGatewayClient(
                 if (txChar != null) {
                     gatt.setCharacteristicNotification(txChar, true)
                     val descriptor = txChar.getDescriptor(CCCD_UUID)
-                    descriptor?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    gatt.writeDescriptor(descriptor)
+                    // descriptor 可能为 null（对端未暴露 CCCD），writeDescriptor(null) 会抛 NPE
+                    if (descriptor != null) {
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        gatt.writeDescriptor(descriptor)
+                    } else {
+                        Log.w(TAG, "CCCD not found on TX characteristic — notifications not enabled")
+                    }
                 }
 
                 // Flush pending messages
