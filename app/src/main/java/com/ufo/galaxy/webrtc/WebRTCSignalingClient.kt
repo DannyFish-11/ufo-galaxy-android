@@ -177,6 +177,11 @@ class WebRTCSignalingClient(
             Log.e(TAG, msg, t)
             isConnected = false
             webSocket = null
+            // BUG-FIX(round2): OkHttp requires the failure-path response body to be
+            // closed; otherwise the underlying connection is not released back to the
+            // pool and leaks for the client's lifetime (same class of leak fixed in
+            // GalaxyWebSocketClient.onFailure in the previous round).
+            response?.close()
             GalaxyLogger.logError(
                 traceId = effectiveTraceId,
                 cause   = t.message ?: "signaling_ws_failure",
