@@ -85,11 +85,26 @@ android {
     }
 
     // Round-4 HIGH: fail release builds when certificate-pinning hash is still a placeholder
+    //
+    // 真 bug 修复:原实现用 variant.buildConfigFields["CERT_PIN_HASH"] 反查已配置的值,
+    // 但 applicationVariants.all 是旧 Variant API(ApplicationVariantImpl),该对象没有
+    // 复数形式的 buildConfigFields 属性——那是新 Variant API(com.android.build.api.variant.Variant)
+    // 才有的东西;旧 API 只有单数形式的写入方法 variant.buildConfigField(type, name, value)。
+    // 此前所有 CI 门只跑 debug 变体,release 分支从未真正执行到这段 doFirst,bug 一直隐身,
+    // 直到 gate 6/7(唯一跑 `./gradlew :app:test`,同时构建 debug+release)第一次真正执行。
+    // 改为直接从 project property 驱动判断,不再依赖不存在的反查 API；顺带把错误提示里
+    // 一直承诺、但从未真正接线的 -PcertPinHash 覆盖开关落到实处。
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
+            def pinHashOverride = project.findProperty('certPinHash')
+            if (pinHashOverride) {
+                variant.buildConfigField "String", "CERT_PIN_HASH", "\"${pinHashOverride}\""
+            }
+            def effectivePinHash = pinHashOverride
+                ? "\"${pinHashOverride}\"".toString()
+                : '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"'
             variant.preBuildProvider.get().doFirst {
-                def pinHash = variant.buildConfigFields["CERT_PIN_HASH"]?.value
-                if (!pinHash || pinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
+                if (effectivePinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
                     throw new GradleException(
                         "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
                         "Generate the real hash with:\n" +
@@ -213,6 +228,12 @@ dependencies {
     // 测试
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
+    // 真机上 org.json 是 android.jar 里的真实实现;但纯 JVM 单测用的是 android.jar 桩,
+    // 在 returnDefaultValues=true 下其方法返回 null,导致任何用 JSONObject 的生产代码
+    // (共 16 个文件:GalaxyLogger/OAuthManager/DevicePairingClient/AipTransportManager…)
+    // 的返回值撞非空类型 → NPE,连锁把上百个单测带崩。加入 org.json 的【真实】Maven 制品到
+    // 测试类路径,单测即用真实实现而非桩,一次性根治所有 org.json 触发的 NPE。
+    testImplementation 'org.json:json:20240303'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')

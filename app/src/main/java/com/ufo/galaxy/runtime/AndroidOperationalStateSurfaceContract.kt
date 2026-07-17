@@ -173,9 +173,12 @@ object AndroidOperationalStateSurfaceContract {
     }
 
     private fun deriveDegradedModeState(input: DerivationInput): String = when {
-        input.reconnectRecoveryState == "recovering" -> "recovering"
+        // 轴正交性修复:恢复进行中已由 recovery_repair 轴(recovery_active)独立表达;
+        // 此处 "recovering" 分支若排在前面,会在重连期间遮蔽 compat_only——
+        // 而 compat 旁路风险驳回是比瞬态重连更持久、更需要 V2 感知的降级原因。
         input.acceptanceArtifact is DeviceAcceptanceArtifact.DeviceRejectedDueToCompatBypassRisk ->
             "compat_only"
+        input.reconnectRecoveryState == "recovering" -> "recovering"
         input.degradedConditionClass in setOf("degraded", "fallback", "constrained", "partial", "delayed") ||
             input.executionModeState == "cross_device_degraded" -> "degraded"
         else -> "nominal"

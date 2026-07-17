@@ -12,6 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -441,13 +442,17 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
         runBlocking {
             val controller = buildController()
 
+            // reconciliationSignals 是 replay=0 热流,先以 UNDISPATCHED 订阅再触发,规避订阅-发射竞态。
+            val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
             controller.recordDelegatedTaskAccepted(
                 taskId = "task-plan-test",
                 correlationId = null,
                 dispatchPlanId = "plan-001"
             )
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = signalJob.await()
             assertNotNull("Expected TASK_ACCEPTED signal", signal)
             assertEquals(ReconciliationSignal.Kind.TASK_ACCEPTED, signal!!.kind)
             assertEquals("plan-001", signal.dispatchPlanId)
@@ -462,9 +467,13 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
         runBlocking {
             val controller = buildController()
 
+            // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+            val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+            }
             controller.recordDelegatedTaskAccepted(taskId = "task-no-plan")
 
-            val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+            val signal = signalJob.await()
             assertNotNull("Expected TASK_ACCEPTED signal", signal)
             assertNull(signal!!.dispatchPlanId)
             assertFalse(ReconciliationSignal.KEY_DISPATCH_PLAN_ID in signal.payload)
@@ -480,12 +489,17 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
             taskId = "task-result-plan",
             dispatchPlanId = "plan-result-001"
         )
-        // Drain the TASK_ACCEPTED signal.
-        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
 
+        // 先以 UNDISPATCHED 订阅(谓词过滤 TASK_RESULT,自然跳过 TASK_ACCEPTED)再触发,
+        // 规避 replay=0 热流订阅-发射竞态。
+        val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_RESULT }
+            }
+        }
         controller.publishTaskResult("task-result-plan")
 
-        val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+        val signal = signalJob.await()
         assertNotNull("Expected TASK_RESULT signal", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
         assertEquals("plan-result-001", signal.dispatchPlanId)
@@ -505,12 +519,16 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
             taskId = "task-cancel-plan",
             dispatchPlanId = "plan-cancel-001"
         )
-        // Drain the TASK_ACCEPTED signal.
-        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
 
+        // 同上:先订阅(UNDISPATCHED,过滤 TASK_CANCELLED)再触发。
+        val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_CANCELLED }
+            }
+        }
         controller.publishTaskCancelled("task-cancel-plan")
 
-        val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+        val signal = signalJob.await()
         assertNotNull("Expected TASK_CANCELLED signal", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_CANCELLED, signal!!.kind)
         assertEquals("plan-cancel-001", signal.dispatchPlanId)
@@ -524,11 +542,16 @@ class Pr123AndroidV2DistributedActivationCompatibilityContractTest {
             taskId = "task-status-plan",
             dispatchPlanId = "plan-status-001"
         )
-        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
 
+        // 同上:先订阅(UNDISPATCHED,过滤 TASK_STATUS_UPDATE)再触发。
+        val signalJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_STATUS_UPDATE }
+            }
+        }
         controller.publishTaskStatusUpdate("task-status-plan", progressDetail = "still-running")
 
-        val signal = withTimeoutOrNull(300) { controller.reconciliationSignals.first() }
+        val signal = signalJob.await()
         assertNotNull("Expected TASK_STATUS_UPDATE signal", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
         assertEquals("plan-status-001", signal.dispatchPlanId)

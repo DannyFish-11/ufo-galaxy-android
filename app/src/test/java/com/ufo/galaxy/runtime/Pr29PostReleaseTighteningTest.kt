@@ -14,7 +14,10 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.ui.viewmodel.UnifiedResultPresentation
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -502,9 +505,18 @@ class Pr29PostReleaseTighteningTest {
             val causes = TakeoverFallbackEvent.Cause.values()
             val received = mutableListOf<TakeoverFallbackEvent>()
 
-            // Emit all failures first, then collect all expected events with a bounded timeout
-            // so we never block indefinitely and avoid a fixed delay.
+            // 测试修复:takeoverFailure 是 replay=0 的热流,先发射后订阅必然丢事件;
+            // 必须先用 UNDISPATCHED 订阅(take(N).toList 收集),再触发生产方。
+            val collectJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(2000L) {
+                    controller.takeoverFailure.take(causes.size).toList(received)
+                }
+            }
+
             for (cause in causes) {
+                // 测试修复:notifyTakeoverFailed 受 shouldSuppressTerminalSignal 守卫保护,
+                // 需先登记同一 taskId 为活跃任务,否则静默 no-op。
+                controller.recordDelegatedTaskAccepted(taskId = "task-seq-${cause.wireValue}")
                 controller.notifyTakeoverFailed(
                     takeoverId = "t-seq-${cause.wireValue}",
                     taskId = "task-seq-${cause.wireValue}",
@@ -514,11 +526,7 @@ class Pr29PostReleaseTighteningTest {
                 )
             }
 
-            // Collect exactly `causes.size` events, each with a reasonable per-event timeout.
-            repeat(causes.size) {
-                val event = withTimeoutOrNull(500L) { controller.takeoverFailure.first() }
-                if (event != null) received.add(event)
-            }
+            collectJob.await()
 
             assertEquals(
                 "All ${causes.size} sequential takeover failures must be individually emitted",

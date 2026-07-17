@@ -7,6 +7,7 @@ import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -249,7 +250,10 @@ class LocalLoopCorrectnessTest {
             )
         )
         assertEquals(LocalLoopResult.STATUS_FAILED, result.status)
-        assertEquals(LoopController.STOP_REPLAN_FAILED, result.stopReason)
+        // 过期断言:PlannerFallbackLadder 的 Stage 4(规则兜底)保证 replan 永不返回空计划,
+        // 因此 STOP_REPLAN_FAILED 在当前梯子语义下不可达;"replan 枯竭"实际表现为
+        // 兜底恢复步骤反复失败直到单步重试耗尽 → STOP_STEP_EXHAUSTED。
+        assertEquals(LoopController.STOP_STEP_EXHAUSTED, result.stopReason)
     }
 
     @Test
@@ -503,7 +507,15 @@ class LocalLoopCorrectnessTest {
             readinessProvider = FakeReadinessProvider.fullyReady()
         )
         val result = runBlocking {
-            executor.execute(LocalLoopOptions("blocked instruction"))
+            // LocalLoopOptions 默认 posture 为 control_only(PR #533 契约),会在姿态门
+            // 处被拒(STATUS_FAILED/posture_control_only),根本走不到远程任务阻断逻辑。
+            // 显式声明 JOIN_RUNTIME 以专注验证 remote-task block 语义(与 Scenario 默认一致)。
+            executor.execute(
+                LocalLoopOptions(
+                    "blocked instruction",
+                    sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME
+                )
+            )
         }
 
         assertEquals(LocalLoopResult.STATUS_CANCELLED, result.status)
@@ -533,7 +545,14 @@ class LocalLoopCorrectnessTest {
             readinessProvider = FakeReadinessProvider.fullyReady()
         )
         val result = runBlocking {
-            executor.execute(LocalLoopOptions("resumed instruction"))
+            // 同上:默认 control_only 会被姿态门拒绝;显式 JOIN_RUNTIME 才能验证
+            // 清除远程任务阻断后本地执行恢复正常。
+            executor.execute(
+                LocalLoopOptions(
+                    "resumed instruction",
+                    sourceRuntimePosture = SourceRuntimePosture.JOIN_RUNTIME
+                )
+            )
         }
         assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
     }

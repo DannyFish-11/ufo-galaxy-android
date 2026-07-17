@@ -71,7 +71,8 @@ class Pr88InflightContinuityRecoveryTest {
     }
 
     private fun buildLoopController(): LoopController {
-        val modelsDir = tmpFolder.newFolder("models")
+        // 唯一目录名:同一测试内两次 buildController 时,重复 newFolder("models") 会抛 IOException。
+        val modelsDir = tmpFolder.newFolder("models-${System.nanoTime()}")
         return LoopController(
             localPlanner = LocalPlanner(FakePlannerService()),
             executorBridge = ExecutorBridge(
@@ -189,8 +190,9 @@ class Pr88InflightContinuityRecoveryTest {
         controller.recordDelegatedTaskAccepted("task-runtime-truth")
         controller.stop()
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让订阅在 publish 前同步建立,规避 replay=0 热流订阅-发射竞态。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }

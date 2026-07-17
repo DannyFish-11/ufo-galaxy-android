@@ -169,14 +169,17 @@ class TaskSubmitV3Test {
 
     @Test
     fun `LEGACY_TYPE_MAP maps task_execute to task_assign`() {
-        assertEquals("task_assign", MsgType.toV3Type("task_execute"),
-            "task_execute must be remapped to task_assign for Task Manager unification")
+        // JUnit4 assertEquals 签名是 (message, expected, actual) —— message 在最前。
+        // 原来把 message 放最后,导致 expected=toV3Type 结果、actual=消息串,必然 ComparisonFailure。
+        // LEGACY_TYPE_MAP 映射本身正确(task_execute→task_assign),这是测试传参顺序 bug。
+        assertEquals("task_execute must be remapped to task_assign for Task Manager unification",
+            "task_assign", MsgType.toV3Type("task_execute"))
     }
 
     @Test
     fun `LEGACY_TYPE_MAP maps task_status_query to task_assign`() {
-        assertEquals("task_assign", MsgType.toV3Type("task_status_query"),
-            "task_status_query must be remapped to task_assign for Task Manager unification")
+        assertEquals("task_status_query must be remapped to task_assign for Task Manager unification",
+            "task_assign", MsgType.toV3Type("task_status_query"))
     }
 
     @Test
@@ -325,12 +328,26 @@ class TaskSubmitV3Test {
         )
     }
 
+    /**
+     * `command` 与 `registration` 不同:它是【活】的合法 MsgType,不是"只能经 toV3Type 归一"的遗留串。
+     *
+     * 判定依据(跨仓实证):
+     *  - WearOS 客户端就以 `type = MsgType.COMMAND` 发送(galaxy-wearos AIPClient.kt),删掉
+     *    MsgType.COMMAND 会直接破坏手表的发送路径,并改动两仓共享的枚举与 count 锚点;
+     *  - V2 后端的 MessageType 里也有 `command`。
+     * 因此 `command`(及 `command_result`)是合法 raw MsgType 值。原测试断言"command 不该是合法
+     * MsgType"与现实相反 —— 改为守护真相:command 必须【是】合法 MsgType,防止将来被误删。
+     *
+     * (LEGACY_TYPE_MAP 里的 `command → task_assign` 是【下游归一】的另一码事:把旧式通用 command
+     *  归一到 v3 的 task_assign,与 command 本身作为可发送类型合法并存,互不矛盾。)
+     */
     @Test
-    fun `legacy type string command is not a valid MsgType value`() {
+    fun `command is a live valid MsgType value (WearOS emits it, V2 accepts it)`() {
         val v3Values = MsgType.entries.map { it.value }.toSet()
-        assertFalse(
-            "v2 string 'command' must not be a raw MsgType value (use toV3Type for normalisation)",
+        assertTrue(
+            "'command' must be a valid raw MsgType value — WearOS emits MsgType.COMMAND and V2 accepts it",
             v3Values.contains("command")
         )
+        assertEquals(MsgType.COMMAND, MsgType.fromValue("command"))
     }
 }

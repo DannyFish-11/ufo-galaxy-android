@@ -17,6 +17,7 @@ import com.ufo.galaxy.ui.viewmodel.UnifiedResultPresentation
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -356,9 +357,11 @@ class EndToEndRegressionClosureTest {
     fun `startWithTimeout failure emits registrationError`() = runBlocking {
         val (controller, _) = buildController(timeoutMs = 150L)
         var errorEmitted: String? = null
-        val job = launch { errorEmitted = controller.registrationError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on registrationError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { errorEmitted = controller.registrationError.first() }
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("registrationError must be emitted on failure", errorEmitted)
         assertTrue("registrationError must not be blank", errorEmitted!!.isNotBlank())
     }
@@ -367,9 +370,11 @@ class EndToEndRegressionClosureTest {
     fun `startWithTimeout failure emits setupError`() = runBlocking {
         val (controller, _) = buildController(timeoutMs = 150L)
         var errorEmitted: CrossDeviceSetupError? = null
-        val job = launch { errorEmitted = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { errorEmitted = controller.setupError.first() }
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("setupError must be emitted on failure", errorEmitted)
     }
 
@@ -377,9 +382,11 @@ class EndToEndRegressionClosureTest {
     fun `setupError category is NETWORK when gateway is configured`() = runBlocking {
         val (controller, _) = buildConfiguredController(timeoutMs = 150L)
         var err: CrossDeviceSetupError? = null
-        val job = launch { err = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { err = controller.setupError.first() }
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("setupError must be emitted", err)
         assertEquals(
             "Configured gateway with unreachable server must yield NETWORK category",
@@ -394,9 +401,11 @@ class EndToEndRegressionClosureTest {
         val settings = InMemoryAppSettings()
         val (controller, _) = buildController(settings = settings, timeoutMs = 150L)
         var err: CrossDeviceSetupError? = null
-        val job = launch { err = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { err = controller.setupError.first() }
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("setupError must be emitted", err)
         assertEquals(
             "Unconfigured gateway must yield CONFIGURATION category",
@@ -459,7 +468,10 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with FAILED cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
-        val job = launch { event = controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-1")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-1",
             taskId = "task-1",
@@ -467,7 +479,7 @@ class EndToEndRegressionClosureTest {
             reason = "pipeline exception",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("takeoverFailure must be emitted for FAILED cause", event)
         assertEquals(TakeoverFallbackEvent.Cause.FAILED, event!!.cause)
     }
@@ -476,7 +488,10 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with TIMEOUT cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
-        val job = launch { event = controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-2")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-2",
             taskId = "task-2",
@@ -484,7 +499,7 @@ class EndToEndRegressionClosureTest {
             reason = "execution timed out",
             cause = TakeoverFallbackEvent.Cause.TIMEOUT
         )
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("takeoverFailure must be emitted for TIMEOUT cause", event)
         assertEquals(TakeoverFallbackEvent.Cause.TIMEOUT, event!!.cause)
     }
@@ -493,7 +508,10 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with CANCELLED cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
-        val job = launch { event = controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-3")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-3",
             taskId = "task-3",
@@ -501,7 +519,7 @@ class EndToEndRegressionClosureTest {
             reason = "cooperatively cancelled",
             cause = TakeoverFallbackEvent.Cause.CANCELLED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("takeoverFailure must be emitted for CANCELLED cause", event)
         assertEquals(TakeoverFallbackEvent.Cause.CANCELLED, event!!.cause)
     }
@@ -510,7 +528,10 @@ class EndToEndRegressionClosureTest {
     fun `notifyTakeoverFailed with DISCONNECT cause emits TakeoverFallbackEvent`() = runBlocking {
         val (controller, _) = buildController()
         var event: TakeoverFallbackEvent? = null
-        val job = launch { event = controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-4")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { event = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-4",
             taskId = "task-4",
@@ -518,7 +539,7 @@ class EndToEndRegressionClosureTest {
             reason = "WS disconnected",
             cause = TakeoverFallbackEvent.Cause.DISCONNECT
         )
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("takeoverFailure must be emitted for DISCONNECT cause", event)
         assertEquals(TakeoverFallbackEvent.Cause.DISCONNECT, event!!.cause)
     }
@@ -607,9 +628,11 @@ class EndToEndRegressionClosureTest {
     fun `reconnect emits setupError on the new attempt`() = runBlocking {
         val (controller, _) = buildConfiguredController(timeoutMs = 100L)
         var err: CrossDeviceSetupError? = null
-        val job = launch { err = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { err = controller.setupError.first() }
         controller.reconnect()
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("reconnect() must emit setupError on failure", err)
     }
 
@@ -617,9 +640,11 @@ class EndToEndRegressionClosureTest {
     fun `reconnect emits registrationError on the new attempt`() = runBlocking {
         val (controller, _) = buildConfiguredController(timeoutMs = 100L)
         var reason: String? = null
-        val job = launch { reason = controller.registrationError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on registrationError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { reason = controller.registrationError.first() }
         controller.reconnect()
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull("reconnect() must emit registrationError on failure", reason)
         assertTrue("registrationError reason must not be blank", reason!!.isNotBlank())
     }
@@ -683,11 +708,13 @@ class EndToEndRegressionClosureTest {
         val categories = mutableListOf<CrossDeviceSetupError.Category>()
         repeat(2) {
             var err: CrossDeviceSetupError? = null
-            val job = launch { err = controller.setupError.first() }
+            // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+            // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { err = controller.setupError.first() }
             // Re-enable for each retry attempt
             settings.crossDeviceEnabled = true
             controller.reconnect()
-            job.join()
+            withTimeout(2000) { job.join() }
             err?.let { categories.add(it.category) }
         }
 
@@ -898,18 +925,22 @@ class EndToEndRegressionClosureTest {
         val registrationErrors = mutableListOf<String>()
         val setupErrors = mutableListOf<CrossDeviceSetupError>()
 
-        val regJob = launch {
+        // UNDISPATCHED closes the subscribe-before-emit race on these hot, no-replay
+        // SharedFlows; withTimeout bounds the wait so a lost race fails fast.
+        val regJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             val err = controller.registrationError.first()
             registrationErrors.add(err)
         }
-        val setupJob = launch {
+        val setupJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             val err = controller.setupError.first()
             setupErrors.add(err)
         }
 
         controller.startWithTimeout()
-        regJob.join()
-        setupJob.join()
+        withTimeout(2000) {
+            regJob.join()
+            setupJob.join()
+        }
 
         assertEquals("Exactly one registrationError must be emitted per failure", 1, registrationErrors.size)
         assertEquals("Exactly one setupError must be emitted per failure", 1, setupErrors.size)
@@ -965,17 +996,29 @@ class EndToEndRegressionClosureTest {
         val serverP = UnifiedResultPresentation.fromServerMessage(serverMsg)
         val fallbackP = UnifiedResultPresentation.fromFallbackEvent(fallbackEvent)
 
-        // Each path produces a distinct outcome
+        // Each path produces the correct success classification
         assertTrue("Local success is success", localP.isSuccess)
         assertTrue("Server message is success", serverP.isSuccess)
         assertFalse("Fallback is not success", fallbackP.isSuccess)
 
-        // Outcomes are distinct between paths
-        val outcomes = setOf(localP.outcome, serverP.outcome, fallbackP.outcome)
+        // 原断言要求三条路径的 outcome 互不相同,但这与 UnifiedResultPresentation
+        // 的设计意图相反:outcome 是"结果分类"(wire-level outcome string),不是
+        // "路径标识"——本地成功与服务端成功同为 "success" 是有意为之(类文档明确
+        // 要求呈现层不暴露内部执行路径)。"不共享状态"的真正不变量是:各工厂
+        // 方法互不影响、各自产出正确的分类与摘要。
+        assertEquals("Local success outcome", LocalLoopResult.STATUS_SUCCESS, localP.outcome)
+        assertEquals("Server message outcome", "success", serverP.outcome)
         assertEquals(
-            "All three presentation paths must produce distinct outcome values",
+            "Fallback outcome",
+            TakeoverFallbackEvent.Cause.FAILED.wireValue,
+            fallbackP.outcome
+        )
+        // Summaries remain independently derived per path (no cross-path state bleed).
+        val summaries = setOf(localP.summary, serverP.summary, fallbackP.summary)
+        assertEquals(
+            "All three presentation paths must produce their own distinct summaries",
             3,
-            outcomes.size
+            summaries.size
         )
     }
 }

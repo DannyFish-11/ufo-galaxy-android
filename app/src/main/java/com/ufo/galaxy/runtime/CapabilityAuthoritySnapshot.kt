@@ -183,15 +183,19 @@ data class CapabilityAuthoritySnapshot(
                 }
             }
 
-            // inferenceReady: at least one component is ready AND checksum is valid.
-            val inferenceReady = (plannerReady || groundingReady) && checksumValid
-
             val authorityLabel = deriveAuthorityLabel(
                 managerState   = managerState,
                 plannerReady   = plannerReady,
                 groundingReady = groundingReady,
                 checksumValid  = checksumValid
             )
+
+            // inferenceReady: at least one component is ready AND checksum is valid.
+            // 不变量修复:类文档明确 "pending → inferenceReady=false"(能力信号未稳定,
+            // V2 不应据此调度推理),但 PartialReady(planner 已就绪)映射到 pending 后
+            // 旧公式仍会得出 true,自相矛盾。以 label 收口该不变量。
+            val inferenceReady = (plannerReady || groundingReady) && checksumValid &&
+                authorityLabel != AUTHORITY_LABEL_PENDING
 
             val capabilityList: List<String> = if (inferenceReady) {
                 BASE_CAPABILITY_LIST + CAPABILITY_LOCAL_MODEL_INFERENCE

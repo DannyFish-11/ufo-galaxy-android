@@ -50,6 +50,7 @@ jobs:
   build:
     name: "Build [gate 1/5]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -91,6 +92,7 @@ jobs:
   protocol-contract-guard:
     name: "Protocol Contract Guard [gate 2/5]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
 
     steps:
@@ -135,6 +137,12 @@ jobs:
   runtime-regression:
     name: "Runtime Regression [gate 3/5]"
     runs-on: ubuntu-latest
+    # 真机复现过:这个 job 曾无限期挂起(观测到 4h16m+ 仍 in_progress,而其余 6 个
+    # 门都在 3~4 分钟内跑完),此前全文件没有任何 job 设 timeout-minutes,只能靠
+    # GitHub 默认 6 小时兜底,期间一直占着 runner、挡住 PR 合并。20 分钟 =
+    # 正常耗时(观测 ~3~4 分钟)的 5 倍富余,既不会误伤正常运行,又能把未来的
+    # 挂起代价从"几小时"压到"20 分钟自动失败"。
+    timeout-minutes: 20
     needs: build
 
     steps:
@@ -173,6 +181,7 @@ jobs:
   cross-repo-compatibility-guard:
     name: "Cross-Repo Compatibility Guard [parallel gate 4/7]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
 
     steps:
@@ -233,6 +242,7 @@ jobs:
   e2e-verification-gate:
     name: "E2E Verification Gate [gate 5/7]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
 
     steps:
@@ -309,6 +319,7 @@ jobs:
   all-unit-tests:
     name: "All Unit Tests [gate 6/7]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [protocol-contract-guard, runtime-regression, cross-repo-compatibility-guard, e2e-verification-gate]
 
     steps:
@@ -339,6 +350,7 @@ jobs:
   lint:
     name: "Lint [gate 7/7]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
 
     steps:
@@ -385,6 +397,7 @@ jobs:
   cross-repo-evidence-status:
     name: "Cross-Repo Evidence Status [visibility]"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs:
       - build
       - protocol-contract-guard
@@ -917,6 +930,7 @@ jobs:
   protected-release-enforcement-gate:
     name: "Protected Release Enforcement Gate"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [cross-repo-evidence-status]
     if: always()
 
@@ -962,6 +976,7 @@ jobs:
   ci-gate:
     name: "CI Gate (all blocking gates must pass)"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [all-unit-tests, lint, cross-repo-compatibility-guard, cross-repo-evidence-status, protected-release-enforcement-gate]
     if: always()
 

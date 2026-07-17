@@ -3187,6 +3187,14 @@ class GalaxyWebSocketClient(
                 ?: persistedInstallDeviceId()
         )
 
+    /**
+     * 本客户端【将用于鉴权握手】的规范设备 id(与 /ws/device 握手、心跳、AuthMessage 一致)。
+     *
+     * 配对端必须用【同一个 id】去登记/领取 token —— 否则服务端把 token 绑到"厂商_型号"
+     * 裸 id,而握手用的是"厂商_型号-8hex",id 不匹配 → 鉴权被拒("已配对"却连不上)。
+     */
+    fun currentDeviceId(): String = getDeviceId()
+
     /** [persistedInstallDeviceId] 在 Context 不可用时的进程内兜底缓存。 */
     @Volatile private var inMemoryDeviceIdFallback: String? = null
 
@@ -3320,6 +3328,24 @@ class GalaxyWebSocketClient(
     internal fun simulateDisconnected() {
         isConnected = false
         listeners.forEach { it.onDisconnected() }
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onError] on all registered listeners
+     * without a real WebSocket failure.
+     *
+     * Allows unit tests to drive the `RECOVERING → FAILED` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController]'s permanent WS listener (that transition
+     * only happens on the error callback, not on a repeated disconnect).
+     *
+     * 补齐:Pr33ReconnectResilienceTest 的 KDoc 一直引用本方法,但方法从未被实现,
+     * 相关测试只能用 simulateDisconnected() 顶替——而重复 disconnect 并不会走
+     * onError 通路,导致 RECOVERING→FAILED 断言必然失败。
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateError(error: String = "simulated_ws_error") {
+        listeners.forEach { it.onError(error) }
     }
 
     /**

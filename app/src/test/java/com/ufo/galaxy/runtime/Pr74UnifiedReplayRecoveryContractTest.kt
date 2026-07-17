@@ -249,9 +249,13 @@ class Pr74UnifiedReplayRecoveryContractTest {
 
     @Test
     fun `null sessionTag on authority-sensitive type is blocked`() {
+        // 生产端已有意新增 canonical ownership 预过滤:裸 "{}" 会先被判为
+        // OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED,到不了 session-tag 判定轴。
+        // 补上 canonical ownership 字段(与本文件既有用例一致)以专注验证 null-tag 语义。
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "goal_execution_result",
-            json = "{}",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
             sessionTag = null
         )
         val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
@@ -264,9 +268,11 @@ class Pr74UnifiedReplayRecoveryContractTest {
 
     @Test
     fun `null sessionTag on runtime truth replay is blocked`() {
+        // 同上:补 canonical ownership 字段,越过 ownership 预过滤以专注验证 null-tag 语义。
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "device_state_snapshot",
-            json = "{}",
+            json =
+                """{"type":"device_state_snapshot","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
             sessionTag = null
         )
         val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-A")
@@ -295,9 +301,11 @@ class Pr74UnifiedReplayRecoveryContractTest {
 
     @Test
     fun `different sessionTag produces STALE_SESSION_BLOCKED`() {
+        // 同上:补 canonical ownership 字段,越过 ownership 预过滤以专注验证 stale-tag 语义。
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "goal_execution_result",
-            json = "{}",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
             sessionTag = "session-OLD"
         )
         val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(msg, "session-CURRENT")
@@ -311,9 +319,11 @@ class Pr74UnifiedReplayRecoveryContractTest {
 
     @Test
     fun `null currentDurableSessionId blocks tagged message replay`() {
+        // 同上:补 canonical ownership 字段,越过 ownership 预过滤以专注验证无当前权威语义。
         val msg = OfflineTaskQueue.QueuedMessage(
             type = "goal_execution_result",
-            json = "{}",
+            json =
+                """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
             sessionTag = "some-session"
         )
         val decision = UnifiedReplayRecoveryContract.evaluateMessageAuthority(
@@ -508,21 +518,27 @@ class Pr74UnifiedReplayRecoveryContractTest {
         // 1. Messages are enqueued under different sessions.
         // 2. discardForDifferentSession filters based on the current session.
         // 3. Only current-session messages survive for authority-sensitive replay types.
+        // 生产端已有意收紧回放门:authority-sensitive 类型还需 canonical ownership 字段
+        // 与 sessionEpoch(REPLAY_EPOCH_REQUIRED_TYPES),否则连当前会话消息也会被隔离。
+        // 三条消息统一补齐,只保留 sessionTag 差异,专注验证 stale-session 过滤语义。
         val queue = OfflineTaskQueue(prefs = null)
         queue.enqueue(
             "goal_execution_result",
-            """{"type":"goal_execution_result","payload":{"task_id":"stale-1"}}""",
-            sessionTag = "session-OLD"
+            """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,"payload":{"task_id":"stale-1"}}""",
+            sessionTag = "session-OLD",
+            sessionEpoch = 1
         )
         queue.enqueue(
             "goal_execution_result",
-            """{"type":"goal_execution_result","payload":{"task_id":"current-1"}}""",
-            sessionTag = "session-NEW"
+            """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,"payload":{"task_id":"current-1"}}""",
+            sessionTag = "session-NEW",
+            sessionEpoch = 1
         )
         queue.enqueue(
             "goal_execution_result",
-            """{"type":"goal_execution_result","payload":{"task_id":"stale-2"}}""",
-            sessionTag = "session-OLD"
+            """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,"payload":{"task_id":"stale-2"}}""",
+            sessionTag = "session-OLD",
+            sessionEpoch = 1
         )
 
         val discarded = queue.discardForDifferentSession("session-NEW")
@@ -570,10 +586,13 @@ class Pr74UnifiedReplayRecoveryContractTest {
     @Test
     fun `non-canonical ownership records are isolated while canonical replay record survives`() {
         val queue = OfflineTaskQueue(prefs = null)
+        // canonical 消息需补 sessionEpoch:goal_execution_result 属 REPLAY_EPOCH_REQUIRED_TYPES,
+        // 缺 epoch 时即使同会话 canonical 也会被隔离(生产端有意收紧)。
         queue.enqueue(
             "goal_execution_result",
             """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true}""",
-            sessionTag = "session-NEW"
+            sessionTag = "session-NEW",
+            sessionEpoch = 1
         )
         queue.enqueue(
             "goal_execution_result",

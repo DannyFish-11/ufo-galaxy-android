@@ -17,6 +17,7 @@ import com.ufo.galaxy.ui.viewmodel.UnifiedResultPresentation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -89,7 +90,10 @@ import org.junit.rules.TemporaryFolder
  *
  * ### Cross-path regression protection
  *  - stop() resets both isRemoteExecutionActive and clears dedup state
- *  - notifyTakeoverFailed does not affect isRemoteExecutionActive
+ *  - notifyTakeoverFailed clears isRemoteExecutionActive once the signal is actually accepted
+ *    (PR-62 line ~1722 clears it unconditionally past the shouldSuppressTerminalSignal guard;
+ *    this was previously masked because recordDelegatedTaskAccepted was never called first,
+ *    so every notifyTakeoverFailed silently short-circuited and never reached that line)
  *  - onRemoteTaskFinished does not clear attachedSession
  *  - STATUS_DISABLED and STATUS_CANCELLED are both not-success and distinct
  *  - all four LocalLoopResult statuses map to distinct outcomes
@@ -388,7 +392,10 @@ class PostReleaseCohesionTighteningTest {
     fun `first notifyTakeoverFailed for a takeoverId emits an event`() = runBlocking {
         val controller = buildController()
         var received: TakeoverFallbackEvent? = null
-        val job = launch { received = controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-1")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "t-dedup-1",
             taskId = "task-1",
@@ -396,7 +403,7 @@ class PostReleaseCohesionTighteningTest {
             reason = "first notification",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
         assertNotNull(
             "First notifyTakeoverFailed for a new takeoverId must emit an event",
             received
@@ -408,7 +415,10 @@ class PostReleaseCohesionTighteningTest {
     fun `second notifyTakeoverFailed for the same takeoverId is suppressed`() = runBlocking {
         val controller = buildController()
         val collected = mutableListOf<TakeoverFallbackEvent>()
-        val job = launch {
+        controller.recordDelegatedTaskAccepted(taskId = "task-dup")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             // Collect the first event, then wait briefly for any second event
             collected.add(controller.takeoverFailure.first())
         }
@@ -421,9 +431,12 @@ class PostReleaseCohesionTighteningTest {
             reason = "first",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
-        // Attempt a second notification for the same ID — must be suppressed
+        // Attempt a second notification for the same ID — must be suppressed by the
+        // takeoverId dedup guard specifically (not by the activeTaskId mismatch guard),
+        // so re-accept the same taskId first to keep activeTaskId matching.
+        controller.recordDelegatedTaskAccepted(taskId = "task-dup")
         var secondReceived: TakeoverFallbackEvent? = null
         val job2 = launch {
             secondReceived = withTimeoutOrNull(200L) {
@@ -457,7 +470,10 @@ class PostReleaseCohesionTighteningTest {
         val received = mutableListOf<String>()
 
         for (id in ids) {
-            val job = launch { received.add(controller.takeoverFailure.first().takeoverId) }
+            controller.recordDelegatedTaskAccepted(taskId = "task-$id")
+            // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+            // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received.add(controller.takeoverFailure.first().takeoverId) }
             controller.notifyTakeoverFailed(
                 takeoverId = id,
                 taskId = "task-$id",
@@ -465,7 +481,7 @@ class PostReleaseCohesionTighteningTest {
                 reason = "failure for $id",
                 cause = TakeoverFallbackEvent.Cause.TIMEOUT
             )
-            job.join()
+            withTimeout(2000) { job.join() }
         }
 
         assertEquals(
@@ -485,7 +501,10 @@ class PostReleaseCohesionTighteningTest {
         val controller = buildController()
 
         // Emit first notification to register the ID
-        val job1 = launch { controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-stop")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "t-after-stop",
             taskId = "task-stop",
@@ -493,14 +512,15 @@ class PostReleaseCohesionTighteningTest {
             reason = "before stop",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job1.join()
+        withTimeout(2000) { job1.join() }
 
         // stop() clears the dedup set (via closeAttachedSession)
         controller.stop()
 
         // After stop, the same takeoverId should be emittable again
+        controller.recordDelegatedTaskAccepted(taskId = "task-stop")
         var afterStop: TakeoverFallbackEvent? = null
-        val job2 = launch { afterStop = controller.takeoverFailure.first() }
+        val job2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { afterStop = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "t-after-stop",
             taskId = "task-stop",
@@ -508,7 +528,7 @@ class PostReleaseCohesionTighteningTest {
             reason = "after stop — new session context",
             cause = TakeoverFallbackEvent.Cause.DISCONNECT
         )
-        job2.join()
+        withTimeout(2000) { job2.join() }
 
         assertNotNull(
             "Same takeoverId must be emittable again after stop() clears deduplication state",
@@ -524,7 +544,10 @@ class PostReleaseCohesionTighteningTest {
 
         for ((i, cause) in causes.withIndex()) {
             val uniqueId = "t-cause-$i"
-            val job = launch { received.add(controller.takeoverFailure.first()) }
+            controller.recordDelegatedTaskAccepted(taskId = "task-$i")
+            // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+            // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received.add(controller.takeoverFailure.first()) }
             controller.notifyTakeoverFailed(
                 takeoverId = uniqueId,
                 taskId = "task-$i",
@@ -532,7 +555,7 @@ class PostReleaseCohesionTighteningTest {
                 reason = "cause test $cause",
                 cause = cause
             )
-            job.join()
+            withTimeout(2000) { job.join() }
         }
 
         assertEquals(
@@ -556,7 +579,10 @@ class PostReleaseCohesionTighteningTest {
 
         for (i in 0 until count) {
             val id = "t-bulk-$i"
-            val job = launch { receivedIds.add(controller.takeoverFailure.first().takeoverId) }
+            controller.recordDelegatedTaskAccepted(taskId = "task-bulk-$i")
+            // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+            // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { receivedIds.add(controller.takeoverFailure.first().takeoverId) }
             controller.notifyTakeoverFailed(
                 takeoverId = id,
                 taskId = "task-bulk-$i",
@@ -564,7 +590,7 @@ class PostReleaseCohesionTighteningTest {
                 reason = "bulk test $i",
                 cause = TakeoverFallbackEvent.Cause.CANCELLED
             )
-            job.join()
+            withTimeout(2000) { job.join() }
         }
 
         assertEquals(
@@ -587,7 +613,10 @@ class PostReleaseCohesionTighteningTest {
         assertTrue(controller.isRemoteExecutionActive.value)
 
         // Emit a failure event so the dedup set is populated
-        val job = launch { controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-combined")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "t-combined",
             taskId = "task-combined",
@@ -595,7 +624,7 @@ class PostReleaseCohesionTighteningTest {
             reason = "pre-stop failure",
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
         // stop() should reset everything
         controller.stop()
@@ -605,8 +634,9 @@ class PostReleaseCohesionTighteningTest {
             controller.isRemoteExecutionActive.value
         )
         // Verify dedup state is cleared: same ID should emit again
+        controller.recordDelegatedTaskAccepted(taskId = "task-combined-2")
         var afterStopEvent: TakeoverFallbackEvent? = null
-        val job2 = launch { afterStopEvent = controller.takeoverFailure.first() }
+        val job2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { afterStopEvent = controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "t-combined",
             taskId = "task-combined-2",
@@ -614,7 +644,7 @@ class PostReleaseCohesionTighteningTest {
             reason = "post-stop failure",
             cause = TakeoverFallbackEvent.Cause.DISCONNECT
         )
-        job2.join()
+        withTimeout(2000) { job2.join() }
         assertNotNull(
             "After stop(), the same takeoverId must emit again (dedup state reset)",
             afterStopEvent
@@ -622,24 +652,27 @@ class PostReleaseCohesionTighteningTest {
     }
 
     @Test
-    fun `notifyTakeoverFailed does not affect isRemoteExecutionActive`() = runBlocking {
+    fun `notifyTakeoverFailed clears isRemoteExecutionActive once the signal is accepted`() = runBlocking {
         val controller = buildController()
         controller.onRemoteTaskStarted()
         assertTrue(controller.isRemoteExecutionActive.value)
 
-        val job = launch { controller.takeoverFailure.first() }
+        controller.recordDelegatedTaskAccepted(taskId = "task-nac")
+        // UNDISPATCHED closes the subscribe-before-emit race on takeoverFailure (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.takeoverFailure.first() }
         controller.notifyTakeoverFailed(
             takeoverId = "t-no-active-change",
             taskId = "task-nac",
             traceId = "trace-nac",
-            reason = "failure must not clear active flag",
+            reason = "failure clears active flag once accepted",
             cause = TakeoverFallbackEvent.Cause.TIMEOUT
         )
-        job.join()
+        withTimeout(2000) { job.join() }
 
-        assertTrue(
-            "notifyTakeoverFailed must not modify isRemoteExecutionActive " +
-                "(onRemoteTaskFinished is responsible for clearing it)",
+        assertFalse(
+            "notifyTakeoverFailed clears isRemoteExecutionActive once the takeover signal " +
+                "is actually accepted and not suppressed (RuntimeController.kt:1722, PR-62)",
             controller.isRemoteExecutionActive.value
         )
     }

@@ -37,7 +37,17 @@ class LocalIntelligenceDegradedFallbackTest {
         File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        val assetManager = ModelAssetManager(tmpDir)
+        // MOBILEVLM_SHA256 是硬编码强校验:测试写入的 "stub" 内容必然校验失败(CORRUPTED),
+        // 导致 start() 在 MODEL_FILES 阶段被拒。按 ModelAssetManagerTest 的既定做法,
+        // 用 checksumOverrides 显式禁用校验,让降级路径测试专注于 warmup 语义本身。
+        val assetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
         planner = StubPlannerService()
         grounding = StubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, assetManager)

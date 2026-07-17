@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.ufo.galaxy.agent.AccessibilityExecutor
 import com.ufo.galaxy.agent.EdgeExecutor
@@ -100,7 +101,9 @@ class Pr10AndroidCarrierConsolidationTest {
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
-    private val gson = Gson()
+    // 真 bug 修复:Gson() 默认 serializeNulls=false,null 字段被省略而非变成 JsonNull,
+    // 断言 .get("x").isJsonNull 时对已省略键先拿到 Java null 再空指针。
+    private val gson = GsonBuilder().serializeNulls().create()
 
     /** Serialise [obj] to JSON and parse back as a [JsonObject] for field inspection. */
     private fun toJsonObject(obj: Any): JsonObject =

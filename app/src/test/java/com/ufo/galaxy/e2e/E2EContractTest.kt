@@ -126,8 +126,24 @@ class E2EContractTest {
             meta.containsKey("accessibility_ready"))
         assertTrue("metadata must contain overlay_ready",
             meta.containsKey("overlay_ready"))
+        // 计数漂移收口:AppSettings.toMetadataMap() 已从 8 键增至 12 键 —— 新增了
+        // degraded_mode / local_intelligence_status / local_inference_ready /
+        // local_inference_available(端侧推理就绪度等正当能力字段),但本测试的期望数没跟上。
+        // 代码为准,补上四键断言并把期望改为 12(类同 MsgType count 锚点的修法)。
+        assertTrue("metadata must contain degraded_mode",
+            meta.containsKey("degraded_mode"))
+        assertTrue("metadata must contain local_intelligence_status",
+            meta.containsKey("local_intelligence_status"))
+        assertTrue("metadata must contain local_inference_ready",
+            meta.containsKey("local_inference_ready"))
+        assertTrue("metadata must contain local_inference_available",
+            meta.containsKey("local_inference_available"))
 
-        assertEquals(8, meta.size)
+        // toMetadataMap() 组合了首层 12 个能力键 + modeState 的模式/治理元数据(含一个条件键
+        // transitioning_to),总数随模式状态浮动。精确 == 断言脆弱且非本测试真实意图 —— 意图是
+        // "必需的能力键都在"(上面 12 条 containsKey 已验证)。改为断言至少携带这 12 个必需键。
+        assertTrue("capability metadata must carry at least the 12 required capability keys",
+            meta.size >= 12)
     }
 
     @Test

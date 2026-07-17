@@ -279,6 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.LOCAL)
                     )
                 }
+                maybeSpeakResponse(presentation.summary)
             },
             onError = { reason ->
                 Log.e(TAG, "InputRouter error: $reason")
@@ -291,6 +292,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 语音输入管理器
     private val speechManager: SpeechInputManager by lazy {
         SpeechInputManager(getApplication<Application>().applicationContext)
+    }
+
+    // 语音输出管理器(设备侧 TTS)—— 全模态输出的另一半:让助手在手机上【出声】。
+    private val speechOutputManager: com.ufo.galaxy.speech.SpeechOutputManager by lazy {
+        com.ufo.galaxy.speech.SpeechOutputManager(getApplication<Application>().applicationContext)
+    }
+
+    // 仅在【语音发起】的这一轮把助手回复念出来(文字输入的轮次不吵)。
+    @Volatile private var speakNextResponse = false
+
+    /** 若本轮由语音发起,把助手回复念出来(念一次即清标记);TTS 不可用会静默降级不崩。 */
+    private fun maybeSpeakResponse(text: String) {
+        if (speakNextResponse) {
+            speakNextResponse = false
+            speechOutputManager.speak(text)
+        }
     }
 
     private val wsListener = object : GalaxyWebSocketClient.Listener {
@@ -425,6 +442,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.FALLBACK)
                     )
                 }
+                maybeSpeakResponse(presentation.summary)
             }
             .launchIn(viewModelScope)
         // PR-31: Observe rollout-control snapshot changes and surface them in UI state
@@ -500,8 +518,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     partialSpeechResult = ""
                 ) 
             }
-            // 自动发送
+            // 自动发送;语音发起 → 标记本轮回复要念出来
             if (result.isNotBlank()) {
+                speakNextResponse = true
                 sendMessage(result)
             }
         }
@@ -1002,7 +1021,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pushError("请先在网络设置里填写网关地址(或用 Tailscale 一键填入)后再配对")
             return
         }
-        val deviceId = s.deviceId.ifBlank { "${android.os.Build.MANUFACTURER}_${android.os.Build.MODEL}" }
+        // 关键:用 WS 客户端【将用于鉴权握手的那个规范 id】去登记,并持久化到设置,
+        // 使 enroll / 领取 / 之后每次握手 / 重启 全用同一 id —— 否则 token 绑到裸"厂商_型号",
+        // 而握手用"厂商_型号-8hex",id 不匹配 → 鉴权被拒("已配对"却连不上)。
+        val deviceId = UFOGalaxyApplication.webSocketClient.currentDeviceId()
+        if (s.deviceId != deviceId) s.deviceId = deviceId
         val deviceName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
         _uiState.update { it.copy(isPairing = true, pairingStatus = "正在发起配对…") }
         viewModelScope.launch {
@@ -1102,6 +1125,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "MainViewModel 销毁")
         webSocketClient.removeListener(wsListener)
         speechManager.release()
+        speechOutputManager.release()
     }
 
     // ── Diagnostics (PR15) ───────────────────────────────────────────────────

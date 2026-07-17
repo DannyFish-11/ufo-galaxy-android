@@ -52,6 +52,10 @@ class MainActivity : ComponentActivity() {
     
     companion object {
         private const val TAG = "MainActivity"
+
+        /** 助理被唤起(长按电源/侧滑 → GalaxyVoiceInteractionSession)时,带此 action 打开主界面
+         *  并【自动开始语音】—— 让"唤起助理"直接进入听→答的对话回路(复用主界面既有语音流 + TTS)。 */
+        const val ACTION_ASSIST_VOICE = "com.ufo.galaxy.ASSIST_VOICE"
         const val ENTRYPOINT_ROLE = "sub_entry"
     }
 
@@ -151,12 +155,22 @@ class MainActivity : ComponentActivity() {
 
         // 全局文本入口:选中文字"问 Galaxy"带来的预填(singleTask 首启走此处)。
         handlePrefillIntent(intent)
+        // 助理唤起:自动进入语音对话(冷启动走此处)。
+        handleAssistVoiceIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePrefillIntent(intent)
+        handleAssistVoiceIntent(intent)
+    }
+
+    /** 助理被唤起 → 直接开始语音输入(复用 MainViewModel 的语音流:听→发→答→念)。 */
+    private fun handleAssistVoiceIntent(intent: Intent?) {
+        if (intent?.action != ACTION_ASSIST_VOICE) return
+        Log.i(TAG, "助理唤起 → 自动开始语音")
+        mainViewModel.startVoiceInput()
     }
 
     /** 消费 ProcessTextActivity 转来的选中文本,预填进聊天输入。 */

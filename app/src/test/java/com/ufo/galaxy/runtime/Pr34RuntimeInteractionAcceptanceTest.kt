@@ -18,6 +18,7 @@ import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.speech.NaturalLanguageInputManager
+import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.ui.viewmodel.MainUiState
 import com.ufo.galaxy.ui.viewmodel.UnifiedResultPresentation
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -165,6 +167,12 @@ class Pr34RuntimeInteractionAcceptanceTest {
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED 测试修复:清理 AipTransportManager 单例,避免 fake adapter 泄漏到其他测试类。
+        AipTransportManager.resetInstance()
+    }
+
     // ── Fake dependencies ─────────────────────────────────────────────────────
 
     private class TrivialPlannerService : LocalPlannerService {
@@ -218,7 +226,9 @@ class Pr34RuntimeInteractionAcceptanceTest {
     // ── Builder helpers ───────────────────────────────────────────────────────
 
     private fun buildLoopController(): LoopController {
-        val modelsDir = tmpFolder.newFolder("models")
+        // 测试修复(IOException 排查):同一测试内两次构建 manager 时,重复的
+        // newFolder("models") 会因目录已存在抛 IOException,改用唯一目录名。
+        val modelsDir = tmpFolder.newFolder("models_${System.nanoTime()}")
         return LoopController(
             localPlanner = LocalPlanner(TrivialPlannerService()),
             executorBridge = ExecutorBridge(
@@ -242,6 +252,10 @@ class Pr34RuntimeInteractionAcceptanceTest {
             loopController = buildLoopController(),
             readinessProvider = FakeReadinessProvider.fullyReady()
         )
+        // PR-AIP-UNIFIED 测试修复:生产侧 InputRouter 统一经 AipTransportManager 单例
+        // 发送上行消息,必须把 fake gateway 注册为 websocket adapter,消息才能被捕获。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gateway)
         return InputRouter(
             settings = settings,
             webSocketClient = gateway,
@@ -465,13 +479,14 @@ class Pr34RuntimeInteractionAcceptanceTest {
 
     @Test
     fun `submitVoiceResult and submit behave identically for the same input`() {
+        // 测试修复:AipTransportManager 是单例,后注册的 adapter 会接管所有上行消息,
+        // 因此必须"构建→提交"串行进行,不能先构建两个 manager 再分别提交。
         val gateway1 = FakeGatewayClient(connected = true, sendResult = true)
         val manager1 = buildInputManager(crossDeviceEnabled = true, gateway = gateway1)
+        val viaVoice = manager1.submitVoiceResult("打开设置")
 
         val gateway2 = FakeGatewayClient(connected = true, sendResult = true)
         val manager2 = buildInputManager(crossDeviceEnabled = true, gateway = gateway2)
-
-        val viaVoice = manager1.submitVoiceResult("打开设置")
         val viaText = manager2.submit("打开设置")
 
         assertEquals("voice and text routing results must be identical", viaVoice, viaText)

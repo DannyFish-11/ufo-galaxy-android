@@ -61,7 +61,17 @@ class Pr14AndroidRuntimeLifecycleHardeningTest {
         File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
         File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        val assetManager = ModelAssetManager(tmpDir)
+        // 测试修复:MobileVLM 的静态 SHA-256 默认强制校验,桩内容("stub")会被判为
+        // CORRUPTED,使 start() 停在 MODEL_FILES 阶段而非进入 warmup。与其它模型测试
+        // 一致,传入 null 覆盖以禁用校验。
+        val assetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
+                ModelAssetManager.MODEL_ID_SEECLICK to null,
+                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+            )
+        )
         planner = StubPlannerService()
         grounding = StubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, assetManager)

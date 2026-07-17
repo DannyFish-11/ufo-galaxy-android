@@ -299,7 +299,8 @@ object AndroidNonClosureSignalBoundaryContract {
         NonClosureSignalClass.DIAGNOSTICS_ONLY to
             "core/android_device_state_store.py — store for observability only; no task closure",
         NonClosureSignalClass.ADVISORY_RECOVERY_ONLY to
-            "core/continuity_adjudication.py — advisory evidence; V2 adjudicates independently",
+            "core/continuity_adjudication.py — advisory recovery evidence only; " +
+            "V2 adjudicates continuity independently; no direct task closure",
         NonClosureSignalClass.READINESS_ONLY to
             "core/device_readiness_gate.py — readiness assessment only; no task closure",
         NonClosureSignalClass.EVALUATOR_ADVISORY_ONLY to
