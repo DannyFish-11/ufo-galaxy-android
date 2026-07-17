@@ -12,7 +12,9 @@ import kotlinx.coroutines.flow.asStateFlow
  * V2 Desktop sends phase transitions via `state_event` (category=phase) and
  * `liquid_event` (msg_type=phase_change).  This state machine:
  *  1. Validates every transition against the allowed directed graph.
- *  2. Persists the current phase so it survives process restart.
+ *  2. Keeps the current phase in memory only — the phase is driven by the
+ *     remote desktop peer, which re-sends the authoritative phase on
+ *     (re)connect, so nothing is persisted across process restarts.
  *  3. Exposes a [StateFlow] that UI components (MainActivity, floating island)
  *     can collect to visualise the current phase.
  *
@@ -32,9 +34,6 @@ class PhaseStateMachine {
 
     companion object {
         private const val TAG = "PhaseStateMachine"
-
-        /** SharedPreferences key for phase persistence. */
-        private const val PREFS_KEY = "phase_state_machine_current"
     }
 
     /** The three canonical phases.
