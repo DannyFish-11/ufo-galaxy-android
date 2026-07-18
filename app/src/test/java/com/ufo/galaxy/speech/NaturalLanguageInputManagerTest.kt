@@ -15,9 +15,11 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.transport.AipTransportManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +39,12 @@ class NaturalLanguageInputManagerTest {
 
     @get:Rule
     val tmpFolder = TemporaryFolder()
+
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED:清理 AipTransportManager 单例,避免 fake adapter 泄漏到其他测试类。
+        AipTransportManager.resetInstance()
+    }
 
     // ── Fake GatewayClient ────────────────────────────────────────────────────
 
@@ -98,7 +106,10 @@ class NaturalLanguageInputManagerTest {
     // ── Builder helpers ───────────────────────────────────────────────────────
 
     private fun buildLoopController(): LoopController {
-        val modelsDir = tmpFolder.newFolder("models")
+        // 测试修复:一个测试方法内可能调用 buildRouter() 两次(如 submitVoiceResult
+        // behaves identically to submit),固定名字 "models" 在第二次调用时因同名
+        // 目录已存在抛 IOException;改用无参 newFolder() 每次分配唯一目录。
+        val modelsDir = tmpFolder.newFolder()
         return LoopController(
             localPlanner = LocalPlanner(FakePlannerService()),
             executorBridge = ExecutorBridge(
@@ -117,6 +128,10 @@ class NaturalLanguageInputManagerTest {
         gateway: FakeGatewayClient = FakeGatewayClient(connected = false),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     ): InputRouter {
+        // PR-AIP-UNIFIED:生产侧 InputRouter 统一经 AipTransportManager 单例发送上行消息,
+        // 测试必须把 fake gateway 注册为 websocket adapter,消息才能被捕获。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gateway)
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
         val localLoopExecutor = DefaultLocalLoopExecutor(
             loopController = buildLoopController(),
