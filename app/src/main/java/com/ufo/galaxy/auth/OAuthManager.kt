@@ -1,3 +1,13 @@
+// 真 bug 修复:CancellableContinuation.tryResume/tryResumeWithException 在本项目
+// 引脚的 kotlinx-coroutines 版本中标注为 @InternalCoroutinesApi(@RequiresOptIn 默认
+// 严重级别为 ERROR),未经 opt-in 直接使用会导致编译失败——此前所有 CI 门都跑
+// debug 变体的 compileDebugKotlin,理应早已暴露,但显然是刚落地未经完整编译验证
+// 就被推送到主干。这里选择继续使用 tryResume 系列(而非改回 resume/resumeWithException),
+// 因为它是本文件里跨回调/超时/取消三条路径实现"至多 resume 一次"幂等语义的关键
+// API(resume() 在重复调用时会抛 IllegalStateException,tryResume 返回 null 静默失败),
+// 是这段并发安全代码的既有设计意图,不应更改行为,只需补上正确的 opt-in。
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+
 package com.ufo.galaxy.auth
 
 import android.app.Activity

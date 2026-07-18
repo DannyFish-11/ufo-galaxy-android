@@ -215,7 +215,10 @@ class DelegatedRuntimeUnitTest {
 
     @Test
     fun `runtime kind resolves to local assistive when dispatch intent contains assist`() {
-        val unit = fromEnvelope(minimalEnvelope(dispatchIntent = "local_assistive_execution"))
+        // 测试修复:classifyExecutionRuntimeKind 按精确 token 匹配(避免
+        // "non_fallback_mode" 误判为 fallback),"assistive" 分词后不等于精确 token
+        // "assist",原 fixture 不会命中 ASSIST 分支;改用包含精确 "assist" token 的意图串。
+        val unit = fromEnvelope(minimalEnvelope(dispatchIntent = "local_assist_execution"))
         assertEquals(
             DelegatedRuntimeUnit.EXECUTION_RUNTIME_KIND_LOCAL_ASSISTIVE,
             unit.executionRuntimeKind
