@@ -68,7 +68,17 @@ class RemoteConfigFetcher(
         val v1Result = fetchDirect(v1Url, endpoint = "v1") ?: return null
         if (v1Result.code == 404) {
             Log.w(TAG, "[CONFIG] v1 returned 404; falling back to legacy path")
-            return fetchDirect(legacyUrl, endpoint = "legacy")?.body
+            // 真 bug 修复:原来直接返回 fetchDirect(...)?.body,没有检查 legacy 调用是否成功——
+            // fetchDirect 无论 HTTP 状态码如何都会解析并返回一个非空 body(onResponse 里
+            // 无条件 JSONObject(...)),导致 legacy 返回 404/500 时仍把空 body 当成功结果返回,
+            // 与类文档"非 404 HTTP 错误立即返回 null"矛盾。补上与兄弟类
+            // OpenClawdMemoryBackflow.queryLegacy 一致的 success 校验。
+            val legacyResult = fetchDirect(legacyUrl, endpoint = "legacy") ?: return null
+            if (!legacyResult.success) {
+                Log.w(TAG, "[CONFIG] http=${legacyResult.code} endpoint=legacy")
+                return null
+            }
+            return legacyResult.body
         }
         if (!v1Result.success) {
             Log.w(TAG, "[CONFIG] http=${v1Result.code} endpoint=v1")

@@ -76,9 +76,12 @@ class DelegatedFlowContinuityStoreTest {
 
     @Test
     fun `all returns entries newest-first`() {
-        store.save(makeRecord("flow-1", savedAtMs = 1_000L))
-        store.save(makeRecord("flow-2", savedAtMs = 2_000L))
-        store.save(makeRecord("flow-3", savedAtMs = 3_000L))
+        // 测试修复:原先用 1970 纪元附近的绝对时间戳,会被 48h TTL 淘汰逻辑(evictStale)
+        // 在 save() 时立即清除;改为相对当前时间的时间戳,保持新旧顺序又不触发 TTL 淘汰。
+        val now = System.currentTimeMillis()
+        store.save(makeRecord("flow-1", savedAtMs = now - 3_000L))
+        store.save(makeRecord("flow-2", savedAtMs = now - 2_000L))
+        store.save(makeRecord("flow-3", savedAtMs = now - 1_000L))
         val all = store.all()
         assertEquals(3, all.size)
         assertEquals("flow-3", all[0].flowId)
@@ -207,8 +210,10 @@ class DelegatedFlowContinuityStoreTest {
     @Test
     fun `oldest entries are evicted when maxEntries exceeded`() {
         val smallStore = DelegatedFlowContinuityStore(prefs = null, maxEntries = 3)
+        // 测试修复:同上,改为相对当前时间的时间戳,避免被 48h TTL 淘汰而非按 maxEntries 淘汰。
+        val now = System.currentTimeMillis()
         repeat(5) { i ->
-            smallStore.save(makeRecord("flow-$i", savedAtMs = i * 1_000L))
+            smallStore.save(makeRecord("flow-$i", savedAtMs = now - (5 - i) * 1_000L))
         }
         assertEquals(3, smallStore.size())
         val ids = smallStore.all().map { it.flowId }.toSet()

@@ -187,8 +187,11 @@ class ModelAssetManagerTest {
 
     @Test
     fun `downloadSpecsForMissing returns empty list when all models are loaded`() {
+        // 测试修复:registry 现有三个条目(MobileVLM、SeeClick param、SeeClick bin,
+        // 三者独立跟踪),downloadSpecsForMissing() 遍历全部条目,故三者都需标记 LOADED。
         mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
         mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
         val specs = mam.downloadSpecsForMissing()
         assertTrue("No specs when all models are already loaded", specs.isEmpty())
     }

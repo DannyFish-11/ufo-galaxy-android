@@ -18,17 +18,20 @@ class IceCandidateManagerTest {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    private fun host(sdp: String = "host-candidate") = SignalingMessage.IceCandidate(
+    // 测试修复:默认参数改为空串。sdp.ifEmpty 只应在调用方显式传入候选串时生效,
+    // 原来的非空默认值("host-candidate" 等)会覆盖掉含 "typ host/srflx/relay" 标记的
+    // 原始 SDP,使 candidateType 全部被误判为 TYPE_HOST(relay/srflx 分类因此失效)。
+    private fun host(sdp: String = "") = SignalingMessage.IceCandidate(
         "candidate:0 1 UDP 2130706431 192.168.1.1 54321 typ host",
         "0", 0
     ).let { it.copy(candidate = sdp.ifEmpty { it.candidate }) }
 
-    private fun srflx(sdp: String = "srflx-candidate") = SignalingMessage.IceCandidate(
+    private fun srflx(sdp: String = "") = SignalingMessage.IceCandidate(
         "candidate:1 1 UDP 1694498815 1.2.3.4 54321 typ srflx raddr 192.168.1.1 rport 54321",
         "0", 0
     ).let { it.copy(candidate = sdp.ifEmpty { it.candidate }) }
 
-    private fun relay(sdp: String = "relay-candidate") = SignalingMessage.IceCandidate(
+    private fun relay(sdp: String = "") = SignalingMessage.IceCandidate(
         "candidate:2 1 UDP 33562623 5.6.7.8 3478 typ relay raddr 1.2.3.4 rport 54321",
         "0", 0
     ).let { it.copy(candidate = sdp.ifEmpty { it.candidate }) }

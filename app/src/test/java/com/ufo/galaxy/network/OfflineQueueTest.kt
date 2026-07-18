@@ -215,8 +215,9 @@ class OfflineQueueTest {
     // ── MAX_QUEUE_SIZE constant ───────────────────────────────────────────────
 
     @Test
-    fun `MAX_QUEUE_SIZE constant is 50`() {
-        assertEquals(50, OfflineTaskQueue.MAX_QUEUE_SIZE)
+    fun `MAX_QUEUE_SIZE constant is 1000`() {
+        // 断言更新:C12-FIX 将队列上限从 50 提升到 1000,以承受更长离线周期而不致 OOM。
+        assertEquals(1000, OfflineTaskQueue.MAX_QUEUE_SIZE)
     }
 
     // ── drainAll on empty queue ───────────────────────────────────────────────
@@ -297,7 +298,14 @@ class OfflineQueueTest {
 
     @Test
     fun `previewReplayGovernance blocks null-tagged authority-sensitive replay`() {
-        queue.enqueue("goal_execution_result", """{"id":3}""")
+        // 测试修复:evaluateMessageAuthority() 对 authority-sensitive 类型先做 ownership 校验;
+        // 裸 JSON 缺 ownership 字段会被 OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED 先行拦截,
+        // reason 与本测试想验证的"空 session tag"分支不符。补齐 canonical ownership 字段
+        // 使其判为 CANONICALIZED_TRUTH,从而落入要测试的 null-tag 分支。
+        queue.enqueue(
+            "goal_execution_result",
+            """{"canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,"id":3}"""
+        )
 
         val decision = queue.previewReplayGovernance(currentTag = "durable-3").single()
 
@@ -308,7 +316,12 @@ class OfflineQueueTest {
 
     @Test
     fun `previewReplayGovernance blocks null-tagged runtime truth replay without canonical authority`() {
-        queue.enqueue("device_state_snapshot", """{"id":4}""")
+        // 测试修复:同上,device_state_snapshot 也在 authoritySensitiveReplayTypes 中,
+        // 需补齐 canonical ownership 字段越过 ownership 分支,落入 null-tag 分支。
+        queue.enqueue(
+            "device_state_snapshot",
+            """{"canonical_ownership_status":"canonical_bound","truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,"id":4}"""
+        )
 
         val decision = queue.previewReplayGovernance(currentTag = "durable-4").single()
 

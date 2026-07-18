@@ -48,7 +48,10 @@ class OpenClawdMemoryBackflowTest {
     }
 
     private fun backflow(client: OkHttpClient) =
-        OpenClawdMemoryBackflow(restBaseUrl = "http://100.0.0.1:9000", httpClient = client)
+        // 测试修复:生产端构造函数新增了 Tailscale IP 校验(100.64.0.0/10 CGNAT 网段),
+        // 100.0.0.1 不在该网段内会触发 require() 抛 IllegalArgumentException;改用真实
+        // 落在 CGNAT 范围内的地址。
+        OpenClawdMemoryBackflow(restBaseUrl = "http://100.64.0.1:9000", httpClient = client)
 
     private fun sampleEntry(taskId: String = "t-001") = MemoryEntry(
         task_id = taskId,
