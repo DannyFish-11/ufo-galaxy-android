@@ -7,16 +7,18 @@ import org.junit.Test
 import java.lang.reflect.Method
 
 /**
- * AUDIT INSPECTION — GalaxyWebSocketClient.handleMessage real dispatch chain.
+ * AUDIT INSPECTION — GalaxyWebSocketClient.processMessage real dispatch chain.
  *
  * ## Purpose
- * This test exercises the PRIVATE handleMessage(String) method via reflection so that the
+ * This test exercises the PRIVATE processMessage(String) router via reflection so that the
  * actual inbound routing logic — which maps raw WebSocket JSON to typed Listener callbacks
  * — is machine-verifiable, not just described in comments or documentation.
+ * (handleMessage(String) now only enqueues to messageChannel for backpressure; the real
+ * routing runs in processMessage via the consumer coroutine.)
  *
  * Without this coverage, the entire inbound WS-to-service dispatch chain can silently
  * regress (wrong field extraction, wrong callback, missing remapping) with no automated
- * signal. No other test in the suite calls handleMessage.
+ * signal. No other test in the suite calls processMessage.
  *
  * ## What this exposes
  *  - task_assign routing: taskId extracted from payload.task_id; traceId from envelope
@@ -48,9 +50,12 @@ class WsInboundDispatchAuditTest {
     private lateinit var client: GalaxyWebSocketClient
     private lateinit var captured: CapturingListener
 
-    /** Reflection handle to the private handleMessage(String) method. */
-    private val handleMessageMethod: Method = GalaxyWebSocketClient::class.java
-        .getDeclaredMethod("handleMessage", String::class.java)
+    // 入站路由分发的真实逻辑在 processMessage(String) —— handleMessage 现仅做背压入队
+    // (C13-FIX / SECURITY-FIX P2:trySend 到 messageChannel,由消费协程异步调用 processMessage)。
+    // 直接反射 processMessage 才能同步、确定性地验证路由,避免异步入队导致回调未触发。
+    /** Reflection handle to the private processMessage(String) dispatch method. */
+    private val processMessageMethod: Method = GalaxyWebSocketClient::class.java
+        .getDeclaredMethod("processMessage", String::class.java)
         .also { it.isAccessible = true }
 
     @Before
@@ -350,19 +355,9 @@ class WsInboundDispatchAuditTest {
 
     @Test
     fun `goal_execution_result dispatches payload json to onMessage`() {
+        // onMessage 原样转发线上帧;线上为紧凑 JSON,故输入用无空格紧凑串以匹配 contains 断言
         dispatch(
-            """
-            {
-              "type": "goal_execution_result",
-              "payload": {
-                "status": "success",
-                "result_summary": "任务完成",
-                "unified_action_lifecycle_surface": {
-                  "stage": "result_emitted"
-                }
-              }
-            }
-            """.trimIndent()
+            """{"type":"goal_execution_result","payload":{"status":"success","result_summary":"任务完成","unified_action_lifecycle_surface":{"stage":"result_emitted"}}}"""
         )
 
         assertEquals(1, captured.messageCalls)
@@ -374,20 +369,9 @@ class WsInboundDispatchAuditTest {
 
     @Test
     fun `reconciliation_signal dispatches payload json to onMessage`() {
+        // 同上:onMessage 原样转发紧凑帧,输入用无空格紧凑串以匹配 contains 断言
         dispatch(
-            """
-            {
-              "type": "reconciliation_signal",
-              "payload": {
-                "kind": "task_status_update",
-                "payload": {
-                  "unified_action_lifecycle_surface": {
-                    "stage": "executing"
-                  }
-                }
-              }
-            }
-            """.trimIndent()
+            """{"type":"reconciliation_signal","payload":{"kind":"task_status_update","payload":{"unified_action_lifecycle_surface":{"stage":"executing"}}}}"""
         )
 
         assertEquals(1, captured.messageCalls)
@@ -511,9 +495,9 @@ class WsInboundDispatchAuditTest {
 
     // ── helpers ────────────────────────────────────────────────────────────────
 
-    /** Invokes the private handleMessage method on [client]. */
+    /** Invokes the private processMessage router on [client] (同步分发,便于断言回调)。 */
     private fun dispatch(rawJson: String) {
-        handleMessageMethod.invoke(client, rawJson)
+        processMessageMethod.invoke(client, rawJson)
     }
 
     /**

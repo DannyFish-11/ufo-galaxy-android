@@ -87,8 +87,8 @@ class NetworkPrefsTest {
             gatewayPort = 9000,
             deviceId = "device-a"
         )
-        // host is set → ignore galaxyGatewayUrl
-        assertEquals("ws://100.64.0.2:9000/ws/device/device-a", s.effectiveGatewayWsUrl())
+        // host is set → ignore galaxyGatewayUrl;未显式传 useTls 时默认 true(SECURITY-FIX-R5)→ wss://
+        assertEquals("wss://100.64.0.2:9000/ws/device/device-a", s.effectiveGatewayWsUrl())
     }
 
     // ── effectiveRestBaseUrl — priority logic ─────────────────────────────────

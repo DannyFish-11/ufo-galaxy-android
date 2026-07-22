@@ -261,7 +261,11 @@ class HandoffEnvelopeV2ConsumptionTest {
     @Test
     fun `missing optional fields produce safe defaults`() {
         val json = """{"trace_id":"t2","task_id":"tsk2","goal":"g","exec_mode":"local","route_mode":"local"}"""
-        val parsed = gson.fromJson(json, HandoffEnvelopeV2::class.java)
+        // 测试对齐生产入站路径:Gson 经 Unsafe 分配、跳过 Kotlin 构造器默认值,裸
+        // fromJson 得到的集合字段实际是 null(这正是修掉的真机 NPE 根因)。生产解析点
+        // (GalaxyConnectionService)现统一调用 withSafeCollectionDefaults() 归一,
+        // 本测试验证的"安全默认值"契约即由该归一化承接。
+        val parsed = gson.fromJson(json, HandoffEnvelopeV2::class.java).withSafeCollectionDefaults()
         assertNull(parsed.capability)
         assertNull(parsed.source_runtime_posture)
         assertNull(parsed.dispatch_intent)

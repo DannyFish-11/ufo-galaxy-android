@@ -1414,7 +1414,9 @@ class GalaxyWebSocketClient(
         try {
             val root = gson.fromJson(text, JsonObject::class.java)
             val msgTypeStr = root.get("type")?.asString
-            val traceId = root.get("trace_id")?.asString
+            // 真 bug 修复:空白 trace_id 需归一化为 null(下游会另生成 UUID),
+            // 否则监听方收到空串而非 null。
+            val traceId = root.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
 
             // PR-AUTH-UNIFIED: 认证应答在进入 MsgType 枚举分发之前拦截
             // (auth_ok/auth_failed/auth_invalid 不属于业务枚举)。
@@ -1422,8 +1424,31 @@ class GalaxyWebSocketClient(
                 handleAuthResponse(msgTypeStr, root)
                 return
             }
+
+            // 真 bug 修复:error/response 是不在 MsgType 枚举里的遗留字符串帧,
+            // 直接调 fromValue 会返回 null 而落到 onUnknownMessage,导致网关错误/
+            // 响应帧被静默当成未知消息。按各自语义显式路由。
+            if (msgTypeStr == "error") {
+                listeners.forEach { it.onError(root.get("message")?.asString ?: "") }
+                return
+            }
+            if (msgTypeStr == "response") {
+                val responsePayload = root.getAsJsonObject("payload")
+                listeners.forEach { it.onMessage(responsePayload?.get("content")?.asString ?: text) }
+                return
+            }
+
+            // 真 bug 修复:入站路由器丢失了合约明文要求的 legacy 类型重映射
+            // (CanonicalDispatchChain.kt / AndroidAuthoritativePathAlignmentAudit.kt:
+            // task_execute / task_status_query / command 必须经 MsgType.toV3Type 归一到
+            // task_assign)。原实现直接 fromValue(msgTypeStr) 跳过了这层,导致真机
+            // 跨设备 legacy 任务被误路由到 onUnknownMessage、永不在设备上执行。
             val msgType = try {
-                msgTypeStr?.let { com.ufo.galaxy.shared.protocol.MsgType.fromValue(it) }
+                msgTypeStr?.let {
+                    com.ufo.galaxy.shared.protocol.MsgType.fromValue(
+                        com.ufo.galaxy.shared.protocol.MsgType.toV3Type(it)
+                    )
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1434,7 +1459,10 @@ class GalaxyWebSocketClient(
             when (msgType) {
                 com.ufo.galaxy.shared.protocol.MsgType.TASK_ASSIGN -> {
                     val payload = root.getAsJsonObject("payload")
-                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    // 真 bug 修复:legacy task_execute 等帧可能没有 payload 对象,
+                    // 需回退到顶层 task_id 字段(合约文档明确的兜底路径)。
+                    val taskId = payload?.get("task_id")?.asString
+                        ?: root.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onTaskAssign(taskId, payload?.toString() ?: "{}", traceId) }
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.GOAL_EXECUTION -> {
@@ -1463,7 +1491,10 @@ class GalaxyWebSocketClient(
                 com.ufo.galaxy.shared.protocol.MsgType.HANDOFF_ENVELOPE_V2 -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
-                    listeners.forEach { it.onHandoffEnvelopeV2(taskId, payload?.toString() ?: "{}", traceId) }
+                    // 真 bug 修复:envelope 层无 trace_id 时回退到 payload.trace_id
+                    // (合约:先查 envelope,再查 payload)。
+                    val handoffTraceId = traceId ?: payload?.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                    listeners.forEach { it.onHandoffEnvelopeV2(taskId, payload?.toString() ?: "{}", handoffTraceId) }
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.OPERATOR_ACTION_REQUEST -> {
                     val payload = root.getAsJsonObject("payload")
