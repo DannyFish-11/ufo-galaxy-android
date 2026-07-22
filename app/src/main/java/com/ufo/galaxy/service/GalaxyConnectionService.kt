@@ -21,6 +21,7 @@ import com.ufo.galaxy.agent.GoalExecutionPipeline
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.HandoffContractValidator
 import com.ufo.galaxy.agent.HandoffEnvelopeV2
+import com.ufo.galaxy.agent.withSafeCollectionDefaults
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverEligibilityAssessor
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
@@ -3054,7 +3055,9 @@ class GalaxyConnectionService : Service() {
         val envelope = try {
             // 真 bug 修复:Gson 不套用 Kotlin 构造器默认值,legacy/minimal 帧省略集合字段时
             // 会得到 null;withSafeCollectionDefaults() 归一为空集合,避免下游解引用 NPE。
-            gson.fromJson(payloadJson, HandoffEnvelopeV2::class.java)?.withSafeCollectionDefaults()
+            requireNotNull(gson.fromJson(payloadJson, HandoffEnvelopeV2::class.java)) {
+                "handoff_v2 payload parsed to null"
+            }.withSafeCollectionDefaults()
         } catch (e: Exception) {
             Log.e(TAG, "[PR-H:HANDOFF_V2] envelope parse failed task_id=$taskId: ${e.message}", e)
             emitRuntimeDiagnostics(

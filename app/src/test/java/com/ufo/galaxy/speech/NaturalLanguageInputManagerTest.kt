@@ -257,13 +257,15 @@ class NaturalLanguageInputManagerTest {
 
     @Test
     fun `submitVoiceResult behaves identically to submit`() {
+        // 测试修复:AipTransportManager 是单例,后一次 buildRouter() 的 resetInstance+
+        // registerAdapter 会接管所有上行消息;必须"构建→提交"串行进行,不能先建两个
+        // router 再分别提交(与 Pr34RuntimeInteractionAcceptanceTest 同名测试的修法一致)。
         val gatewayForText = FakeGatewayClient(connected = true, sendResult = true)
-        val gatewayForVoice = FakeGatewayClient(connected = true, sendResult = true)
-
         val routerForText = buildRouter(crossDeviceEnabled = true, gateway = gatewayForText)
-        val routerForVoice = buildRouter(crossDeviceEnabled = true, gateway = gatewayForVoice)
-
         val textResult = NaturalLanguageInputManager(routerForText).submit("go home")
+
+        val gatewayForVoice = FakeGatewayClient(connected = true, sendResult = true)
+        val routerForVoice = buildRouter(crossDeviceEnabled = true, gateway = gatewayForVoice)
         val voiceResult = NaturalLanguageInputManager(routerForVoice).submitVoiceResult("go home")
 
         assertEquals("submit and submitVoiceResult must produce identical routing result",
