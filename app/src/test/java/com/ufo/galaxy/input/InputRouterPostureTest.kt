@@ -2,6 +2,7 @@ package com.ufo.galaxy.input
 
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
@@ -10,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.Locale
@@ -72,11 +74,22 @@ class InputRouterPostureTest {
         }
     }
 
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED:清理 AipTransportManager 单例,避免 fake adapter 泄漏到其他测试类。
+        AipTransportManager.resetInstance()
+    }
+
     private fun buildCrossDeviceRouter(
         gateway: FakeGatewayClient = FakeGatewayClient(connected = true),
         localExecutor: LocalLoopExecutor = CapturingLocalLoopExecutor(),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     ): InputRouter {
+        // PR-AIP-UNIFIED:生产侧 InputRouter 统一经 AipTransportManager 单例发送上行消息,
+        // 测试必须把 fake gateway 注册为 websocket adapter,消息才能被捕获
+        // (与 InputRouterTest / NaturalLanguageInputManagerTest 同一修法)。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gateway)
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
         return InputRouter(
             settings = settings,
