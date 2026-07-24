@@ -32,9 +32,8 @@ class ModelAssetManagerTest {
         mam = ModelAssetManager(
             modelsDir,
             checksumOverrides = mapOf(
-                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
-                ModelAssetManager.MODEL_ID_SEECLICK to null,
-                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
             )
         )
     }
@@ -43,14 +42,14 @@ class ModelAssetManagerTest {
 
     @Test
     fun `verifyModel returns MISSING when file does not exist`() {
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(ModelAssetManager.ModelStatus.MISSING, status)
     }
 
     @Test
     fun `getStatus returns MISSING initially`() {
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_SEECLICK))
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_VLM_MMPROJ))
     }
 
     @Test
@@ -63,42 +62,42 @@ class ModelAssetManagerTest {
 
     @Test
     fun `verifyModel returns READY when file exists and checksum override is null`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("fake weights")
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeText("fake weights")
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(ModelAssetManager.ModelStatus.READY, status)
     }
 
     @Test
-    fun `verifyAll returns READY for mobilevlm and MISSING for seeclick when only mobilevlm present`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("fake weights")
+    fun `verifyAll returns READY for vlm and MISSING for mmproj when only vlm present`() {
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeText("fake weights")
         val statuses = mam.verifyAll()
-        assertEquals(ModelAssetManager.ModelStatus.READY, statuses[ModelAssetManager.MODEL_ID_MOBILEVLM])
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, statuses[ModelAssetManager.MODEL_ID_SEECLICK])
+        assertEquals(ModelAssetManager.ModelStatus.READY, statuses[ModelAssetManager.MODEL_ID_VLM])
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, statuses[ModelAssetManager.MODEL_ID_VLM_MMPROJ])
     }
 
     // ── markLoaded / markUnloaded ─────────────────────────────────────────────
 
     @Test
     fun `markLoaded transitions status to LOADED`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("fake weights")
-        mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        assertEquals(ModelAssetManager.ModelStatus.LOADED, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeText("fake weights")
+        mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        assertEquals(ModelAssetManager.ModelStatus.LOADED, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
     }
 
     @Test
     fun `markUnloaded reverts to READY when file still present`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("fake weights")
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markUnloaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        assertEquals(ModelAssetManager.ModelStatus.READY, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeText("fake weights")
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markUnloaded(ModelAssetManager.MODEL_ID_VLM)
+        assertEquals(ModelAssetManager.ModelStatus.READY, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
     }
 
     @Test
     fun `markUnloaded reverts to MISSING when file absent`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markUnloaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markUnloaded(ModelAssetManager.MODEL_ID_VLM)
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
     }
 
     // ── areAllModelsLoaded ────────────────────────────────────────────────────
@@ -110,9 +109,9 @@ class ModelAssetManagerTest {
 
     @Test
     fun `areAllModelsLoaded returns true only when both models are loaded`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        assertFalse("Should be false with only planner loaded", mam.areAllModelsLoaded())
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        assertFalse("Should be false with only the LLM weights loaded", mam.areAllModelsLoaded())
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         assertTrue("Should be true with both loaded", mam.areAllModelsLoaded())
     }
 
@@ -120,8 +119,8 @@ class ModelAssetManagerTest {
 
     @Test
     fun `readinessError returns null when all models are loaded`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         assertNull(mam.readinessError())
     }
 
@@ -135,18 +134,20 @@ class ModelAssetManagerTest {
     // ── path helpers ──────────────────────────────────────────────────────────
 
     @Test
-    fun `mobileVlmPath points inside models directory`() {
-        assertTrue(mam.mobileVlmPath.contains(ModelAssetManager.MOBILEVLM_FILE))
+    fun `vlmModelPath points inside models directory`() {
+        assertTrue(mam.vlmModelPath.contains(ModelAssetManager.VLM_FILE))
     }
 
     @Test
-    fun `seeClickParamPath points inside models directory`() {
-        assertTrue(mam.seeClickParamPath.contains(ModelAssetManager.SEECLICK_PARAM_FILE))
+    fun `vlmMmprojPath points inside models directory`() {
+        assertTrue(mam.vlmMmprojPath.contains(ModelAssetManager.VLM_MMPROJ_FILE))
     }
 
     @Test
-    fun `seeClickBinPath points inside models directory`() {
-        assertTrue(mam.seeClickBinPath.contains(ModelAssetManager.SEECLICK_BIN_FILE))
+    fun `vlmModelPath and vlmMmprojPath are distinct files`() {
+        // 适配说明:旧三模型注册表有第三个路径 helper(NCNN bin 文件),新契约只有两个
+        // 文件;改为断言两个 helper 指向不同文件,防止 LLM 与 mmproj 路径互相覆盖。
+        assertNotEquals(mam.vlmModelPath, mam.vlmMmprojPath)
     }
 
     // ── models directory ──────────────────────────────────────────────────────
@@ -163,8 +164,8 @@ class ModelAssetManagerTest {
     fun `verifyModel returns READY when file exists and null checksum skips verification`() {
         // This test exercises the explicit null-override path. The setUp() method already
         // configures null overrides for all models; the test below confirms the behaviour.
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(byteArrayOf(1, 2, 3, 4))
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(byteArrayOf(1, 2, 3, 4))
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(
             "With null checksum override, any file content should yield READY",
             ModelAssetManager.ModelStatus.READY,
@@ -176,7 +177,7 @@ class ModelAssetManagerTest {
 
     @Test
     fun `downloadSpecsForMissing returns non-empty list when models are MISSING and URLs are configured`() {
-        // MobileVLM and SeeClick download URLs are configured in ModelAssetManager.
+        // VLM and mmproj download URLs are configured via the ModelManifest entries.
         // All models start as MISSING, so specs should be returned.
         val specs = mam.downloadSpecsForMissing()
         assertTrue(
@@ -187,20 +188,18 @@ class ModelAssetManagerTest {
 
     @Test
     fun `downloadSpecsForMissing returns empty list when all models are loaded`() {
-        // 测试修复:registry 现有三个条目(MobileVLM、SeeClick param、SeeClick bin,
-        // 三者独立跟踪),downloadSpecsForMissing() 遍历全部条目,故三者都需标记 LOADED。
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+        // 适配说明:registry 现有两个条目(MAI-UI-2B LLM 权重与 mmproj 视觉投影,
+        // 两者独立跟踪),downloadSpecsForMissing() 遍历全部条目,故两者都需标记 LOADED。
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         val specs = mam.downloadSpecsForMissing()
         assertTrue("No specs when all models are already loaded", specs.isEmpty())
     }
 
     @Test
     fun `downloadSpecsForMissing returns empty list when models are READY`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("weights")
-        File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("param")
-        File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("bin")
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeText("weights")
+        File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).writeText("mmproj")
         mam.verifyAll()
         val specs = mam.downloadSpecsForMissing()
         assertTrue("No specs when models are READY (only MISSING/CORRUPTED trigger download)", specs.isEmpty())

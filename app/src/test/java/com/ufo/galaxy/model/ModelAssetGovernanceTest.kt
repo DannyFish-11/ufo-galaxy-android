@@ -50,9 +50,8 @@ class ModelAssetGovernanceTest {
         mam = ModelAssetManager(
             modelsDir,
             checksumOverrides = mapOf(
-                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
-                ModelAssetManager.MODEL_ID_SEECLICK to null,
-                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
             )
         )
     }
@@ -100,19 +99,19 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `provision success returns ProvisioningResult Success`() = runBlocking {
-        val body = "mobilevlm weights content".toByteArray()
+        val body = "vlm weights content".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         val result = pipeline.provision(spec)
 
         assertTrue("Provision must succeed", result is ProvisioningResult.Success)
         val success = result as ProvisioningResult.Success
-        assertEquals(ModelAssetManager.MODEL_ID_MOBILEVLM, success.modelId)
+        assertEquals(ModelAssetManager.MODEL_ID_VLM, success.modelId)
         assertTrue("Installed file must exist", success.installedFile.exists())
     }
 
@@ -121,9 +120,9 @@ class ModelAssetGovernanceTest {
         val body = "weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         pipeline.provision(spec)
@@ -131,20 +130,20 @@ class ModelAssetGovernanceTest {
         assertEquals(
             "Model must be LOADED after successful provision",
             ModelAssetManager.ModelStatus.LOADED,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
     @Test
     fun `provision is idempotent when model is already LOADED`() = runBlocking {
         // Pre-mark model as loaded without touching the network.
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
         val counting = CountingFactory(fakeHttp())
         val pipeline = makePipeline(counting)
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         val result = pipeline.provision(spec)
@@ -158,9 +157,9 @@ class ModelAssetGovernanceTest {
         val body = ByteArray(16_384) { it.toByte() }
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         val progressEvents = mutableListOf<ModelDownloader.DownloadStatus.Progress>()
 
@@ -169,7 +168,7 @@ class ModelAssetGovernanceTest {
         assertTrue("At least one Progress event expected", progressEvents.isNotEmpty())
         assertEquals(
             "Progress events must carry the correct modelId",
-            ModelAssetManager.MODEL_ID_MOBILEVLM,
+            ModelAssetManager.MODEL_ID_VLM,
             progressEvents.first().modelId
         )
     }
@@ -182,9 +181,9 @@ class ModelAssetGovernanceTest {
         val wrongChecksum = "a".repeat(64)  // intentionally wrong SHA-256
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = wrongChecksum
         )
 
@@ -195,7 +194,7 @@ class ModelAssetGovernanceTest {
             result is ProvisioningResult.Failure.ChecksumMismatch
         )
         val failure = result as ProvisioningResult.Failure.ChecksumMismatch
-        assertEquals(ModelAssetManager.MODEL_ID_MOBILEVLM, failure.modelId)
+        assertEquals(ModelAssetManager.MODEL_ID_VLM, failure.modelId)
         assertEquals(wrongChecksum, failure.expected)
     }
 
@@ -204,9 +203,9 @@ class ModelAssetGovernanceTest {
         val body = "bytes".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = "0".repeat(64)
         )
 
@@ -214,11 +213,11 @@ class ModelAssetGovernanceTest {
 
         assertFalse(
             "Final model file must NOT be present after checksum failure",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists()
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists()
         )
         assertFalse(
             "Temp file must be cleaned up after checksum failure",
-            File(modelsDir, "${ModelAssetManager.MOBILEVLM_FILE}.tmp").exists()
+            File(modelsDir, "${ModelAssetManager.VLM_FILE}.tmp").exists()
         )
     }
 
@@ -227,9 +226,9 @@ class ModelAssetGovernanceTest {
         val body = "bytes".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = "0".repeat(64)
         )
 
@@ -238,7 +237,7 @@ class ModelAssetGovernanceTest {
         assertNotEquals(
             "Model must not be LOADED after checksum failure",
             ModelAssetManager.ModelStatus.LOADED,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
@@ -246,9 +245,9 @@ class ModelAssetGovernanceTest {
     fun `provision download network error returns DownloadError`() = runBlocking {
         val pipeline = makePipeline(fakeHttp(responseCode = 503))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         val result = pipeline.provision(spec)
@@ -258,7 +257,7 @@ class ModelAssetGovernanceTest {
             result is ProvisioningResult.Failure.DownloadError
         )
         val failure = result as ProvisioningResult.Failure.DownloadError
-        assertEquals(ModelAssetManager.MODEL_ID_MOBILEVLM, failure.modelId)
+        assertEquals(ModelAssetManager.MODEL_ID_VLM, failure.modelId)
     }
 
     // ── 3. Interrupted download recovery ─────────────────────────────────────
@@ -267,16 +266,16 @@ class ModelAssetGovernanceTest {
     fun `provision removes leftover tmp file before starting download`() = runBlocking {
         // Simulate a partial download from a previous run.
         val staleContent = "incomplete download data".toByteArray()
-        val tmpFile = File(modelsDir, "${ModelAssetManager.MOBILEVLM_FILE}.tmp")
+        val tmpFile = File(modelsDir, "${ModelAssetManager.VLM_FILE}.tmp")
         tmpFile.writeBytes(staleContent)
         assertTrue("Precondition: tmp file must exist before provision", tmpFile.exists())
 
         val freshBody = "complete model weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = freshBody))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         val result = pipeline.provision(spec)
@@ -285,21 +284,21 @@ class ModelAssetGovernanceTest {
         assertFalse("Tmp file must be gone after successful provision", tmpFile.exists())
         assertTrue(
             "Fresh model file must be present after recovery",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists()
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists()
         )
     }
 
     @Test
     fun `provision recovers from tmp file and activates model`() = runBlocking {
         // Place a stale .tmp file to simulate an interrupted prior download.
-        File(modelsDir, "${ModelAssetManager.MOBILEVLM_FILE}.tmp").writeBytes("partial".toByteArray())
+        File(modelsDir, "${ModelAssetManager.VLM_FILE}.tmp").writeBytes("partial".toByteArray())
 
         val freshBody = "full weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = freshBody))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         pipeline.provision(spec)
@@ -307,7 +306,7 @@ class ModelAssetGovernanceTest {
         assertEquals(
             "Model must be LOADED after recovery",
             ModelAssetManager.ModelStatus.LOADED,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
@@ -315,14 +314,14 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `cleanupStaleFiles removes tmp residues`() {
-        File(modelsDir, "${ModelAssetManager.MOBILEVLM_FILE}.tmp").writeBytes("partial".toByteArray())
-        File(modelsDir, "${ModelAssetManager.SEECLICK_PARAM_FILE}.tmp").writeBytes("partial2".toByteArray())
+        File(modelsDir, "${ModelAssetManager.VLM_FILE}.tmp").writeBytes("partial".toByteArray())
+        File(modelsDir, "${ModelAssetManager.VLM_MMPROJ_FILE}.tmp").writeBytes("partial2".toByteArray())
 
         val removed = mam.cleanupStaleFiles()
 
         assertEquals("Both tmp files must be removed", 2, removed)
-        assertFalse(File(modelsDir, "${ModelAssetManager.MOBILEVLM_FILE}.tmp").exists())
-        assertFalse(File(modelsDir, "${ModelAssetManager.SEECLICK_PARAM_FILE}.tmp").exists())
+        assertFalse(File(modelsDir, "${ModelAssetManager.VLM_FILE}.tmp").exists())
+        assertFalse(File(modelsDir, "${ModelAssetManager.VLM_MMPROJ_FILE}.tmp").exists())
     }
 
     @Test
@@ -339,16 +338,16 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `cleanupStaleFiles preserves recognised model files`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("weights".toByteArray())
-        File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeBytes("param".toByteArray())
-        File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).writeBytes("bin".toByteArray())
+        // 适配说明:旧三模型注册表有三个可识别文件;新契约注册表只有 LLM 权重与
+        // mmproj 两个文件,故仅写入并断言这两个文件被保留。
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).writeBytes("mmproj".toByteArray())
 
         val removed = mam.cleanupStaleFiles()
 
         assertEquals("No recognised files must be removed", 0, removed)
-        assertTrue(File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists())
-        assertTrue(File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).exists())
-        assertTrue(File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).exists())
+        assertTrue(File(modelsDir, ModelAssetManager.VLM_FILE).exists())
+        assertTrue(File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).exists())
     }
 
     @Test
@@ -359,14 +358,14 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `cleanupStaleFiles removes mix of tmp and orphan files while preserving valid files`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("vlm".toByteArray())
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("vlm".toByteArray())
         File(modelsDir, "junk.bin").writeBytes("junk".toByteArray())
-        File(modelsDir, "${ModelAssetManager.SEECLICK_PARAM_FILE}.tmp").writeBytes("partial".toByteArray())
+        File(modelsDir, "${ModelAssetManager.VLM_MMPROJ_FILE}.tmp").writeBytes("partial".toByteArray())
 
         val removed = mam.cleanupStaleFiles()
 
         assertEquals("Exactly 2 stale files must be removed", 2, removed)
-        assertTrue("Valid vlm file must survive cleanup", File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists())
+        assertTrue("Valid vlm file must survive cleanup", File(modelsDir, ModelAssetManager.VLM_FILE).exists())
     }
 
     // ── 5. Compatibility rejection ────────────────────────────────────────────
@@ -425,12 +424,12 @@ class ModelAssetGovernanceTest {
         val body = "weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         val manifest = ModelManifest(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             modelVersion = "1.0",
             runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
             minRuntimeVersion = "2.0"
@@ -450,9 +449,9 @@ class ModelAssetGovernanceTest {
         val body = "weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         val result = pipeline.provision(spec, manifest = null)
@@ -464,9 +463,9 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `fileFor returns non-null file for known model ids`() {
-        assertNotNull(mam.fileFor(ModelAssetManager.MODEL_ID_MOBILEVLM))
-        assertNotNull(mam.fileFor(ModelAssetManager.MODEL_ID_SEECLICK))
-        assertNotNull(mam.fileFor(ModelAssetManager.MODEL_ID_SEECLICK_BIN))
+        // 适配说明:注册表由旧三模型收敛为 LLM 权重 + mmproj 两个条目。
+        assertNotNull(mam.fileFor(ModelAssetManager.MODEL_ID_VLM))
+        assertNotNull(mam.fileFor(ModelAssetManager.MODEL_ID_VLM_MMPROJ))
     }
 
     @Test
@@ -476,7 +475,7 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `fileFor returns file inside modelsDir`() {
-        val file = mam.fileFor(ModelAssetManager.MODEL_ID_MOBILEVLM)!!
+        val file = mam.fileFor(ModelAssetManager.MODEL_ID_VLM)!!
         assertEquals(modelsDir.absolutePath, file.parentFile?.absolutePath)
     }
 
@@ -490,7 +489,7 @@ class ModelAssetGovernanceTest {
     @Test
     fun `storageUsageBytes reflects size of present model files`() {
         val content = "1234567890".toByteArray()
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(content)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(content)
 
         val usage = mam.storageUsageBytes()
         assertEquals("Usage must match written file size", content.size.toLong(), usage)
@@ -499,11 +498,11 @@ class ModelAssetGovernanceTest {
     @Test
     fun `storageUsageBytes sums all present model files`() {
         val vlmBytes = "vlm_weights".toByteArray()
-        val paramBytes = "sc_param".toByteArray()
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(vlmBytes)
-        File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeBytes(paramBytes)
+        val mmprojBytes = "mmproj_w".toByteArray()
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(vlmBytes)
+        File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).writeBytes(mmprojBytes)
 
-        val expected = vlmBytes.size.toLong() + paramBytes.size.toLong()
+        val expected = vlmBytes.size.toLong() + mmprojBytes.size.toLong()
         assertEquals(expected, mam.storageUsageBytes())
     }
 
@@ -518,59 +517,59 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `evictForStorage removes READY model file from disk`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("weights".toByteArray())
-        mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)  // puts it in READY state
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)  // puts it in READY state
 
         mam.evictForStorage(requiredBytes = Long.MAX_VALUE)
 
         assertFalse(
             "READY model file must be deleted by eviction",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists()
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists()
         )
     }
 
     @Test
     fun `evictForStorage transitions model to MISSING after removal`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("weights".toByteArray())
-        mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
 
         mam.evictForStorage(requiredBytes = Long.MAX_VALUE)
 
         assertEquals(
             "Evicted model must transition to MISSING",
             ModelAssetManager.ModelStatus.MISSING,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
     @Test
     fun `evictForStorage does not evict LOADED models`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("weights".toByteArray())
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)  // LOADED, not READY
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)  // LOADED, not READY
 
         mam.evictForStorage(requiredBytes = Long.MAX_VALUE)
 
         assertTrue(
             "LOADED model file must NOT be evicted",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists()
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists()
         )
         assertEquals(
             "LOADED status must be preserved",
             ModelAssetManager.ModelStatus.LOADED,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
     @Test
     fun `evictForStorage returns list of evicted model ids`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("w".toByteArray())
-        mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("w".toByteArray())
+        mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
 
         val evicted = mam.evictForStorage(requiredBytes = Long.MAX_VALUE)
 
         assertTrue(
             "Evicted list must include the removed model id",
-            evicted.contains(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            evicted.contains(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
@@ -578,39 +577,39 @@ class ModelAssetGovernanceTest {
 
     @Test
     fun `rollback without deleteFile reverts LOADED model to READY when file is present`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("weights".toByteArray())
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
 
         val pipeline = makePipeline(fakeHttp())
-        pipeline.rollback(ModelAssetManager.MODEL_ID_MOBILEVLM, deleteFile = false)
+        pipeline.rollback(ModelAssetManager.MODEL_ID_VLM, deleteFile = false)
 
         assertEquals(
             "Model must be READY after rollback without deleteFile",
             ModelAssetManager.ModelStatus.READY,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
         assertTrue(
             "Installed file must still exist after rollback without deleteFile",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists()
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists()
         )
     }
 
     @Test
     fun `rollback with deleteFile removes model file and marks MISSING`() {
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("weights".toByteArray())
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
 
         val pipeline = makePipeline(fakeHttp())
-        pipeline.rollback(ModelAssetManager.MODEL_ID_MOBILEVLM, deleteFile = true)
+        pipeline.rollback(ModelAssetManager.MODEL_ID_VLM, deleteFile = true)
 
         assertFalse(
             "Installed file must be removed after rollback with deleteFile=true",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists()
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists()
         )
         assertEquals(
             "Model must be MISSING after rollback with deleteFile=true",
             ModelAssetManager.ModelStatus.MISSING,
-            mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM)
+            mam.getStatus(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
@@ -660,61 +659,60 @@ class ModelAssetGovernanceTest {
     // ── 6. Manifest-driven download spec generation ───────────────────────────
 
     @Test
-    fun `downloadSpecsForMissing derives MobileVLM URL from manifest source`() {
+    fun `downloadSpecsForMissing derives VLM URL from manifest source`() {
         val specs = mam.downloadSpecsForMissing()
-        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
-        assertNotNull("MobileVLM spec must be present", vlmSpec)
-        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_MOBILEVLM)!!
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }
+        assertNotNull("VLM spec must be present", vlmSpec)
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_VLM)!!
         val expectedUrl = (manifest.source as ModelSource.HuggingFace).downloadUrl
         assertEquals(
-            "MobileVLM spec URL must match manifest source URL",
+            "VLM spec URL must match manifest source URL",
             expectedUrl, vlmSpec!!.url
         )
     }
 
     @Test
-    fun `downloadSpecsForMissing derives SeeClick param URL from manifest source`() {
+    fun `downloadSpecsForMissing derives mmproj URL from manifest source`() {
         val specs = mam.downloadSpecsForMissing()
-        val scSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK }
-        assertNotNull("SeeClick param spec must be present", scSpec)
-        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK)!!
+        val mmprojSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM_MMPROJ }
+        assertNotNull("mmproj spec must be present", mmprojSpec)
+        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_VLM_MMPROJ)!!
         val expectedUrl = (manifest.source as ModelSource.HuggingFace).downloadUrl
         assertEquals(
-            "SeeClick param spec URL must match manifest source URL",
-            expectedUrl, scSpec!!.url
+            "mmproj spec URL must match manifest source URL",
+            expectedUrl, mmprojSpec!!.url
         )
     }
 
     @Test
-    fun `downloadSpecsForMissing derives SeeClick bin URL from manifest source`() {
+    fun `downloadSpecsForMissing covers exactly the two registered models when all missing`() {
+        // 适配说明:原测试针对旧第三模型(NCNN bin)的 spec 派生;该模型已退役,
+        // 改为断言 registry 收敛后 spec 集合恰好覆盖两个新模型。
         val specs = mam.downloadSpecsForMissing()
-        val scBinSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK_BIN }
-        assertNotNull("SeeClick bin spec must be present", scBinSpec)
-        val manifest = ModelManifest.forKnownModel(ModelAssetManager.MODEL_ID_SEECLICK_BIN)!!
-        val expectedUrl = (manifest.source as ModelSource.HuggingFace).downloadUrl
         assertEquals(
-            "SeeClick bin spec URL must match manifest source URL",
-            expectedUrl, scBinSpec!!.url
+            "Exactly two specs expected when both model files are missing",
+            setOf(ModelAssetManager.MODEL_ID_VLM, ModelAssetManager.MODEL_ID_VLM_MMPROJ),
+            specs.map { it.modelId }.toSet()
         )
     }
 
     @Test
-    fun `downloadSpecsForMissing MobileVLM URL references Q4_K_M quantized file`() {
+    fun `downloadSpecsForMissing VLM URL references Q4_K_M quantized file`() {
         val specs = mam.downloadSpecsForMissing()
-        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }!!
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }!!
         assertTrue(
-            "MobileVLM download URL must reference the Q4_K_M quantized file",
-            vlmSpec.url.contains(ModelAssetManager.MOBILEVLM_FILE)
+            "VLM download URL must reference the Q4_K_M quantized file",
+            vlmSpec.url.contains(ModelAssetManager.VLM_FILE)
         )
     }
 
     @Test
     fun `downloadSpecsForMissing does not include already loaded models`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
         val specs = mam.downloadSpecsForMissing()
         assertNull(
-            "Loaded MobileVLM must not appear in missing specs",
-            specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
+            "Loaded VLM must not appear in missing specs",
+            specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }
         )
     }
 
@@ -751,13 +749,13 @@ class ModelAssetGovernanceTest {
     fun `provision returns InsufficientStorage when manifest declares minDiskSpaceBytes and space is lacking`() = runBlocking {
         val pipeline = makePipeline(fakeHttp())
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         // Manifest with minDiskSpaceBytes = Long.MAX_VALUE guarantees the check fails.
         val manifest = ModelManifest(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             modelVersion = "1.0",
             runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
             minDiskSpaceBytes = Long.MAX_VALUE
@@ -775,12 +773,12 @@ class ModelAssetGovernanceTest {
     fun `provision InsufficientStorage carries modelId and byte counts`() = runBlocking {
         val pipeline = makePipeline(fakeHttp())
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         val manifest = ModelManifest(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             modelVersion = "1.0",
             runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
             minDiskSpaceBytes = Long.MAX_VALUE
@@ -789,7 +787,7 @@ class ModelAssetGovernanceTest {
         val result = pipeline.provision(spec, manifest = manifest)
             as ProvisioningResult.Failure.InsufficientStorage
 
-        assertEquals(ModelAssetManager.MODEL_ID_MOBILEVLM, result.modelId)
+        assertEquals(ModelAssetManager.MODEL_ID_VLM, result.modelId)
         assertEquals(Long.MAX_VALUE, result.requiredBytes)
         assertTrue("availableBytes must be non-negative", result.availableBytes >= 0L)
     }
@@ -799,12 +797,12 @@ class ModelAssetGovernanceTest {
         val counting = CountingFactory(fakeHttp())
         val pipeline = makePipeline(counting)
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         val manifest = ModelManifest(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             modelVersion = "1.0",
             runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
             minDiskSpaceBytes = Long.MAX_VALUE
@@ -820,12 +818,12 @@ class ModelAssetGovernanceTest {
         val body = "weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         val manifest = ModelManifest(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             modelVersion = "1.0",
             runtimeType = ModelManifest.RuntimeType.LLAMA_CPP,
             minDiskSpaceBytes = null  // no storage check
@@ -843,9 +841,9 @@ class ModelAssetGovernanceTest {
         val body = "weights".toByteArray()
         val pipeline = makePipeline(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
 
         // Null manifest: compatibility check and storage pre-check are both skipped.
