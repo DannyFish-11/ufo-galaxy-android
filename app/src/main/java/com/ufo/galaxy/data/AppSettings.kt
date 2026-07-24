@@ -251,25 +251,25 @@ interface AppSettings {
     // ── Local-chain execution settings (planner / grounding) ─────────────────
 
     /**
-     * Maximum tokens the MobileVLM planner may generate per call.
+     * Maximum tokens the VLM planner may generate per call.
      * Default is read from `assets/config.properties` key `planner_max_tokens`.
      */
     var plannerMaxTokens: Int
 
     /**
-     * Sampling temperature for the MobileVLM planner (lower = more deterministic).
+     * Sampling temperature for the VLM planner (lower = more deterministic).
      * Default is read from `assets/config.properties` key `planner_temperature`.
      */
     var plannerTemperature: Double
 
     /**
-     * HTTP connect+read timeout for MobileVLM inference calls (milliseconds).
+     * HTTP connect+read timeout for VLM planner inference calls (milliseconds).
      * Default is read from `assets/config.properties` key `planner_timeout_ms`.
      */
     var plannerTimeoutMs: Int
 
     /**
-     * HTTP connect+read timeout for SeeClick grounding calls (milliseconds).
+     * HTTP connect+read timeout for VLM grounding calls (milliseconds).
      * Default is read from `assets/config.properties` key `grounding_timeout_ms`.
      */
     var groundingTimeoutMs: Int
@@ -591,7 +591,7 @@ class InMemoryAppSettings(
  * - [crossDeviceEnabled]: `true` — canonical Android↔V2 cross-device runtime path is enabled by default.
  * - [goalExecutionEnabled]: `true`
  * - [localModelEnabled]: `false` — updated to `true` by [GalaxyConnectionService] when
- *   both MobileVLM and SeeClick models are successfully loaded.
+ *   both VLM weight files (LLM + mmproj) are successfully loaded.
  * - [parallelExecutionEnabled]: `false`
  * - [deviceRole]: [DEFAULT_DEVICE_ROLE] ("phone")
  * - [modelReady]: `false` — updated by [ReadinessChecker] at startup and before autonomous execution.

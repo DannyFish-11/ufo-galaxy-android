@@ -1,10 +1,10 @@
 package com.ufo.galaxy.inference
 
 /**
- * Local planner service interface for MobileVLM V2-1.7B on-device task planning.
+ * Local planner service interface for unified-VLM on-device task planning.
  *
  * Pluggable runtime: llama.cpp (GGUF INT4/INT8) or MLC-LLM backend.
- * Model: mtgv/MobileVLM_V2-1.7B (HuggingFace).
+ * Model: MAI-UI-2B(mradermacher/MAI-UI-2B-GGUF,Qwen3-VL-2B 底座)。
  *
  * Implementations must provide load/unload lifecycle hooks to manage on-device model
  * memory.
@@ -142,7 +142,7 @@ interface LocalPlannerService {
      */
     fun prewarm(): Boolean = loadModel()
 
-    /** Loads the MobileVLM model weights into device memory. Returns true on success. */
+    /** Loads the VLM model weights into device memory. Returns true on success. */
     fun loadModel(): Boolean
 
     /** Releases model weights from device memory. */
@@ -206,7 +206,7 @@ class NoOpPlannerService : LocalPlannerService {
         screenshotBase64: String?
     ): LocalPlannerService.PlanResult = LocalPlannerService.PlanResult(
         steps = emptyList(),
-        error = "MobileVLM planner not available: model not loaded"
+        error = "VLM planner not available: model not loaded"
     )
 
     override fun replan(
@@ -217,6 +217,6 @@ class NoOpPlannerService : LocalPlannerService {
         screenshotBase64: String?
     ): LocalPlannerService.PlanResult = LocalPlannerService.PlanResult(
         steps = emptyList(),
-        error = "MobileVLM planner not available: model not loaded"
+        error = "VLM planner not available: model not loaded"
     )
 }

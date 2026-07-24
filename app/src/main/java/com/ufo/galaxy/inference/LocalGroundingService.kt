@@ -1,10 +1,10 @@
 package com.ufo.galaxy.inference
 
 /**
- * Local grounding service interface for SeeClick on-device GUI grounding.
+ * Local grounding service interface for unified-VLM on-device GUI grounding.
  *
  * Pluggable runtime: NCNN (ARM NEON/Vulkan) or MNN backend.
- * Model: njucckevin/SeeClick (HuggingFace).
+ * Model: MAI-UI-2B(与规划器共用同一模型/服务)。
  *
  * Maps a natural-language intent and a live screenshot to physical screen coordinates.
  * Coordinates are produced exclusively on-device; the gateway never supplies x/y values.
@@ -63,7 +63,7 @@ interface LocalGroundingService {
      */
     fun prewarm(): Boolean = loadModel()
 
-    /** Loads the SeeClick model weights into device memory. Returns true on success. */
+    /** Loads the VLM model weights into device memory. Returns true on success. */
     fun loadModel(): Boolean
 
     /** Releases model weights from device memory. */
@@ -115,6 +115,6 @@ class NoOpGroundingService : LocalGroundingService {
         y = 0,
         confidence = 0f,
         element_description = "",
-        error = "SeeClick grounding not available: model not loaded"
+        error = "VLM grounding not available: model not loaded"
     )
 }

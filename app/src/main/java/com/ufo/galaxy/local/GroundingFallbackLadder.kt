@@ -6,12 +6,12 @@ import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
- * Implements a multi-stage grounding fallback chain so that if primary SeeClick grounding
+ * Implements a multi-stage grounding fallback chain so that if primary VLM grounding
  * fails, the system attempts lower-cost alternatives before returning a structured failure.
  *
  * The ladder is attempted in order until valid coordinates are produced:
  *
- * 1. **Primary SeeClick** — full-resolution or downscaled screenshot passed to the
+ * 1. **Primary VLM grounding** — full-resolution or downscaled screenshot passed to the
  *    loaded [LocalGroundingService].
  * 2. **Resized retry** — screenshot re-scaled to a smaller edge (50 % of the primary
  *    edge) before grounding; reduces encoding noise from compression artefacts.
@@ -26,7 +26,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
  * 6. **Structured no-match failure** — all stages exhausted; returns an error result
  *    with [FailureCode.GROUND_ALL_STAGES_EXHAUSTED].
  *
- * @param groundingService The primary [LocalGroundingService] (SeeClick).
+ * @param groundingService The primary [LocalGroundingService] (unified VLM).
  * @param imageScaler      Scaler used for stages 1 and 2.
  * @param primaryMaxEdge   Max longest edge (px) for the primary grounding call.
  * @param resizedMaxEdge   Max longest edge (px) for the resized-retry stage.
@@ -99,7 +99,7 @@ class GroundingFallbackLadder(
         screenHeight: Int
     ): GroundingResult {
 
-        // Stage 1: Primary SeeClick grounding.
+        // Stage 1: Primary VLM grounding.
         if (groundingService.isModelLoaded()) {
             val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight)
             if (result != null) return result

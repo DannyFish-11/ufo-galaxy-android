@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * **Local runtime lifecycle manager** for the on-device inference pair (planner + grounding).
  *
  * This class is the single authority for starting, stopping, health-checking, and recovering
- * the MobileVLM planner and SeeClick grounding runtimes. It enforces **real inference
+ * the unified VLM planner and grounding runtimes. It enforces **real inference
  * readiness** — not just endpoint liveness — before reporting a component as healthy.
  *
  * ## Lifecycle
@@ -38,8 +38,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * - [restart]: stop + start in one call; useful after repeated health failures.
  * - [healthCheck]: non-mutating snapshot; call at any time.
  *
- * @param plannerService     MobileVLM planner backend.
- * @param groundingService   SeeClick grounding backend.
+ * @param plannerService     Unified VLM planner backend.
+ * @param groundingService   Unified VLM grounding backend.
  * @param modelAssetManager  Model file registry; consulted during start for file readiness.
  */
 class LocalInferenceRuntimeManager(
@@ -102,7 +102,7 @@ class LocalInferenceRuntimeManager(
          * The runtime startup pipeline failed. This is a **startup-specific** failure,
          * distinct from a post-startup crash or safe-mode block.
          *
-         * [reason] describes the failure cause (e.g. "Model files not ready: 'mobilevlm'=MISSING").
+         * [reason] describes the failure cause (e.g. "Model files not ready: 'mai_ui_2b'=MISSING").
          * [stage] identifies the startup phase at which the pipeline stopped.
          *
          * ## Recovery

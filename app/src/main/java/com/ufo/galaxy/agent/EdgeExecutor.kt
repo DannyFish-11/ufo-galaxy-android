@@ -20,10 +20,10 @@ import java.util.Base64
 
 /**
  * EdgeExecutor orchestrates the full on-device AIP v3 task execution pipeline:
- *   screenshot → MobileVLM 1.7B planner → SeeClick grounding → AccessibilityService
+ *   screenshot → VLM(MAI-UI-2B)planner → VLM grounding → AccessibilityService
  *
  * Uses [LocalPlannerService] and [LocalGroundingService] as pluggable inference
- * backends (llama.cpp/MLC-LLM for planning; NCNN/MNN for grounding).
+ * backends (同一 llama.cpp 服务承担规划与定位——单模型双职).
  *
  * Architecture constraints:
  *  - All screen coordinates are generated on-device in the grounding stage.
@@ -40,8 +40,8 @@ import java.util.Base64
  *  - [correlation_id] in [TaskResultPayload] is always set to [TaskAssignPayload.task_id].
  *
  * @param screenshotProvider    Captures the current device screen as JPEG bytes.
- * @param plannerService        MobileVLM 1.7B local planner (llama.cpp / MLC-LLM).
- * @param groundingService      SeeClick local grounding engine (NCNN / MNN).
+ * @param plannerService        Unified VLM local planner (llama.cpp).
+ * @param groundingService      Unified VLM local grounding engine (同一 llama.cpp 服务).
  * @param accessibilityExecutor Executes resolved actions via Android AccessibilityService.
  * @param imageScaler           Optional scaler for grounding input; defaults to [NoOpImageScaler].
  * @param scaledMaxEdge         Maximum longest edge (px) for grounding input image.
@@ -113,7 +113,7 @@ class EdgeExecutor(
             return buildResult(
                 taskId = taskAssign.task_id,
                 status = STATUS_ERROR,
-                error = "Model not ready: MobileVLM planner is not loaded. " +
+                error = "Model not ready: VLM planner is not loaded. " +
                     "Ensure the inference server is running and loadModel() succeeded."
             )
         }
@@ -121,7 +121,7 @@ class EdgeExecutor(
             return buildResult(
                 taskId = taskAssign.task_id,
                 status = STATUS_ERROR,
-                error = "Model not ready: SeeClick grounding engine is not loaded. " +
+                error = "Model not ready: VLM grounding engine is not loaded. " +
                     "Ensure the inference server is running and loadModel() succeeded."
             )
         }

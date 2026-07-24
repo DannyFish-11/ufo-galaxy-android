@@ -179,7 +179,7 @@ import kotlin.coroutines.coroutineContext
  *    gateway task arrives (blocking the local [LoopController]) and
  *    [RuntimeController.onRemoteTaskFinished] when the result is sent back.
  *
- * On start: loads MobileVLM and SeeClick models via [GalaxyWebSocketClient.setModelCapabilities].
+ * On start: loads the unified VLM (LLM + mmproj) via [GalaxyWebSocketClient.setModelCapabilities].
  * On destroy: unloads models and removes the WS listener.
  */
 class GalaxyConnectionService : Service() {
@@ -4850,8 +4850,8 @@ class GalaxyConnectionService : Service() {
             // ── Model identity from ModelAssetManager ────────────────────────
             val assetManager = UFOGalaxyApplication.modelAssetManager
             val modelStatuses = try { assetManager.verifyAll() } catch (e: Exception) { emptyMap() }
-            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM]
-            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK]
+            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM]
+            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ]
             val mobilevlmPresent = mobilevlmStatus != null &&
                 mobilevlmStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
             val seeClickPresent = seeClickStatus != null &&
@@ -4868,7 +4868,7 @@ class GalaxyConnectionService : Service() {
                 mobilevlmStatus == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
             // model_id: the canonical identifier of the primary on-device model when present;
             // null when the model is not yet present (awaiting first download or missing).
-            val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM else null
+            val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM else null
             // pending_first_download: true when no model has been successfully downloaded
             // (no model in the registry is READY or LOADED).  This is the canonical condition:
             // a device awaiting its first download has no READY/LOADED models.
@@ -7502,7 +7502,7 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * Pre-warms the MobileVLM and SeeClick inference servers before full model loading.
+     * Pre-warms the unified VLM inference server (planner + grounding paths) before full model loading.
      * Sends a lightweight health ping to each server to establish a warm TCP connection
      * and surface any startup failures early.
      */
@@ -7551,10 +7551,10 @@ class GalaxyConnectionService : Service() {
         )
 
         val assetManager = UFOGalaxyApplication.modelAssetManager
-        if (plannerLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
-        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
-        if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
-        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
+        if (plannerLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM)
+        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM)
+        if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ)
+        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ)
 
         // Low-level model capabilities are advertised only for components that are actually loaded.
         val lowLevelCaps = mutableListOf<String>()
@@ -7646,8 +7646,8 @@ class GalaxyConnectionService : Service() {
      */
     private fun unloadModels() {
         UFOGalaxyApplication.localInferenceRuntimeManager.stop()
-        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
-        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
+        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM)
+        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         Log.i(TAG, "本地模型已卸载 (LocalInferenceRuntimeManager stopped)")
     }
     

@@ -16,7 +16,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
  * returning a structured failure. Actions that do not need coordinates (type, back,
  * home, open_app) are dispatched directly without a grounding call.
  *
- * @param groundingService      SeeClick NCNN grounding engine.
+ * @param groundingService      Unified VLM grounding engine.
  * @param accessibilityExecutor Dispatches device actions via AccessibilityService.
  * @param imageScaler           Optional downscaler for grounding input;
  *                              use [NoOpImageScaler] in JVM tests.
@@ -49,7 +49,7 @@ class ExecutorBridge(
     /**
      * Executes [step] against the device and returns an updated [ActionStep] with the result.
      *
-     * Grounding now uses [GroundingFallbackLadder] so transient SeeClick failures are
+     * Grounding now uses [GroundingFallbackLadder] so transient grounding failures are
      * retried at a smaller resolution before falling back to accessibility-node or heuristic
      * region coordinates, rather than immediately failing the step.
      *

@@ -9,7 +9,7 @@ import com.ufo.galaxy.inference.WarmupResult
 import com.ufo.galaxy.runtime.NativeInferenceLoader
 
 /**
- * MobileVLM V2-1.7B task planner backed by the llama.cpp native runtime.
+ * Unified VLM (MAI-UI-2B) task planner backed by the llama.cpp native runtime.
  *
  * Uses JNI to call directly into `libllama.so` (the llama.cpp Android shared library),
  * bypassing any intermediary HTTP server. The GGUF model file is loaded into device RAM
@@ -115,7 +115,7 @@ class LlamaCppPlannerService(
                 false
             } else {
                 nativeHandle = handle
-                Log.i(TAG, "MobileVLM GGUF model loaded via llama.cpp: $modelPath")
+                Log.i(TAG, "VLM GGUF model loaded via llama.cpp: $modelPath")
                 true
             }
         } catch (e: UnsatisfiedLinkError) {
@@ -137,7 +137,7 @@ class LlamaCppPlannerService(
                 Log.w(TAG, "unloadModel: error freeing native context: ${e.message}")
             }
             nativeHandle = 0L
-            Log.i(TAG, "MobileVLM llama.cpp model unloaded")
+            Log.i(TAG, "VLM llama.cpp model unloaded")
         }
     }
 
@@ -155,7 +155,7 @@ class LlamaCppPlannerService(
         if (!isModelLoaded() && !loadModel()) {
             return WarmupResult.failure(
                 WarmupResult.WarmupStage.HEALTH_CHECK,
-                "MobileVLM GGUF model failed to load from: $modelPath"
+                "VLM GGUF model failed to load from: $modelPath"
             )
         }
         // Dry-run: single-token completion to verify the loaded model responds correctly.
@@ -165,7 +165,7 @@ class LlamaCppPlannerService(
         } else {
             WarmupResult.failure(
                 WarmupResult.WarmupStage.DRY_RUN_INFERENCE,
-                "MobileVLM dry-run inference returned null"
+                "VLM dry-run inference returned null"
             )
         }
     }
@@ -182,7 +182,7 @@ class LlamaCppPlannerService(
         if (!isModelLoaded()) {
             return LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM not loaded — call loadModel() first"
+                error = "VLM not loaded — call loadModel() first"
             )
         }
         val prompt = buildPrompt(goal, constraints, screenshotBase64, history = emptyList())
@@ -200,7 +200,7 @@ class LlamaCppPlannerService(
         if (!isModelLoaded()) {
             return LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM not loaded — call loadModel() first"
+                error = "VLM not loaded — call loadModel() first"
             )
         }
         val history = listOf(
@@ -238,7 +238,7 @@ class LlamaCppPlannerService(
         val raw = runCompletion(prompt, maxTokens)
             ?: return LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM (llama.cpp): inference returned null"
+                error = "VLM (llama.cpp): inference returned null"
             )
         return parseSteps(raw)
     }
@@ -269,7 +269,7 @@ class LlamaCppPlannerService(
             val stepsArray = root?.getAsJsonArray("steps")
                 ?: return LocalPlannerService.PlanResult(
                     steps = emptyList(),
-                    error = "MobileVLM (llama.cpp): no 'steps' array in model output: $raw"
+                    error = "VLM (llama.cpp): no 'steps' array in model output: $raw"
                 )
             val steps = stepsArray.mapNotNull { el ->
                 try {
@@ -290,7 +290,7 @@ class LlamaCppPlannerService(
             if (steps.isEmpty()) {
                 LocalPlannerService.PlanResult(
                     steps = emptyList(),
-                    error = "MobileVLM (llama.cpp): steps array is empty in: $raw"
+                    error = "VLM (llama.cpp): steps array is empty in: $raw"
                 )
             } else {
                 LocalPlannerService.PlanResult(steps = steps)
@@ -298,12 +298,12 @@ class LlamaCppPlannerService(
         } catch (e: JsonSyntaxException) {
             LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM (llama.cpp): JSON parse error: ${e.message}"
+                error = "VLM (llama.cpp): JSON parse error: ${e.message}"
             )
         } catch (e: Exception) {
             LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM (llama.cpp): parse error: ${e.message}"
+                error = "VLM (llama.cpp): parse error: ${e.message}"
             )
         }
     }

@@ -9,17 +9,17 @@ import com.ufo.galaxy.observability.GalaxyLogger
 /**
  * Plans automation sequences for the local closed-loop pipeline.
  *
- * Bridges [LocalPlannerService] (MobileVLM) into the [ActionSequence] abstraction used by
+ * Bridges [LocalPlannerService] (unified VLM) into the [ActionSequence] abstraction used by
  * [LoopController]. Uses a [PlannerFallbackLadder] to attempt multiple strategies before
  * giving up, so transient model errors or empty responses do not immediately fail a session.
  *
- * Grounding (SeeClick) is intentionally **not** performed here; it runs per-step inside
+ * Grounding (unified VLM) is intentionally **not** performed here; it runs per-step inside
  * [ExecutorBridge] so that each step uses the freshest possible screenshot.
  *
  * Boundary note: this planner is a local decomposition stage for Android execution only.
  * It does not own global semantic authority and must not be treated as a V2 semantic core.
  *
- * @param plannerService MobileVLM V2-1.7B planner backend ([LocalPlannerService]).
+ * @param plannerService Unified VLM planner backend ([LocalPlannerService]).
  */
 class LocalPlanner(
     private val plannerService: LocalPlannerService

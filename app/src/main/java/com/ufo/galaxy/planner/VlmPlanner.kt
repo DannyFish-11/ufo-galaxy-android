@@ -13,16 +13,21 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 
 /**
- * MobileVLM V2-1.7B local task planner.
+ * MAI-UI-2B local task planner(统一 VLM 的"规划"职责,Qwen3-VL-2B 底座的 GUI 专精模型)。
  *
- * Communicates with a llama.cpp or MLC-LLM inference server running locally at
+ * Communicates with a llama.cpp inference server running locally at
  * [endpointUrl] (default: http://127.0.0.1:8080). The server must accept
  * OpenAI-compatible POST /v1/chat/completions requests and return a JSON response
  * containing a "choices[0].message.content" field with a JSON action plan.
  *
- * Model:   mtgv/MobileVLM_V2-1.7B (HuggingFace)
- * Runtime: llama.cpp (GGUF INT4/INT8 quantisation) or MLC-LLM
+ * Model:   mradermacher/MAI-UI-2B-GGUF (HuggingFace, Q4_K_M + mmproj f16;2B 档 GUI SOTA)
+ * Runtime: llama.cpp —— 服务端启动必须同时传入 LLM 权重与 `--mmproj` 视觉投影文件
+ *          ([com.ufo.galaxy.model.ModelAssetManager.vlmMmprojPath]),否则无法处理
+ *          截图输入(旧 MobileVLM 组合正是因缺 mmproj 而"从未看见过屏幕")。
  * Model file path exposed via [modelPath] for the local inference server to locate weights.
+ *
+ * 定位(grounding)由 [com.ufo.galaxy.grounding.VlmGroundingEngine] 调用**同一个**
+ * llama.cpp 服务完成 —— 单模型双职,手机只驻留一份 2B 权重。
  *
  * Expected plan JSON from model:
  * ```json
@@ -39,7 +44,7 @@ import java.nio.charset.StandardCharsets
  * @param timeoutMs     HTTP connect/read timeout in milliseconds.
  * @param maxRetries    Number of additional attempts after a transient failure.
  */
-class MobileVlmPlanner(
+class VlmPlanner(
     private val endpointUrl: String = "http://127.0.0.1:8080",
     val modelPath: String = "",
     private val maxTokens: Int = 512,
@@ -61,7 +66,7 @@ class MobileVlmPlanner(
     companion object {
         private const val COMPLETIONS_PATH = "/v1/chat/completions"
         private const val HEALTH_PATH = "/health"
-        private const val MODEL_NAME = "mobilevlm-v2-1.7b"
+        private const val MODEL_NAME = "mai-ui-2b"
 
         private const val SYSTEM_PROMPT =
             "You are a mobile GUI agent. " +
@@ -87,7 +92,7 @@ class MobileVlmPlanner(
     override fun isModelLoaded(): Boolean = modelLoaded
 
     /**
-     * Pre-warms the MobileVLM inference server by pinging /health and sending a minimal
+     * Pre-warms the VLM llama.cpp inference server by pinging /health and sending a minimal
      * 1-token dry-run completion request to bring the model weights into active memory.
      * Returns true if the server is reachable and responds to the dry-run.
      *
@@ -108,7 +113,7 @@ class MobileVlmPlanner(
         if (!pingEndpoint()) {
             val result = WarmupResult.failure(
                 WarmupResult.WarmupStage.HEALTH_CHECK,
-                "MobileVLM health endpoint not reachable at $endpointUrl"
+                "VLM health endpoint not reachable at $endpointUrl"
             )
             modelLoaded = false
             lastWarmupResult = result
@@ -121,7 +126,7 @@ class MobileVlmPlanner(
         } catch (e: Exception) {
             val result = WarmupResult.failure(
                 WarmupResult.WarmupStage.DRY_RUN_INFERENCE,
-                "MobileVLM dry-run inference failed: ${e.message}"
+                "VLM dry-run inference failed: ${e.message}"
             )
             modelLoaded = false
             lastWarmupResult = result
@@ -142,7 +147,7 @@ class MobileVlmPlanner(
         if (content == null) {
             val result = WarmupResult.failure(
                 WarmupResult.WarmupStage.RESPONSE_VALIDATION,
-                "MobileVLM dry-run response missing choices[0].message.content"
+                "VLM dry-run response missing choices[0].message.content"
             )
             modelLoaded = false
             lastWarmupResult = result
@@ -197,14 +202,14 @@ class MobileVlmPlanner(
         prompt: String,
         screenshotBase64: String?
     ): LocalPlannerService.PlanResult {
-        var lastError = "MobileVLM inference failed"
+        var lastError = "VLM inference failed"
         repeat(maxRetries + 1) { attempt ->
             try {
                 val requestJson = buildRequestJson(prompt, screenshotBase64)
                 val responseText = httpPost(requestJson)
                 return parseResponse(responseText)
             } catch (e: Exception) {
-                lastError = "MobileVLM inference failed (attempt ${attempt + 1}): ${e.message}"
+                lastError = "VLM inference failed (attempt ${attempt + 1}): ${e.message}"
             }
         }
         return LocalPlannerService.PlanResult(steps = emptyList(), error = lastError)
@@ -265,7 +270,7 @@ class MobileVlmPlanner(
             conn.outputStream.use { it.write(requestJson.toByteArray(StandardCharsets.UTF_8)) }
             val code = conn.responseCode
             if (code != 200) {
-                throw IOException("HTTP $code from MobileVLM endpoint")
+                throw IOException("HTTP $code from VLM endpoint")
             }
             return conn.inputStream.use { it.readBytes().toString(StandardCharsets.UTF_8) }
         } finally {
@@ -283,7 +288,7 @@ class MobileVlmPlanner(
                 ?.get("content")?.asString
                 ?: return LocalPlannerService.PlanResult(
                     steps = emptyList(),
-                    error = "MobileVLM: missing content in response"
+                    error = "VLM: missing content in response"
                 )
 
             val jsonContent = extractJsonBlock(content)
@@ -291,7 +296,7 @@ class MobileVlmPlanner(
             val stepsArray = planJson.getAsJsonArray("steps")
                 ?: return LocalPlannerService.PlanResult(
                     steps = emptyList(),
-                    error = "MobileVLM: no steps array in plan"
+                    error = "VLM: no steps array in plan"
                 )
 
             val steps = stepsArray.map { el ->
@@ -309,12 +314,12 @@ class MobileVlmPlanner(
         } catch (e: JsonSyntaxException) {
             LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM: failed to parse plan JSON: ${e.message}"
+                error = "VLM: failed to parse plan JSON: ${e.message}"
             )
         } catch (e: Exception) {
             LocalPlannerService.PlanResult(
                 steps = emptyList(),
-                error = "MobileVLM: unexpected parse error: ${e.message}"
+                error = "VLM: unexpected parse error: ${e.message}"
             )
         }
     }
