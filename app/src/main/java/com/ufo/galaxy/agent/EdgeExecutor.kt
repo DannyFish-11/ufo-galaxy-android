@@ -365,14 +365,16 @@ class EdgeExecutor(
                         image_width = screenW,
                         image_height = screenH
                     ),
+                    // 上报仲裁后的最终定位(全分辨率):双通道裁决结果才是真正下发
+                    // 执行的坐标,遥测必须与执行一致。
                     grounding_payload = DeviceGroundingPayload(
                         intent = step.intent,
                         input_width = scaledForGrounding.scaledWidth,
                         input_height = scaledForGrounding.scaledHeight,
-                        result_x = fullResX,
-                        result_y = fullResY,
-                        confidence = grounding.confidence,
-                        element_description = grounding.element_description
+                        result_x = remappedGrounding.x,
+                        result_y = remappedGrounding.y,
+                        confidence = remappedGrounding.confidence,
+                        element_description = remappedGrounding.element_description
                     ),
                     local_perception_payload = DeviceLocalPerceptionPayload(
                         screen_width = screenW,
