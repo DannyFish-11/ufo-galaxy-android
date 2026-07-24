@@ -7,6 +7,7 @@ import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -488,7 +489,7 @@ class LocalLoopCorrectnessTest {
         // To test the remote-task block we need direct access to LoopController.
         // Build the pipeline manually and call cancelForRemoteTask() before running.
         val manager = ModelAssetManager(tmpFolder.newFolder("models2"))
-        val downloader = ModelDownloader(manager.modelsDir)
+        val downloader = noNetworkModelDownloader(manager.modelsDir)
         val loopController = LoopController(
             localPlanner = LocalPlanner(FakePlannerService.singleStep()),
             executorBridge = ExecutorBridge(
@@ -525,7 +526,7 @@ class LocalLoopCorrectnessTest {
     @Test
     fun `after remote task cleared execution resumes normally`() {
         val manager = ModelAssetManager(tmpFolder.newFolder("models3"))
-        val downloader = ModelDownloader(manager.modelsDir)
+        val downloader = noNetworkModelDownloader(manager.modelsDir)
         val loopController = LoopController(
             localPlanner = LocalPlanner(FakePlannerService.singleStep()),
             executorBridge = ExecutorBridge(

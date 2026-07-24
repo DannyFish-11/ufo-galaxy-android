@@ -6,6 +6,7 @@ import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -50,7 +51,7 @@ class LocalLoopScenarioRunner(private val modelsDir: File) {
      */
     fun run(scenario: LocalLoopScenario): LocalLoopResult {
         val manager = ModelAssetManager(modelsDir)
-        val downloader = ModelDownloader(modelsDir)
+        val downloader = noNetworkModelDownloader(modelsDir)
 
         val planner = LocalPlanner(scenario.planner)
         val bridge = ExecutorBridge(

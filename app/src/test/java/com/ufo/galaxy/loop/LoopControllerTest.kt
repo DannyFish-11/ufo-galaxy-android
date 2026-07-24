@@ -7,6 +7,7 @@ import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -135,7 +136,7 @@ class LoopControllerTest {
     ): LoopController {
         val modelsDir = tmpFolder.newFolder("models")
         val manager = ModelAssetManager(modelsDir)
-        val downloader = ModelDownloader(modelsDir)
+        val downloader = noNetworkModelDownloader(modelsDir)
         val planner = LocalPlanner(plannerService)
         val bridge = ExecutorBridge(
             groundingService = grounder,
@@ -346,7 +347,7 @@ class LoopControllerTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
         assertEquals(LoopController.DEFAULT_MAX_STEPS, ctrl.maxSteps)
     }
@@ -363,7 +364,7 @@ class LoopControllerTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
         assertEquals(LoopController.DEFAULT_MAX_RETRIES, ctrl.maxRetriesPerStep)
     }

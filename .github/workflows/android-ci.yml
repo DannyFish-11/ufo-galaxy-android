@@ -319,7 +319,9 @@ jobs:
   all-unit-tests:
     name: "All Unit Tests [gate 6/7]"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 全量 12000+ 测试实测 ~16.5 分钟,20 分钟余量太薄(一次真实超时被杀,浪费整轮
+    # CI 排查)。30 分钟仍能拦住真挂起,同时给套件自然增长留出余量。
+    timeout-minutes: 30
     needs: [protocol-contract-guard, runtime-regression, cross-repo-compatibility-guard, e2e-verification-gate]
 
     steps:
