@@ -36,19 +36,19 @@ class LocalInferenceRuntimeRecycleTest {
         tmpDir = File(System.getProperty("java.io.tmpdir"), "recycle_test_${System.nanoTime()}")
         tmpDir.mkdirs()
         // Stub model files so checkModelFiles() passes.
-        File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
+        // 适配模型层替换:注册表由三条目(mobilevlm/seeclick/seeclick_bin)收敛为两条目
+        // (MAI-UI-2B LLM + mmproj),原 NCNN bin 第三条目已不存在。
+        File(tmpDir, ModelAssetManager.VLM_FILE).writeText("stub")
+        File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).writeText("stub")
 
-        // MOBILEVLM_SHA256 是硬编码强校验:测试写入的 "stub" 内容必然校验失败(CORRUPTED),
-        // 导致 start() 在 MODEL_FILES 阶段被拒。按 ModelAssetManagerTest 的既定做法,
-        // 用 checksumOverrides 显式禁用校验,让回收/恢复测试专注于 warmup 语义本身。
+        // 两个模型均为 trust-on-first-use(静态 SHA-256 为 null),"stub" 内容首轮
+        // verify 即 READY;仍按 ModelAssetManagerTest 的既定做法保留 checksumOverrides
+        // 显式禁用校验,让回收/恢复测试专注于 warmup 语义本身。
         val assetManager = ModelAssetManager(
             tmpDir,
             checksumOverrides = mapOf(
-                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
-                ModelAssetManager.MODEL_ID_SEECLICK to null,
-                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
             )
         )
         planner = CrashableStubPlannerService()
@@ -383,37 +383,36 @@ class LocalInferenceRuntimeRecycleTest {
     }
 
     @Test
-    fun `start returns Failure when only MobileVLM file is missing`() = runBlocking {
-        // Only SeeClick files present — MobileVLM missing
+    fun `start returns Failure when only VLM gguf file is missing`() = runBlocking {
+        // Only mmproj present — VLM LLM weight missing
         val partialDir = File(System.getProperty("java.io.tmpdir"), "partial_models_${System.nanoTime()}")
         partialDir.mkdirs()
-        File(partialDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
-        File(partialDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
+        File(partialDir, ModelAssetManager.VLM_MMPROJ_FILE).writeText("stub")
         val assetManager = ModelAssetManager(partialDir)
         val partialManager = LocalInferenceRuntimeManager(planner, grounding, assetManager)
 
         val result = partialManager.start()
 
-        assertFalse("Start must fail when MobileVLM file is absent", result.isSuccess)
+        assertFalse("Start must fail when VLM gguf file is absent", result.isSuccess)
         assertTrue("Failure must be at MODEL_FILES stage",
             result is RuntimeStartResult.Failure &&
                 result.stage == RuntimeStartResult.StartStage.MODEL_FILES)
     }
 
     @Test
-    fun `start returns Failure when SeeClick bin file is missing`() = runBlocking {
-        // MobileVLM + param present, but bin missing
+    fun `start returns Failure when mmproj file is missing`() = runBlocking {
+        // 适配:原测试验证第三个 SeeClick NCNN bin 条目缺失时启动被拒;该条目随模型层
+        // 替换退役,改为验证两条目契约中 mmproj 缺失同样阻断启动(LLM 权重存在也不行)。
         val partialDir = File(System.getProperty("java.io.tmpdir"), "partial_models2_${System.nanoTime()}")
         partialDir.mkdirs()
-        File(partialDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
-        File(partialDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
-        // SEECLICK_BIN_FILE intentionally absent
+        File(partialDir, ModelAssetManager.VLM_FILE).writeText("stub")
+        // VLM_MMPROJ_FILE intentionally absent
         val assetManager = ModelAssetManager(partialDir)
         val partialManager = LocalInferenceRuntimeManager(planner, grounding, assetManager)
 
         val result = partialManager.start()
 
-        assertFalse("Start must fail when SeeClick bin file is absent", result.isSuccess)
+        assertFalse("Start must fail when mmproj file is absent", result.isSuccess)
         assertTrue("Failure must be at MODEL_FILES stage",
             result is RuntimeStartResult.Failure &&
                 result.stage == RuntimeStartResult.StartStage.MODEL_FILES)
@@ -430,7 +429,7 @@ class LocalInferenceRuntimeRecycleTest {
             manager.state.value is LocalInferenceRuntimeManager.ManagerState.Running)
 
         // Delete model files to simulate storage failure
-        File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).delete()
+        File(tmpDir, ModelAssetManager.VLM_FILE).delete()
 
         // Crash the planner to force a recovery attempt
         planner.simulateCrash()
@@ -475,12 +474,11 @@ class LocalInferenceRuntimeRecycleTest {
         val mam = ModelAssetManager(tmpDir)
         mam.cleanupStaleFiles()
 
-        assertTrue("MOBILEVLM_FILE must survive cleanup",
-            File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).exists())
-        assertTrue("SEECLICK_PARAM_FILE must survive cleanup",
-            File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).exists())
-        assertTrue("SEECLICK_BIN_FILE must survive cleanup",
-            File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).exists())
+        // 适配:注册表已收敛为两条目(LLM + mmproj),第三个 NCNN bin 条目不复存在。
+        assertTrue("VLM_FILE must survive cleanup",
+            File(tmpDir, ModelAssetManager.VLM_FILE).exists())
+        assertTrue("VLM_MMPROJ_FILE must survive cleanup",
+            File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).exists())
     }
 
     @Test
@@ -503,72 +501,71 @@ class LocalInferenceRuntimeRecycleTest {
         assertEquals("No files should be deleted when only subdirectories are stale", 0, deleted)
     }
 
-    // ── SeeClick bin file registry tracking ──────────────────────────────────
+    // ── mmproj file registry tracking ────────────────────────────────────────
+    // 适配:原节验证第三个 SeeClick NCNN bin 条目与 param 条目的独立追踪;该条目随
+    // 模型层替换退役,改为验证两条目契约下 LLM 权重与 mmproj 的独立追踪。
 
     @Test
-    fun `verifyModel tracks SEECLICK_BIN separately from SEECLICK param`() {
+    fun `verifyModel tracks VLM_MMPROJ separately from VLM`() {
         val mam = ModelAssetManager(tmpDir)
-        val paramStatus = mam.verifyModel(ModelAssetManager.MODEL_ID_SEECLICK)
-        val binStatus = mam.verifyModel(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+        val vlmStatus = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
+        val mmprojStatus = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
 
-        assertEquals("SEECLICK param must be READY", ModelAssetManager.ModelStatus.READY, paramStatus)
-        assertEquals("SEECLICK bin must be READY", ModelAssetManager.ModelStatus.READY, binStatus)
+        assertEquals("VLM must be READY", ModelAssetManager.ModelStatus.READY, vlmStatus)
+        assertEquals("VLM mmproj must be READY", ModelAssetManager.ModelStatus.READY, mmprojStatus)
     }
 
     @Test
-    fun `verifyModel returns MISSING for seeclick_bin when bin file absent`() {
-        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).delete()
+    fun `verifyModel returns MISSING for mmproj when mmproj file absent`() {
+        File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).delete()
         val mam = ModelAssetManager(tmpDir)
-        val binStatus = mam.verifyModel(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+        val mmprojStatus = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         assertEquals(
-            "SEECLICK bin must be MISSING when file absent",
+            "VLM mmproj must be MISSING when file absent",
             ModelAssetManager.ModelStatus.MISSING,
-            binStatus
+            mmprojStatus
         )
     }
 
     @Test
-    fun `downloadSpecsForMissing returns bin spec when only bin is missing`() {
-        // Remove only the bin file
-        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).delete()
-        // MOBILEVLM_SHA256 强校验会把 "stub" 内容判为 CORRUPTED,使 vlmSpec 意外出现;
-        // 本测试只关心"仅 bin 缺失"的下载规格,故禁用校验。
+    fun `downloadSpecsForMissing returns mmproj spec when only mmproj is missing`() {
+        // Remove only the mmproj file
+        File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).delete()
+        // 两个模型均为 trust-on-first-use(静态 SHA-256 为 null);仍显式禁用校验,
+        // 防止将来预置静态摘要时把 "stub" 内容判为 CORRUPTED、使 vlmSpec 意外出现。
+        // 本测试只关心"仅 mmproj 缺失"的下载规格。
         val mam = ModelAssetManager(
             tmpDir,
             checksumOverrides = mapOf(
-                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
-                ModelAssetManager.MODEL_ID_SEECLICK to null,
-                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
             )
         )
         mam.verifyAll()
 
         val specs = mam.downloadSpecsForMissing()
 
-        val binSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK_BIN }
-        assertNotNull("Bin download spec must be present when bin file is missing", binSpec)
+        val mmprojSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM_MMPROJ }
+        assertNotNull("Mmproj download spec must be present when mmproj file is missing", mmprojSpec)
 
-        val paramSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK }
-        assertNull("Param download spec must NOT be present when param file is already present", paramSpec)
-
-        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
-        assertNull("MobileVLM spec must NOT be present when VLM file is already present", vlmSpec)
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }
+        assertNull("VLM spec must NOT be present when VLM file is already present", vlmSpec)
     }
 
     @Test
-    fun `downloadSpecsForMissing returns param spec independently when only param is missing`() {
-        // Remove only the param file
-        File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).delete()
+    fun `downloadSpecsForMissing returns vlm spec independently when only vlm is missing`() {
+        // Remove only the LLM weight file
+        File(tmpDir, ModelAssetManager.VLM_FILE).delete()
         val mam = ModelAssetManager(tmpDir)
         mam.verifyAll()
 
         val specs = mam.downloadSpecsForMissing()
 
-        val paramSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK }
-        assertNotNull("Param download spec must be present when param file is missing", paramSpec)
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }
+        assertNotNull("VLM download spec must be present when VLM file is missing", vlmSpec)
 
-        val binSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_SEECLICK_BIN }
-        assertNull("Bin download spec must NOT be present when bin file exists", binSpec)
+        val mmprojSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM_MMPROJ }
+        assertNull("Mmproj download spec must NOT be present when mmproj file exists", mmprojSpec)
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

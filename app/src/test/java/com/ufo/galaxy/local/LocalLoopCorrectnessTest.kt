@@ -282,7 +282,7 @@ class LocalLoopCorrectnessTest {
     @Test
     fun `grounding fails but fallback ladder produces coordinates and execution succeeds`() {
         // The GroundingFallbackLadder has heuristic-region and accessibility-node stages
-        // that never fail. Even if the primary SeeClick grounder is unavailable the
+        // that never fail. Even if the primary VLM grounder is unavailable the
         // ladder will produce some coordinates and the tap will be dispatched.
         val result = runner.run(
             LocalLoopScenario(
