@@ -150,9 +150,22 @@ class VlmGroundingEngine(
         screenshotBase64: String,
         width: Int,
         height: Int
+    ): LocalGroundingService.GroundingResult = ground(intent, screenshotBase64, width, height, null)
+
+    /**
+     * 双通道定位:截图 + 结构化元素清单同帧注入(所有者要求的"同时在场、综合判断",
+     * 非兜底关系)。structuredContext 为空时退化为纯视觉,行为与旧版一致。
+     */
+    override fun ground(
+        intent: String,
+        screenshotBase64: String,
+        width: Int,
+        height: Int,
+        structuredContext: String?
     ): LocalGroundingService.GroundingResult {
         return try {
-            val responseText = httpPost(buildRequestJson(intent, screenshotBase64, width, height))
+            val responseText =
+                httpPost(buildRequestJson(intent, screenshotBase64, width, height, structuredContext))
             parseResponse(responseText, width, height)
         } catch (e: IOException) {
             LocalGroundingService.GroundingResult(
@@ -183,7 +196,8 @@ class VlmGroundingEngine(
         intent: String,
         screenshotBase64: String,
         width: Int,
-        height: Int
+        height: Int,
+        structuredContext: String? = null
     ): String {
         val messages = JsonArray()
 
@@ -192,12 +206,18 @@ class VlmGroundingEngine(
             addProperty("content", SYSTEM_PROMPT)
         })
 
+        // 结构化通道:无障碍树元素清单与截图同帧注入,模型综合两路证据出坐标。
+        val structuredBlock = structuredContext
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "\nKnown screen elements (from the accessibility tree, format [i] \"label\" type (cx,cy)):\n$it" }
+            ?: ""
+
         val userContent = JsonArray().apply {
             add(JsonObject().apply {
                 addProperty("type", "text")
                 addProperty(
                     "text",
-                    "Screenshot size: ${width}x${height} px. Target: $intent"
+                    "Screenshot size: ${width}x${height} px. Target: $intent$structuredBlock"
                 )
             })
             add(JsonObject().apply {

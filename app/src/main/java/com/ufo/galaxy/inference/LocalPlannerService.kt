@@ -166,6 +166,19 @@ interface LocalPlannerService {
     ): PlanResult
 
     /**
+     * 双通道版本:除截图外同时携带结构化屏幕上下文(元素清单文本,来自
+     * [com.ufo.galaxy.perception.UiStructuredSnapshot.toPromptBlock];null/空 = 无
+     * 结构化通道)。默认实现忽略之并委托三参 [plan],既有实现与测试 fake 零感知;
+     * 支持双通道的实现(VlmPlanner)覆写,把元素清单与截图一同注入 prompt。
+     */
+    fun plan(
+        goal: String,
+        constraints: List<String>,
+        screenshotBase64: String?,
+        structuredContext: String?
+    ): PlanResult = plan(goal, constraints, screenshotBase64)
+
+    /**
      * Produces a revised plan after [failedStep] encountered [error].
      *
      * @param goal            Original task objective.

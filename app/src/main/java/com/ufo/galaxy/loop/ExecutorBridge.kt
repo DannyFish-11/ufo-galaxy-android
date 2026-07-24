@@ -26,7 +26,13 @@ class ExecutorBridge(
     private val groundingService: LocalGroundingService,
     private val accessibilityExecutor: AccessibilityExecutor,
     private val imageScaler: ImageScaler = NoOpImageScaler(),
-    private val scaledMaxEdge: Int = 720
+    private val scaledMaxEdge: Int = 720,
+    /**
+     * 结构化感知通道(无障碍树快照)。非 null 时每步与截图同帧采集,元素清单注入
+     * 梯子的主/缩放视觉定位 prompt(双通道同时在场;梯子 3/4 级本就是 a11y 启发式,
+     * 树证据在本路径天然参与)。null(默认)= 纯视觉,行为不变。
+     */
+    private val uiSnapshotProvider: com.ufo.galaxy.perception.UiSnapshotProvider? = null
 ) {
 
     companion object {
@@ -135,13 +141,15 @@ class ExecutorBridge(
         }
 
         // Use the grounding fallback ladder for coordinate-based actions.
+        // 双通道:同帧采集树快照,元素清单注入梯子的视觉级 prompt。
         val grounding = groundingLadder.ground(
             sessionId = "",
             stepId = step.id,
             intent = step.intent,
             jpegBytes = jpegBytes,
             screenWidth = screenWidth,
-            screenHeight = screenHeight
+            screenHeight = screenHeight,
+            structuredContext = uiSnapshotProvider?.capture()?.toPromptBlock()
         )
 
         if (!grounding.succeeded) {

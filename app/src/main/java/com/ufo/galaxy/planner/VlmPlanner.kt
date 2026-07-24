@@ -164,8 +164,19 @@ class VlmPlanner(
         goal: String,
         constraints: List<String>,
         screenshotBase64: String?
+    ): LocalPlannerService.PlanResult = plan(goal, constraints, screenshotBase64, null)
+
+    /**
+     * 双通道规划:截图 + 无障碍树元素清单同帧注入 prompt(同时在场、综合判断)。
+     * structuredContext 为空时与旧版行为一致。
+     */
+    override fun plan(
+        goal: String,
+        constraints: List<String>,
+        screenshotBase64: String?,
+        structuredContext: String?
     ): LocalPlannerService.PlanResult {
-        val prompt = buildPrompt(goal, constraints, history = emptyList())
+        val prompt = buildPrompt(goal, constraints, history = emptyList(), structuredContext)
         return callModelWithRetry(prompt, screenshotBase64)
     }
 
@@ -186,7 +197,8 @@ class VlmPlanner(
     private fun buildPrompt(
         goal: String,
         constraints: List<String>,
-        history: List<String>
+        history: List<String>,
+        structuredContext: String? = null
     ): String = buildString {
         append("Goal: $goal\n")
         if (constraints.isNotEmpty()) {
@@ -194,6 +206,10 @@ class VlmPlanner(
         }
         if (history.isNotEmpty()) {
             append("History: ${history.joinToString(" | ")}\n")
+        }
+        // 结构化通道:与截图同帧的无障碍树元素清单,给规划提供确定性的屏幕语义。
+        if (!structuredContext.isNullOrBlank()) {
+            append("Known screen elements (accessibility tree):\n$structuredContext\n")
         }
         append("Produce a JSON action plan.")
     }

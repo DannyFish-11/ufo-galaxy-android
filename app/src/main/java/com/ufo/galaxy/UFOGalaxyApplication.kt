@@ -648,6 +648,8 @@ class UFOGalaxyApplication : Application() {
             mmprojPath = modelAssetManager.vlmMmprojPath,
             timeoutMs = appSettings.groundingTimeoutMs
         )
+        // 双通道感知:无障碍树结构化快照与截图同帧采集,注入规划/定位并参与坐标仲裁。
+        val uiSnapshotProvider = com.ufo.galaxy.perception.AccessibilityUiSnapshotProvider()
         edgeExecutor = EdgeExecutor(
             screenshotProvider = AccessibilityScreenshotProvider(),
             plannerService = plannerService,
@@ -655,7 +657,8 @@ class UFOGalaxyApplication : Application() {
             accessibilityExecutor = AccessibilityActionExecutor(),
             imageScaler = AndroidBitmapScaler(),
             scaledMaxEdge = appSettings.scaledMaxEdge,
-            continuousIngressProvider = { continuousIngressSessionManager.currentSnapshot() }
+            continuousIngressProvider = { continuousIngressSessionManager.currentSnapshot() },
+            uiSnapshotProvider = uiSnapshotProvider
         )
         val deviceId = DeviceIdProvider.getOrCreateDeviceId(this)
         localGoalExecutor = LocalGoalExecutor(
@@ -676,7 +679,8 @@ class UFOGalaxyApplication : Application() {
                 groundingService = groundingService,
                 accessibilityExecutor = AccessibilityActionExecutor(),
                 imageScaler = AndroidBitmapScaler(),
-                scaledMaxEdge = appSettings.scaledMaxEdge
+                scaledMaxEdge = appSettings.scaledMaxEdge,
+                uiSnapshotProvider = uiSnapshotProvider
             ),
             screenshotProvider = AccessibilityScreenshotProvider(),
             modelAssetManager = modelAssetManager,
@@ -698,7 +702,14 @@ class UFOGalaxyApplication : Application() {
         localInferenceRuntimeManager = LocalInferenceRuntimeManager(
             plannerService = plannerService,
             groundingService = groundingService,
-            modelAssetManager = modelAssetManager
+            modelAssetManager = modelAssetManager,
+            // 闭环自启动:llama-server 二进制供给后(files/bin/llama-server),
+            // 推理运行时启动时由 App 自己拉起本地服务,不再依赖外部手工起进程。
+            llamaServerController = com.ufo.galaxy.inference.LlamaServerController(
+                binaryPath = java.io.File(filesDir, "bin/llama-server").absolutePath,
+                modelPath = modelAssetManager.vlmModelPath,
+                mmprojPath = modelAssetManager.vlmMmprojPath
+            )
         )
         Log.d(TAG, "推理服务已初始化")
     }

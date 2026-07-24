@@ -96,18 +96,21 @@ class GroundingFallbackLadder(
         intent: String,
         jpegBytes: ByteArray,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        // 双通道:无障碍树元素清单文本,与截图同帧注入主/缩放两级视觉定位的 prompt
+        // (null = 无结构化通道,行为与旧版一致)。
+        structuredContext: String? = null
     ): GroundingResult {
 
         // Stage 1: Primary VLM grounding.
         if (groundingService.isModelLoaded()) {
-            val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight)
+            val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, structuredContext)
             if (result != null) return result
         }
 
         // Stage 2: Resized screenshot retry (smaller edge).
         if (groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
-            val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight)
+            val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, structuredContext)
             if (result != null) return result
         }
 
@@ -147,7 +150,8 @@ class GroundingFallbackLadder(
         intent: String,
         jpegBytes: ByteArray,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        structuredContext: String? = null
     ): GroundingResult? {
         return try {
             val scaled = imageScaler.scaleToMaxEdge(
@@ -160,7 +164,8 @@ class GroundingFallbackLadder(
                 intent = intent,
                 screenshotBase64 = scaled.scaledJpegBase64,
                 width = scaled.scaledWidth,
-                height = scaled.scaledHeight
+                height = scaled.scaledHeight,
+                structuredContext = structuredContext
             )
             if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
                 logStage(sessionId, stepId, STAGE_PRIMARY, "skip",
@@ -184,7 +189,8 @@ class GroundingFallbackLadder(
         intent: String,
         jpegBytes: ByteArray,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        structuredContext: String? = null
     ): GroundingResult? {
         return try {
             val scaled = imageScaler.scaleToMaxEdge(
@@ -197,7 +203,8 @@ class GroundingFallbackLadder(
                 intent = intent,
                 screenshotBase64 = scaled.scaledJpegBase64,
                 width = scaled.scaledWidth,
-                height = scaled.scaledHeight
+                height = scaled.scaledHeight,
+                structuredContext = structuredContext
             )
             if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
                 logStage(sessionId, stepId, STAGE_RESIZED, "skip",
