@@ -250,7 +250,14 @@ class InputRouter(
                     mapOf("event" to "route_local", "task_id" to taskId, "posture" to posture) +
                         AndroidNlSemanticContract.localRouteMetadata(posture)
                 )
-                launchLocal(trimmed, posture)
+                // 真 bug 修复:此前把外来 posture(默认 CONTROL_ONLY)原样透传给本地执行器,
+                // 而 LocalLoopExecutor 的 posture 门会直接拒绝 control_only——等于默认配置下
+                // 用户在本机发起的一切本地任务(语音/文字指令)全部静默失败,本地闭环被废。
+                // posture 契约(PR #533)描述的是"跨设备执行中源设备是否加入运行时";而走到
+                // 本分支意味着路由器已经替本机做出了"本地执行"的决定——执行意图即
+                // JOIN_RUNTIME(执行器 KDoc:"Callers that intend to run a task locally must
+                // supply JOIN_RUNTIME")。上面的日志/route 元数据仍如实记录原始 posture。
+                launchLocal(trimmed, SourceRuntimePosture.JOIN_RUNTIME)
                 RouteMode.LOCAL
             }
             wsConnected -> {

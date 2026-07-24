@@ -361,9 +361,11 @@ class AndroidSessionContributionTest {
     // ── Kind enum completeness ─────────────────────────────────────────────────
 
     @Test
-    fun `Kind enum has five distinct values`() {
+    fun `Kind enum has six distinct values`() {
+        // 断言更新:STAGED_MESH_SUBTASK 在 PR-32(V2 主导的 staged-mesh 协同流程)中新增,
+        // 使 Kind 枚举从 5 个值增至 6 个。
         val kinds = AndroidSessionContribution.Kind.values()
-        assertEquals(5, kinds.size)
+        assertEquals(6, kinds.size)
     }
 
     @Test

@@ -342,24 +342,35 @@ object UnifiedReplayRecoveryContract {
             JsonParser.parseString(json).asJsonObject
         }.getOrNull()
 
+    // 真 bug 修复:ownership 字段的读取原来只看 root 与 root.payload 一层,但生产端
+    // GalaxyConnectionService.sendReconciliationSignal 的 buildReliablePayload 把
+    // ownershipResolution.toWireMap() 注入的是 ReconciliationSignalPayload.payload
+    // (即 envelope 的 root.payload.payload,第二层)——注入方与校验方层级不匹配,
+    // 导致离线排队的 reconciliation_signal 永远被判 OWNERSHIP_UNSPECIFIED、重连后
+    // 在 AUTHORITY_FILTERING 阶段被静默丢弃,"可靠回放"对该类型完全失效。
+    // 读取路径补一层嵌套 payload 查找;root/一层 payload 的既有语义不变。
     private fun readStringOwnershipField(json: JsonObject, key: String): String? {
         val rootValue = readPrimitiveAsString(json, key)
         if (rootValue != null) return rootValue
-        val payload = extractPayloadObject(json)
-        payload ?: return null
-        return readPrimitiveAsString(payload, key)
+        val payload = extractPayloadObject(json) ?: return null
+        val payloadValue = readPrimitiveAsString(payload, key)
+        if (payloadValue != null) return payloadValue
+        val nested = extractPayloadObject(payload) ?: return null
+        return readPrimitiveAsString(nested, key)
     }
 
     private fun readBooleanOwnershipField(json: JsonObject, key: String): Boolean? {
-        val rootField = if (json.has(key)) json.get(key) else null
-        if (rootField != null && rootField.isJsonPrimitive) {
-            return runCatching { rootField.asBoolean }.getOrNull()
-        }
-        val payload = extractPayloadObject(json)
-        payload ?: return null
-        val payloadField = if (payload.has(key)) payload.get(key) else null
-        return if (payloadField != null && payloadField.isJsonPrimitive) {
-            runCatching { payloadField.asBoolean }.getOrNull()
+        readBooleanAt(json, key)?.let { return it }
+        val payload = extractPayloadObject(json) ?: return null
+        readBooleanAt(payload, key)?.let { return it }
+        val nested = extractPayloadObject(payload) ?: return null
+        return readBooleanAt(nested, key)
+    }
+
+    private fun readBooleanAt(obj: JsonObject, key: String): Boolean? {
+        val field = if (obj.has(key)) obj.get(key) else null
+        return if (field != null && field.isJsonPrimitive) {
+            runCatching { field.asBoolean }.getOrNull()
         } else {
             null
         }

@@ -18,8 +18,7 @@ import com.ufo.galaxy.config.RemoteConfigFetcher
 import com.ufo.galaxy.data.AppConfig
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
-import com.ufo.galaxy.grounding.SeeClickGroundingEngine
-import com.ufo.galaxy.grounding.NcnnGroundingService
+import com.ufo.galaxy.grounding.VlmGroundingEngine
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.local.DefaultLocalLoopExecutor
@@ -37,7 +36,7 @@ import com.ufo.galaxy.network.OfflineTaskQueue
 import com.ufo.galaxy.network.TailscaleAdapter
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.MetricsRecorder
-import com.ufo.galaxy.planner.MobileVlmPlanner
+import com.ufo.galaxy.planner.VlmPlanner
 import com.ufo.galaxy.planner.LlamaCppPlannerService
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.runtime.AndroidCanonicalContinuousIngressSessionManager
@@ -109,11 +108,11 @@ class UFOGalaxyApplication : Application() {
         lateinit var modelDownloader: ModelDownloader
             private set
 
-        // 本地推理服务：MobileVLM 1.7B 规划器
+        // 本地推理服务：统一 VLM(MAI-UI-2B)规划器
         lateinit var plannerService: LocalPlannerService
             private set
 
-        // 本地推理服务：SeeClick grounding 引擎
+        // 本地推理服务：统一 VLM(MAI-UI-2B)grounding 引擎(与规划器共用同一模型/服务)
         lateinit var groundingService: LocalGroundingService
             private set
 
@@ -626,39 +625,31 @@ class UFOGalaxyApplication : Application() {
         plannerService = if (com.ufo.galaxy.runtime.NativeInferenceLoader.isLlamaCppAvailable()) {
             Log.i(TAG, "Using LlamaCppPlannerService (native JNI runtime)")
             com.ufo.galaxy.planner.LlamaCppPlannerService(
-                modelPath = modelAssetManager.mobileVlmPath,
+                modelPath = modelAssetManager.vlmModelPath,
                 maxTokens = appSettings.plannerMaxTokens,
                 temperature = appSettings.plannerTemperature.toFloat(),
                 timeoutMs = appSettings.plannerTimeoutMs
             )
         } else {
-            Log.i(TAG, "llama.cpp native library unavailable — using MobileVlmPlanner (HTTP fallback)")
-            MobileVlmPlanner(
-                modelPath = modelAssetManager.mobileVlmPath,
+            Log.i(TAG, "llama.cpp native library unavailable — using VlmPlanner (HTTP fallback)")
+            VlmPlanner(
+                modelPath = modelAssetManager.vlmModelPath,
                 maxTokens = appSettings.plannerMaxTokens,
                 temperature = appSettings.plannerTemperature,
                 timeoutMs = appSettings.plannerTimeoutMs
             )
         }
 
-        // Select the grounding backend: prefer the native NCNN runtime when the
-        // library is present (libncnn.so packaged in the APK); fall back to the HTTP
-        // client targeting a separate NCNN server process.
-        groundingService = if (com.ufo.galaxy.runtime.NativeInferenceLoader.isNcnnAvailable()) {
-            Log.i(TAG, "Using NcnnGroundingService (native JNI runtime)")
-            com.ufo.galaxy.grounding.NcnnGroundingService(
-                modelParamPath = modelAssetManager.seeClickParamPath,
-                modelBinPath = modelAssetManager.seeClickBinPath,
-                timeoutMs = appSettings.groundingTimeoutMs
-            )
-        } else {
-            Log.i(TAG, "NCNN native library unavailable — using SeeClickGroundingEngine (HTTP fallback)")
-            SeeClickGroundingEngine(
-                modelParamPath = modelAssetManager.seeClickParamPath,
-                modelBinPath = modelAssetManager.seeClickBinPath,
-                timeoutMs = appSettings.groundingTimeoutMs
-            )
-        }
+        // 定位(grounding)与规划共用同一个 MAI-UI-2B 模型 / 同一个 llama.cpp 服务
+        // (单模型双职)。历史 NCNN/SeeClick 栈已退役:SeeClick 官方仓不存在 NCNN 端口,
+        // 该定位后端在生产上从未真正供给成功过。
+        groundingService = VlmGroundingEngine(
+            modelPath = modelAssetManager.vlmModelPath,
+            mmprojPath = modelAssetManager.vlmMmprojPath,
+            timeoutMs = appSettings.groundingTimeoutMs
+        )
+        // 双通道感知:无障碍树结构化快照与截图同帧采集,注入规划/定位并参与坐标仲裁。
+        val uiSnapshotProvider = com.ufo.galaxy.perception.AccessibilityUiSnapshotProvider()
         edgeExecutor = EdgeExecutor(
             screenshotProvider = AccessibilityScreenshotProvider(),
             plannerService = plannerService,
@@ -666,7 +657,8 @@ class UFOGalaxyApplication : Application() {
             accessibilityExecutor = AccessibilityActionExecutor(),
             imageScaler = AndroidBitmapScaler(),
             scaledMaxEdge = appSettings.scaledMaxEdge,
-            continuousIngressProvider = { continuousIngressSessionManager.currentSnapshot() }
+            continuousIngressProvider = { continuousIngressSessionManager.currentSnapshot() },
+            uiSnapshotProvider = uiSnapshotProvider
         )
         val deviceId = DeviceIdProvider.getOrCreateDeviceId(this)
         localGoalExecutor = LocalGoalExecutor(
@@ -687,7 +679,8 @@ class UFOGalaxyApplication : Application() {
                 groundingService = groundingService,
                 accessibilityExecutor = AccessibilityActionExecutor(),
                 imageScaler = AndroidBitmapScaler(),
-                scaledMaxEdge = appSettings.scaledMaxEdge
+                scaledMaxEdge = appSettings.scaledMaxEdge,
+                uiSnapshotProvider = uiSnapshotProvider
             ),
             screenshotProvider = AccessibilityScreenshotProvider(),
             modelAssetManager = modelAssetManager,
@@ -709,7 +702,14 @@ class UFOGalaxyApplication : Application() {
         localInferenceRuntimeManager = LocalInferenceRuntimeManager(
             plannerService = plannerService,
             groundingService = groundingService,
-            modelAssetManager = modelAssetManager
+            modelAssetManager = modelAssetManager,
+            // 闭环自启动:llama-server 二进制供给后(files/bin/llama-server),
+            // 推理运行时启动时由 App 自己拉起本地服务,不再依赖外部手工起进程。
+            llamaServerController = com.ufo.galaxy.inference.LlamaServerController(
+                binaryPath = java.io.File(filesDir, "bin/llama-server").absolutePath,
+                modelPath = modelAssetManager.vlmModelPath,
+                mmprojPath = modelAssetManager.vlmMmprojPath
+            )
         )
         Log.d(TAG, "推理服务已初始化")
     }

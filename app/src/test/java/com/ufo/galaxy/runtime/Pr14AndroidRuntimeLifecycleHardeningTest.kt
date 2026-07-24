@@ -58,18 +58,18 @@ class Pr14AndroidRuntimeLifecycleHardeningTest {
     fun setUp() {
         tmpDir = File(System.getProperty("java.io.tmpdir"), "pr14_test_${System.nanoTime()}")
         tmpDir.mkdirs()
-        File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        // 测试修复:MobileVLM 的静态 SHA-256 默认强制校验,桩内容("stub")会被判为
-        // CORRUPTED,使 start() 停在 MODEL_FILES 阶段而非进入 warmup。与其它模型测试
-        // 一致,传入 null 覆盖以禁用校验。
+        // 适配模型层替换:注册表由三条目(mobilevlm/seeclick/seeclick_bin)收敛为两条目
+        // (MAI-UI-2B LLM + mmproj),原 NCNN bin 第三条目已不存在。两个模型均为
+        // trust-on-first-use(静态 SHA-256 为 null),"stub" 内容首轮 verify 即 READY;
+        // 与其它模型测试一致,仍保留 checksumOverrides 显式禁用校验,防止将来预置
+        // 静态摘要时使 start() 停在 MODEL_FILES 阶段而非进入 warmup。
+        File(tmpDir, ModelAssetManager.VLM_FILE).writeText("stub")
+        File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).writeText("stub")
         val assetManager = ModelAssetManager(
             tmpDir,
             checksumOverrides = mapOf(
-                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
-                ModelAssetManager.MODEL_ID_SEECLICK to null,
-                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
             )
         )
         planner = StubPlannerService()

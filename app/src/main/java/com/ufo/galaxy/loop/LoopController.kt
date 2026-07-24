@@ -24,9 +24,9 @@ import java.util.concurrent.atomic.AtomicReference
  *   natural-language instruction
  *     → model readiness check / download
  *     → screenshot capture
- *     → [LocalPlanner] inference (MobileVLM) via [PlannerFallbackLadder]
+ *     → [LocalPlanner] inference (unified VLM) via [PlannerFallbackLadder]
  *     → stagnation / plan-repeat guard
- *     → [ExecutorBridge] action dispatch (SeeClick grounding via [GroundingFallbackLadder]
+ *     → [ExecutorBridge] action dispatch (unified-VLM grounding via [GroundingFallbackLadder]
  *         + AccessibilityService)
  *     → post-action screenshot + [PostActionObserver] observation
  *     → [StagnationDetector] step guard

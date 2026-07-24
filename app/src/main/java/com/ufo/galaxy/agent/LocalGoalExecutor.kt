@@ -11,7 +11,7 @@ import com.ufo.galaxy.protocol.TaskAssignPayload
  *
  * Converts a [GoalExecutionPayload] into a [TaskAssignPayload] and delegates to
  * [EdgeExecutor.handleTaskAssign] for the full pipeline
- * (screenshot → MobileVLM → SeeClick → AccessibilityService). The result is wrapped
+ * (screenshot → unified VLM plan → unified VLM ground → AccessibilityService). The result is wrapped
  * in a [GoalResultPayload] that includes [GoalExecutionPayload.group_id],
  * [GoalExecutionPayload.subtask_index], [latency_ms], and [device_id] so that the
  * server can converge parallel-group results.

@@ -9,11 +9,11 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * Tests that verify the new SHA-256 checksum enforcement added to [ModelAssetManager]:
+ * Tests that verify the SHA-256 checksum enforcement in [ModelAssetManager]:
  *
- * 1. MobileVLM SHA-256 constant is non-null (real checksum is set).
+ * 1. Both static SHA-256 constants are null (trust-on-first-use policy).
  * 2. [ModelAssetManager.verifyModel] returns CORRUPTED when file does not match the
- *    expected SHA-256.
+ *    expected SHA-256 (supplied via checksumOverrides).
  * 3. [ModelAssetManager.verifyModel] returns READY when file content matches the
  *    expected SHA-256.
  * 4. [ModelAssetManager.persistComputedChecksum] stores the SHA-256 from the downloaded
@@ -41,19 +41,30 @@ class ChecksumVerificationTest {
         modelsDir = tmpFolder.newFolder("models")
     }
 
-    // ── 1. Static constant ────────────────────────────────────────────────────
+    // ── 1. Static constants (trust-on-first-use) ─────────────────────────────
 
     @Test
-    fun `MOBILEVLM_SHA256 constant is non-null`() {
-        assertNotNull(
-            "MOBILEVLM_SHA256 must be set to the real SHA-256 of ggml-model-q4_k.gguf",
-            ModelAssetManager.MOBILEVLM_SHA256
+    fun `static SHA256 constants are null pending trust-on-first-use`() {
+        // 适配说明:旧 MobileVLM 曾预置硬编码 SHA-256(每次强制校验);新契约下两个
+        // MAI-UI-2B 文件均为 trust-on-first-use——静态常量为 null,首次下载后由
+        // persistComputedChecksum 持久化并强制校验。
+        assertNull(
+            "VLM_SHA256 must be null until persistComputedChecksum stores the first-download digest",
+            ModelAssetManager.VLM_SHA256
+        )
+        assertNull(
+            "VLM_MMPROJ_SHA256 must be null until persistComputedChecksum stores the first-download digest",
+            ModelAssetManager.VLM_MMPROJ_SHA256
         )
     }
 
     @Test
-    fun `MOBILEVLM_SHA256 has the expected 64-character hex format`() {
-        val sha = ModelAssetManager.MOBILEVLM_SHA256
+    fun `persisted checksum has the expected 64-character hex format`() {
+        // 适配说明:原测试校验硬编码常量的 64 位十六进制格式;TOFU 语义下改为校验
+        // persistComputedChecksum 产出的摘要格式。
+        val mam = ModelAssetManager(modelsDir)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        val sha = mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM)
         assertNotNull(sha)
         assertEquals("SHA-256 must be 64 hex characters", 64, sha!!.length)
         assertTrue("SHA-256 must contain only hex characters",
@@ -61,11 +72,11 @@ class ChecksumVerificationTest {
     }
 
     @Test
-    fun `MOBILEVLM_FILE is updated to ggml-model-q4_k gguf`() {
+    fun `VLM_FILE is the MAI-UI-2B Q4_K_M gguf`() {
         assertEquals(
-            "MobileVLM file must reference the Q4_K quantised GGUF that ships with SHA-256",
-            "ggml-model-q4_k.gguf",
-            ModelAssetManager.MOBILEVLM_FILE
+            "VLM file must reference the MAI-UI-2B Q4_K_M quantised GGUF",
+            "MAI-UI-2B.Q4_K_M.gguf",
+            ModelAssetManager.VLM_FILE
         )
     }
 
@@ -76,10 +87,10 @@ class ChecksumVerificationTest {
         val expectedSha = "a".repeat(64)  // deliberately wrong SHA-256
         val mam = ModelAssetManager(
             modelsDir,
-            checksumOverrides = mapOf(ModelAssetManager.MODEL_ID_MOBILEVLM to expectedSha)
+            checksumOverrides = mapOf(ModelAssetManager.MODEL_ID_VLM to expectedSha)
         )
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("wrong content".toByteArray())
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("wrong content".toByteArray())
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(
             "File with wrong SHA-256 must be CORRUPTED",
             ModelAssetManager.ModelStatus.CORRUPTED,
@@ -88,19 +99,18 @@ class ChecksumVerificationTest {
     }
 
     @Test
-    fun `downloadSpecsForMissing includes non-null checksum for CORRUPTED MobileVLM`() {
-        // Verify that provisioning re-downloads CORRUPTED models and carries the real checksum.
+    fun `downloadSpecsForMissing includes spec for CORRUPTED VLM`() {
+        // Verify that provisioning re-downloads CORRUPTED models. Under trust-on-first-use
+        // the manifest checksum is null, but a re-download spec must still be generated.
         val mam = ModelAssetManager(
             modelsDir,
-            checksumOverrides = mapOf(ModelAssetManager.MODEL_ID_MOBILEVLM to "a".repeat(64))
+            checksumOverrides = mapOf(ModelAssetManager.MODEL_ID_VLM to "a".repeat(64))
         )
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("corrupted".toByteArray())
-        mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)  // → CORRUPTED
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("corrupted".toByteArray())
+        mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)  // → CORRUPTED
         val specs = mam.downloadSpecsForMissing()
-        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
-        // The manifest checksum (MOBILEVLM_SHA256) should be present in the spec for
-        // the real download so the downloader can verify the freshly fetched file.
-        assertNotNull("Re-download spec for CORRUPTED MobileVLM must be non-null", vlmSpec)
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }
+        assertNotNull("Re-download spec for CORRUPTED VLM must be non-null", vlmSpec)
     }
 
     // ── 3. Correct content → READY ────────────────────────────────────────────
@@ -111,10 +121,10 @@ class ChecksumVerificationTest {
         val expectedSha = sha256Hex(content)
         val mam = ModelAssetManager(
             modelsDir,
-            checksumOverrides = mapOf(ModelAssetManager.MODEL_ID_MOBILEVLM to expectedSha)
+            checksumOverrides = mapOf(ModelAssetManager.MODEL_ID_VLM to expectedSha)
         )
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(content)
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(content)
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(
             "File whose SHA-256 matches the expected value must be READY",
             ModelAssetManager.ModelStatus.READY,
@@ -126,56 +136,56 @@ class ChecksumVerificationTest {
 
     @Test
     fun `persistComputedChecksum returns non-null SHA256 for a present file`() {
-        // SeeClick starts with no expected checksum (static constant is null).
+        // The VLM starts with no expected checksum (static constant is null, TOFU).
         val mam = ModelAssetManager(modelsDir)
-        val seeClickContent = "seeclick param bytes".toByteArray()
-        File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeBytes(seeClickContent)
+        val vlmContent = "vlm weight bytes".toByteArray()
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(vlmContent)
 
-        val persisted = mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK)
+        val persisted = mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM)
         assertNotNull("persistComputedChecksum must return non-null for present file", persisted)
-        assertEquals("Persisted SHA-256 must match file content", sha256Hex(seeClickContent), persisted)
+        assertEquals("Persisted SHA-256 must match file content", sha256Hex(vlmContent), persisted)
     }
 
     @Test
     fun `effectiveChecksum is non-null after persistComputedChecksum`() {
         val mam = ModelAssetManager(modelsDir)
-        File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeBytes("param".toByteArray())
-        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("weights".toByteArray())
+        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM)
 
         assertNotNull(
             "effectiveChecksum must be non-null after persistComputedChecksum",
-            mam.effectiveChecksum(ModelAssetManager.MODEL_ID_SEECLICK)
+            mam.effectiveChecksum(ModelAssetManager.MODEL_ID_VLM)
         )
     }
 
     @Test
-    fun `effectiveChecksum for SeeClick bin is non-null after persistComputedChecksum`() {
+    fun `effectiveChecksum for mmproj is non-null after persistComputedChecksum`() {
         val mam = ModelAssetManager(modelsDir)
-        File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).writeBytes("bin weights".toByteArray())
-        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+        File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).writeBytes("mmproj weights".toByteArray())
+        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
 
         assertNotNull(
-            "effectiveChecksum for SeeClick bin must be non-null after persistComputedChecksum",
-            mam.effectiveChecksum(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+            "effectiveChecksum for mmproj must be non-null after persistComputedChecksum",
+            mam.effectiveChecksum(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         )
     }
 
     // ── 6. Tampered file detected after persist ───────────────────────────────
 
     @Test
-    fun `verifyModel detects tampered SeeClick file after checksum is persisted`() {
+    fun `verifyModel detects tampered VLM file after checksum is persisted`() {
         val mam = ModelAssetManager(modelsDir)
-        val originalContent = "original seeclick param".toByteArray()
-        val paramFile = File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE)
-        paramFile.writeBytes(originalContent)
-        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK)
+        val originalContent = "original vlm weights".toByteArray()
+        val vlmFile = File(modelsDir, ModelAssetManager.VLM_FILE)
+        vlmFile.writeBytes(originalContent)
+        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM)
 
         // Tamper with the file
-        paramFile.writeBytes("tampered content".toByteArray())
+        vlmFile.writeBytes("tampered content".toByteArray())
 
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_SEECLICK)
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(
-            "Tampered SeeClick file must be CORRUPTED after checksum was persisted",
+            "Tampered VLM file must be CORRUPTED after checksum was persisted",
             ModelAssetManager.ModelStatus.CORRUPTED,
             status
         )
@@ -187,9 +197,9 @@ class ChecksumVerificationTest {
     fun `persisted checksums survive across ModelAssetManager reconstruction`() {
         // First instance: download and persist
         val mam1 = ModelAssetManager(modelsDir)
-        val content = "seeclick bin weights".toByteArray()
-        File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).writeBytes(content)
-        val sha = mam1.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+        val content = "mmproj weights".toByteArray()
+        File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).writeBytes(content)
+        val sha = mam1.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         assertNotNull(sha)
 
         // Second instance: should load persisted checksum from disk
@@ -197,7 +207,7 @@ class ChecksumVerificationTest {
         assertEquals(
             "Reconstructed ModelAssetManager must load persisted checksum from .checksums.json",
             sha,
-            mam2.effectiveChecksum(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+            mam2.effectiveChecksum(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         )
     }
 
@@ -205,17 +215,17 @@ class ChecksumVerificationTest {
     fun `verifyModel enforces persisted checksum on second ModelAssetManager instance`() {
         // First instance: persist checksum
         val mam1 = ModelAssetManager(modelsDir)
-        val content = "param bytes".toByteArray()
-        val paramFile = File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE)
-        paramFile.writeBytes(content)
-        mam1.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK)
+        val content = "vlm bytes".toByteArray()
+        val vlmFile = File(modelsDir, ModelAssetManager.VLM_FILE)
+        vlmFile.writeBytes(content)
+        mam1.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM)
 
         // Tamper with the file between app restarts
-        paramFile.writeBytes("tampered after restart".toByteArray())
+        vlmFile.writeBytes("tampered after restart".toByteArray())
 
         // Second instance should enforce the persisted checksum
         val mam2 = ModelAssetManager(modelsDir)
-        val status = mam2.verifyModel(ModelAssetManager.MODEL_ID_SEECLICK)
+        val status = mam2.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(
             "Persisted checksum must be enforced after reconstruction — tampered file is CORRUPTED",
             ModelAssetManager.ModelStatus.CORRUPTED,
@@ -229,11 +239,10 @@ class ChecksumVerificationTest {
     fun `cleanupStaleFiles does not delete the checksums json file`() {
         val mam = ModelAssetManager(modelsDir)
         // Write all model files so cleanupStaleFiles has nothing to evict except unknowns
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes("vlm".toByteArray())
-        File(modelsDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeBytes("param".toByteArray())
-        File(modelsDir, ModelAssetManager.SEECLICK_BIN_FILE).writeBytes("bin".toByteArray())
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes("vlm".toByteArray())
+        File(modelsDir, ModelAssetManager.VLM_MMPROJ_FILE).writeBytes("mmproj".toByteArray())
         // Persist a checksum so the .checksums.json file exists
-        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.persistComputedChecksum(ModelAssetManager.MODEL_ID_VLM)
 
         val checksumsFile = File(modelsDir, ModelAssetManager.CHECKSUMS_FILE)
         assertTrue("Checksums file must exist after persist", checksumsFile.exists())

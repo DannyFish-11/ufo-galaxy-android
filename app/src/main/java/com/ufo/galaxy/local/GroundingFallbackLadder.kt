@@ -6,12 +6,12 @@ import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
- * Implements a multi-stage grounding fallback chain so that if primary SeeClick grounding
+ * Implements a multi-stage grounding fallback chain so that if primary VLM grounding
  * fails, the system attempts lower-cost alternatives before returning a structured failure.
  *
  * The ladder is attempted in order until valid coordinates are produced:
  *
- * 1. **Primary SeeClick** — full-resolution or downscaled screenshot passed to the
+ * 1. **Primary VLM grounding** — full-resolution or downscaled screenshot passed to the
  *    loaded [LocalGroundingService].
  * 2. **Resized retry** — screenshot re-scaled to a smaller edge (50 % of the primary
  *    edge) before grounding; reduces encoding noise from compression artefacts.
@@ -26,7 +26,7 @@ import com.ufo.galaxy.observability.GalaxyLogger
  * 6. **Structured no-match failure** — all stages exhausted; returns an error result
  *    with [FailureCode.GROUND_ALL_STAGES_EXHAUSTED].
  *
- * @param groundingService The primary [LocalGroundingService] (SeeClick).
+ * @param groundingService The primary [LocalGroundingService] (unified VLM).
  * @param imageScaler      Scaler used for stages 1 and 2.
  * @param primaryMaxEdge   Max longest edge (px) for the primary grounding call.
  * @param resizedMaxEdge   Max longest edge (px) for the resized-retry stage.
@@ -96,18 +96,21 @@ class GroundingFallbackLadder(
         intent: String,
         jpegBytes: ByteArray,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        // 双通道:无障碍树元素清单文本,与截图同帧注入主/缩放两级视觉定位的 prompt
+        // (null = 无结构化通道,行为与旧版一致)。
+        structuredContext: String? = null
     ): GroundingResult {
 
-        // Stage 1: Primary SeeClick grounding.
+        // Stage 1: Primary VLM grounding.
         if (groundingService.isModelLoaded()) {
-            val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight)
+            val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, structuredContext)
             if (result != null) return result
         }
 
         // Stage 2: Resized screenshot retry (smaller edge).
         if (groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
-            val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight)
+            val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, structuredContext)
             if (result != null) return result
         }
 
@@ -147,7 +150,8 @@ class GroundingFallbackLadder(
         intent: String,
         jpegBytes: ByteArray,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        structuredContext: String? = null
     ): GroundingResult? {
         return try {
             val scaled = imageScaler.scaleToMaxEdge(
@@ -160,7 +164,8 @@ class GroundingFallbackLadder(
                 intent = intent,
                 screenshotBase64 = scaled.scaledJpegBase64,
                 width = scaled.scaledWidth,
-                height = scaled.scaledHeight
+                height = scaled.scaledHeight,
+                structuredContext = structuredContext
             )
             if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
                 logStage(sessionId, stepId, STAGE_PRIMARY, "skip",
@@ -184,7 +189,8 @@ class GroundingFallbackLadder(
         intent: String,
         jpegBytes: ByteArray,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        structuredContext: String? = null
     ): GroundingResult? {
         return try {
             val scaled = imageScaler.scaleToMaxEdge(
@@ -197,7 +203,8 @@ class GroundingFallbackLadder(
                 intent = intent,
                 screenshotBase64 = scaled.scaledJpegBase64,
                 width = scaled.scaledWidth,
-                height = scaled.scaledHeight
+                height = scaled.scaledHeight,
+                structuredContext = structuredContext
             )
             if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
                 logStage(sessionId, stepId, STAGE_RESIZED, "skip",

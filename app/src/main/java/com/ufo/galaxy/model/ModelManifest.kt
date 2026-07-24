@@ -11,8 +11,8 @@ sealed class ModelSource {
     /**
      * Model hosted on Hugging Face Hub.
      *
-     * @param repoId    Repository identifier in `owner/repo` format (e.g., "ZiangWu/MobileVLM_V2-1.7B-GGUF").
-     * @param fileName  File name within the repository (e.g., "mobilevlm-v2-1.7b.Q4_K_M.gguf").
+     * @param repoId    Repository identifier in `owner/repo` format (e.g., "Qwen/Qwen3-VL-2B-Instruct-GGUF").
+     * @param fileName  File name within the repository (e.g., "Qwen3VL-2B-Instruct-Q4_K_M.gguf").
      * @param branch    Git branch or revision; defaults to "main".
      */
     data class HuggingFace(
@@ -51,8 +51,8 @@ sealed class ModelSource {
  * Manifests are resolved by [ModelManifest.forKnownModel] for built-in models, or supplied
  * externally (e.g., from a downloaded config file) for dynamic model registries.
  *
- * @property modelId             Canonical model identifier (e.g., [ModelAssetManager.MODEL_ID_MOBILEVLM]).
- * @property modelVersion        Human-readable version string (e.g., "v2-1.7b-Q4_K_M").
+ * @property modelId             Canonical model identifier (e.g., [ModelAssetManager.MODEL_ID_VLM]).
+ * @property modelVersion        Human-readable version string (e.g., "mai-ui-2b-Q4_K_M").
  * @property runtimeType         Required inference runtime type.
  * @property source              Where the model file can be obtained; null when not yet resolved.
  * @property minRuntimeVersion   Minimum required runtime version string; null = no constraint.
@@ -80,16 +80,16 @@ data class ModelManifest(
      * Supported inference runtime backends.
      */
     enum class RuntimeType {
-        /** llama.cpp GGUF runtime (used by MobileVLM). */
+        /** llama.cpp GGUF runtime (used by the unified MAI-UI-2B model). */
         LLAMA_CPP,
 
-        /** MLC-LLM runtime (alternative to llama.cpp for MobileVLM). */
+        /** MLC-LLM runtime (alternative GGUF-class runtime). */
         MLC_LLM,
 
-        /** NCNN lightweight CNN framework (used by SeeClick). */
+        /** NCNN lightweight CNN framework(已退役:历史 SeeClick 栈,保留枚举值以兼容旧数据)。 */
         NCNN,
 
-        /** MNN inference runtime (alternative to NCNN for SeeClick). */
+        /** MNN inference runtime(已退役:历史备选,保留枚举值以兼容旧数据)。 */
         MNN,
 
         /** Runtime type is not specified or not recognised. */
@@ -129,47 +129,42 @@ data class ModelManifest(
          * absence of a manifest as [CompatibilityResult.Unknown] rather than an error.
          */
         fun forKnownModel(modelId: String): ModelManifest? = when (modelId) {
-            ModelAssetManager.MODEL_ID_MOBILEVLM -> ModelManifest(
-                modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
-                modelVersion = "v2-1.7b-Q4_K",
+            // 统一 VLM:规划 + 定位由同一个 MAI-UI-2B 承担(llama.cpp)。
+            // 取代旧的 MobileVLM(缺 mmproj、视觉从未生效)+ SeeClick NCNN(官方仓
+            // 无 NCNN 端口、文件从未成功供给)组合。选型:2B 档 GUI 定位 SOTA
+            // (ScreenSpot-Pro 57.4%),Qwen3-VL-2B 底座,Apache-2.0;GGUF 见
+            // mradermacher/MAI-UI-2B-GGUF(社区量化;回退选项为官方
+            // Qwen/Qwen3-VL-2B-Instruct-GGUF,同架构仅需改常量)。
+            ModelAssetManager.MODEL_ID_VLM -> ModelManifest(
+                modelId = ModelAssetManager.MODEL_ID_VLM,
+                modelVersion = "mai-ui-2b-Q4_K_M",
                 runtimeType = RuntimeType.LLAMA_CPP,
                 source = ModelSource.HuggingFace(
-                    repoId = "ZiangWu/MobileVLM_V2-1.7B-GGUF",
-                    fileName = ModelAssetManager.MOBILEVLM_FILE
+                    repoId = "mradermacher/MAI-UI-2B-GGUF",
+                    fileName = ModelAssetManager.VLM_FILE
                 ),
                 minRuntimeVersion = null,
-                checksum = ModelAssetManager.MOBILEVLM_SHA256,
-                quantization = "Q4_K",
-                parameterCountM = 1700L,
-                minDiskSpaceBytes = 950_000_000L  // ~900 MB for ggml-model-q4_k.gguf + extraction buffer
+                checksum = ModelAssetManager.VLM_SHA256,
+                quantization = "Q4_K_M",
+                parameterCountM = 2000L,
+                // 2B Q4_K_M 权重约 1.1~1.3 GB(同架构 4B 官方 Q4_K_M 实证 2.5 GB 按比例推定),
+                // 预留下载与解压缓冲。
+                minDiskSpaceBytes = 1_600_000_000L
             )
-            ModelAssetManager.MODEL_ID_SEECLICK -> ModelManifest(
-                modelId = ModelAssetManager.MODEL_ID_SEECLICK,
-                modelVersion = "seeclick-ncnn",
-                runtimeType = RuntimeType.NCNN,
+            ModelAssetManager.MODEL_ID_VLM_MMPROJ -> ModelManifest(
+                modelId = ModelAssetManager.MODEL_ID_VLM_MMPROJ,
+                modelVersion = "mai-ui-2b-mmproj-f16",
+                runtimeType = RuntimeType.LLAMA_CPP,
                 source = ModelSource.HuggingFace(
-                    repoId = "cckevinn/SeeClick",
-                    fileName = "ncnn/${ModelAssetManager.SEECLICK_PARAM_FILE}"
+                    repoId = "mradermacher/MAI-UI-2B-GGUF",
+                    fileName = ModelAssetManager.VLM_MMPROJ_FILE
                 ),
                 minRuntimeVersion = null,
-                checksum = ModelAssetManager.SEECLICK_SHA256,
-                quantization = null,
-                parameterCountM = null,
-                minDiskSpaceBytes = 50_000_000L  // ~50 MB for NCNN param file
-            )
-            ModelAssetManager.MODEL_ID_SEECLICK_BIN -> ModelManifest(
-                modelId = ModelAssetManager.MODEL_ID_SEECLICK_BIN,
-                modelVersion = "seeclick-ncnn",
-                runtimeType = RuntimeType.NCNN,
-                source = ModelSource.HuggingFace(
-                    repoId = "cckevinn/SeeClick",
-                    fileName = "ncnn/${ModelAssetManager.SEECLICK_BIN_FILE}"
-                ),
-                minRuntimeVersion = null,
-                checksum = ModelAssetManager.SEECLICK_BIN_SHA256,
-                quantization = null,
-                parameterCountM = null,
-                minDiskSpaceBytes = 400_000_000L  // ~400 MB for NCNN bin weights
+                checksum = ModelAssetManager.VLM_MMPROJ_SHA256,
+                quantization = "F16",
+                parameterCountM = 400L,
+                // 视觉投影 F16 约数百 MB(同架构 4B 的 mmproj-F16 实证 ~836 MB),预留缓冲。
+                minDiskSpaceBytes = 1_000_000_000L
             )
             else -> null
         }

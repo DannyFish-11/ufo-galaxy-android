@@ -9,25 +9,29 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * Manages local model files for MobileVLM and SeeClick inference.
+ * Manages local model files for the unified on-device VLM(MAI-UI-2B,Qwen3-VL-2B 底座)。
  *
  * Model files are stored under [modelsDir] (default: [Context.getFilesDir]/models/ for Android).
  * This manager tracks readiness, exposes canonical file paths, and provides SHA-256 checksum
- * verification. Actual inference is delegated to the native runtimes (llama.cpp for MobileVLM,
- * NCNN for SeeClick); this class only manages the file-system contract between the app and
- * those runtimes.
+ * verification. Actual inference is delegated to the llama.cpp runtime; this class only
+ * manages the file-system contract between the app and that runtime.
+ *
+ * ## 单模型双职(替换 MobileVLM + SeeClick 的历史组合)
+ * 规划(planning)与定位(grounding)由**同一个** MAI-UI-2B 模型承担,
+ * 跑在同一个 llama.cpp 服务上。历史组合被替换的实证原因:
+ *  - 旧 MobileVLM 只发布了语言模型 GGUF,资产清单从未包含 mmproj 视觉投影文件,
+ *    llama.cpp 因此从来无法处理截图 —— "V" 从未生效;
+ *  - 旧 SeeClick 走 NCNN,而 SeeClick 本体是 Qwen-VL 9.6B,官方仓不存在 NCNN 端口,
+ *    该文件从未成功供给。NCNN 栈随本次替换整体退役。
  *
  * ## Checksum policy
- * - **MobileVLM**: a hardcoded SHA-256 constant is present; every verify call enforces it.
- * - **SeeClick (param + bin)**: SHA-256 is not pre-published. After the first successful
- *   download, call [persistComputedChecksum] to compute and store the digest. All
- *   subsequent [verifyModel] calls will enforce that persisted digest, protecting against
- *   corruption or tampering on the device. The initial trust-on-first-use window exists
- *   only for the very first download; re-downloads are always verified.
+ * 两个模型文件的 SHA-256 均未在本仓预置(trust-on-first-use)。首次成功下载后
+ * 调用 [persistComputedChecksum] 计算并持久化摘要;此后所有 [verifyModel] 调用都会
+ * 强制校验,防止后续损坏或篡改。TOFU 窗口仅存在于首次下载。
  *
  * Model IDs:
- *  - [MODEL_ID_MOBILEVLM] – MobileVLM V2-1.7B GGUF quantised weights
- *  - [MODEL_ID_SEECLICK]  – SeeClick NCNN param/bin pair (tracked via param file)
+ *  - [MODEL_ID_VLM]        – MAI-UI-2B Q4_K_M GGUF 语言模型权重
+ *  - [MODEL_ID_VLM_MMPROJ] – MAI-UI-2B F16 mmproj 视觉投影权重
  *
  * @param modelsDir       Root directory for model file storage.
  * @param checksumOverrides  Per-model expected SHA-256 overrides; a key present with a
@@ -69,47 +73,46 @@ class ModelAssetManager(
     companion object {
         private const val TAG = "ModelAssetManager"
 
-        const val MODEL_ID_MOBILEVLM = "mobilevlm"
-        const val MODEL_ID_SEECLICK = "seeclick"
+        /** 统一 VLM(MAI-UI-2B,Qwen3-VL-2B 底座的 GUI 专精模型)语言模型 GGUF 的逻辑标识。 */
+        const val MODEL_ID_VLM = "mai_ui_2b"
 
         /**
-         * Logical identifier for the SeeClick NCNN binary weight file.
-         * Tracked separately from [MODEL_ID_SEECLICK] (the param file) so that the registry
-         * can independently verify presence, checksum, and download status of both NCNN files.
+         * Logical identifier for the MAI-UI-2B mmproj vision-projector weight file.
+         * Tracked separately from [MODEL_ID_VLM] (the LLM weights) so that the registry
+         * can independently verify presence, checksum, and download status of both files.
+         * llama.cpp needs BOTH files to process screenshots (`--mmproj`);缺 mmproj 时
+         * 服务只能做纯文本推理 —— 这正是旧 MobileVLM 组合"从未看见过屏幕"的根因。
          */
-        const val MODEL_ID_SEECLICK_BIN = "seeclick_bin"
+        const val MODEL_ID_VLM_MMPROJ = "mai_ui_2b_mmproj"
 
         /** Sub-directory name under [Context.getFilesDir] for all model files. */
         const val MODELS_DIR = "models"
 
-        /** MobileVLM V2-1.7B GGUF INT4 quantised weight file. */
-        const val MOBILEVLM_FILE = "ggml-model-q4_k.gguf"
+        /**
+         * MAI-UI-2B Q4_K_M quantised LLM weight file.
+         *
+         * 选型依据(所有者要求视觉/定位取 2B 档最强):MAI-UI-2B(通义 Tongyi-MAI,
+         * Apache-2.0,Qwen3-VL-2B 底座的 GUI 专精模型)为 2B 档 GUI 定位 SOTA
+         * (ScreenSpot-Pro 57.4%;对比:旧 SeeClick 同基准约 1%)。GGUF 来自社区量化仓
+         * mradermacher/MAI-UI-2B-GGUF(官方未发 GGUF;该仓 25 个量化档,推荐 Q4_K_M,
+         * mmproj 文件名已实证)。若该量化质量有问题,回退选项为官方
+         * Qwen/Qwen3-VL-2B-Instruct-GGUF(同架构、同协议,仅需改本文件与
+         * [ModelManifest.forKnownModel] 的常量)。
+         */
+        const val VLM_FILE = "MAI-UI-2B.Q4_K_M.gguf"
 
-        /** SeeClick NCNN model parameter file (companion to [SEECLICK_BIN_FILE]). */
-        const val SEECLICK_PARAM_FILE = "seeclick.ncnn.param"
-
-        /** SeeClick NCNN model binary weight file. */
-        const val SEECLICK_BIN_FILE = "seeclick.ncnn.bin"
+        /** MAI-UI-2B F16 mmproj vision-projector file(文件名依 mradermacher 仓实证)。 */
+        const val VLM_MMPROJ_FILE = "MAI-UI-2B.mmproj-f16.gguf"
 
         /**
          * Expected SHA-256 checksums for each model file.
          *
-         * **MobileVLM**: the digest is hardcoded for `ggml-model-q4_k.gguf` as published
-         * in the ZiangWu/MobileVLM_V2-1.7B-GGUF Hugging Face repository. [verifyModel]
-         * enforces this on every call and returns [ModelStatus.CORRUPTED] on mismatch.
-         *
-         * **SeeClick (param + bin)**: no pre-published digest exists for these files.
-         * The constants are intentionally `null` here; after the first successful download,
-         * call [persistComputedChecksum] to compute the SHA-256 from the file on disk
-         * and persist it to [CHECKSUMS_FILE]. [verifyModel] will then load the persisted
-         * digest and enforce it on all subsequent calls, protecting against later corruption.
-         *
-         * Update [MOBILEVLM_SHA256] whenever new MobileVLM weights are deployed to the
-         * HuggingFace repository.
+         * 两个文件均未预置摘要(trust-on-first-use):首次成功下载后调用
+         * [persistComputedChecksum] 计算并持久化到 [CHECKSUMS_FILE],此后每次
+         * [verifyModel] 都会强制校验,防止后续损坏或篡改。
          */
-        val MOBILEVLM_SHA256: String = "15d4bd09293404831902c23dd898aa2cc7b4b223b6c39a64e330601ef72d99db"
-        val SEECLICK_SHA256: String? = null     // populated via persistComputedChecksum after first download
-        val SEECLICK_BIN_SHA256: String? = null // populated via persistComputedChecksum after first download
+        val VLM_SHA256: String? = null        // populated via persistComputedChecksum after first download
+        val VLM_MMPROJ_SHA256: String? = null // populated via persistComputedChecksum after first download
 
         /**
          * File name for the persisted checksum store inside [modelsDir].
@@ -125,32 +128,25 @@ class ModelAssetManager(
          * source of truth for download URLs in provisioning code is the manifest; these
          * constants serve as documentation anchors and fallbacks only.
          *
-         * **Alignment requirement**: [MOBILEVLM_DOWNLOAD_URL] must resolve to a file whose
-         * local name matches [MOBILEVLM_FILE].
+         * **Alignment requirement**: [VLM_DOWNLOAD_URL] must resolve to a file whose
+         * local name matches [VLM_FILE].
          */
-        const val MOBILEVLM_DOWNLOAD_URL: String =
-            "https://huggingface.co/ZiangWu/MobileVLM_V2-1.7B-GGUF/resolve/main/ggml-model-q4_k.gguf"
-        const val SEECLICK_PARAM_DOWNLOAD_URL: String =
-            "https://huggingface.co/cckevinn/SeeClick/resolve/main/ncnn/seeclick.ncnn.param"
-        const val SEECLICK_BIN_DOWNLOAD_URL: String =
-            "https://huggingface.co/cckevinn/SeeClick/resolve/main/ncnn/seeclick.ncnn.bin"
+        const val VLM_DOWNLOAD_URL: String =
+            "https://huggingface.co/mradermacher/MAI-UI-2B-GGUF/resolve/main/MAI-UI-2B.Q4_K_M.gguf"
+        const val VLM_MMPROJ_DOWNLOAD_URL: String =
+            "https://huggingface.co/mradermacher/MAI-UI-2B-GGUF/resolve/main/MAI-UI-2B.mmproj-f16.gguf"
     }
 
     private val registry: MutableMap<String, ModelInfo> = mutableMapOf(
-        MODEL_ID_MOBILEVLM to ModelInfo(
-            id = MODEL_ID_MOBILEVLM,
-            fileName = MOBILEVLM_FILE,
-            expectedSha256 = resolveChecksum(MODEL_ID_MOBILEVLM, MOBILEVLM_SHA256)
+        MODEL_ID_VLM to ModelInfo(
+            id = MODEL_ID_VLM,
+            fileName = VLM_FILE,
+            expectedSha256 = resolveChecksum(MODEL_ID_VLM, VLM_SHA256)
         ),
-        MODEL_ID_SEECLICK to ModelInfo(
-            id = MODEL_ID_SEECLICK,
-            fileName = SEECLICK_PARAM_FILE,
-            expectedSha256 = resolveChecksum(MODEL_ID_SEECLICK, SEECLICK_SHA256)
-        ),
-        MODEL_ID_SEECLICK_BIN to ModelInfo(
-            id = MODEL_ID_SEECLICK_BIN,
-            fileName = SEECLICK_BIN_FILE,
-            expectedSha256 = resolveChecksum(MODEL_ID_SEECLICK_BIN, SEECLICK_BIN_SHA256)
+        MODEL_ID_VLM_MMPROJ to ModelInfo(
+            id = MODEL_ID_VLM_MMPROJ,
+            fileName = VLM_MMPROJ_FILE,
+            expectedSha256 = resolveChecksum(MODEL_ID_VLM_MMPROJ, VLM_MMPROJ_SHA256)
         )
     )
 
@@ -175,20 +171,17 @@ class ModelAssetManager(
         return staticDefault
     }
 
-    /** Full absolute path to the MobileVLM GGUF weight file. */
-    val mobileVlmPath: String get() = File(modelsDir, MOBILEVLM_FILE).absolutePath
+    /** Full absolute path to the Qwen3-VL GGUF LLM weight file. */
+    val vlmModelPath: String get() = File(modelsDir, VLM_FILE).absolutePath
 
-    /** Full absolute path to the SeeClick NCNN param file. */
-    val seeClickParamPath: String get() = File(modelsDir, SEECLICK_PARAM_FILE).absolutePath
-
-    /** Full absolute path to the SeeClick NCNN bin file. */
-    val seeClickBinPath: String get() = File(modelsDir, SEECLICK_BIN_FILE).absolutePath
+    /** Full absolute path to the Qwen3-VL mmproj vision-projector file. */
+    val vlmMmprojPath: String get() = File(modelsDir, VLM_MMPROJ_FILE).absolutePath
 
     /**
      * Checks whether [modelId] is present on disk and, if [ModelInfo.expectedSha256] is set,
      * verifies its checksum. Updates and returns the model's [ModelStatus].
      *
-     * @param modelId One of [MODEL_ID_MOBILEVLM] or [MODEL_ID_SEECLICK].
+     * @param modelId One of [MODEL_ID_VLM] or [MODEL_ID_VLM_MMPROJ].
      * @return Current [ModelStatus] after verification.
      */
     fun verifyModel(modelId: String): ModelStatus {
@@ -213,8 +206,7 @@ class ModelAssetManager(
             // No expected SHA-256 is configured for this model. This is acceptable on the
             // very first download (trust-on-first-use). Call persistComputedChecksum()
             // immediately after download to store the digest; all subsequent verify calls
-            // will enforce it. For MobileVLM this branch should never be reached because
-            // MOBILEVLM_SHA256 is always set.
+            // will enforce it.
             Log.w(TAG, "Model '$modelId' SHA-256 not yet available — " +
                 "call persistComputedChecksum() after first download to enable verification.")
         }
@@ -259,11 +251,12 @@ class ModelAssetManager(
         registry[modelId]?.status ?: ModelStatus.MISSING
 
     /**
-     * Returns true when both [MODEL_ID_MOBILEVLM] and [MODEL_ID_SEECLICK] are [ModelStatus.LOADED].
+     * Returns true when both [MODEL_ID_VLM] and [MODEL_ID_VLM_MMPROJ] are [ModelStatus.LOADED]
+     * (即 llama.cpp 服务同时装载了语言模型与视觉投影,具备完整多模态能力)。
      */
     fun areAllModelsLoaded(): Boolean =
-        getStatus(MODEL_ID_MOBILEVLM) == ModelStatus.LOADED &&
-            getStatus(MODEL_ID_SEECLICK) == ModelStatus.LOADED
+        getStatus(MODEL_ID_VLM) == ModelStatus.LOADED &&
+            getStatus(MODEL_ID_VLM_MMPROJ) == ModelStatus.LOADED
 
     /**
      * Returns a human-readable capabilities error when models are not loaded.
@@ -287,8 +280,8 @@ class ModelAssetManager(
      * source of truth. Models without a manifest, or whose manifest source is a
      * [ModelSource.LocalPath], are silently skipped (no download needed).
      *
-     * The param and binary SeeClick files are tracked and checked independently: if only the
-     * binary file is missing, only its spec is returned.
+     * The LLM and mmproj files are tracked and checked independently: if only the
+     * mmproj file is missing, only its spec is returned.
      */
     fun downloadSpecsForMissing(): List<ModelDownloader.DownloadSpec> {
         val specs = mutableListOf<ModelDownloader.DownloadSpec>()
@@ -425,7 +418,7 @@ class ModelAssetManager(
      * writing anything.
      *
      * Call this immediately after a successful first download for any model whose
-     * SHA-256 constant is null (currently SeeClick param and bin).
+     * SHA-256 constant is null (currently both Qwen3-VL files).
      *
      * @return The computed SHA-256 hex string, or null if the file was not found.
      */

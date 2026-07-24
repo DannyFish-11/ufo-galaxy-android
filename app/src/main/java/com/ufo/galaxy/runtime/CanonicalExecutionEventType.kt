@@ -20,7 +20,7 @@ package com.ufo.galaxy.runtime
  *
  * ### Grounding events
  * Emitted by [com.ufo.galaxy.loop.LoopController] / [com.ufo.galaxy.agent.EdgeExecutor]
- * during coordinate-resolution / SeeClick grounding:
+ * during coordinate-resolution / VLM grounding:
  *  - [GROUNDING_STARTED]  — grounding stage has begun for the current action step.
  *  - [GROUNDING_PROGRESS] — grounding step progressed (e.g. fallback ladder advance).
  *  - [GROUNDING_BLOCKED]  — grounding cannot resolve a target (coordinate failure).
@@ -89,7 +89,7 @@ enum class CanonicalExecutionEventType(val wireValue: String) {
     // ── Grounding events ──────────────────────────────────────────────────────
 
     /**
-     * Grounding (coordinate resolution / SeeClick) has begun for the current action step.
+     * Grounding (coordinate resolution / VLM grounding) has begun for the current action step.
      *
      * Emitted when the executor attempts to resolve an abstract action intent to a
      * concrete screen coordinate.

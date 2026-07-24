@@ -1,10 +1,10 @@
 package com.ufo.galaxy.inference
 
 /**
- * Local grounding service interface for SeeClick on-device GUI grounding.
+ * Local grounding service interface for unified-VLM on-device GUI grounding.
  *
  * Pluggable runtime: NCNN (ARM NEON/Vulkan) or MNN backend.
- * Model: njucckevin/SeeClick (HuggingFace).
+ * Model: MAI-UI-2B(与规划器共用同一模型/服务)。
  *
  * Maps a natural-language intent and a live screenshot to physical screen coordinates.
  * Coordinates are produced exclusively on-device; the gateway never supplies x/y values.
@@ -63,7 +63,7 @@ interface LocalGroundingService {
      */
     fun prewarm(): Boolean = loadModel()
 
-    /** Loads the SeeClick model weights into device memory. Returns true on success. */
+    /** Loads the VLM model weights into device memory. Returns true on success. */
     fun loadModel(): Boolean
 
     /** Releases model weights from device memory. */
@@ -87,6 +87,23 @@ interface LocalGroundingService {
         width: Int = 0,
         height: Int = 0
     ): GroundingResult
+
+    /**
+     * 双通道版本:除截图外同时携带结构化屏幕上下文([structuredContext],由
+     * [com.ufo.galaxy.perception.UiStructuredSnapshot.toPromptBlock] 生成的元素清单
+     * 文本;null/空 = 无结构化通道)。
+     *
+     * 默认实现忽略 structuredContext 并委托给四参 [ground] —— 既有实现与全部测试
+     * fake 无需感知本方法;支持双通道的实现(VlmGroundingEngine)覆写之,把元素
+     * 清单注入 prompt 与截图一同送模型(同时在场、综合判断,而非兜底)。
+     */
+    fun ground(
+        intent: String,
+        screenshotBase64: String,
+        width: Int,
+        height: Int,
+        structuredContext: String?
+    ): GroundingResult = ground(intent, screenshotBase64, width, height)
 }
 
 /**
@@ -115,6 +132,6 @@ class NoOpGroundingService : LocalGroundingService {
         y = 0,
         confidence = 0f,
         element_description = "",
-        error = "SeeClick grounding not available: model not loaded"
+        error = "VLM grounding not available: model not loaded"
     )
 }

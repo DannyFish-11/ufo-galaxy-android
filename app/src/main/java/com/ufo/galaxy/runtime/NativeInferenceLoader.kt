@@ -6,8 +6,8 @@ import android.util.Log
  * Detects and loads native inference runtime libraries at application startup.
  *
  * Two runtimes are managed:
- * - **llama.cpp** (`libllama.so`) — GGUF-format model execution for MobileVLM.
- * - **NCNN** (`libncnn.so`) — lightweight CNN inference for SeeClick.
+ * - **llama.cpp** (`libllama.so`) — GGUF-format model execution for the unified VLM (MAI-UI-2B).
+ * - **NCNN** (`libncnn.so`) — lightweight CNN inference(已退役:历史 SeeClick 栈,库探测保留以兼容能力上报字段).
  *
  * Both libraries are optional at the source-code level. If a library is absent from the
  * APK (e.g., the dependency was not included in the build), [System.loadLibrary] throws

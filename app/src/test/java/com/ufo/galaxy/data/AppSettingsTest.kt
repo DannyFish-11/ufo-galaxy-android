@@ -396,7 +396,9 @@ class AppSettingsTest {
 
     @Test
     fun `effectiveGatewayWsUrl uses host+port when gatewayHost is set`() {
-        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 9000, deviceId = "d1")
+        // 测试修复:InMemoryAppSettings.useTls 默认值已改为 true(SECURITY-FIX-R5),
+        // 本用例验证的是 host+port 拼接而非 TLS 行为,需显式关闭 TLS 以匹配 ws:// 断言。
+        val settings = InMemoryAppSettings(gatewayHost = "100.64.0.1", gatewayPort = 9000, useTls = false, deviceId = "d1")
         assertEquals("ws://100.64.0.1:9000/ws/device/d1", settings.effectiveGatewayWsUrl())
     }
 

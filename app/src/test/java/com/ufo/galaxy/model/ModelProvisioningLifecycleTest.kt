@@ -44,9 +44,8 @@ class ModelProvisioningLifecycleTest {
         mam = ModelAssetManager(
             modelsDir,
             checksumOverrides = mapOf(
-                ModelAssetManager.MODEL_ID_MOBILEVLM to null,
-                ModelAssetManager.MODEL_ID_SEECLICK to null,
-                ModelAssetManager.MODEL_ID_SEECLICK_BIN to null
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
             )
         )
     }
@@ -80,8 +79,8 @@ class ModelProvisioningLifecycleTest {
 
     @Test
     fun `initial model status is MISSING before any download`() {
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM))
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.verifyModel(ModelAssetManager.MODEL_ID_SEECLICK))
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.verifyModel(ModelAssetManager.MODEL_ID_VLM))
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.verifyModel(ModelAssetManager.MODEL_ID_VLM_MMPROJ))
     }
 
     @Test
@@ -108,14 +107,14 @@ class ModelProvisioningLifecycleTest {
         val body = "fake gguf weights".toByteArray()
         val downloader = makeDownloader(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         var lastStatus: ModelDownloader.DownloadStatus? = null
         val ok = downloader.downloadSync(spec) { lastStatus = it }
         assertTrue("downloadSync must return true on success", ok)
-        assertTrue("Destination file must exist", File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists())
+        assertTrue("Destination file must exist", File(modelsDir, ModelAssetManager.VLM_FILE).exists())
         assertTrue("Last status must be Success", lastStatus is ModelDownloader.DownloadStatus.Success)
     }
 
@@ -124,9 +123,9 @@ class ModelProvisioningLifecycleTest {
         val body = ByteArray(16_384) { it.toByte() }
         val downloader = makeDownloader(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         val events = mutableListOf<ModelDownloader.DownloadStatus>()
         downloader.downloadSync(spec) { events.add(it) }
@@ -142,14 +141,14 @@ class ModelProvisioningLifecycleTest {
         val checksum = sha256Hex(body)
         val downloader = makeDownloader(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = checksum
         )
         val ok = downloader.downloadSync(spec) {}
         assertTrue("Download with correct checksum must succeed", ok)
-        assertTrue(File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists())
+        assertTrue(File(modelsDir, ModelAssetManager.VLM_FILE).exists())
     }
 
     @Test
@@ -158,9 +157,9 @@ class ModelProvisioningLifecycleTest {
         val wrongChecksum = "0".repeat(64) // wrong SHA-256
         val downloader = makeDownloader(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = wrongChecksum
         )
         var lastStatus: ModelDownloader.DownloadStatus? = null
@@ -168,7 +167,7 @@ class ModelProvisioningLifecycleTest {
         assertFalse("Download with mismatched checksum must fail", ok)
         assertTrue("Last status must be Failure", lastStatus is ModelDownloader.DownloadStatus.Failure)
         assertFalse("File must not be present after checksum failure",
-            File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).exists())
+            File(modelsDir, ModelAssetManager.VLM_FILE).exists())
     }
 
     // ── 4. Cache hit ──────────────────────────────────────────────────────────
@@ -178,7 +177,7 @@ class ModelProvisioningLifecycleTest {
         val body = "cached model".toByteArray()
         val checksum = sha256Hex(body)
         // Pre-populate the file
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(body)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(body)
 
         var httpCallCount = 0
         val countingFactory = ModelDownloader.HttpFactory { url ->
@@ -187,9 +186,9 @@ class ModelProvisioningLifecycleTest {
         }
         val downloader = makeDownloader(countingFactory)
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = checksum
         )
         val ok = downloader.downloadSync(spec) {}
@@ -201,22 +200,22 @@ class ModelProvisioningLifecycleTest {
 
     @Test
     fun `verifyModel returns READY after file is downloaded`() = runBlocking {
-        val body = "mobilevlm weights".toByteArray()
+        val body = "vlm weights".toByteArray()
         val downloader = makeDownloader(fakeHttp(body = body))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         downloader.downloadSync(spec) {}
-        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        val status = mam.verifyModel(ModelAssetManager.MODEL_ID_VLM)
         assertEquals(ModelAssetManager.ModelStatus.READY, status)
     }
 
     @Test
     fun `verifyModel returns CORRUPTED when file has wrong checksum`() {
         val badContent = "corrupted content".toByteArray()
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeBytes(badContent)
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeBytes(badContent)
 
         // Build a ModelAssetManager with an expected checksum that won't match
         val badChecksum = "a".repeat(64)
@@ -224,13 +223,13 @@ class ModelProvisioningLifecycleTest {
         // Inject an expected SHA-256 via a DownloadSpec-based check
         // We can only test this via a custom ModelAssetManager subclass or by
         // placing a file that won't match the download spec checksum.
-        // Since the public API only allows null checksums for built-in models,
+        // Since the built-in models start with null checksums (trust-on-first-use),
         // test CORRUPTED via the ModelDownloader path instead.
         val downloader = makeDownloader(fakeHttp(body = badContent))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE,
+            fileName = ModelAssetManager.VLM_FILE,
             expectedSha256 = badChecksum
         )
         var failed = false
@@ -246,39 +245,39 @@ class ModelProvisioningLifecycleTest {
 
     @Test
     fun `markLoaded then getStatus returns LOADED`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        assertEquals(ModelAssetManager.ModelStatus.LOADED, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        assertEquals(ModelAssetManager.ModelStatus.LOADED, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
     }
 
     @Test
     fun `markUnloaded after load returns READY when file is present`() = runBlocking {
         // Write a dummy file so the unloaded state reflects READY not MISSING
-        File(modelsDir, ModelAssetManager.MOBILEVLM_FILE).writeText("weights")
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markUnloaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        assertEquals(ModelAssetManager.ModelStatus.READY, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
+        File(modelsDir, ModelAssetManager.VLM_FILE).writeText("weights")
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markUnloaded(ModelAssetManager.MODEL_ID_VLM)
+        assertEquals(ModelAssetManager.ModelStatus.READY, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
     }
 
     @Test
     fun `markUnloaded when file is absent returns MISSING`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markUnloaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markUnloaded(ModelAssetManager.MODEL_ID_VLM)
         // File was never written → MISSING
-        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_MOBILEVLM))
+        assertEquals(ModelAssetManager.ModelStatus.MISSING, mam.getStatus(ModelAssetManager.MODEL_ID_VLM))
     }
 
     @Test
     fun `areAllModelsLoaded true only when both models are LOADED`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
         assertFalse("Only one model loaded — not all models loaded", mam.areAllModelsLoaded())
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         assertTrue("Both models loaded", mam.areAllModelsLoaded())
     }
 
     @Test
     fun `readinessError is null when all models are loaded`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         assertNull("readinessError must be null when all models are LOADED", mam.readinessError())
     }
 
@@ -287,36 +286,36 @@ class ModelProvisioningLifecycleTest {
     @Test
     fun `downloadSpecsForMissing returns specs when models are missing`() {
         val specs = mam.downloadSpecsForMissing()
-        // At least one spec should be present since MobileVLM download URL is configured
+        // At least one spec should be present since the VLM download URL is configured
         assertTrue("At least one download spec must be returned for missing models",
             specs.isNotEmpty())
     }
 
     @Test
     fun `downloadSpecsForMissing returns empty list when all models are loaded`() {
-        mam.markLoaded(ModelAssetManager.MODEL_ID_MOBILEVLM)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK)
-        mam.markLoaded(ModelAssetManager.MODEL_ID_SEECLICK_BIN)
+        // 适配说明:registry 现收敛为两个条目(LLM 权重与 mmproj),两者都需标记 LOADED。
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM)
+        mam.markLoaded(ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         val specs = mam.downloadSpecsForMissing()
         assertTrue("No specs when all models are LOADED", specs.isEmpty())
     }
 
     @Test
-    fun `downloadSpecsForMissing includes MobileVLM HuggingFace URL`() {
+    fun `downloadSpecsForMissing includes VLM HuggingFace URL`() {
         val specs = mam.downloadSpecsForMissing()
-        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_MOBILEVLM }
-        assertNotNull("MobileVLM spec must be present", vlmSpec)
-        assertTrue("MobileVLM URL must reference HuggingFace",
+        val vlmSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM }
+        assertNotNull("VLM spec must be present", vlmSpec)
+        assertTrue("VLM URL must reference HuggingFace",
             vlmSpec!!.url.contains("huggingface.co"))
     }
 
     @Test
-    fun `downloadSpecsForMissing includes SeeClick HuggingFace URL`() {
+    fun `downloadSpecsForMissing includes mmproj HuggingFace URL`() {
         val specs = mam.downloadSpecsForMissing()
-        val scParamSpec = specs.firstOrNull { it.modelId.startsWith(ModelAssetManager.MODEL_ID_SEECLICK) }
-        assertNotNull("SeeClick spec must be present", scParamSpec)
-        assertTrue("SeeClick URL must reference HuggingFace",
-            scParamSpec!!.url.contains("huggingface.co"))
+        val mmprojSpec = specs.firstOrNull { it.modelId == ModelAssetManager.MODEL_ID_VLM_MMPROJ }
+        assertNotNull("mmproj spec must be present", mmprojSpec)
+        assertTrue("mmproj URL must reference HuggingFace",
+            mmprojSpec!!.url.contains("huggingface.co"))
     }
 
     // ── 8. HTTP error response ────────────────────────────────────────────────
@@ -325,9 +324,9 @@ class ModelProvisioningLifecycleTest {
     fun `download Failure reported on HTTP 404`() = runBlocking {
         val downloader = makeDownloader(fakeHttp(responseCode = 404, body = ByteArray(0)))
         val spec = ModelDownloader.DownloadSpec(
-            modelId = ModelAssetManager.MODEL_ID_MOBILEVLM,
+            modelId = ModelAssetManager.MODEL_ID_VLM,
             url = "http://fake.local/model.gguf",
-            fileName = ModelAssetManager.MOBILEVLM_FILE
+            fileName = ModelAssetManager.VLM_FILE
         )
         var failed = false
         downloader.downloadSync(spec) { if (it is ModelDownloader.DownloadStatus.Failure) failed = true }

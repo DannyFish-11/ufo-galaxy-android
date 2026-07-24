@@ -166,8 +166,8 @@ class StateHandler(
 
             val assetManager = UFOGalaxyApplication.modelAssetManager
             val modelStatuses = try { assetManager.verifyAll() } catch (e: Exception) { emptyMap() }
-            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM]
-            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK]
+            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM]
+            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ]
             val mobilevlmPresent = mobilevlmStatus != null &&
                 mobilevlmStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
             val seeClickPresent = seeClickStatus != null &&

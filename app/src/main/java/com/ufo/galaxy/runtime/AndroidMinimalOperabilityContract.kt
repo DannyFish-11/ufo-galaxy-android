@@ -388,13 +388,13 @@ object AndroidMinimalOperabilityContract {
         ),
 
         /**
-         * 外部推理服务器（MobileVlmPlanner 的本地 HTTP 端点）未运行。
+         * 外部推理服务器（VlmPlanner 的本地 HTTP 端点）未运行。
          * 使用远程 V2 节点（Node_113_AndroidVLM）作为推理路径时不受影响。
          */
         EXTERNAL_INFERENCE_SERVER_UNAVAILABLE(
             wireValue = "external_inference_server_unavailable",
             displayName = "外部推理服务器不可用",
-            description = "MobileVlmPlanner 的本地 HTTP 推理服务器（127.0.0.1:8080）未运行。若已配置远程 V2 VLM 节点，则降级不影响跨设备执行路径。",
+            description = "VlmPlanner 的本地 HTTP 推理服务器（127.0.0.1:8080）未运行。若已配置远程 V2 VLM 节点，则降级不影响跨设备执行路径。",
             affectedCapability = "local_vlm_planning",
             isRecoverable = true
         ),

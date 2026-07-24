@@ -20,10 +20,10 @@ import java.util.Base64
 
 /**
  * EdgeExecutor orchestrates the full on-device AIP v3 task execution pipeline:
- *   screenshot → MobileVLM 1.7B planner → SeeClick grounding → AccessibilityService
+ *   screenshot → VLM(MAI-UI-2B)planner → VLM grounding → AccessibilityService
  *
  * Uses [LocalPlannerService] and [LocalGroundingService] as pluggable inference
- * backends (llama.cpp/MLC-LLM for planning; NCNN/MNN for grounding).
+ * backends (同一 llama.cpp 服务承担规划与定位——单模型双职).
  *
  * Architecture constraints:
  *  - All screen coordinates are generated on-device in the grounding stage.
@@ -40,8 +40,8 @@ import java.util.Base64
  *  - [correlation_id] in [TaskResultPayload] is always set to [TaskAssignPayload.task_id].
  *
  * @param screenshotProvider    Captures the current device screen as JPEG bytes.
- * @param plannerService        MobileVLM 1.7B local planner (llama.cpp / MLC-LLM).
- * @param groundingService      SeeClick local grounding engine (NCNN / MNN).
+ * @param plannerService        Unified VLM local planner (llama.cpp).
+ * @param groundingService      Unified VLM local grounding engine (同一 llama.cpp 服务).
  * @param accessibilityExecutor Executes resolved actions via Android AccessibilityService.
  * @param imageScaler           Optional scaler for grounding input; defaults to [NoOpImageScaler].
  * @param scaledMaxEdge         Maximum longest edge (px) for grounding input image.
@@ -55,7 +55,13 @@ class EdgeExecutor(
     private val imageScaler: ImageScaler = NoOpImageScaler(),
     private val scaledMaxEdge: Int = 720,
     private var perceptionEmissionSink: DevicePerceptionEmissionSink? = null,
-    private val continuousIngressProvider: (() -> AndroidCanonicalContinuousIngressBackbone.Snapshot)? = null
+    private val continuousIngressProvider: (() -> AndroidCanonicalContinuousIngressBackbone.Snapshot)? = null,
+    /**
+     * 结构化感知通道(无障碍树快照)。非 null 时与截图同帧采集:元素清单注入
+     * 规划/定位 prompt,坐标经 [com.ufo.galaxy.perception.GroundingArbiter] 与视觉
+     * 结果综合裁决(同时在场,非兜底)。null(默认)= 纯视觉,行为与引入前一致。
+     */
+    private val uiSnapshotProvider: com.ufo.galaxy.perception.UiSnapshotProvider? = null
 ) {
 
     /**
@@ -113,7 +119,7 @@ class EdgeExecutor(
             return buildResult(
                 taskId = taskAssign.task_id,
                 status = STATUS_ERROR,
-                error = "Model not ready: MobileVLM planner is not loaded. " +
+                error = "Model not ready: VLM planner is not loaded. " +
                     "Ensure the inference server is running and loadModel() succeeded."
             )
         }
@@ -121,7 +127,7 @@ class EdgeExecutor(
             return buildResult(
                 taskId = taskAssign.task_id,
                 status = STATUS_ERROR,
-                error = "Model not ready: SeeClick grounding engine is not loaded. " +
+                error = "Model not ready: VLM grounding engine is not loaded. " +
                     "Ensure the inference server is running and loadModel() succeeded."
             )
         }
@@ -192,10 +198,13 @@ class EdgeExecutor(
         )
 
         // Initial planning uses the full-resolution screenshot for best context.
+        // 双通道:同帧采集无障碍树元素清单注入规划 prompt(采集失败 = null,纯视觉)。
+        val planUiSnapshot = uiSnapshotProvider?.capture()
         val planResult = plannerService.plan(
             goal = taskAssign.goal,
             constraints = planningConstraints,
-            screenshotBase64 = initialBase64
+            screenshotBase64 = initialBase64,
+            structuredContext = planUiSnapshot?.toPromptBlock()
         )
         if (planResult.error != null || planResult.steps.isEmpty()) {
             return buildResult(
@@ -255,14 +264,24 @@ class EdgeExecutor(
             )
 
             // Grounding: intent + (scaled) screenshot → on-device coordinates in scaled space
+            // 双通道:与本步截图同帧采集树快照;元素清单注入定位 prompt(结构化通道),
+            // 坐标裁决在重映射回全分辨率后由 GroundingArbiter 综合两路证据完成。
+            val stepUiSnapshot = uiSnapshotProvider?.capture()
             val grounding = groundingService.ground(
                 intent = step.intent,
                 screenshotBase64 = scaledForGrounding.scaledJpegBase64,
                 width = scaledForGrounding.scaledWidth,
-                height = scaledForGrounding.scaledHeight
+                height = scaledForGrounding.scaledHeight,
+                structuredContext = stepUiSnapshot?.toPromptBlock()
             )
             val screenshotRef = "step${stepId}_${taskAssign.task_id.take(8)}"
-            if (grounding.error != null) {
+            // 视觉失败先问结构化通道:树有强匹配候选即救场(tree_rescue,坐标本就是
+            // 全分辨率),步骤继续而不是整任务报错;树也给不出才走原错误流程。
+            val treeRescue = if (grounding.error != null) {
+                com.ufo.galaxy.perception.GroundingArbiter.fuse(step.intent, grounding, stepUiSnapshot)
+                    .takeIf { it.source == com.ufo.galaxy.perception.GroundingArbiter.SOURCE_TREE_RESCUE }
+            } else null
+            if (grounding.error != null && treeRescue == null) {
                 emitPerception(
                     DevicePerceptionEmissionPayload(
                         flow_id = taskAssign.task_id,
@@ -316,9 +335,18 @@ class EdgeExecutor(
             // Remap grounding coordinates from scaled space back to full-resolution.
             // This ensures AccessibilityService receives pixel-accurate coordinates
             // regardless of what resolution was passed to the grounding engine.
-            val fullResX = remapCoord(grounding.x, scaledForGrounding.scaledWidth, screenW)
-            val fullResY = remapCoord(grounding.y, scaledForGrounding.scaledHeight, screenH)
-            val remappedGrounding = grounding.copy(x = fullResX, y = fullResY)
+            // 综合裁决必须在全分辨率空间进行:视觉坐标先重映射,树 bounds 本就是
+            // 屏幕绝对像素,两路证据同空间后交仲裁器(一致加信、强树候选可纠偏、
+            // 视觉失败树救场;树缺席时原样透传视觉结果)。
+            val remappedGrounding = treeRescue?.result
+                ?: com.ufo.galaxy.perception.GroundingArbiter.fuse(
+                    intent = step.intent,
+                    vlm = grounding.copy(
+                        x = remapCoord(grounding.x, scaledForGrounding.scaledWidth, screenW),
+                        y = remapCoord(grounding.y, scaledForGrounding.scaledHeight, screenH)
+                    ),
+                    snapshot = stepUiSnapshot
+                ).result
             emitPerception(
                 DevicePerceptionEmissionPayload(
                     flow_id = taskAssign.task_id,
@@ -337,14 +365,16 @@ class EdgeExecutor(
                         image_width = screenW,
                         image_height = screenH
                     ),
+                    // 上报仲裁后的最终定位(全分辨率):双通道裁决结果才是真正下发
+                    // 执行的坐标,遥测必须与执行一致。
                     grounding_payload = DeviceGroundingPayload(
                         intent = step.intent,
                         input_width = scaledForGrounding.scaledWidth,
                         input_height = scaledForGrounding.scaledHeight,
-                        result_x = fullResX,
-                        result_y = fullResY,
-                        confidence = grounding.confidence,
-                        element_description = grounding.element_description
+                        result_x = remappedGrounding.x,
+                        result_y = remappedGrounding.y,
+                        confidence = remappedGrounding.confidence,
+                        element_description = remappedGrounding.element_description
                     ),
                     local_perception_payload = DeviceLocalPerceptionPayload(
                         screen_width = screenW,
