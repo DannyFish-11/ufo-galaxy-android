@@ -618,12 +618,16 @@ class OAuthManager private constructor(private val context: Context) {
         // 无论是否有等待中的续体，流程结束都清除 state，避免残留
         clearGitHubOAuthState()
         val continuation = takeGitHubContinuation() ?: return
+        // 真 bug 修复:tryResume/tryResumeWithException 只是"预定"恢复并返回 token,
+        // 必须再调用 completeResume(token) 才会真正恢复协程;此前缺少 completeResume,
+        // 触发场景:GitHub 授权回调/超时到达后,signInWithGitHub 的挂起协程永远不被
+        // 恢复,登录界面永久停留在 Loading 状态(逻辑死路)。
         if (code != null) {
-            continuation.tryResume(code)
+            continuation.tryResume(code)?.let { continuation.completeResume(it) }
         } else {
             continuation.tryResumeWithException(
                 OAuthException(error ?: "GitHub 授权失败")
-            )
+            )?.let { continuation.completeResume(it) }
         }
     }
 
@@ -774,12 +778,17 @@ class OAuthManager private constructor(private val context: Context) {
                 c
             } ?: return
 
+            // 真 bug 修复:tryResume/tryResumeWithException 返回的 token 必须传给
+            // completeResume 才会真正恢复协程;此前缺少 completeResume,触发场景:
+            // 用户在 Google 账号选择器中完成选择或取消后,performGoogleSignIn 的挂起
+            // 协程永远不被恢复,登录流程卡死在 Loading(逻辑死路)。
             try {
                 val account = task.getResult(ApiException::class.java)
                 if (account != null) {
-                    continuation.tryResume(account)
+                    continuation.tryResume(account)?.let { continuation.completeResume(it) }
                 } else {
                     continuation.tryResumeWithException(OAuthException("Google 登录返回空账号"))
+                        ?.let { continuation.completeResume(it) }
                 }
             } catch (e: ApiException) {
                 Log.e(TAG, "Google Sign-In 失败: code=${e.statusCode}, message=${e.message}")
@@ -789,9 +798,11 @@ class OAuthManager private constructor(private val context: Context) {
                     else -> "Google 登录失败 (${e.statusCode})"
                 }
                 continuation.tryResumeWithException(OAuthException(message, e))
+                    ?.let { continuation.completeResume(it) }
             } catch (e: Exception) {
                 Log.e(TAG, "Google Sign-In 异常: ${e.message}")
                 continuation.tryResumeWithException(OAuthException("Google 登录异常: ${e.message}", e))
+                    ?.let { continuation.completeResume(it) }
             }
         }
     }

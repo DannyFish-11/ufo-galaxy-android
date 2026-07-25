@@ -1150,6 +1150,13 @@ class GalaxyConnectionService : Service() {
      * with a lower [MeshTopologyPayload.topology_seq] are silently ignored so out-of-order
      * delivery does not overwrite a newer snapshot.
      */
+    // 真 bug 修复:handlePeerAnnounce / handleMeshTopology / handleCoordSync 均由
+    // onAdvancedMessage 以 serviceScope.launch(Dispatchers.IO)并发派发,对下列共享
+    // 状态的"读-判-写"并非原子。触发场景:两台 peer 同时 announce 时,基于旧 map
+    // 的两次 copy-on-write 互相覆盖,其中一台的在场记录整体丢失(直至其重新
+    // announce);topology_seq 的 check-then-act 同理可被旧序列覆盖新序列。此锁
+    // 保护所有 peer/topology 状态的读-改-写序列。
+    private val peerTopologyStateLock = Any()
     @Volatile
     private var lastMeshTopologyNodes: List<String> = emptyList()
     @Volatile
@@ -1169,9 +1176,12 @@ class GalaxyConnectionService : Service() {
      * Monotonic count of COORD_SYNC ticks received in this service lifecycle.
      * Incremented by [handleCoordSync] and echoed in every [CoordSyncAckPayload] so the
      * coordinator can detect gaps in the device's acknowledgement sequence.
+     *
+     * 真 bug 修复:此前是 @Volatile Int 且用 `++` 自增——volatile 不保证自增原子性,
+     * 并发 COORD_SYNC 消息(每条消息独立协程处理)会丢失计数,协调端据 tick_count
+     * 检测 ack 序列缺口时会看到"重复 tick",误判确认序列异常。改为原子自增。
      */
-    @Volatile
-    private var coordSyncTickCount: Int = 0
+    private val coordSyncTickCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Per-peer presence record from the most recent PEER_ANNOUNCE message received from
@@ -6270,10 +6280,19 @@ class GalaxyConnectionService : Service() {
 
         // Update the per-peer presence record when we have a valid peer device id,
         // but only when the incoming announce_seq is not stale.
+        // 真 bug 修复:读-判-写必须持锁原子完成(触发场景见 peerTopologyStateLock 注释:
+        // 两台 peer 并发 announce 时 copy-on-write 相互覆盖导致在场记录丢失)。
         if (payload.peer_device_id.isNotBlank()) {
-            val existing = lastPeerAnnouncements[payload.peer_device_id]
-            if (existing == null || payload.announce_seq >= existing.announce_seq) {
-                lastPeerAnnouncements = lastPeerAnnouncements + (payload.peer_device_id to payload)
+            val updated = synchronized(peerTopologyStateLock) {
+                val existing = lastPeerAnnouncements[payload.peer_device_id]
+                if (existing == null || payload.announce_seq >= existing.announce_seq) {
+                    lastPeerAnnouncements = lastPeerAnnouncements + (payload.peer_device_id to payload)
+                    true
+                } else {
+                    false
+                }
+            }
+            if (updated) {
                 updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(lastMeshTopologyMeshId))
             }
         }
@@ -6325,11 +6344,20 @@ class GalaxyConnectionService : Service() {
         }
 
         // Only retain topology updates that are newer than what we already have.
-        val accepted = payload.topology_seq > lastMeshTopologySeq
+        // 真 bug 修复:seq 比较与三个字段写入必须持锁原子完成(触发场景见
+        // peerTopologyStateLock 注释:并发拓扑帧的 check-then-act 可让旧 seq
+        // 快照覆盖新 seq 快照,破坏"乱序旧帧被忽略"的既有约定)。
+        val accepted = synchronized(peerTopologyStateLock) {
+            if (payload.topology_seq > lastMeshTopologySeq) {
+                lastMeshTopologyMeshId = payload.mesh_id.takeIf { it.isNotBlank() }
+                lastMeshTopologyNodes = payload.nodes
+                lastMeshTopologySeq = payload.topology_seq
+                true
+            } else {
+                false
+            }
+        }
         if (accepted) {
-            lastMeshTopologyMeshId = payload.mesh_id.takeIf { it.isNotBlank() }
-            lastMeshTopologyNodes = payload.nodes
-            lastMeshTopologySeq = payload.topology_seq
             updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(lastMeshTopologyMeshId))
         }
 
@@ -6370,8 +6398,7 @@ class GalaxyConnectionService : Service() {
      * @param rawJson   Raw JSON string of the inbound coord_sync message.
      */
     private fun handleCoordSync(messageId: String?, rawJson: String) {
-        coordSyncTickCount++
-        val currentTickCount = coordSyncTickCount
+        val currentTickCount = coordSyncTickCount.incrementAndGet()
 
         val syncSeq = try {
             val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)

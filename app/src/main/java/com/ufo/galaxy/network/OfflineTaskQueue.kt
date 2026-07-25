@@ -141,8 +141,16 @@ class OfflineTaskQueue(
      * SECURITY-FIX: Background scope for async SharedPreferences writes to avoid
      * main-thread I/O during message enqueue (P2-FIX).
      */
+    // 真 bug 修复:持久化写入必须串行且保序。此前直接用并行的 Dispatchers.IO,
+    // 两次相邻变更(如 enqueue 后立刻 drainAll)启动的两个写协程可能乱序执行,
+    // 旧快照覆盖新快照。触发场景:消息刚入队又被 drain 发送成功后,drain 的空
+    // 快照先落盘、enqueue 的旧快照后落盘,进程重启后已发送的消息"复活"被重复
+    // 发送。limitedParallelism(1) 保证 FIFO 串行写盘(launch 均在 lock 内发起,
+    // 提交顺序即队列变更顺序)。
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val ioScope: CoroutineScope = CoroutineScope(
-        Dispatchers.IO + SupervisorJob() + kotlinx.coroutines.CoroutineName("OfflineTaskQueueIO")
+        Dispatchers.IO.limitedParallelism(1) + SupervisorJob() +
+            kotlinx.coroutines.CoroutineName("OfflineTaskQueueIO")
     )
 
     private val queue = ArrayDeque<QueuedMessage>()

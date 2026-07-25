@@ -1,6 +1,7 @@
 package com.ufo.galaxy.perception
 
 import android.graphics.Rect
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ufo.galaxy.service.HardwareKeyListener
@@ -42,15 +43,20 @@ class AccessibilityUiSnapshotProvider(
         val service = HardwareKeyListener.instance ?: return null
         return try {
             val root = service.rootInActiveWindow ?: return null
-            val elements = ArrayList<UiStructuredSnapshot.UiElement>(64)
-            flatten(root, elements, depth = 0)
-            if (elements.isEmpty()) return null
-            UiStructuredSnapshot(
-                packageName = root.packageName?.toString() ?: "",
-                screenWidth = screenWidth(),
-                screenHeight = screenHeight(),
-                elements = elements
-            )
+            try {
+                val elements = ArrayList<UiStructuredSnapshot.UiElement>(64)
+                flatten(root, elements, depth = 0)
+                if (elements.isEmpty()) return null
+                UiStructuredSnapshot(
+                    packageName = root.packageName?.toString() ?: "",
+                    screenWidth = screenWidth(),
+                    screenHeight = screenHeight(),
+                    elements = elements
+                )
+            } finally {
+                // 根节点同样是每次调用新分配的句柄,API < 33 需回收(见 recycleQuietly)。
+                recycleQuietly(root)
+            }
         } catch (e: Exception) {
             // 窗口切换瞬间节点可能已回收(IllegalStateException 等):静默退化。
             Log.w(TAG, "capture failed — degrade to vision-only: ${e.message}")
@@ -89,8 +95,30 @@ class AccessibilityUiSnapshotProvider(
             }
         }
         for (i in 0 until node.childCount) {
+            // 采集量已达上限时直接停:继续 getChild 只会白白分配节点句柄。
+            if (out.size >= MAX_ELEMENTS) return
             val child = node.getChild(i) ?: continue
-            flatten(child, out, depth + 1)
+            try {
+                flatten(child, out, depth + 1)
+            } finally {
+                recycleQuietly(child)
+            }
+        }
+    }
+
+    /**
+     * 真 bug 修复(资源未释放):minSdk 26 上 getChild() 返回的 AccessibilityNodeInfo
+     * 持有跨进程原生资源,API < 33 必须 recycle,否则每步定位遍历(最多上百节点)
+     * 都在泄漏,长任务下累积耗尽节点池。API 33+ recycle 是 no-op,故仅在旧版本调用;
+     * 窗口切换竞态下节点可能已失效,回收失败静默忽略。
+     */
+    private fun recycleQuietly(node: AccessibilityNodeInfo) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
+        try {
+            @Suppress("DEPRECATION")
+            node.recycle()
+        } catch (_: Exception) {
+            // 已被系统回收/失效:忽略。
         }
     }
 }

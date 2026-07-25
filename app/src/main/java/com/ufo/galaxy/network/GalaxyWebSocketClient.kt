@@ -52,7 +52,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
@@ -1118,11 +1117,15 @@ class GalaxyWebSocketClient(
 
     init {
         // C13-FIX: Start the message consumer coroutine with backpressure handling.
-        // buffer() + conflate() ensures that if messages arrive faster than they can
-        // be processed, intermediate values are dropped and only the latest is delivered.
+        // 真 bug 修复:此前管线里加了 conflate(),它在消费者繁忙时只保留"最新一条"、
+        // 丢弃所有中间消息——而这条管线承载的是全部入站指令流(task_assign /
+        // goal_execution / task_cancel / 结果帧),不是可覆盖的状态流。触发场景:
+        // processMessage 正在处理一条消息时连续到达两条消息(如 task_assign 紧跟
+        // heartbeat_ack),前一条被 conflate 无声吞掉,任务永远不会在设备上执行;
+        // 这也使 handleMessage 中"高优先级消息绝不丢失"的信道回压设计完全失效。
+        // 保留有界 buffer(回压仍由 handleMessage 的优先级逻辑处理),移除 conflate。
         messageChannel.consumeAsFlow()
             .buffer(capacity = 64)
-            .conflate()
             .flowOn(Dispatchers.IO)
             .onEach { text -> processMessage(text) }
             .launchIn(scope)
@@ -2906,6 +2909,11 @@ class GalaxyWebSocketClient(
      * R3-3-FIX: Interval is dynamically adjusted based on Doze / Power Save state.
      */
     private fun startHeartbeat() {
+        // 真 bug 修复:启动前必须取消旧心跳任务。触发场景:配置了 token 时,
+        // AUTH_RESPONSE_TIMEOUT 兼容放行定时器与迟到的 auth_ok 处理可并发各调一次
+        // startHeartbeat,旧 Job 引用被覆盖后无法再被 stopHeartbeat 取消,产生两条
+        // 并行心跳循环——心跳频率翻倍且 missed-pong 判定被双重计数,误触发重连。
+        heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             // B5-FIX: Initial delay aligns to the next minute boundary for Doze batching.
             val interval = getHeartbeatIntervalMs()

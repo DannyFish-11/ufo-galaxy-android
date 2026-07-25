@@ -267,12 +267,20 @@ class EdgeExecutor(
             // 双通道:与本步截图同帧采集树快照;元素清单注入定位 prompt(结构化通道),
             // 坐标裁决在重映射回全分辨率后由 GroundingArbiter 综合两路证据完成。
             val stepUiSnapshot = uiSnapshotProvider?.capture()
+            // 真 bug 修复(坐标空间混用):定位 prompt 里的截图是缩放图
+            // (scaledWidth×scaledHeight),而树快照 bounds 是屏幕全分辨率像素。
+            // 此前把全分辨率元素中心原样注入,模型看到的"已知元素坐标"与
+            // "Screenshot size" 不同空间,极易复读全分辨率坐标 → 被钳位到缩放图
+            // 边缘 → remap 后系统性偏移。注入前先把快照换算到缩放图空间;
+            // 仲裁(GroundingArbiter)仍用全分辨率快照,与 remap 后的视觉坐标同空间。
             val grounding = groundingService.ground(
                 intent = step.intent,
                 screenshotBase64 = scaledForGrounding.scaledJpegBase64,
                 width = scaledForGrounding.scaledWidth,
                 height = scaledForGrounding.scaledHeight,
-                structuredContext = stepUiSnapshot?.toPromptBlock()
+                structuredContext = stepUiSnapshot
+                    ?.scaledTo(scaledForGrounding.scaledWidth, scaledForGrounding.scaledHeight)
+                    ?.toPromptBlock()
             )
             val screenshotRef = "step${stepId}_${taskAssign.task_id.take(8)}"
             // 视觉失败先问结构化通道:树有强匹配候选即救场(tree_rescue,坐标本就是
@@ -446,9 +454,17 @@ class EdgeExecutor(
             stepIndex++
         }
 
+        // 真 bug 修复(逻辑死路/结果语义):此前无论是"计划全部执行完"还是
+        // "step 预算耗尽但计划还有剩余步骤",一律上报 SUCCESS —— 目标未完成却让
+        // 网关/聚合侧误判任务成功(LoopController 对同一情形上报 max_steps_reached
+        // 失败,两条路径语义相互矛盾)。预算耗尽且仍有未执行步骤时如实上报 ERROR。
+        val budgetExhausted = stepIndex < planSteps.size && stepsConsumed >= taskAssign.max_steps
         return buildResult(
             taskId = taskAssign.task_id,
-            status = STATUS_SUCCESS,
+            status = if (budgetExhausted) STATUS_ERROR else STATUS_SUCCESS,
+            error = if (budgetExhausted) {
+                "Max step budget (${taskAssign.max_steps}) reached with ${planSteps.size - stepIndex} plan step(s) remaining"
+            } else null,
             steps = accumulatedSteps,
             snapshot = makeSnapshot(lastSnapshotBase64, lastW, lastH)
         )

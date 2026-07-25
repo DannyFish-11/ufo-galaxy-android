@@ -44,6 +44,11 @@ class VlmGroundingEngine(
 ) : LocalGroundingService {
 
     private val gson = Gson()
+
+    // 真 bug 修复(可见性竞态):warmup 在后台线程写 modelLoaded,GroundingFallbackLadder /
+    // EdgeExecutor 在其它线程读 isModelLoaded() —— 无 @Volatile 时读线程可能长期看到
+    // 过期值(同文件 lastWarmupResult 已标 @Volatile,本字段被漏掉)。
+    @Volatile
     private var modelLoaded = false
 
     /** Stores the last structured warmup failure for diagnostics; null when loaded. */
