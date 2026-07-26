@@ -214,11 +214,28 @@ class BleGatewayClient(
                     BluetoothProfile.STATE_CONNECTED -> {
                         Log.i(TAG, "BLE connected to ${device.address}")
                         synchronized(connectionLock) { connected = true }
+                        // 真 bug 修复:连接成功后必须清零重连计数。此前计数只增不减,
+                        // 触发场景:设备在整个进程生命周期内累计断开 10 次(即使每次
+                        // 都成功重连),之后自动重连永久停止——长期运行的可穿戴/边缘
+                        // 场景必然触发,属逻辑死路。
+                        reconnectAttempts.remove(address)
                         gatt.requestMtu(MTU_SIZE)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         Log.i(TAG, "BLE disconnected from ${device.address}")
-                        synchronized(connectionLock) { connected = false }
+                        synchronized(connectionLock) {
+                            connected = false
+                            // 真 bug 修复:断开后必须 close() 释放已死亡的 GATT 客户端句柄。
+                            // 此前仅调度重连,connectToDevice 会创建全新 BluetoothGatt 并覆盖
+                            // 引用,旧句柄泄漏;Android 全局最多约 32 个 GATT client,触发场景:
+                            // 反复断连重连若干次后 connectGatt 开始全部失败,整机 BLE 不可用。
+                            if (bluetoothGatt === gatt) bluetoothGatt = null
+                        }
+                        try {
+                            gatt.close()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "BLE gatt close after disconnect failed: ${e.message}")
+                        }
                         // CRITICAL-5: Exponential backoff with max retry limit
                         val attempts = reconnectAttempts.getOrDefault(address, 0)
                         if (attempts < RECONNECT_MAX_ATTEMPTS) {

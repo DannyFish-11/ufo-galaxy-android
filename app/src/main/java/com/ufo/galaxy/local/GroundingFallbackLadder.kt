@@ -97,20 +97,24 @@ class GroundingFallbackLadder(
         jpegBytes: ByteArray,
         screenWidth: Int,
         screenHeight: Int,
-        // 双通道:无障碍树元素清单文本,与截图同帧注入主/缩放两级视觉定位的 prompt
+        // 双通道:无障碍树结构化快照,与截图同帧注入主/缩放两级视觉定位的 prompt
         // (null = 无结构化通道,行为与旧版一致)。
-        structuredContext: String? = null
+        // 真 bug 修复(坐标空间混用):此前入参是调用方预渲染的全分辨率元素清单文本,
+        // 而本梯子内部把截图缩到 primary/resized 两种不同边长 —— prompt 里的元素坐标
+        // 与截图像素空间不一致且每级不同。改为传入快照本体,由各级按自己的缩放尺寸
+        // 换算后再渲染注入。
+        uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot? = null
     ): GroundingResult {
 
         // Stage 1: Primary VLM grounding.
         if (groundingService.isModelLoaded()) {
-            val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, structuredContext)
+            val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, uiSnapshot)
             if (result != null) return result
         }
 
         // Stage 2: Resized screenshot retry (smaller edge).
         if (groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
-            val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, structuredContext)
+            val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, uiSnapshot)
             if (result != null) return result
         }
 
@@ -151,7 +155,7 @@ class GroundingFallbackLadder(
         jpegBytes: ByteArray,
         screenWidth: Int,
         screenHeight: Int,
-        structuredContext: String? = null
+        uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot? = null
     ): GroundingResult? {
         return try {
             val scaled = imageScaler.scaleToMaxEdge(
@@ -165,7 +169,10 @@ class GroundingFallbackLadder(
                 screenshotBase64 = scaled.scaledJpegBase64,
                 width = scaled.scaledWidth,
                 height = scaled.scaledHeight,
-                structuredContext = structuredContext
+                // 坐标空间对齐:元素清单换算到本级缩放图空间后再注入 prompt。
+                structuredContext = uiSnapshot
+                    ?.scaledTo(scaled.scaledWidth, scaled.scaledHeight)
+                    ?.toPromptBlock()
             )
             if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
                 logStage(sessionId, stepId, STAGE_PRIMARY, "skip",
@@ -190,7 +197,7 @@ class GroundingFallbackLadder(
         jpegBytes: ByteArray,
         screenWidth: Int,
         screenHeight: Int,
-        structuredContext: String? = null
+        uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot? = null
     ): GroundingResult? {
         return try {
             val scaled = imageScaler.scaleToMaxEdge(
@@ -204,7 +211,10 @@ class GroundingFallbackLadder(
                 screenshotBase64 = scaled.scaledJpegBase64,
                 width = scaled.scaledWidth,
                 height = scaled.scaledHeight,
-                structuredContext = structuredContext
+                // 坐标空间对齐:本级缩放尺寸与主级不同,必须按本级尺寸重新换算。
+                structuredContext = uiSnapshot
+                    ?.scaledTo(scaled.scaledWidth, scaled.scaledHeight)
+                    ?.toPromptBlock()
             )
             if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
                 logStage(sessionId, stepId, STAGE_RESIZED, "skip",

@@ -281,7 +281,11 @@ class WebRTCSignalingClient(
         connectStartMs = System.currentTimeMillis()
         Log.i(TAG, "[trace=$effectiveTraceId] Connecting to WebRTC signaling endpoint: $url")
         val request = Request.Builder().url(url).build()
-        httpClient.newWebSocket(request, wsListener)
+        // 真 bug 修复:此前丢弃了 newWebSocket() 的返回值,仅靠 onOpen 回调再赋值
+        // webSocket。触发场景:握手完成前调用 disconnect() 时 webSocket 仍为 null,
+        // 无法关闭正在建立的连接;随后 onOpen 到达又把 webSocket/isConnected 置回
+        // 已连接状态,产生"逻辑上已关闭、实际仍存活"的僵尸连接与连接泄漏。
+        webSocket = httpClient.newWebSocket(request, wsListener)
     }
 
     /**

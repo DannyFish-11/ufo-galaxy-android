@@ -82,6 +82,35 @@ data class UiStructuredSnapshot(
     }
 
     /**
+     * 真 bug 修复(坐标空间混用):树 bounds 是屏幕绝对像素,而注入 VLM prompt 的
+     * 截图经常被 ImageScaler 缩到 720/360 边 —— 若把全分辨率元素中心原样写进
+     * "Screenshot size: 缩放宽x缩放高" 的 prompt,模型极易复读全分辨率坐标,随后被
+     * parseResponse 钳位到缩放图边缘、再被 remap 放大,系统性偏到屏幕右下角。
+     * 本方法把整棵快照线性换算到目标(缩放图)坐标空间,调用方在注入 prompt 前
+     * 调用之,保证"元素清单坐标"与"截图像素空间"一致。目标或自身尺寸未知时
+     * 原样返回(退化为旧行为,不会更糟)。
+     */
+    fun scaledTo(targetWidth: Int, targetHeight: Int): UiStructuredSnapshot {
+        if (targetWidth <= 0 || targetHeight <= 0) return this
+        if (screenWidth <= 0 || screenHeight <= 0) return this
+        if (targetWidth == screenWidth && targetHeight == screenHeight) return this
+        val sx = targetWidth.toFloat() / screenWidth.toFloat()
+        val sy = targetHeight.toFloat() / screenHeight.toFloat()
+        return copy(
+            screenWidth = targetWidth,
+            screenHeight = targetHeight,
+            elements = elements.map { e ->
+                e.copy(
+                    left = Math.round(e.left * sx),
+                    top = Math.round(e.top * sy),
+                    right = Math.round(e.right * sx),
+                    bottom = Math.round(e.bottom * sy)
+                )
+            }
+        )
+    }
+
+    /**
      * 按意图文本给每个元素打匹配分(0.0~1.0),返回按分降序的候选。
      *
      * 评分:标签与意图的归一化 token 重叠率;完整包含(标签是意图子串或反之)

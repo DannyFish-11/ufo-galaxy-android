@@ -54,6 +54,11 @@ class VlmPlanner(
 ) : LocalPlannerService {
 
     private val gson = Gson()
+
+    // 真 bug 修复(可见性竞态):warmup 在后台线程写 modelLoaded,而 EdgeExecutor /
+    // 就绪探针在其它线程读 isModelLoaded() —— 无 @Volatile 时读线程可能永远看到过期值
+    // (同文件的 lastWarmupResult 已标 @Volatile,本字段被漏掉)。
+    @Volatile
     private var modelLoaded = false
 
     /** Stores the last structured warmup failure for diagnostics; null when loaded. */
@@ -67,6 +72,9 @@ class VlmPlanner(
         private const val COMPLETIONS_PATH = "/v1/chat/completions"
         private const val HEALTH_PATH = "/health"
         private const val MODEL_NAME = "mai-ui-2b"
+
+        /** 重试线性退避基数(毫秒);第 n 次重试前等待 n×该值。 */
+        private const val RETRY_BACKOFF_BASE_MS = 250L
 
         private const val SYSTEM_PROMPT =
             "You are a mobile GUI agent. " +
@@ -220,6 +228,17 @@ class VlmPlanner(
     ): LocalPlannerService.PlanResult {
         var lastError = "VLM inference failed"
         repeat(maxRetries + 1) { attempt ->
+            // 真 bug 修复(重试无退避):此前失败后立即重试,本地 llama.cpp 服务在
+            // 启动/过载窗口内会被连续请求打满,重试注定同样失败。加入线性退避
+            // (250ms × 已失败次数),给服务恢复窗口;首次尝试不等待。
+            if (attempt > 0) {
+                try {
+                    Thread.sleep(RETRY_BACKOFF_BASE_MS * attempt)
+                } catch (ie: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return LocalPlannerService.PlanResult(steps = emptyList(), error = lastError)
+                }
+            }
             try {
                 val requestJson = buildRequestJson(prompt, screenshotBase64)
                 val responseText = httpPost(requestJson)

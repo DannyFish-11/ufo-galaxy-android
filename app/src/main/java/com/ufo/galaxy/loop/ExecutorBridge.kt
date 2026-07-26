@@ -142,6 +142,9 @@ class ExecutorBridge(
 
         // Use the grounding fallback ladder for coordinate-based actions.
         // 双通道:同帧采集树快照,元素清单注入梯子的视觉级 prompt。
+        // 真 bug 修复(坐标空间混用):此前在此处预渲染全分辨率元素清单文本,而梯子
+        // 内部会把截图缩放到不同边长 —— prompt 中元素坐标与截图空间不一致。改为
+        // 传快照本体,由梯子按各级实际缩放尺寸换算后注入。
         val grounding = groundingLadder.ground(
             sessionId = "",
             stepId = step.id,
@@ -149,7 +152,7 @@ class ExecutorBridge(
             jpegBytes = jpegBytes,
             screenWidth = screenWidth,
             screenHeight = screenHeight,
-            structuredContext = uiSnapshotProvider?.capture()?.toPromptBlock()
+            uiSnapshot = uiSnapshotProvider?.capture()
         )
 
         if (!grounding.succeeded) {

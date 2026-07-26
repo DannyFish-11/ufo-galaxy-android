@@ -210,6 +210,12 @@ class NetworkDiagnostics(
                             if (cont.isActive) cont.resume(true to "HTTP ${response.code}")
                         }
                         override fun onFailure(ws: WebSocket, t: Throwable, r: Response?) {
+                            // 真 bug 修复:OkHttp WebSocket 失败路径必须关闭 response,
+                            // 否则底层连接不会归还连接池而泄漏(与 GalaxyWebSocketClient /
+                            // WebRTCSignalingClient 此前修过的同族缺陷一致)。触发场景:
+                            // 网关返回非 101 响应(如 403/404)导致握手失败时,每次诊断
+                            // 都泄漏一条连接。
+                            r?.close()
                             if (cont.isActive) cont.resume(false to (t.message ?: "握手失败"))
                         }
                     })

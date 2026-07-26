@@ -74,9 +74,13 @@ object GroundingArbiter {
         }
 
         // 视觉坐标落在意图匹配的元素内 → 双证据一致。
-        val hitMatching = candidates.any { it.element.contains(vlm.x, vlm.y) && it.score > 0f }
-        if (hitMatching) {
-            val boosted = vlm.copy(confidence = maxOf(vlm.confidence, best?.score ?: 0f))
+        // 真 bug 修复:此前加信用的是全局最高分 best.score —— 当视觉命中的是另一个
+        // 弱匹配元素时,会拿与命中无关的元素分数抬高置信度(文档承诺的是"两者较大"
+        // 即视觉分与**被命中元素**的树分)。改为取实际命中元素中的最高分。
+        val hit = candidates.filter { it.element.contains(vlm.x, vlm.y) && it.score > 0f }
+            .maxByOrNull { it.score }
+        if (hit != null) {
+            val boosted = vlm.copy(confidence = maxOf(vlm.confidence, hit.score))
             return log(intent, Fused(boosted, SOURCE_AGREEMENT))
         }
 
