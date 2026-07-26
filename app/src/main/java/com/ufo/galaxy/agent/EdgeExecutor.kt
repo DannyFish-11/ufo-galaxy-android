@@ -105,7 +105,13 @@ class EdgeExecutor(
      *
      * [TaskResultPayload.correlation_id] is always set to [taskAssign.task_id].
      */
-    fun handleTaskAssign(taskAssign: TaskAssignPayload): TaskResultPayload {
+    fun handleTaskAssign(taskAssign: TaskAssignPayload, deadlineMs: Long = 0L): TaskResultPayload {
+        // 真 bug 修复(超时契约从未实现):STATUS_TIMEOUT 只有常量声明,循环里没有任何
+        // 截止检查;上游 AutonomousExecutionPipeline 的 withTimeoutOrNull 又包在纯阻塞
+        // 调用外(无挂起点),永远打不断 —— 整条链路的"硬超时"实为空话。本参数把
+        // GoalExecutionPayload.effectiveTimeoutMs 传进来,在每个步边界协作式判定:
+        // 超限即停止点击、上报 STATUS_TIMEOUT。0 = 无截止(兼容既有直调方/测试)。
+        val deadlineAt = if (deadlineMs > 0L) System.currentTimeMillis() + deadlineMs else Long.MAX_VALUE
         if (!taskAssign.require_local_agent) {
             return buildResult(
                 taskId = taskAssign.task_id,
@@ -227,6 +233,16 @@ class EdgeExecutor(
         // max_steps caps the total budget regardless of how many times replanning occurs.
 
         while (stepIndex < planSteps.size && stepsConsumed < taskAssign.max_steps) {
+            // 步边界截止检查:超限立即停手(不再截屏/推理/点击),诚实上报 TIMEOUT。
+            if (System.currentTimeMillis() >= deadlineAt) {
+                return buildResult(
+                    taskId = taskAssign.task_id,
+                    status = STATUS_TIMEOUT,
+                    error = "Task deadline exceeded (${deadlineMs}ms) after $stepsConsumed step(s)",
+                    steps = accumulatedSteps,
+                    snapshot = makeSnapshot(lastSnapshotBase64, lastW, lastH)
+                )
+            }
             val step = planSteps[stepIndex]
             val stepId = (stepsConsumed + 1).toString()
             val stepStart = System.currentTimeMillis()
