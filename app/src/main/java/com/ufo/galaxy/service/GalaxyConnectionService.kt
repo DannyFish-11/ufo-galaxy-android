@@ -7522,6 +7522,10 @@ class GalaxyConnectionService : Service() {
             }
             if (!ok) {
                 Log.e(TAG, "ensureModels: failed to download ${spec.modelId}; inference may be unavailable")
+            } else if (assetManager.effectiveChecksum(spec.modelId) == null) {
+                // TOFU 闭环补齐(与 LoopController.ensureModels 同款缺陷):首次成功下载后
+                // 必须持久化摘要,否则 verifyModel 永远跳过校验,损坏/篡改不可发现。
+                assetManager.persistComputedChecksum(spec.modelId)
             }
         }
         // Refresh status after downloads complete.

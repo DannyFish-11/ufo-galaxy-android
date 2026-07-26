@@ -837,6 +837,11 @@ class UFOGalaxyApplication : Application() {
             for (spec in specs) {
                 val ok = modelDownloader.downloadSync(spec) {}
                 Log.i(TAG, "ensureModelsAtStartup: ${spec.modelId} ok=$ok")
+                if (ok && modelAssetManager.effectiveChecksum(spec.modelId) == null) {
+                    // TOFU 闭环补齐(与 LoopController.ensureModels 同款缺陷):首次成功
+                    // 下载后持久化摘要,后续 verifyModel 才能强制校验。
+                    modelAssetManager.persistComputedChecksum(spec.modelId)
+                }
             }
             modelAssetManager.verifyAll()
             // Re-run readiness checks so UI/capability_report reflect updated model state.
