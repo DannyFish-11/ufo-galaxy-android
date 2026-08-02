@@ -37,6 +37,31 @@ android {
         buildConfigField "String", "GALAXY_SERVER_URL", '"wss://localhost:9000"'
         buildConfigField "String", "API_VERSION", '"v3.0"'
         buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "true"
+
+        // ── 模型权重的 SHA-256 钉死（三仓-8）────────────────────────────────
+        //
+        // ModelAssetManager 此前把这两个摘要写死为 Kotlin 里的 `null`，运行时走
+        // trust-on-first-use：首次下载什么就信什么，算出摘要落盘，此后强制校验。
+        // TOFU 能防"下载之后被篡改/损坏"，**防不住"首次下载时就已经被投毒"** ——
+        // 毒化的摘要一旦被持久化，之后每次校验都"通过"。
+        //
+        // 之所以不在源码里直接填死：本仓的 CI/开发环境不一定能访问 HuggingFace，
+        // 而**编造一个摘要比留空更危险**（要么所有下载失败，要么给出"已校验"的假象）。
+        // 所以做成构建期可注入：能访问上游的人无需改一行 Kotlin 即可钉死。
+        //
+        // 取得真实摘要（HuggingFace 对 LFS 文件直接给 sha256）：
+        //   curl -s 'https://huggingface.co/api/models/mradermacher/MAI-UI-2B-GGUF?blobs=true' \
+        //     | jq -r '.siblings[] | select(.rfilename|endswith(".gguf")) | "\(.rfilename) \(.lfs.sha256)"'
+        // 然后写进 gradle.properties（或 -P 传参、或 CI secret）：
+        //   galaxy.model.vlm.sha256=<64位十六进制>
+        //   galaxy.model.vlmMmproj.sha256=<64位十六进制>
+        //
+        // 留空 = 显式承认"本次构建走 TOFU"，运行时会把这个事实上报给 V2 并在
+        // 诊断里可见（见 ModelAssetManager.checksumProvenance）。
+        buildConfigField "String", "MODEL_VLM_SHA256",
+                "\"${project.findProperty('galaxy.model.vlm.sha256') ?: ''}\""
+        buildConfigField "String", "MODEL_VLM_MMPROJ_SHA256",
+                "\"${project.findProperty('galaxy.model.vlmMmproj.sha256') ?: ''}\""
         // R3-3-FIX: Certificate pinning hash for release builds. Set to placeholder by default.
         // Before release: generate hash with:
         //   openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \
