@@ -1485,8 +1485,22 @@ class GalaxyWebSocketClient(
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT -> {
                     val payload = root.getAsJsonObject("payload")
-                    val eventCategory = payload?.get("category")?.asString ?: ""
-                    val eventAction = payload?.get("action")?.asString ?: ""
+                    // 相变字段在【报文顶层】，不在 payload 里。V2 两个发送点
+                    // （galaxy_gateway/android_bridge.py、android/handlers/registration.py）
+                    // 发的都是：
+                    //
+                    //     {"type":"state_event",
+                    //      "event_category":"phase", "event_action":"liminal",   ← 顶层
+                    //      "payload":{"from_phase":..,"to_phase":..,"source":..}} ← 另外四个字段
+                    //
+                    // 而这里原本读的是 payload 里的 "category"/"action" —— 位置和名字
+                    // 双错。两个 ?: "" 兜底把它完全吞掉：不抛异常、不打日志，监听者
+                    // 只是永远收到空串，于是三态在手机端从来没有真正生效过。
+                    //
+                    // 另注：走 AIPTransport 的那条路径连 payload 都不带，所以顶层取值
+                    // 是唯一可靠的读法。
+                    val eventCategory = root.get("event_category")?.asString ?: ""
+                    val eventAction = root.get("event_action")?.asString ?: ""
                     listeners.forEach {
                         it.onStateEvent(eventCategory, eventAction, payload?.toString() ?: "{}", traceId)
                     }

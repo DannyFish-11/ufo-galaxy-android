@@ -71,8 +71,11 @@ class MessageRouter(
                     taskHandler.handleTaskCancel(taskId, payloadStr)
                 }
                 MsgType.STATE_EVENT -> {
-                    val eventCategory = payload?.get("category")?.asString ?: ""
-                    val eventAction = payload?.get("action")?.asString ?: ""
+                    // 同 GalaxyWebSocketClient：相变字段在报文【顶层】，不在 payload 里。
+                    // 原先读 payload 里的 "category"/"action" —— 位置和名字双错，
+                    // 且被 ?: "" 静默吞成空串。
+                    val eventCategory = root.get("event_category")?.asString ?: ""
+                    val eventAction = root.get("event_action")?.asString ?: ""
                     onStateEvent(eventCategory, eventAction, payloadStr, traceId)
                 }
                 MsgType.HANDOFF_ENVELOPE_V2 -> {
