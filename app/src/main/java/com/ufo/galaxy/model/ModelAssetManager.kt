@@ -2,6 +2,7 @@ package com.ufo.galaxy.model
 
 import android.content.Context
 import android.util.Log
+import com.ufo.galaxy.BuildConfig
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonSyntaxException
@@ -111,8 +112,38 @@ class ModelAssetManager(
          * [persistComputedChecksum] 计算并持久化到 [CHECKSUMS_FILE],此后每次
          * [verifyModel] 都会强制校验,防止后续损坏或篡改。
          */
-        val VLM_SHA256: String? = null        // populated via persistComputedChecksum after first download
-        val VLM_MMPROJ_SHA256: String? = null // populated via persistComputedChecksum after first download
+        /**
+         * 构建期钉死的摘要（三仓-8）。
+         *
+         * 来源：`BuildConfig.MODEL_VLM_SHA256`，由 gradle.properties 的
+         * `galaxy.model.vlm.sha256` 注入（见 app/build.gradle 里的取得方法）。
+         *
+         * **为空 = 本次构建未钉死**，运行时退回 trust-on-first-use。TOFU 能防
+         * "下载后被篡改/损坏"，防不住"首次下载时就已被投毒" —— 毒化的摘要一旦
+         * 被持久化，之后每次校验都会"通过"。因此未钉死是一个需要被看见的事实，
+         * 由 [checksumProvenance] 暴露，而不是像以前那样静静地是个 `null`。
+         *
+         * 只接受 64 位十六进制；写错格式视同未设置（并告警），避免一个手滑的
+         * 值让所有下载永远失败、又让人以为"已经钉死了"。
+         */
+        // HEX64 与 sanitizePinnedChecksum 必须声明在下面两个 val **之前**：
+        // companion object 的属性初始化器按声明顺序执行，HEX64 若排在后面，
+        // sanitizePinnedChecksum 在初始化 VLM_SHA256 时拿到的会是 null。
+        private val HEX64 = Regex("[0-9a-fA-F]{64}")
+
+        /** 校验构建期注入的摘要格式；空/非法一律返回 null（= 未钉死）。 */
+        private fun sanitizePinnedChecksum(raw: String?, label: String): String? {
+            val v = raw?.trim().orEmpty()
+            if (v.isEmpty()) return null
+            if (!HEX64.matches(v)) {
+                Log.e(TAG, "构建期注入的 $label SHA-256 格式非法(需 64 位十六进制)，按未钉死处理: '$v'")
+                return null
+            }
+            return v.lowercase()
+        }
+
+        val VLM_SHA256: String? = sanitizePinnedChecksum(BuildConfig.MODEL_VLM_SHA256, "VLM")
+        val VLM_MMPROJ_SHA256: String? = sanitizePinnedChecksum(BuildConfig.MODEL_VLM_MMPROJ_SHA256, "VLM_MMPROJ")
 
         /**
          * File name for the persisted checksum store inside [modelsDir].
@@ -446,6 +477,53 @@ class ModelAssetManager(
      * Returns null if no checksum is currently available (first-download window).
      */
     fun effectiveChecksum(modelId: String): String? = registry[modelId]?.expectedSha256
+
+    /**
+     * 摘要的**来源**（三仓-8）。回答的是"这个模型凭什么被信任"。
+     *
+     * 光看 [effectiveChecksum] 非空并不能说明安全：TOFU 落盘的摘要同样非空，
+     * 但它只证明"文件自首次下载后没变过"，不证明"首次下载拿到的就是对的"。
+     * 把来源显式表达出来，V2 与诊断面才能区分这两种情况。
+     */
+    enum class ChecksumProvenance {
+        /** 构建期钉死（gradle.properties 注入）—— 最强，能防首次下载投毒。 */
+        PINNED,
+
+        /** 构造时经 checksumOverrides 传入 —— 与 PINNED 同级，但由调用方负责。 */
+        OVERRIDE,
+
+        /** trust-on-first-use：首次下载后自算并落盘。防篡改，**不防首次投毒**。 */
+        TRUST_ON_FIRST_USE,
+
+        /** 尚无任何摘要 —— 还没下载过，或下载后未成功持久化。 */
+        NONE,
+    }
+
+    /** 返回 [modelId] 当前摘要的来源。 */
+    fun checksumProvenance(modelId: String): ChecksumProvenance {
+        if (checksumOverrides.containsKey(modelId)) return ChecksumProvenance.OVERRIDE
+        val pinned = when (modelId) {
+            MODEL_ID_VLM -> VLM_SHA256
+            MODEL_ID_VLM_MMPROJ -> VLM_MMPROJ_SHA256
+            else -> null
+        }
+        if (pinned != null) return ChecksumProvenance.PINNED
+        if (persistedChecksums.containsKey(modelId)) return ChecksumProvenance.TRUST_ON_FIRST_USE
+        return ChecksumProvenance.NONE
+    }
+
+    /**
+     * 是否存在**任何**一个模型走的是 TOFU 或干脆没有摘要。
+     *
+     * 供上行链路（DEVICE_STATE_SNAPSHOT）与诊断面直接消费 —— 这台设备的模型
+     * 完整性保证等级是否低于"构建期钉死"，应该是 V2 侧看得见的事实。
+     */
+    fun hasUnpinnedModelChecksum(): Boolean =
+        registry.keys.any { checksumProvenance(it) != ChecksumProvenance.PINNED && checksumProvenance(it) != ChecksumProvenance.OVERRIDE }
+
+    /** 每个模型的摘要来源快照，便于整体上报。 */
+    fun checksumProvenanceSnapshot(): Map<String, String> =
+        registry.keys.associateWith { checksumProvenance(it).name }
 
     // ── Persisted checksum store ───────────────────────────────────────────────
 
