@@ -43,7 +43,6 @@ import com.ufo.galaxy.protocol.DevicePerceptionEmissionPayload
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.shared.protocol.ReconnectionConfig
 import com.ufo.galaxy.shared.protocol.AuthMessage
-import com.ufo.galaxy.shared.protocol.StateEventPayload
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import kotlinx.coroutines.channels.Channel
@@ -1447,27 +1446,24 @@ class GalaxyWebSocketClient(
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT -> {
                     val payload = root.getAsJsonObject("payload")
-                    // 用 StateEventPayload 反序列化，不要再手写 payload.get("...")。
+                    // 相变字段在【报文顶层】，不在 payload 里。V2 两个发送点
+                    // （galaxy_gateway/android_bridge.py、android/handlers/registration.py）
+                    // 发的都是：
                     //
-                    // 这里原本读的是 "category" / "action"，而 V2 发出的字段名是
-                    // "event_category" / "event_action"（见 galaxy_gateway/android_bridge.py
-                    // 与 android/handlers/registration.py）。两个 ?: "" 兜底把这个错误
-                    // 完全吞掉：不抛异常、不打日志、监听者只是永远收到两个空串，
-                    // 于是三态（silent/liminal/manifest）在手机端从来没有真正生效过。
+                    //     {"type":"state_event",
+                    //      "event_category":"phase", "event_action":"liminal",   ← 顶层
+                    //      "payload":{"from_phase":..,"to_phase":..,"source":..}} ← 另外四个字段
                     //
-                    // 字段名的唯一真相源是 StateEventPayload——它本来就定义正确，只是
-                    // 当时缺 Gson 的 @SerializedName，没法直接拿来反序列化，才被绕过。
-                    // 注解已补齐，这里改走它，键名从此由那一个类说了算。
-                    val parsed = payload?.let {
-                        runCatching { gson.fromJson(it, StateEventPayload::class.java) }.getOrNull()
-                    }
+                    // 而这里原本读的是 payload 里的 "category"/"action" —— 位置和名字
+                    // 双错。两个 ?: "" 兜底把它完全吞掉：不抛异常、不打日志，监听者
+                    // 只是永远收到空串，于是三态在手机端从来没有真正生效过。
+                    //
+                    // 另注：走 AIPTransport 的那条路径连 payload 都不带，所以顶层取值
+                    // 是唯一可靠的读法。
+                    val eventCategory = root.get("event_category")?.asString ?: ""
+                    val eventAction = root.get("event_action")?.asString ?: ""
                     listeners.forEach {
-                        it.onStateEvent(
-                            parsed?.eventCategory ?: "",
-                            parsed?.eventAction ?: "",
-                            payload?.toString() ?: "{}",
-                            traceId,
-                        )
+                        it.onStateEvent(eventCategory, eventAction, payload?.toString() ?: "{}", traceId)
                     }
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.HANDOFF_ENVELOPE_V2 -> {

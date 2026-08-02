@@ -5,7 +5,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.shared.protocol.MsgType
-import com.ufo.galaxy.shared.protocol.StateEventPayload
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -72,18 +71,12 @@ class MessageRouter(
                     taskHandler.handleTaskCancel(taskId, payloadStr)
                 }
                 MsgType.STATE_EVENT -> {
-                    // 同 GalaxyWebSocketClient：键名以 StateEventPayload 为唯一真相源。
-                    // 原先手写读 "category"/"action"，而 V2 发的是 "event_category"/
-                    // "event_action"，被 ?: "" 静默吞成空串。
-                    val parsed = payload?.let {
-                        runCatching { gson.fromJson(it, StateEventPayload::class.java) }.getOrNull()
-                    }
-                    onStateEvent(
-                        parsed?.eventCategory ?: "",
-                        parsed?.eventAction ?: "",
-                        payloadStr,
-                        traceId,
-                    )
+                    // 同 GalaxyWebSocketClient：相变字段在报文【顶层】，不在 payload 里。
+                    // 原先读 payload 里的 "category"/"action" —— 位置和名字双错，
+                    // 且被 ?: "" 静默吞成空串。
+                    val eventCategory = root.get("event_category")?.asString ?: ""
+                    val eventAction = root.get("event_action")?.asString ?: ""
+                    onStateEvent(eventCategory, eventAction, payloadStr, traceId)
                 }
                 MsgType.HANDOFF_ENVELOPE_V2 -> {
                     onHandoffEnvelopeV2(taskId, payloadStr, traceId)
