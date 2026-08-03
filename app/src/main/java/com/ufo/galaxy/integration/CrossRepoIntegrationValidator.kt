@@ -18,7 +18,7 @@ import java.util.regex.Pattern
  * Checks performed:
  *  1. `GET  /api/v1/health`         — gateway liveness ping.
  *  2. `GET  /api/v1/config`         — config discovery endpoint (M3/M7).
- *  3. `GET  /api/v1/devices/list`   — device registry reachability.
+ *  3. `GET  /api/v1/devices`        — device registry reachability.
  *  4. `POST /api/v1/memory/store`   — memory endpoint write access (dry-run body).
  *  5. WS URL format validation      — [wsUrl] must be a valid ws:// or wss:// URL.
  *
@@ -59,21 +59,31 @@ class CrossRepoIntegrationValidator(
 
     // ── Individual checks ─────────────────────────────────────────────────────
 
+    // 这三条此前分别打 /api/v1/health、/api/v1/config、/api/v1/devices/list ——
+    // **三条在 V2 服务端都不存在**,于是这个"跨仓集成校验器"的四项检查里有三项恒判失败。
+    // 一个恒报失败的校验器比没有校验器更糟:它不再区分"今天真的坏了"和"一直就这样",
+    // 于是所有人学会无视它的结论。
+    //
+    // 实测(对着 core.api_routes 组装出的 350 条权威路由逐条打真实 HTTP):
+    //   GET /api/v1/health        → 404   实际存在的是 /api/v1/health/quick 与 /unified
+    //   GET /api/v1/config        → 404   配置值在 /api/config;/api/v1/config/status 是
+    //                                     **配置管理器状态**,与配置值不是一回事,不能拿来顶替
+    //   GET /api/v1/devices/list  → 404   实际存在的是 /api/v1/devices(与 /api/devices/list)
     private fun checkHealth(): CheckResult {
-        val url = "${restBaseUrl.trimEnd('/')}/api/v1/health"
-        return runGetCheck(name = "GET /api/v1/health", url = url,
+        val url = "${restBaseUrl.trimEnd('/')}$HEALTH_PATH"
+        return runGetCheck(name = "GET $HEALTH_PATH", url = url,
             missingHint = "Server liveness ping failed — ensure gateway is running")
     }
 
     private fun checkConfig(): CheckResult {
-        val url = "${restBaseUrl.trimEnd('/')}/api/v1/config"
-        return runGetCheck(name = "GET /api/v1/config", url = url,
-            missingHint = "Config discovery endpoint missing — server may not expose /api/v1/config")
+        val url = "${restBaseUrl.trimEnd('/')}$CONFIG_PATH"
+        return runGetCheck(name = "GET $CONFIG_PATH", url = url,
+            missingHint = "Config discovery endpoint missing — server may not expose $CONFIG_PATH")
     }
 
     private fun checkDevicesList(): CheckResult {
-        val url = "${restBaseUrl.trimEnd('/')}/api/v1/devices/list"
-        return runGetCheck(name = "GET /api/v1/devices/list", url = url,
+        val url = "${restBaseUrl.trimEnd('/')}$DEVICES_PATH"
+        return runGetCheck(name = "GET $DEVICES_PATH", url = url,
             missingHint = "Device registry endpoint unreachable — check /api/v1/devices/* routes on server")
     }
 
@@ -199,6 +209,16 @@ class CrossRepoIntegrationValidator(
 
     companion object {
         private const val TAG = "CrossRepoValidator"
+
+        // 服务端权威路径。抽成常量是为了让"这条路径还在不在"能被单测直接钉住 ——
+        // 散在方法体里的字符串字面量,漂了没人看得见(这正是它们此前漂掉的原因)。
+        /** 存活探针。V2 只有 /quick 与 /unified,没有裸 /api/v1/health。 */
+        const val HEALTH_PATH = "/api/v1/health/quick"
+        /** 配置值。注意不是 /api/v1/config/status —— 那是配置管理器状态,不是配置本身。 */
+        const val CONFIG_PATH = "/api/config"
+        /** 设备清单。V2 是 /api/v1/devices,没有 /api/v1/devices/list。 */
+        const val DEVICES_PATH = "/api/v1/devices"
+
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val WS_URL_PATTERN: Pattern =
             Pattern.compile("^wss?://\\S+$", Pattern.CASE_INSENSITIVE)

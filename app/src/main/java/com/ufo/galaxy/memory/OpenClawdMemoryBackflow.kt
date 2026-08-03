@@ -80,8 +80,8 @@ class OpenClawdMemoryBackflow(
     /**
      * Persists [entry] to `/api/v1/memory/store` (v1-first).
      *
-     * If the v1 endpoint returns HTTP 404, the request is automatically retried
-     * against the legacy `/api/memory/store` path.  Any other error is logged and
+     * V2 上没有无版本的 memory 路由,所以这里**没有 legacy 兜底** —— 详见方法体内的注释。
+     * Any error is logged and
      * `false` is returned immediately — no second attempt is made.
      *
      * @return `true` when the server responded with a 2xx status; `false` on any
@@ -97,15 +97,14 @@ class OpenClawdMemoryBackflow(
                 .post(json.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
             httpClient.newCall(request).execute().use { response ->
-                if (response.code == 404) {
-                    // v1 not present — fall back to legacy endpoint (compatibility window)
-                    Log.w(TAG, "[MEMORY:STORE] v1 returned 404; falling back to legacy path task_id=${entry.task_id}")
-                    storeLegacy(base, entry, json)
-                } else {
-                    val ok = response.isSuccessful
-                    Log.i(TAG, "[MEMORY:STORE] task_id=${entry.task_id} status=${entry.status} http=${response.code} ok=$ok endpoint=v1")
-                    ok
-                }
+                // 这里此前有一条 404 兜底,打 /api/memory/store。
+                // 实测:V2 上**根本没有无版本的 memory 路由**(/api/memory/store → 404),
+                // 也就是说那条兜底从来没有救回过任何一次请求 —— 它唯一的作用是在
+                // v1 真出问题时多打一次注定失败的请求,并留下一条"已降级"的假象日志。
+                // (对照 /api/devices/*:那一族 legacy 路径 V2 上是真有的,所以那边的兜底保留。)
+                val ok = response.isSuccessful
+                Log.i(TAG, "[MEMORY:STORE] task_id=${entry.task_id} status=${entry.status} http=${response.code} ok=$ok endpoint=v1")
+                ok
             }
         } catch (e: Exception) {
             Log.e(TAG, "[MEMORY:STORE] task_id=${entry.task_id} error=${e.message}", e)
@@ -113,31 +112,15 @@ class OpenClawdMemoryBackflow(
         }
     }
 
-    /** Legacy fallback: POST to `/api/memory/store` when the v1 path returns 404. */
-    private fun storeLegacy(base: String, entry: MemoryEntry, json: String): Boolean {
-        val legacyUrl = "$base/api/memory/store"
-        return try {
-            val request = Request.Builder()
-                .url(legacyUrl)
-                .post(json.toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-            httpClient.newCall(request).execute().use { response ->
-                val ok = response.isSuccessful
-                Log.i(TAG, "[MEMORY:STORE] task_id=${entry.task_id} status=${entry.status} http=${response.code} ok=$ok endpoint=legacy")
-                ok
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "[MEMORY:STORE:LEGACY] task_id=${entry.task_id} error=${e.message}", e)
-            false
-        }
-    }
-
     /**
      * Retrieves a previously stored [MemoryEntry] by [taskId].
      *
-     * Calls `GET /api/v1/memory/query?task_id=<taskId>` (v1-first) and deserializes
-     * the first matching entry from the JSON response body.  Falls back to the legacy
-     * `/api/memory/query` path if the v1 endpoint returns HTTP 404.
+     * Calls `GET /api/v1/memory/query?task_id=<taskId>` and deserializes the first
+     * matching entry from the JSON response body.
+     *
+     * 注意 404 在这条链路上有两种含义:服务端对"这条记录不存在"也返回 404(带自家信封)。
+     * 那是正常的 miss,不是端点缺失 —— 两者的区分见方法体内的注释。
+     * V2 上没有无版本的 memory 路由,所以这里没有 legacy 兜底。
      *
      * @return The matching [MemoryEntry], or `null` when no entry was found or a network
      *         or parse error occurred.
@@ -148,9 +131,24 @@ class OpenClawdMemoryBackflow(
         try {
             val request = Request.Builder().url(v1Url).get().build()
             httpClient.newCall(request).execute().use { response ->
+                // 404 在这条链路上有**两种含义**,必须分开:
+                //   a) 路由不存在(端点缺失)—— 该兜底;
+                //   b) 路由存在,但这条 task_id 没有记录 —— 这是正常的 miss,不该兜底。
+                // V2 服务端对 (b) 返回的是自家信封 {"success":false,"error":"not found",...},
+                // 而 FastAPI 对 (a) 返回 {"detail":"Not Found"}。此前不分,于是**每一次
+                // 缓存未命中**都会白打一次根本不存在的 legacy 请求,并打出一条
+                // "v1 returned 404"的告警 —— 真出事时这条日志会把人往错的方向带。
+                if (response.code == 404 && !isEndpointMissing(response.peekBody(MAX_PEEK_BYTES).string())) {
+                    Log.d(TAG, "[MEMORY:QUERY] miss task_id=$taskId")
+                    return@withContext null
+                }
                 if (response.code == 404) {
-                    Log.w(TAG, "[MEMORY:QUERY] v1 returned 404; falling back to legacy path task_id=$taskId")
-                    queryLegacy(base, taskId)
+                    // 走到这里说明是**端点缺失**(上面已经把语义 miss 分流掉了)。
+                    // 此前这里会兜底打 /api/memory/query —— 而 V2 上那条同样不存在,
+                    // 兜底本身也是 404。删掉之后行为不变(都返回 null),少一次无用往返,
+                    // 而且日志不再谎称"已降级到 legacy"。
+                    Log.w(TAG, "[MEMORY:QUERY] v1 endpoint missing task_id=$taskId")
+                    null
                 } else if (!response.isSuccessful) {
                     Log.w(TAG, "[MEMORY:QUERY] task_id=$taskId http=${response.code} endpoint=v1")
                     null
@@ -163,27 +161,6 @@ class OpenClawdMemoryBackflow(
             }
         } catch (e: Exception) {
             Log.e(TAG, "[MEMORY:QUERY] task_id=$taskId error=${e.message}", e)
-            null
-        }
-    }
-
-    /** Legacy fallback: GET `/api/memory/query` when the v1 path returns 404. */
-    private fun queryLegacy(base: String, taskId: String): MemoryEntry? {
-        val legacyUrl = "$base/api/memory/query?task_id=${encode(taskId)}"
-        return try {
-            val request = Request.Builder().url(legacyUrl).get().build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "[MEMORY:QUERY:LEGACY] task_id=$taskId http=${response.code}")
-                    return null
-                }
-                val body = response.body?.string() ?: return null
-                parseFirstEntry(body).also { entry ->
-                    Log.i(TAG, "[MEMORY:QUERY:LEGACY] task_id=$taskId found=${entry != null}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "[MEMORY:QUERY:LEGACY] task_id=$taskId error=${e.message}", e)
             null
         }
     }
@@ -218,6 +195,25 @@ class OpenClawdMemoryBackflow(
     // ── Companion ─────────────────────────────────────────────────────────────
 
     companion object {
+        /**
+         * 这个 404 是"端点不存在"还是"这条记录不存在"?
+         *
+         * 判据:V2 的业务 404 一定带自家信封(有 `success` 字段);FastAPI 的路由级 404
+         * 是 `{"detail":"Not Found"}`。读不出 JSON 时按**端点缺失**处理 —— 那一侧
+         * 只是多打一次兜底请求,而反过来判错会把真正的端点缺失静默吞掉。
+         */
+        internal fun isEndpointMissing(body: String?): Boolean {
+            if (body.isNullOrBlank()) return true
+            return try {
+                !org.json.JSONObject(body).has("success")
+            } catch (e: org.json.JSONException) {
+                true
+            }
+        }
+
+        /** 只窥探判定所需的前若干字节,不把整个响应体读进内存。 */
+        private const val MAX_PEEK_BYTES = 512L
+
         private const val TAG = "OpenClawdMemory"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 

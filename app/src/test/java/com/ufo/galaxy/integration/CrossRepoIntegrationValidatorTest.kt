@@ -76,7 +76,7 @@ class CrossRepoIntegrationValidatorTest {
     fun `health check fails when server returns 500`() {
         val report = validator(fakeClient(500)).validate()
 
-        val healthCheck = report.results.first { it.name == "GET /api/v1/health" }
+        val healthCheck = report.results.first { it.name == "GET ${CrossRepoIntegrationValidator.HEALTH_PATH}" }
         assertFalse("health check should fail on 500", healthCheck.passed)
         assertEquals(500, healthCheck.httpStatus)
         assertNotNull("error message should be populated", healthCheck.error)
@@ -86,7 +86,7 @@ class CrossRepoIntegrationValidatorTest {
     fun `devices list check fails when server returns 404`() {
         val report = validator(fakeClient(404)).validate()
 
-        val devicesCheck = report.results.first { it.name == "GET /api/v1/devices/list" }
+        val devicesCheck = report.results.first { it.name == "GET ${CrossRepoIntegrationValidator.DEVICES_PATH}" }
         assertFalse("devices list check should fail on 404", devicesCheck.passed)
     }
 
@@ -147,7 +147,7 @@ class CrossRepoIntegrationValidatorTest {
 
         val summary = report.summary()
         assertTrue("summary should contain FAIL marker", summary.contains("FAIL"))
-        assertTrue("summary should mention health check", summary.contains("GET /api/v1/health"))
+        assertTrue("summary should mention health check", summary.contains("GET ${CrossRepoIntegrationValidator.HEALTH_PATH}"))
         assertTrue("summary should mention WS format check", summary.contains("WS URL format"))
     }
 
@@ -175,7 +175,7 @@ class CrossRepoIntegrationValidatorTest {
     @Test
     fun `CheckResult httpStatus is populated for HTTP checks`() {
         val report = validator(fakeClient(200)).validate()
-        val healthCheck = report.results.first { it.name == "GET /api/v1/health" }
+        val healthCheck = report.results.first { it.name == "GET ${CrossRepoIntegrationValidator.HEALTH_PATH}" }
         assertEquals(200, healthCheck.httpStatus)
     }
 }

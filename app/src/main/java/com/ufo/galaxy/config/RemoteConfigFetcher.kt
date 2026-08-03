@@ -42,43 +42,57 @@ class RemoteConfigFetcher(
     /**
      * Fetches gateway configuration (v1-first, 404 fallback).
      *
-     * Calls `GET /api/v1/config` first. On HTTP 404 retries with the legacy
-     * path `GET /api/config`. Any other HTTP error or network exception is
+     * Calls `GET /api/config` first (实测那是 V2 上真实存在的那条). On HTTP 404
+     * retries with `GET /api/v1/config` —— 那条服务端目前没有,留着是为了它补上之后
+     * 这里不用改就能自动切过去. Any other HTTP error or network exception is
      * returned as a `null` result — no second attempt is made.
      *
      * @return Parsed [JSONObject] on success; `null` on any failure (network
      *         error, non-2xx response, or JSON parse error).
      */
     // CRITICAL-8: Async suspend function to avoid blocking the main thread
+    //
+    // 顺序是**先 /api/config、后 /api/v1/config**,与本类其余"v1 优先"的说法相反,
+    // 这是有意的:实测 V2 服务端根本没有 /api/v1/config(404),配置值就在 /api/config。
+    // 保持"v1 优先"只会让每一次取配置都先白打一个必然 404 的请求。
+    //
+    // 那为什么还留着 /api/v1/config 这一跳?因为它是**将来**的路径:一旦服务端补上,
+    // 这里不用改就会自动切过去。也就是说这里不是"降级到 legacy",而是
+    // "打现在存在的那个,并为将来留门"。
+    //
+    // 注意 /api/v1/config/status **不能**拿来顶替 —— 那是配置管理器的运行状态,
+    // 不是配置值本身。名字像,内容完全不是一回事。
     suspend fun fetchConfig(): JSONObject? {
         val base = restBaseUrl.trimEnd('/')
-        val v1Url = "$base/api/v1/config"
-        val legacyUrl = "$base/api/config"
-        return fetchWithFallback(v1Url = v1Url, legacyUrl = legacyUrl)
+        return fetchWithFallback(v1Url = "$base$CONFIG_PRIMARY_PATH", legacyUrl = "$base$CONFIG_FUTURE_PATH")
     }
 
     // ── Internal helpers ────────────────────────────────────────────────────
 
     /**
      * Issues a GET request to [v1Url]; on HTTP 404 retries against [legacyUrl].
+     * (命名沿用历史;当前 [v1Url] 传的是 /api/config,[legacyUrl] 传的是 /api/v1/config。)
      * Non-404 failures are returned as `null` immediately without a second attempt.
      * CRITICAL-8: Uses async enqueue to avoid blocking the caller thread.
      */
     private suspend fun fetchWithFallback(v1Url: String, legacyUrl: String): JSONObject? {
         val v1Result = fetchDirect(v1Url, endpoint = "v1") ?: return null
         if (v1Result.code == 404) {
-            Log.w(TAG, "[CONFIG] v1 returned 404; falling back to legacy path")
-            // 真 bug 修复:原来直接返回 fetchDirect(...)?.body,没有检查 legacy 调用是否成功——
-            // fetchDirect 无论 HTTP 状态码如何都会解析并返回一个非空 body(onResponse 里
-            // 无条件 JSONObject(...)),导致 legacy 返回 404/500 时仍把空 body 当成功结果返回,
-            // 与类文档"非 404 HTTP 错误立即返回 null"矛盾。补上与兄弟类
-            // OpenClawdMemoryBackflow.queryLegacy 一致的 success 校验。
-            val legacyResult = fetchDirect(legacyUrl, endpoint = "legacy") ?: return null
-            if (!legacyResult.success) {
-                Log.w(TAG, "[CONFIG] http=${legacyResult.code} endpoint=legacy")
+            // 两边的改动都要保留:
+            //   本分支 —— 把顺序换成"先打服务端真实存在的那条"(/api/config),
+            //             v1 留作服务端补上之后自动切换。实测 /api/v1/config 恒 404。
+            //   main   —— 修了一个真 bug:第二跳的结果没检查成功与否。fetchDirect 无论
+            //             HTTP 状态码如何都会解析出一个非空 body(onResponse 里无条件
+            //             JSONObject(...)),于是第二跳 404/500 时仍把空 body 当成功返回,
+            //             与本类文档"非 404 HTTP 错误立即返回 null"矛盾。
+            // 顺序与校验是两件正交的事,合起来才对。
+            Log.w(TAG, "[CONFIG] primary $CONFIG_PRIMARY_PATH returned 404; trying $CONFIG_FUTURE_PATH")
+            val secondHop = fetchDirect(legacyUrl, endpoint = "legacy") ?: return null
+            if (!secondHop.success) {
+                Log.w(TAG, "[CONFIG] http=${secondHop.code} endpoint=${CONFIG_FUTURE_PATH}")
                 return null
             }
-            return legacyResult.body
+            return secondHop.body
         }
         if (!v1Result.success) {
             Log.w(TAG, "[CONFIG] http=${v1Result.code} endpoint=v1")
@@ -121,7 +135,18 @@ class RemoteConfigFetcher(
     companion object {
         private const val TAG = "RemoteConfigFetcher"
 
+        /**
+         * 当前真实存在的配置端点。V2 服务端实测:GET /api/config → 200。
+         *
+         * 名字不叫 CONFIG_LEGACY_PATH —— 它不是遗留物,是**现在唯一能用的那个**。
+         */
+        const val CONFIG_PRIMARY_PATH = "/api/config"
+
+        /** 预留的 v1 路径。服务端目前没有(实测 404),补上之后这里会自动切过去。 */
+        const val CONFIG_FUTURE_PATH = "/api/v1/config"
+
         /** V1 config endpoint path. */
+        @Deprecated("服务端不存在这条路由(实测 404)。用 CONFIG_PRIMARY_PATH。", ReplaceWith("CONFIG_PRIMARY_PATH"))
         const val CONFIG_V1_PATH = "/api/v1/config"
 
         /** Legacy config endpoint path (fallback). */
