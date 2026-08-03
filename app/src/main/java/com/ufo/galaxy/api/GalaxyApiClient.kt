@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * of the WS-based paths. This class is retained for legacy REST endpoint checks and
  * integration validation only.
  *
- * All device-facing REST calls follow a **v1-first with 404 fallback** strategy
+ * All device-facing REST calls follow a **v1-first with 404/405 fallback** strategy
  * that mirrors the pattern used by [com.ufo.galaxy.memory.OpenClawdMemoryBackflow]:
  *
  * 1. Issue the request to the **v1** path (`/api/v1/devices/<action>`).
@@ -74,9 +74,13 @@ class GalaxyApiClient(
      * on a 30-second interval as part of the canonical WS-based uplink backbone.
      * This REST endpoint is retained only for diagnostic use cases.
      *
-     * Tries `POST /api/v1/devices/heartbeat` first. On HTTP 404 retries with
-     * `POST /api/devices/heartbeat`. Any other HTTP error or network exception
-     * is returned immediately.
+     * Tries `POST /api/v1/devices/{device_id}/heartbeat` first. On HTTP 404 **or 405**
+     * retries with `POST /api/devices/heartbeat`. Any other HTTP error or network
+     * exception is returned immediately.
+     *
+     * 405 也算:旧的裸路径 `/api/v1/devices/heartbeat` 会被 `/api/v1/devices/{device_id}`
+     * 这条 GET 路由吃掉,POST 过去拿到的是 405 而不是 404 —— 只认 404 的兜底会在这里
+     * 直接放弃,而这恰恰是路径重构后最常见的表现。
      *
      * @param deviceId The identifier of the device sending the heartbeat.
      * @return [Result.success] containing the server response body on 2xx;
@@ -88,7 +92,11 @@ class GalaxyApiClient(
     )
     fun sendHeartbeat(deviceId: String): Result<JSONObject> {
         val base = restBaseUrl.trimEnd('/')
-        val v1Url = "$base/api/v1/devices/heartbeat"
+        // V2 服务端的 v1 心跳路由是 /api/v1/devices/{device_id}/heartbeat,
+        // 没有裸的 /api/v1/devices/heartbeat。此前打裸路径会撞上 /api/v1/devices/{device_id}
+        // 这条 GET 路由 —— POST 过去得到的是 **405 而不是 404**,而下面的兜底只认 404,
+        // 于是那条真的能用的 legacy 路径永远到不了。实测:v1 405 / legacy 422。
+        val v1Url = "$base/api/v1/devices/${encodePathSegment(deviceId)}/heartbeat"
         val legacyUrl = "$base/api/devices/heartbeat"
         val body = JSONObject().apply { put("device_id", deviceId) }
         return postWithFallback(v1Url = v1Url, legacyUrl = legacyUrl, body = body, action = "HEARTBEAT")
@@ -186,8 +194,12 @@ class GalaxyApiClient(
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
             httpClient.newCall(request).execute().use { response ->
-                if (response.code == 404) {
-                    Log.w(TAG, "[DEVICE:$action] v1 returned 404; falling back to legacy path")
+                // 405 也要兜底。"这条路由不在这个版本上"在 FastAPI 里有两种表现:
+                // 路径完全不匹配是 404,而路径匹配了别的路由、方法不对是 **405**。
+                // 只认 404 的兜底会在后一种情形下直接放弃 —— 而后一种恰恰是路径重构后
+                // 最常见的表现(旧路径被某条 {param} 路由吃掉)。实测踩到过。
+                if (response.code == 404 || response.code == 405) {
+                    Log.w(TAG, "[DEVICE:$action] v1 returned ${response.code}; falling back to legacy path")
                     postDirect(legacyUrl, body, action = "$action:LEGACY")
                 } else {
                     val responseBody = response.body?.string()?.let { JSONObject(it) } ?: JSONObject()
@@ -247,6 +259,18 @@ class GalaxyApiClient(
     companion object {
         private const val TAG = "GalaxyApiClient"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        /**
+         * URL-encodes a single path segment.
+         *
+         * device_id 进路径就必须编码 —— 它来自设备侧,可能含 `/`、空格或非 ASCII。
+         * 不编码时一个带 `/` 的 id 会把请求打到一条完全不同的路由上,而表现只是
+         * 一个看不懂的 404/405,不会有任何一行提示是 id 的问题。
+         *
+         * `URLEncoder` 是表单编码:空格会变成 `+`,而路径段里必须是 `%20`,所以要换回来。
+         */
+        internal fun encodePathSegment(raw: String): String =
+            java.net.URLEncoder.encode(raw, "UTF-8").replace("+", "%20")
 
         /** Default OkHttpClient with conservative timeouts suitable for gateway calls. */
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

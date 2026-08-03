@@ -209,20 +209,18 @@ class OpenClawdMemoryBackflowTest {
         assertTrue("JSON must contain timestamp_ms", json.contains("\"timestamp_ms\""))
     }
 
-    // ── v1-first with 404 legacy fallback ──────────────────────────────────────
+    // ── 404 的两种含义,以及"不再有 legacy 兜底" ────────────────────────────
+    //
+    // 这一整块此前断言的是"v1 404 就降级到 /api/memory/*"。实测:V2 上**根本没有**
+    // 无版本的 memory 路由,那条兜底从来没救回过任何一次请求 —— 它只是在 v1 真出问题时
+    // 多打一次注定失败的请求,并留下一条"已降级"的假象日志。兜底已删,这些用例
+    // 相应改成断言新的行为,并且**把"只打一次"本身钉住** —— 否则兜底哪天被谁加回来,
+    // 没有任何断言会红。
 
-    /**
-     * Builds an [OkHttpClient] that returns [v1Code] for v1 URL patterns
-     * (`/api/v1/...`) and [legacyCode] for all other paths.
-     */
-    private fun routingClient(
-        v1Code: Int,
-        legacyCode: Int,
-        legacyBody: String = ""
-    ): OkHttpClient {
+    /** 记录每一次实际发出的请求 URL,并按调用方给定的码作答。 */
+    private fun countingClient(code: Int, body: String = "", seen: MutableList<String>): OkHttpClient {
         val interceptor = Interceptor { chain ->
-            val url = chain.request().url.toString()
-            val (code, body) = if ("/api/v1/" in url) Pair(v1Code, "") else Pair(legacyCode, legacyBody)
+            seen += chain.request().url.toString()
             Response.Builder()
                 .request(chain.request())
                 .protocol(Protocol.HTTP_1_1)
@@ -235,44 +233,70 @@ class OpenClawdMemoryBackflowTest {
     }
 
     @Test
-    fun `store falls back to legacy endpoint when v1 returns 404`() = runBlocking {
-        // v1 returns 404; legacy returns 200
-        val client = routingClient(v1Code = 404, legacyCode = 200)
-        val bf = backflow(client)
-        assertTrue("store must return true when legacy endpoint succeeds after v1 404", bf.store(sampleEntry()))
+    fun `store returns false on 404 and does not attempt a second request`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val bf = backflow(countingClient(code = 404, seen = seen))
+        assertFalse("v1 404 时 store 应直接失败", bf.store(sampleEntry()))
+        assertEquals("不该再打第二次(V2 上没有无版本的 memory 路由)", 1, seen.size)
+        assertTrue("唯一那次必须打 v1", seen[0].contains("/api/v1/memory/store"))
     }
 
     @Test
-    fun `store returns false when both v1 and legacy return non-2xx`() = runBlocking {
-        val client = routingClient(v1Code = 404, legacyCode = 500)
-        val bf = backflow(client)
-        assertFalse("store must return false when legacy also fails", bf.store(sampleEntry()))
+    fun `store succeeds via v1`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val bf = backflow(countingClient(code = 200, seen = seen))
+        assertTrue(bf.store(sampleEntry()))
+        assertEquals(1, seen.size)
+    }
+
+    /**
+     * 服务端对"这条记录不存在"返回的是 **带自家信封的 404**
+     * (`{"success":false,"error":"not found",...}`)。那是正常的 miss,不是端点缺失,
+     * 不该触发任何降级 —— 此前不分,于是每一次缓存未命中都会白打一次请求,
+     * 还打出一条"v1 returned 404"的告警,真出事时会把人往错的方向带。
+     */
+    @Test
+    fun `queryByTaskId treats an enveloped 404 as a plain miss`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val bf = backflow(
+            countingClient(code = 404, body = """{"success":false,"error":"not found","task_id":"missing"}""", seen = seen)
+        )
+        assertNull("语义 miss 应返回 null", bf.queryByTaskId("missing"))
+        assertEquals("语义 miss 不该引发第二次请求", 1, seen.size)
+    }
+
+    /** FastAPI 的路由级 404 是 `{"detail":"Not Found"}` —— 没有 success 字段。 */
+    @Test
+    fun `queryByTaskId treats a routing 404 as endpoint missing`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val bf = backflow(countingClient(code = 404, body = """{"detail":"Not Found"}""", seen = seen))
+        assertNull(bf.queryByTaskId("missing"))
+        // 端点缺失同样返回 null,但走的是另一条分支;这里同样不该有第二次请求,
+        // 因为兜底目标在 V2 上也不存在。
+        assertEquals(1, seen.size)
     }
 
     @Test
-    fun `store uses v1 endpoint and does not call legacy when v1 succeeds`() = runBlocking {
-        // v1 returns 200; legacy would fail with 500 (should never be reached)
-        val client = routingClient(v1Code = 200, legacyCode = 500)
-        val bf = backflow(client)
-        assertTrue("store must return true when v1 succeeds without touching legacy", bf.store(sampleEntry()))
+    fun `isEndpointMissing distinguishes the two kinds of 404`() {
+        // 带自家信封 → 记录不存在,端点是在的
+        assertFalse(OpenClawdMemoryBackflow.isEndpointMissing("""{"success":false,"error":"not found"}"""))
+        assertFalse(OpenClawdMemoryBackflow.isEndpointMissing("""{"success":true}"""))
+        // FastAPI 路由级 404 / 空体 / 读不出 JSON → 按端点缺失处理。
+        // 读不出时**刻意**倒向"端点缺失":那一侧只是多一次兜底请求,
+        // 反过来判错会把真正的端点缺失静默吞掉。
+        assertTrue(OpenClawdMemoryBackflow.isEndpointMissing("""{"detail":"Not Found"}"""))
+        assertTrue(OpenClawdMemoryBackflow.isEndpointMissing(""))
+        assertTrue(OpenClawdMemoryBackflow.isEndpointMissing(null))
+        assertTrue(OpenClawdMemoryBackflow.isEndpointMissing("not json at all"))
     }
 
     @Test
-    fun `queryByTaskId falls back to legacy endpoint when v1 returns 404`() = runBlocking {
-        val legacyBody = sampleJson("fallback-q-001")
-        val client = routingClient(v1Code = 404, legacyCode = 200, legacyBody = legacyBody)
-        val bf = backflow(client)
-
-        val result = bf.queryByTaskId("fallback-q-001")
-
-        assertNotNull("queryByTaskId must return an entry from the legacy fallback", result)
-        assertEquals("fallback-q-001", result!!.task_id)
-    }
-
-    @Test
-    fun `queryByTaskId returns null when both v1 and legacy return 404`() = runBlocking {
-        val client = routingClient(v1Code = 404, legacyCode = 404)
-        val bf = backflow(client)
-        assertNull("queryByTaskId must return null when both endpoints return 404", bf.queryByTaskId("missing"))
+    fun `queryByTaskId parses the entry on 200`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val bf = backflow(countingClient(code = 200, body = sampleJson("q-ok-001"), seen = seen))
+        val result = bf.queryByTaskId("q-ok-001")
+        assertNotNull(result)
+        assertEquals("q-ok-001", result!!.task_id)
+        assertEquals(1, seen.size)
     }
 }

@@ -18,7 +18,7 @@ import org.junit.Test
  *  - [GalaxyApiClient.registerDevice] calls `/api/v1/devices/register` first.
  *  - [GalaxyApiClient.registerDevice] falls back to `/api/devices/register` on 404.
  *  - [GalaxyApiClient.registerDevice] does NOT fall back on non-404 errors.
- *  - [GalaxyApiClient.sendHeartbeat] calls `/api/v1/devices/heartbeat` first.
+ *  - [GalaxyApiClient.sendHeartbeat] calls `/api/v1/devices/{device_id}/heartbeat` first.
  *  - [GalaxyApiClient.sendHeartbeat] falls back to `/api/devices/heartbeat` on 404.
  *  - [GalaxyApiClient.sendHeartbeat] does NOT fall back on non-404 errors.
  *  - Network exceptions are surfaced as [Result.failure] without a second attempt.
@@ -204,7 +204,14 @@ class GalaxyApiClientTest {
             httpClient = urlCapturingClient(urls, code = 200)
         )
         apiClient.sendHeartbeat("device-42")
-        assertTrue("First request must target v1 path", urls[0].contains("/api/v1/devices/heartbeat"))
+        // 服务端的 v1 心跳路由是 /api/v1/devices/{device_id}/heartbeat。
+        // 此前这里钉的是裸路径 /api/v1/devices/heartbeat —— 那条会撞上
+        // /api/v1/devices/{device_id} 这条 GET 路由并返回 405,而兜底只认 404,
+        // 于是能用的 legacy 路径永远到不了。测试当时是绿的。
+        assertTrue(
+            "First request must target the per-device v1 heartbeat path",
+            urls[0].contains("/api/v1/devices/device-42/heartbeat")
+        )
     }
 
     // ── reconcileSession ───────────────────────────────────────────────────
