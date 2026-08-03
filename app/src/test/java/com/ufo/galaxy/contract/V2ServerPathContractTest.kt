@@ -62,13 +62,21 @@ import java.io.File
  * `/auth/oauth/device/start` 与 `/auth/oauth/device/poll`(WearOS 用)、以及
  * `/auth/oauth/{google,github,logout}`(Android 的 OAuthManager 用)**不在这 354 条里** ——
  * 它们由 `nodes/Node_05_Auth/oauth_routes.py` 提供,那是一个**独立节点进程**,
- * 不在统一启动器的 9000 端口上。也就是说客户端拿 restBaseUrl 去打 /auth/* 会 404,
+ * 不在统一启动器的 9000 端口上。也就是说客户端拿 restBaseUrl 去打 `/auth/` 那一族会 404,
  * 除非部署时另有反代把它们转到 Auth 节点。
  *
- * 这里刻意**不改客户端**:该由谁承载 /auth/* 是进程拓扑问题(启动器代理过去,
+ * 这里刻意**不改客户端**:该由谁承载 `/auth/` 那一族是进程拓扑问题(启动器代理过去,
  * 还是客户端另配一个 auth base url),属于 125 节点进程模型那一摊,不是路径笔误。
  * 本测试因此只扫 `/api/`,不扫 `/auth/` —— 把一个悬而未决的架构问题变成一条红线,
  * 只会让人把红线注释掉。
+ *
+ * 一个 Kotlin 的坑(这份文件踩过)
+ * -------------------------------
+ * Kotlin 的块注释**可嵌套**(与 Java 不同)。KDoc 里写 `/auth/` 加一个星号,
+ * 那两个字符会被词法器当成"再开一层块注释",于是结尾那个星号斜杠只关掉一层,
+ * 整个文件从那里开始全被吞进注释 —— 报错是 `Unclosed comment`,位置指向文件末尾,
+ * 离真正的原因很远。本文件第一版就是这么挂的(CI 报 V2ServerPathContractTest.kt:216:1)。
+ * 所以下面提到路径族时一律写成 `/auth/`、`/api/` 这样,不带尾部星号。
  *
  * 刻意的边界
  * ----------
