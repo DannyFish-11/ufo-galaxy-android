@@ -319,20 +319,23 @@ jobs:
   all-unit-tests:
     name: "All Unit Tests [gate 6/7]"
     runs-on: ubuntu-latest
-    # 30 → 45。这不是"红了就调大",数字是量出来的:
+    # 45 → 30。上一轮把它调到 45 是**待定项**(为了让诊断步骤有机会产出数据),
+    # 数据出来了,依据也换了:
     #
-    #   4d50ddc  "Run all JVM unit tests" 13分38秒
-    #   2b0d999  同一步骤            **28分21秒**   ← 只剩 86 秒就撞上 30 分钟
+    #   用例 24206 条 · 累计 11.4 分钟
+    #     495.8s  MainlineAbnormalPathMatrixTest    ← 8分16秒,一个类
+    #     137.4s  RuntimeControllerTest
+    #      12.9s  第三名往后急剧下降
+    #   这 25 个占总时长 99%
     #
-    # 两轮的准备阶段都只有约 10 秒(JDK 7s + checkout 2s),所以不是冷缓存,
-    # 是测试任务本身翻了 2.08 倍。30 这个数字是套件跑 ~16.5 分钟时定的,
-    # 现在余量已经没了 —— 下一轮有相当概率在**产出诊断数据之前**就被杀掉,
-    # 而超时被杀时 if:always() 的步骤也拿不到东西。
+    # 结论是"少数类拖慢",不是"套件整体增长" —— 后者才是该放宽 timeout 的情形。
+    # 加上只跑一个变体(见下),用例数减半,30 分钟给回约 2 倍余量。
     #
-    # 所以先给回可比的余量(~1.6 倍),让下面那个"最慢的测试类"步骤把数据打出来,
-    # 再根据数据决定是某个类真的慢、还是套件整体自然增长。
-    # **这一条是待定项,不是结论** —— 拿到数据后应当回来重新定。
-    timeout-minutes: 45
+    # 那两个类为什么慢**还没查清**:已排除注册超时(测试里注入的是 100ms 而不是
+    # 生产的 15s)。线索是 ModelDownloader 的 httpFactory —— 它的注释写着
+    # "so unit tests can inject a fake",而这个测试用的是默认的真 HTTP 工厂。
+    # 没有证据链之前不改,改为让下面的诊断步骤点名到**具体用例**。
+    timeout-minutes: 30
     needs: [protocol-contract-guard, runtime-regression, cross-repo-compatibility-guard, e2e-verification-gate]
 
     steps:
@@ -349,8 +352,20 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run all JVM unit tests
-        run: ./gradlew :app:test
+      # 只跑 debug 变体。
+      #
+      # `:app:test` 会同时跑 testDebugUnitTest 与 testReleaseUnitTest ——
+      # 诊断输出显示用例数 24206,正好是单变体 12102 的两倍,整套跑了两遍。
+      # 这也解释了此前"13分38秒 → 28分21秒翻倍"的观察:那个 13 分钟的数字来自
+      # 一次 debug 变体就失败、release 那遍没跑完的运行,**它本来就是残的**,
+      # 拿它做同口径对比不成立。
+      #
+      # JVM 单测在 debug/release 下走的是同一份 Kotlin 代码,差别只在编译期常量
+      # 与 R8/ProGuard(而 R8 不作用于 unit test)。跑两遍换不到额外信号。
+      # 这是一次**明确的覆盖取舍**,不是顺手优化 —— 若将来有 release-only 的
+      # 行为差异需要覆盖,应当单独加一个针对性的 job,而不是把整套再跑一遍。
+      - name: Run JVM unit tests (debug variant)
+        run: ./gradlew :app:testDebugUnitTest
 
       # 把"最慢的测试类"打进**作业日志**,而不只是产物。
       #
@@ -363,7 +378,7 @@ jobs:
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as ET
           from collections import defaultdict
-          per_class, total, cases = defaultdict(float), 0.0, 0
+          per_class, per_case, total, cases = defaultdict(float), defaultdict(float), 0.0, 0
           for f in glob.glob("app/build/test-results/**/*.xml", recursive=True):
               try:
                   root = ET.parse(f).getroot()
@@ -371,7 +386,9 @@ jobs:
                   continue
               for tc in root.iter("testcase"):
                   t = float(tc.get("time") or 0)
-                  per_class[tc.get("classname") or "?"] += t
+                  cls = tc.get("classname") or "?"
+                  per_class[cls] += t
+                  per_case[f"{cls.rsplit('.', 1)[-1]}.{tc.get('name') or '?'}"] += t
                   total += t
                   cases += 1
           if not cases:
@@ -384,6 +401,13 @@ jobs:
           top = sum(s for _, s in sorted(per_class.items(), key=lambda kv: -kv[1])[:25])
           print(f"\n这 25 个占总时长 {top/total*100:.0f}% —— 占比高说明是少数类拖慢的(该去查它们),"
                 f"占比低说明是套件整体增长(那才该调 timeout)。")
+
+          # 到"类"这一层还不够定位。上一轮已经知道 MainlineAbnormalPathMatrixTest
+          # 占 8 分 16 秒,但那个类有 31 个用例 —— 是某一两个在等什么,还是 31 个
+          # 各自都慢?这两种情况的修法完全不同,而按类聚合的数字分不出来。
+          print("\n最慢的 20 条**单个用例**:")
+          for name, secs in sorted(per_case.items(), key=lambda kv: -kv[1])[:20]:
+              print(f"  {secs:8.1f}s  {name}")
           PY
 
       - name: Upload full test results
