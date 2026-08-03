@@ -237,6 +237,12 @@ class GalaxyConnectionService : Service() {
     private val transportManager = AipTransportManager.getInstance()
     private val gson = Gson()
 
+    // 阶段 1（断网自组网设备侧）：LAN 网关发现 + TCP 直连。发现 `_galaxy-aip3._tcp.`
+    // 后建立 TcpDirectClient 并注册为 "tcp" 适配器 —— 与 WS 走同一个
+    // AipTransportManager，同一个入站消息路由（wsListener.onMessage），不是平行系统。
+    private var lanDiscovery: LanDiscoveryManager? = null
+    private var tcpDirectClient: TcpDirectClient? = null
+
     // ROUND-3-FIX: onStartCommand 会对同一个运行中的服务实例重复触发
     // （每次 startService/startForegroundService 调用，例如 MainActivity 每次启动都会
     // 调 startServices() → startForegroundService()）。常驻 collector 协程和一次性
@@ -1622,8 +1628,40 @@ class GalaxyConnectionService : Service() {
         )
 
         webSocketClient.addListener(wsListener)
+
+        startLanDirectTransport()
     }
-    
+
+    /**
+     * 阶段 1：启动 LAN 发现，解析到网关的 TCP P2P 服务后建立直连并注册为
+     * `"tcp"` 适配器。全程尽力而为：发现失败/连接失败只记日志，绝不影响 WS 主链路。
+     */
+    private fun startLanDirectTransport() {
+        lanDiscovery = LanDiscoveryManager(this) { host, port, gatewayId ->
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val existing = tcpDirectClient
+                    if (existing != null && existing.isConnected()) return@launch
+                    val client = TcpDirectClient(deviceId = localDeviceId)
+                    // 入站消息走与 WS 完全相同的路由入口 —— 单一消息处理路径
+                    client.onMessage = { json -> wsListener.onMessage(json) }
+                    client.onDisconnected = {
+                        transportManager.unregisterAdapter("tcp")
+                        Log.i(TAG, "TCP 直连断开，已从传输管理器注销")
+                    }
+                    if (client.connect(host, port)) {
+                        tcpDirectClient = client
+                        transportManager.registerAdapter("tcp", client)
+                        Log.i(TAG, "TCP 直连网关 $gatewayId @ $host:$port 已注册为 tcp 适配器")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "TCP 直连建立失败（不影响 WS 主链路）: ${e.message}")
+                }
+            }
+        }
+        lanDiscovery?.start()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // C11-FIX: Handle null intent (system restart) gracefully.
         if (intent == null) {
@@ -1752,6 +1790,14 @@ class GalaxyConnectionService : Service() {
             webSocketClient.disconnect()
         } catch (e: Exception) {
             Log.w(TAG, "Exception during WS cleanup: ${e.message}")
+        }
+        try {
+            lanDiscovery?.stop()
+            transportManager.unregisterAdapter("tcp")
+            tcpDirectClient?.close()
+            tcpDirectClient = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Exception during TCP direct cleanup: ${e.message}")
         }
         try {
             resultConvergenceParticipant.clearAllConvergenceGates()
