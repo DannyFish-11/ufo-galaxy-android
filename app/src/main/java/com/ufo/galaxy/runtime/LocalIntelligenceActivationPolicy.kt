@@ -138,24 +138,24 @@ object LocalIntelligenceActivationPolicy {
         ),
 
         /**
-         * Local task planner (MobileVLM).
+         * Local task planner (unified VLM, MAI-UI-2B).
          * Guarded: active only when the planner model is loaded and the runtime is healthy.
          */
         PLANNER(
             wireValue = "local_planner",
             tier = ActivationTier.GUARDED_ON,
-            description = "Local task planning via on-device MobileVLM planner",
+            description = "Local task planning via on-device unified VLM planner",
             guardDescription = "Planner model loaded and planner runtime healthy"
         ),
 
         /**
-         * Local UI grounding (SeeClick).
+         * Local UI grounding (unified VLM, MAI-UI-2B).
          * Guarded: active only when the grounding model is loaded and the runtime is healthy.
          */
         GROUNDING(
             wireValue = "local_grounding",
             tier = ActivationTier.GUARDED_ON,
-            description = "Local UI grounding via on-device SeeClick model",
+            description = "Local UI grounding via on-device unified VLM model",
             guardDescription = "Grounding model loaded and grounding runtime healthy"
         ),
 

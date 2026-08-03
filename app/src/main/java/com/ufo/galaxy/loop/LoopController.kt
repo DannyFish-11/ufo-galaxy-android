@@ -24,9 +24,9 @@ import java.util.concurrent.atomic.AtomicReference
  *   natural-language instruction
  *     → model readiness check / download
  *     → screenshot capture
- *     → [LocalPlanner] inference (MobileVLM) via [PlannerFallbackLadder]
+ *     → [LocalPlanner] inference (unified VLM) via [PlannerFallbackLadder]
  *     → stagnation / plan-repeat guard
- *     → [ExecutorBridge] action dispatch (SeeClick grounding via [GroundingFallbackLadder]
+ *     → [ExecutorBridge] action dispatch (unified-VLM grounding via [GroundingFallbackLadder]
  *         + AccessibilityService)
  *     → post-action screenshot + [PostActionObserver] observation
  *     → [StagnationDetector] step guard
@@ -134,8 +134,11 @@ class LoopController(
 
     /** Resets only the cancel flag (used at the start of a new local session). */
     private fun clearCancelRequested() {
-        val current = remoteTaskState.get()
-        remoteTaskState.set(current.copy(cancelRequested = false))
+        // 真 bug 修复(竞态):此前是非原子的 get() + set(copy) —— 若在两步之间
+        // cancelForRemoteTask() 把状态置为 {cancel=true, remoteActive=true},本方法会用
+        // 过期快照整体覆盖,同时丢掉取消请求与远程占用标记,导致本地会话既取消不掉
+        // 又绕过远程互斥门。改用 updateAndGet 做 CAS 更新,只翻转 cancelRequested。
+        remoteTaskState.updateAndGet { it.copy(cancelRequested = false) }
     }
 
     private val _status = MutableStateFlow<LoopStatus>(LoopStatus.Idle)
@@ -570,6 +573,12 @@ class LoopController(
                         "model_id" to spec.modelId
                     )
                 )
+            } else if (modelAssetManager.effectiveChecksum(spec.modelId) == null) {
+                // 真 bug 修复(校验闭环缺失):TOFU 契约要求"首次下载成功后立即
+                // persistComputedChecksum",但生产链路从未调用它 —— 权重文件永远没有
+                // 基线摘要,verifyModel 恒跳过校验,后续损坏/篡改无法被发现。此处在
+                // 首次下载成功后补上持久化,使后续每次 verify 都强制校验。
+                modelAssetManager.persistComputedChecksum(spec.modelId)
             }
         }
 

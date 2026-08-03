@@ -21,6 +21,7 @@ import com.ufo.galaxy.agent.GoalExecutionPipeline
 import com.ufo.galaxy.agent.EdgeExecutor
 import com.ufo.galaxy.agent.HandoffContractValidator
 import com.ufo.galaxy.agent.HandoffEnvelopeV2
+import com.ufo.galaxy.agent.withSafeCollectionDefaults
 import com.ufo.galaxy.agent.TaskCancelRegistry
 import com.ufo.galaxy.agent.TakeoverEligibilityAssessor
 import com.ufo.galaxy.agent.TakeoverRequestEnvelope
@@ -178,7 +179,7 @@ import kotlin.coroutines.coroutineContext
  *    gateway task arrives (blocking the local [LoopController]) and
  *    [RuntimeController.onRemoteTaskFinished] when the result is sent back.
  *
- * On start: loads MobileVLM and SeeClick models via [GalaxyWebSocketClient.setModelCapabilities].
+ * On start: loads the unified VLM (LLM + mmproj) via [GalaxyWebSocketClient.setModelCapabilities].
  * On destroy: unloads models and removes the WS listener.
  */
 class GalaxyConnectionService : Service() {
@@ -235,6 +236,14 @@ class GalaxyConnectionService : Service() {
     private lateinit var webSocketClient: GalaxyWebSocketClient
     private val transportManager = AipTransportManager.getInstance()
     private val gson = Gson()
+
+    // ROUND-3-FIX: onStartCommand 会对同一个运行中的服务实例重复触发
+    // （每次 startService/startForegroundService 调用，例如 MainActivity 每次启动都会
+    // 调 startServices() → startForegroundService()）。常驻 collector 协程和一次性
+    // 模型加载只允许启动一次，否则协程会累积，V2 会收到重复上行消息
+    // （reconciliation_signal、device_state_snapshot 等），模型也会被重复加载。
+    // onStartCommand 全在主线程串行执行，普通布尔即可保证可见性。
+    private var runtimeWorkStarted = false
     // A2-FIX: Named CoroutineScope with SupervisorJob for structured concurrency cleanup.
     // scope.cancel() is called in onDestroy() to prevent coroutine leaks when Service is destroyed.
     private val serviceScope = CoroutineScope(
@@ -1141,6 +1150,13 @@ class GalaxyConnectionService : Service() {
      * with a lower [MeshTopologyPayload.topology_seq] are silently ignored so out-of-order
      * delivery does not overwrite a newer snapshot.
      */
+    // 真 bug 修复:handlePeerAnnounce / handleMeshTopology / handleCoordSync 均由
+    // onAdvancedMessage 以 serviceScope.launch(Dispatchers.IO)并发派发,对下列共享
+    // 状态的"读-判-写"并非原子。触发场景:两台 peer 同时 announce 时,基于旧 map
+    // 的两次 copy-on-write 互相覆盖,其中一台的在场记录整体丢失(直至其重新
+    // announce);topology_seq 的 check-then-act 同理可被旧序列覆盖新序列。此锁
+    // 保护所有 peer/topology 状态的读-改-写序列。
+    private val peerTopologyStateLock = Any()
     @Volatile
     private var lastMeshTopologyNodes: List<String> = emptyList()
     @Volatile
@@ -1160,9 +1176,12 @@ class GalaxyConnectionService : Service() {
      * Monotonic count of COORD_SYNC ticks received in this service lifecycle.
      * Incremented by [handleCoordSync] and echoed in every [CoordSyncAckPayload] so the
      * coordinator can detect gaps in the device's acknowledgement sequence.
+     *
+     * 真 bug 修复:此前是 @Volatile Int 且用 `++` 自增——volatile 不保证自增原子性,
+     * 并发 COORD_SYNC 消息(每条消息独立协程处理)会丢失计数,协调端据 tick_count
+     * 检测 ack 序列缺口时会看到"重复 tick",误判确认序列异常。改为原子自增。
      */
-    @Volatile
-    private var coordSyncTickCount: Int = 0
+    private val coordSyncTickCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Per-peer presence record from the most recent PEER_ANNOUNCE message received from
@@ -1260,9 +1279,16 @@ class GalaxyConnectionService : Service() {
                 val activeId = activeTakeoverId
                 if (activeId != null) {
                     serviceScope.launch {
+                        // 真 bug 修复(与上面 recordDelegatedTaskAccepted 那处同一轮排查
+                        // 发现):这里此前硬编码 taskId = ""——即便 shouldSuppressTerminalSignal
+                        // 守卫的主根因修好,这条路径仍会因为传的是空字符串、永远对不上真实
+                        // _activeTaskId 而被抑制。RuntimeController.activeTaskId 是既有的
+                        // 公开只读属性(见 RuntimeController.kt:864),直接读当前在飞的任务 id;
+                        // 确实没有在飞任务时(理论上不会发生在这条"断线时有 activeTakeoverId"
+                        // 分支里,但保留空字符串兜底,不改变"没有匹配任务时应被抑制"的既有语义)。
                         UFOGalaxyApplication.runtimeController.notifyTakeoverFailed(
                             takeoverId = activeId,
-                            taskId = "",
+                            taskId = UFOGalaxyApplication.runtimeController.activeTaskId ?: "",
                             traceId = "",
                             reason = "ws_disconnect_during_takeover",
                             cause = TakeoverFallbackEvent.Cause.DISCONNECT
@@ -1618,6 +1644,14 @@ class GalaxyConnectionService : Service() {
         startForeground(NOTIFICATION_ID, createNotification(
             if (savedCrossDevice) "跨设备模式已启用" else "本地模式"
         ))
+
+        // ROUND-3-FIX: 以下均为"每服务实例一次性"的启动工作（常驻 collector 协程、
+        // 模型加载、基线报告）。onStartCommand 可重复触发，必须只执行一次。
+        if (runtimeWorkStarted) {
+            Log.d(TAG, "onStartCommand: 常驻启动工作已完成，跳过重复初始化")
+            return START_STICKY
+        }
+        runtimeWorkStarted = true
 
         // Pre-warm and then load models in background.
         // Pre-warming sends a lightweight health ping + optional dry-run to reduce cold start
@@ -3029,7 +3063,11 @@ class GalaxyConnectionService : Service() {
 
         // ── Step 2: parse ─────────────────────────────────────────────────────────
         val envelope = try {
-            gson.fromJson(payloadJson, HandoffEnvelopeV2::class.java)
+            // 真 bug 修复:Gson 不套用 Kotlin 构造器默认值,legacy/minimal 帧省略集合字段时
+            // 会得到 null;withSafeCollectionDefaults() 归一为空集合,避免下游解引用 NPE。
+            requireNotNull(gson.fromJson(payloadJson, HandoffEnvelopeV2::class.java)) {
+                "handoff_v2 payload parsed to null"
+            }.withSafeCollectionDefaults()
         } catch (e: Exception) {
             Log.e(TAG, "[PR-H:HANDOFF_V2] envelope parse failed task_id=$taskId: ${e.message}", e)
             emitRuntimeDiagnostics(
@@ -4822,8 +4860,8 @@ class GalaxyConnectionService : Service() {
             // ── Model identity from ModelAssetManager ────────────────────────
             val assetManager = UFOGalaxyApplication.modelAssetManager
             val modelStatuses = try { assetManager.verifyAll() } catch (e: Exception) { emptyMap() }
-            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM]
-            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK]
+            val mobilevlmStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM]
+            val seeClickStatus = modelStatuses[com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ]
             val mobilevlmPresent = mobilevlmStatus != null &&
                 mobilevlmStatus != com.ufo.galaxy.model.ModelAssetManager.ModelStatus.MISSING
             val seeClickPresent = seeClickStatus != null &&
@@ -4840,7 +4878,7 @@ class GalaxyConnectionService : Service() {
                 mobilevlmStatus == com.ufo.galaxy.model.ModelAssetManager.ModelStatus.LOADED
             // model_id: the canonical identifier of the primary on-device model when present;
             // null when the model is not yet present (awaiting first download or missing).
-            val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM else null
+            val modelId: String? = if (mobilevlmPresent) com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM else null
             // pending_first_download: true when no model has been successfully downloaded
             // (no model in the registry is READY or LOADED).  This is the canonical condition:
             // a device awaiting its first download has no READY/LOADED models.
@@ -6242,10 +6280,19 @@ class GalaxyConnectionService : Service() {
 
         // Update the per-peer presence record when we have a valid peer device id,
         // but only when the incoming announce_seq is not stale.
+        // 真 bug 修复:读-判-写必须持锁原子完成(触发场景见 peerTopologyStateLock 注释:
+        // 两台 peer 并发 announce 时 copy-on-write 相互覆盖导致在场记录丢失)。
         if (payload.peer_device_id.isNotBlank()) {
-            val existing = lastPeerAnnouncements[payload.peer_device_id]
-            if (existing == null || payload.announce_seq >= existing.announce_seq) {
-                lastPeerAnnouncements = lastPeerAnnouncements + (payload.peer_device_id to payload)
+            val updated = synchronized(peerTopologyStateLock) {
+                val existing = lastPeerAnnouncements[payload.peer_device_id]
+                if (existing == null || payload.announce_seq >= existing.announce_seq) {
+                    lastPeerAnnouncements = lastPeerAnnouncements + (payload.peer_device_id to payload)
+                    true
+                } else {
+                    false
+                }
+            }
+            if (updated) {
                 updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(lastMeshTopologyMeshId))
             }
         }
@@ -6297,11 +6344,20 @@ class GalaxyConnectionService : Service() {
         }
 
         // Only retain topology updates that are newer than what we already have.
-        val accepted = payload.topology_seq > lastMeshTopologySeq
+        // 真 bug 修复:seq 比较与三个字段写入必须持锁原子完成(触发场景见
+        // peerTopologyStateLock 注释:并发拓扑帧的 check-then-act 可让旧 seq
+        // 快照覆盖新 seq 快照,破坏"乱序旧帧被忽略"的既有约定)。
+        val accepted = synchronized(peerTopologyStateLock) {
+            if (payload.topology_seq > lastMeshTopologySeq) {
+                lastMeshTopologyMeshId = payload.mesh_id.takeIf { it.isNotBlank() }
+                lastMeshTopologyNodes = payload.nodes
+                lastMeshTopologySeq = payload.topology_seq
+                true
+            } else {
+                false
+            }
+        }
         if (accepted) {
-            lastMeshTopologyMeshId = payload.mesh_id.takeIf { it.isNotBlank() }
-            lastMeshTopologyNodes = payload.nodes
-            lastMeshTopologySeq = payload.topology_seq
             updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot(lastMeshTopologyMeshId))
         }
 
@@ -6342,8 +6398,7 @@ class GalaxyConnectionService : Service() {
      * @param rawJson   Raw JSON string of the inbound coord_sync message.
      */
     private fun handleCoordSync(messageId: String?, rawJson: String) {
-        coordSyncTickCount++
-        val currentTickCount = coordSyncTickCount
+        val currentTickCount = coordSyncTickCount.incrementAndGet()
 
         val syncSeq = try {
             val jsonObj = gson.fromJson(rawJson, com.google.gson.JsonObject::class.java)
@@ -6733,11 +6788,23 @@ class GalaxyConnectionService : Service() {
                 )
             }
 
-            // PR-14: Record that a delegated execution has been accepted under the current
-            // attached session.  This increments the session's delegatedExecutionCount without
-            // re-creating the session or changing its identity — multiple tasks can flow
-            // through the same session without any per-task session re-init.
-            UFOGalaxyApplication.runtimeController.recordDelegatedExecutionAccepted()
+            // 真 bug 修复(runtime-regression 349 处失败排查发现):这里此前一直调用
+            // PR-14 时代的旧方法 recordDelegatedExecutionAccepted(),从未升级到 PR-62
+            // 引入的 recordDelegatedTaskAccepted(taskId, ...)——后者内部第一步就是调用
+            // 前者(严格超集),额外还会设置 _activeTaskId/_activeTaskStatus。这两个字段
+            // 是 shouldSuppressTerminalSignal() 守卫的唯一判据,只在这里被赋值——旧方法
+            // 从不触碰它们。结果:_activeTaskId 在真机上的 App 生命周期内永远是 null,
+            // notifyTakeoverFailed/publishTaskResult/publishTaskCancelled/
+            // publishTaskStatusUpdate 这四类"终态信号"的守卫永远判定"抑制",V2 后端
+            // 从未真正收到过手机这边的接管失败/任务完成/任务取消/状态更新——静默失效,
+            // 直到这批 runtime 测试第一次真正跑完(此前一直因 CI 挂起而从未执行到)才
+            // 暴露。改用 recordDelegatedTaskAccepted 后,原有的 delegatedExecutionCount
+            // 递增行为保留(内部仍会调用旧方法),额外正确设置 active task 状态,并按其
+            // 文档注释顺带发出一个 TASK_ACCEPTED 信号(此前同样从未发出过)。
+            UFOGalaxyApplication.runtimeController.recordDelegatedTaskAccepted(
+                taskId = envelope.task_id,
+                correlationId = envelope.trace_id
+            )
 
             // PR-12: The executor owns all lifecycle transitions (PENDING → ACTIVATING →
             // ACTIVE → COMPLETED/FAILED); do not pre-advance the record here.
@@ -7455,6 +7522,10 @@ class GalaxyConnectionService : Service() {
             }
             if (!ok) {
                 Log.e(TAG, "ensureModels: failed to download ${spec.modelId}; inference may be unavailable")
+            } else if (assetManager.effectiveChecksum(spec.modelId) == null) {
+                // TOFU 闭环补齐(与 LoopController.ensureModels 同款缺陷):首次成功下载后
+                // 必须持久化摘要,否则 verifyModel 永远跳过校验,损坏/篡改不可发现。
+                assetManager.persistComputedChecksum(spec.modelId)
             }
         }
         // Refresh status after downloads complete.
@@ -7462,7 +7533,7 @@ class GalaxyConnectionService : Service() {
     }
 
     /**
-     * Pre-warms the MobileVLM and SeeClick inference servers before full model loading.
+     * Pre-warms the unified VLM inference server (planner + grounding paths) before full model loading.
      * Sends a lightweight health ping to each server to establish a warm TCP connection
      * and surface any startup failures early.
      */
@@ -7511,10 +7582,10 @@ class GalaxyConnectionService : Service() {
         )
 
         val assetManager = UFOGalaxyApplication.modelAssetManager
-        if (plannerLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
-        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
-        if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
-        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
+        if (plannerLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM)
+        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM)
+        if (groundingLoaded) assetManager.markLoaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ)
+        else assetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ)
 
         // Low-level model capabilities are advertised only for components that are actually loaded.
         val lowLevelCaps = mutableListOf<String>()
@@ -7606,8 +7677,8 @@ class GalaxyConnectionService : Service() {
      */
     private fun unloadModels() {
         UFOGalaxyApplication.localInferenceRuntimeManager.stop()
-        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_MOBILEVLM)
-        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_SEECLICK)
+        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM)
+        UFOGalaxyApplication.modelAssetManager.markUnloaded(com.ufo.galaxy.model.ModelAssetManager.MODEL_ID_VLM_MMPROJ)
         Log.i(TAG, "本地模型已卸载 (LocalInferenceRuntimeManager stopped)")
     }
     

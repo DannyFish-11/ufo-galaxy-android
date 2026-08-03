@@ -165,7 +165,23 @@ object AndroidDistributedGateAlignment {
          *
          * Maps from: [AndroidReadinessEvidenceSurface.ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY]
          */
-        SIGNAL_REPLAY_DUPLICATE_SAFETY("signal_replay_duplicate_safety");
+        SIGNAL_REPLAY_DUPLICATE_SAFETY("signal_replay_duplicate_safety"),
+
+        /**
+         * Participant lifecycle truth gate category.
+         *
+         * Covers whether Android's nine-state participant lifecycle truth model is derived
+         * from real runtime state, exported in the cross-repo report schema, and never
+         * conflates intermediate states (reconnect ≠ recovered, ALIGNMENT_PENDING ≠ ALIGNED)
+         * with completion.
+         *
+         * 对齐修复:ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH 维度落地时未同步
+         * 扩展本枚举与 dimensionToCategoryMap/gateMappings,导致 Pr7 的对齐不变量测试
+         * 确定性失败(维度→类别映射缺项、证据条目无 gate 映射)。
+         *
+         * Maps from: [AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH]
+         */
+        PARTICIPANT_LIFECYCLE_TRUTH("participant_lifecycle_truth");
 
         companion object {
             /** Returns the category matching [wireValue], or `null` if not found. */
@@ -274,7 +290,9 @@ object AndroidDistributedGateAlignment {
         AndroidReadinessEvidenceSurface.ReadinessDimension.COMPATIBILITY_SUPPRESSION to
             CanonicalGateCategory.COMPATIBILITY_LEGACY_SUPPRESSION,
         AndroidReadinessEvidenceSurface.ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY to
-            CanonicalGateCategory.SIGNAL_REPLAY_DUPLICATE_SAFETY
+            CanonicalGateCategory.SIGNAL_REPLAY_DUPLICATE_SAFETY,
+        AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH to
+            CanonicalGateCategory.PARTICIPANT_LIFECYCLE_TRUTH
     )
 
     // ── Gate mapping matrix ───────────────────────────────────────────────────
@@ -596,19 +614,78 @@ object AndroidDistributedGateAlignment {
                 "deduplication key.  V2 deduplicates inbound signals by signalId; Android-side " +
                 "idempotency guard and V2-side deduplication together close the duplicate " +
                 "delivery gap in the distributed gate model."
+        ),
+
+        // ── 对齐修复:以下 5 条证据条目落地时未同步补 gate 映射 ─────────────────
+
+        GateMappingEntry(
+            evidenceId = "reconciliation_signal_session_epoch_bounding",
+            androidDimension = AndroidReadinessEvidenceSurface.ReadinessDimension.ARTIFACT_EMISSION_RECONCILIATION,
+            canonicalGateCategory = CanonicalGateCategory.RECONCILIATION_ARTIFACT_EMISSION,
+            evidenceAuthority = EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME,
+            gateMappingNote = "Reconciliation signals carry a session continuity epoch bound; " +
+                "V2 rejects signals whose epoch predates the current durable session era, " +
+                "closing the stale-signal window across reconnect boundaries."
+        ),
+
+        GateMappingEntry(
+            evidenceId = "offline_queue_replay_ordering_policy",
+            androidDimension = AndroidReadinessEvidenceSurface.ReadinessDimension.SIGNAL_REPLAY_DUPLICATE_SAFETY,
+            canonicalGateCategory = CanonicalGateCategory.SIGNAL_REPLAY_DUPLICATE_SAFETY,
+            evidenceAuthority = EvidenceAuthority.ADVISORY_OBSERVATION_ONLY,
+            gateMappingNote = "Offline queue replay preserves FIFO emission order after " +
+                "reconnect; ordering is observable via replay diagnostics.  Advisory because " +
+                "ordering alone does not prove delivery — the idempotency guard entry carries " +
+                "the strong duplicate-safety evidence."
+        ),
+
+        GateMappingEntry(
+            evidenceId = "participant_lifecycle_truth_nine_state_model",
+            androidDimension = AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            canonicalGateCategory = CanonicalGateCategory.PARTICIPANT_LIFECYCLE_TRUTH,
+            evidenceAuthority = EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME,
+            gateMappingNote = "The nine-state participant lifecycle truth model distinguishes " +
+                "intermediate states (reconnect-from-recovered, ALIGNMENT_PENDING) from " +
+                "completion; V2 gates on the exact state, never on a coarse connected flag."
+        ),
+
+        GateMappingEntry(
+            evidenceId = "participant_lifecycle_truth_report_builder_derivation",
+            androidDimension = AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            canonicalGateCategory = CanonicalGateCategory.PARTICIPANT_LIFECYCLE_TRUTH,
+            evidenceAuthority = EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME,
+            gateMappingNote = "ParticipantLifecycleTruthReportBuilder derives the report from " +
+                "live RuntimeController state rather than cached snapshots, so the exported " +
+                "truth always reflects the real runtime at derivation time."
+        ),
+
+        GateMappingEntry(
+            evidenceId = "participant_lifecycle_truth_report_cross_repo_export",
+            androidDimension = AndroidReadinessEvidenceSurface.ReadinessDimension.PARTICIPANT_LIFECYCLE_TRUTH,
+            canonicalGateCategory = CanonicalGateCategory.PARTICIPANT_LIFECYCLE_TRUTH,
+            evidenceAuthority = EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME,
+            gateMappingNote = "The lifecycle truth report is exported in the stable cross-repo " +
+                "schema consumed by V2's participant truth reconciliation; schema fields are " +
+                "guarded by the cross-repo compatibility gate."
         )
     )
 
     // ── Count constants for test assertions ───────────────────────────────────
 
-    /** Expected total number of gate mapping entries at the time of this PR. */
-    const val GATE_MAPPING_COUNT = 27
+    /**
+     * Expected total number of gate mapping entries.
+     *
+     * 对齐修复:PR-7 之后证据面新增 5 条(lifecycle truth ×3、epoch bounding、
+     * offline queue ordering)未同步补映射,现已补齐,与
+     * [AndroidReadinessEvidenceSurface.EVIDENCE_ENTRY_COUNT] 重新对齐。
+     */
+    const val GATE_MAPPING_COUNT = 32
 
     /** Expected number of [EvidenceAuthority.STRONG_PARTICIPANT_RUNTIME] mapping entries. */
-    const val STRONG_PARTICIPANT_RUNTIME_COUNT = 24
+    const val STRONG_PARTICIPANT_RUNTIME_COUNT = 28
 
     /** Expected number of [EvidenceAuthority.ADVISORY_OBSERVATION_ONLY] mapping entries. */
-    const val ADVISORY_OBSERVATION_ONLY_COUNT = 2
+    const val ADVISORY_OBSERVATION_ONLY_COUNT = 3
 
     /** Expected number of [EvidenceAuthority.DEPRECATED_COMPATIBILITY] mapping entries. */
     const val DEPRECATED_COMPATIBILITY_COUNT = 1
@@ -616,8 +693,8 @@ object AndroidDistributedGateAlignment {
     /** Expected number of [EvidenceAuthority.INTENTIONALLY_LOCAL_DEFERRED] mapping entries. */
     const val INTENTIONALLY_LOCAL_DEFERRED_COUNT = 0
 
-    /** Expected number of canonical gate categories. */
-    const val CANONICAL_GATE_CATEGORY_COUNT = 6
+    /** Expected number of canonical gate categories(含对齐修复新增的 PARTICIPANT_LIFECYCLE_TRUTH). */
+    const val CANONICAL_GATE_CATEGORY_COUNT = 7
 
     // ── Query helpers ─────────────────────────────────────────────────────────
 

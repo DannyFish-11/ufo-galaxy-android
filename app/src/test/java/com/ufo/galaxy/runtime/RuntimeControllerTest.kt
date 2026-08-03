@@ -15,6 +15,7 @@ import com.ufo.galaxy.network.GalaxyWebSocketClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.*
 import org.junit.Rule
@@ -162,12 +163,17 @@ class RuntimeControllerTest {
         val (controller, _) = buildController(timeoutMs = 200L)
 
         var errorReceived: String? = null
-        val job = launch {
+        // UNDISPATCHED ensures the collector subscribes to registrationError (a hot,
+        // no-replay SharedFlow) before startWithTimeout() runs its synchronous failure
+        // path; without it the emission can race ahead of the subscription and be lost,
+        // hanging job.join() forever. withTimeout bounds the wait so a genuine
+        // regression fails fast instead of hanging CI.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             errorReceived = controller.registrationError.first()
         }
 
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertNotNull("registrationError should emit a failure reason", errorReceived)
         assertTrue(
@@ -193,14 +199,20 @@ class RuntimeControllerTest {
         var errorForMainViewModel: String? = null
         var errorForFloatingService: String? = null
 
-        // Both consumers must be subscribed *before* the emission.
-        val job1 = launch { errorForMainViewModel = controller.registrationError.first() }
-        val job2 = launch { errorForFloatingService = controller.registrationError.first() }
+        // Both consumers must be subscribed *before* the emission. UNDISPATCHED forces
+        // each launch to run synchronously up to its first suspension point (the
+        // subscription inside .first()) before control returns here, closing the race
+        // against the synchronous startWithTimeout() failure path below. withTimeout
+        // bounds the wait so a genuine regression fails fast instead of hanging CI.
+        val job1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { errorForMainViewModel = controller.registrationError.first() }
+        val job2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { errorForFloatingService = controller.registrationError.first() }
 
         controller.startWithTimeout()
 
-        job1.join()
-        job2.join()
+        withTimeout(2000) {
+            job1.join()
+            job2.join()
+        }
 
         assertNotNull(
             "MainViewModel consumer (job1) should receive the registration error",

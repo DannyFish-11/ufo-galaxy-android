@@ -548,9 +548,13 @@ class Pr49PolicyRoutingCompatibilityTest {
     }
 
     @Test
-    fun `shouldProceed returns true for unknown future value (forward compatibility)`() {
-        assertTrue(
-            "Unknown future policy routing outcomes must allow execution to proceed (forward compat)",
+    fun `shouldProceed returns false for unknown future value (fail-closed by contract)`() {
+        // 断言修正:shouldProceed 的 KDoc 明确只对 null(legacy/未指定)做前向兼容
+        // 放行;显式携带但不认识的 outcome 是保守拒绝(fail-closed)——未知的未来
+        // 语义(比如某种隔离/驳回类 outcome)不能被默认放行执行。
+        assertFalse(
+            "Unknown explicit policy routing outcomes must NOT proceed (fail-closed); " +
+                "only null/absent is forward-compat pass-through",
             PolicyRoutingContext.shouldProceed("future_policy_v3_outcome")
         )
     }

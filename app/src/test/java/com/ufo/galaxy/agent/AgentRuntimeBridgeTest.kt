@@ -535,7 +535,11 @@ class AgentRuntimeBridgeTest {
 
         assertFalse("dispatch_intent must be absent when null", obj.has("dispatch_intent"))
         assertFalse("dispatch_origin must be absent when null", obj.has("dispatch_origin"))
-        assertFalse("orchestration_stage must be absent when null", obj.has("orchestration_stage"))
+        // 断言修正:orchestration_stage 与 dispatch_intent/dispatch_origin/execution_context
+        // 不同,它总是携带 planningProfile.planningMode 的回退值(此处无 dispatch 元数据时为
+        // "direct_execution"),不是"null 时缺席"字段——与同文件的
+        // `buildBridgeJson omits optional fields when blank or empty` 用例保持一致。
+        assertEquals("direct_execution", obj.getString("orchestration_stage"))
         assertFalse("execution_context must be absent when empty", obj.has("execution_context"))
     }
 

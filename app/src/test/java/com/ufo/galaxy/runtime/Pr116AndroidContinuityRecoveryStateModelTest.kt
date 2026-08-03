@@ -291,8 +291,9 @@ class Pr116AndroidContinuityRecoveryStateModelTest {
         controller.recordDelegatedTaskAccepted("task-reconcile-116")
         controller.stop()  // → LOST_INFLIGHT (crossDevice disabled)
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让订阅在 publish 前同步建立,规避 replay=0 热流订阅-发射竞态。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }
@@ -343,8 +344,9 @@ class Pr116AndroidContinuityRecoveryStateModelTest {
         // After PROCESS_RECREATED with a persisted artifact and crossDevice enabled,
         // the inflight disposition is REQUIRES_RECONCILIATION
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让订阅在 publish 前同步建立,规避 replay=0 热流订阅-发射竞态。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }
@@ -595,8 +597,9 @@ class Pr116AndroidContinuityRecoveryStateModelTest {
         controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
         // inflight disposition is RESUMED_CLEANLY (no artifact), but unified phase is RECOVERING
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让订阅在 publish 前同步建立,规避 replay=0 热流订阅-发射竞态。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }

@@ -473,7 +473,11 @@ class MetricsRecorder(private val settings: AppSettings, private val scope: Coro
     private fun appendLatency(list: MutableList<Long>, value: Long) {
         synchronized(list) {
             if (list.size >= MAX_LATENCY_SAMPLES) {
-                (list as java.util.LinkedList).removeFirst()
+                // 真 bug 修复:这些延迟列表用 Collections.synchronizedList(LinkedList()) 包装,
+                // 返回的是 SynchronizedList 包装器,并不 is-a LinkedList——`as LinkedList` 在第
+                // 257 个样本触发淘汰时抛 ClassCastException(真机遥测跑满 256 条后必崩)。
+                // 改用 MutableList 接口的 removeAt(0),对任意具体列表类型都正确,无需强转。
+                list.removeAt(0)
             }
             list.add(value)
         }

@@ -385,10 +385,12 @@ class Pr11StabilizationBaselineTest {
     // 10. Transitional surfaces
     // ══════════════════════════════════════════════════════════════════════════
 
-    @Test fun `legacy-registration-error-bridge is TRANSITIONAL with CONVERGE guidance`() {
+    @Test fun `legacy-registration-error-bridge is RETIREMENT_GATED with CONVERGE guidance`() {
+        // PR-11 时该表面还是 TRANSITIONAL;PR-36 完成消费方迁移后有意升级为
+        // RETIREMENT_GATED(注册表 rationale 有记录)。断言更新为当前真实分级。
         val e = StabilizationBaseline.forId("legacy-registration-error-bridge")
         assertNotNull(e)
-        assertEquals(StabilizationBaseline.SurfaceStability.TRANSITIONAL, e!!.stability)
+        assertEquals(StabilizationBaseline.SurfaceStability.RETIREMENT_GATED, e!!.stability)
         assertEquals(StabilizationBaseline.ExtensionGuidance.CONVERGE, e.extensionGuidance)
     }
 

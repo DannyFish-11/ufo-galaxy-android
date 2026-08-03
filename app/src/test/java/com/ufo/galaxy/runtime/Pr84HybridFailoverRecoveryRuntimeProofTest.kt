@@ -31,6 +31,7 @@ import okio.ByteString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -171,7 +172,10 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
                 ),
                 is_resumable = true,
                 interruption_reason = "disconnect_during_execution",
-                policy_routing_outcome = PolicyRoutingContext.RoutingOutcome.RESUMED.wireValue
+                policy_routing_outcome = PolicyRoutingContext.RoutingOutcome.RESUMED.wireValue,
+                // posture gate(PR #533 契约):缺省 null 按 control_only 拦截(STATUS_DISABLED),
+                // 显式声明 join_runtime 才允许本机恢复执行。
+                source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
             )
         )
         assertTrue(resumedResult.status == EdgeExecutor.STATUS_SUCCESS)
@@ -203,12 +207,33 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
         )
         assertEquals("Replay queue must drain on canonical reconnect-open path", 0, wsClient.offlineQueue.size)
 
-        val replayedResultEnvelope = recordingSocket.textMessages
+        // 契约更新(两代设计取舍,PR-117/126 隔离门为准):goal_execution_result 属
+        // REPLAY_EPOCH_REQUIRED_TYPES(权威敏感),断线期间排队的旧纪元结果在
+        // canonical 重连后【不得】逐字重放进新纪元——canonical ownership/epoch
+        // 预过滤会阻断(shouldForward=false),Hybrid 连续性注册表亦明确
+        // "Android MUST NOT re-transmit a prior result after reconnect"。
+        // 结果收敛的当前正解:重连后由新纪元的全新上行送达(V2 依据 PR-62 重连
+        // 空闲真相快照自行对账/重派)。
+        val verbatimReplayed = recordingSocket.textMessages
             .map { JsonParser.parseString(it).asJsonObject }
             .firstOrNull { it.get("type")?.asString == MsgType.GOAL_EXECUTION_RESULT.value }
-        assertNotNull("Reconnected transport must deliver final converged goal_execution_result to V2", replayedResultEnvelope)
+        assertNull(
+            "Pre-reconnect queued goal_execution_result must NOT be replayed verbatim " +
+                "into the new epoch (replay isolation gates, PR-117/126)",
+            verbatimReplayed
+        )
 
-        val replayPayload = replayedResultEnvelope!!
+        // Fresh post-reconnect uplink in the new epoch is how the final result converges.
+        assertTrue(
+            "Fresh goal_execution_result uplink must succeed after canonical reconnect",
+            wsClient.sendJson(gson.toJson(envelope))
+        )
+        val freshResultEnvelope = recordingSocket.textMessages
+            .map { JsonParser.parseString(it).asJsonObject }
+            .firstOrNull { it.get("type")?.asString == MsgType.GOAL_EXECUTION_RESULT.value }
+        assertNotNull("Post-reconnect fresh goal_execution_result must reach V2", freshResultEnvelope)
+
+        val replayPayload = freshResultEnvelope!!
             .getAsJsonObject("payload")
         assertEquals("hybrid-task-1", replayPayload.get("task_id").asString)
         assertEquals("cont-hybrid-1", replayPayload.get("continuity_token").asString)
@@ -218,7 +243,7 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
     }
 
     @Test
-    fun `delegated takeover signals replay after reconnect and transfer completes`() {
+    fun `delegated takeover signal queued offline is isolation-blocked on reconnect while fresh transfer completes`() {
         val gson = Gson()
         val (controller, wsClient) = buildController()
         val recordingSocket = RecordingWebSocket()
@@ -281,7 +306,10 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
         assertFalse(sentWhileDisconnected)
         assertEquals(1, wsClient.offlineQueue.size)
 
-        // Canonical reconnect must replay queued takeover signal before resumed transfer result.
+        // 契约更新(两代设计取舍,PR-117/126 隔离门为准):delegated_execution_signal
+        // 属 REPLAY_EPOCH_REQUIRED_TYPES,断线期间排队的旧纪元信号在 canonical 重连后
+        // 【不得】逐字重放进新纪元;队列照常排水(阻断/丢弃),V2 依据 PR-62 重连
+        // 空闲真相快照对该任务对账/重派。新纪元的全新上行不受影响(下方验证)。
         wsClient.installWebSocketForTest(recordingSocket)
         wsClient.simulateCanonicalReconnectOpenForTest()
         assertEquals(ReconnectRecoveryState.RECOVERED, controller.reconnectRecoveryState.value)
@@ -290,12 +318,11 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
         val replayedSignalEnvelope = recordingSocket.textMessages
             .map { JsonParser.parseString(it).asJsonObject }
             .firstOrNull { it.get("type")?.asString == MsgType.DELEGATED_EXECUTION_SIGNAL.value }
-        assertNotNull("Reconnected transport must replay queued delegated_execution_signal", replayedSignalEnvelope)
-
-        val replayedSignalPayload = replayedSignalEnvelope!!.getAsJsonObject("payload")
-        assertEquals(terminalSignal.signalId, replayedSignalPayload.get("signal_id").asString)
-        assertEquals(terminalSignal.emissionSeq, replayedSignalPayload.get("emission_seq").asInt)
-        assertEquals(terminalSignal.resultKind?.wireValue, replayedSignalPayload.get("result_kind").asString)
+        assertNull(
+            "Pre-reconnect queued delegated_execution_signal must NOT be replayed verbatim " +
+                "into the new epoch (replay isolation gates, PR-117/126)",
+            replayedSignalEnvelope
+        )
 
         val resumedEnvelope = AipMessage(
             type = MsgType.GOAL_EXECUTION_RESULT,

@@ -2,6 +2,7 @@ package com.ufo.galaxy.tile
 
 import android.content.Intent
 import android.graphics.drawable.Icon
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import com.ufo.galaxy.R
@@ -47,13 +48,16 @@ class PresenceTileService : TileService() {
         val tile = qsTile ?: return
         tile.state = if (s.connected && !s.isStale) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = "Galaxy"
-        tile.subtitle = when {
-            !s.connected -> "未连接"
-            s.isStale -> "状态未更新"
-            s.statusText.isNotBlank() -> s.statusText
-            s.phase == PresenceState.PHASE_MANIFEST -> "执行中"
-            s.phase == PresenceState.PHASE_LIMINAL -> "在想"
-            else -> "在听"
+        // Tile.subtitle 需 API 29(minSdk 26），低版本调用会崩溃 —— 加版本门。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            tile.subtitle = when {
+                !s.connected -> "未连接"
+                s.isStale -> "状态未更新"
+                s.statusText.isNotBlank() -> s.statusText
+                s.phase == PresenceState.PHASE_MANIFEST -> "执行中"
+                s.phase == PresenceState.PHASE_LIMINAL -> "在想"
+                else -> "在听"
+            }
         }
         tile.icon = Icon.createWithResource(this, R.drawable.ic_notification)
         tile.updateTile()

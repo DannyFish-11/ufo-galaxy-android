@@ -279,7 +279,7 @@ object ParticipantRuntimeSemanticsBoundary {
      *
      * | Property | First-class participant behaviour |
      * |---|---|
-     * | Local AI execution | MobileVLM 1.7B planner + SeeClick grounding + AccessibilityService |
+     * | Local AI execution | Unified VLM (MAI-UI-2B) planner+grounding + AccessibilityService |
      * | Local truth ownership | All domains in [ANDROID_TRUTH_DOMAIN] |
      * | Lifecycle authority | [AndroidAppLifecycleTransition] decisions are Android's |
      * | Cancel/status reporting | Pre-terminal signals via [ReconciliationSignal] |
@@ -307,7 +307,7 @@ object ParticipantRuntimeSemanticsBoundary {
      */
     val FIRST_CLASS_PARTICIPANT_BEHAVIOURS: Map<String, String> = mapOf(
         "local_ai_execution_loop" to
-            "MobileVLM planner + SeeClick grounding + AccessibilityService: screenshot→plan→click→repeat",
+            "Unified VLM (MAI-UI-2B) planner + grounding + AccessibilityService: screenshot→plan→click→repeat",
         "local_truth_ownership" to
             "Exclusive ownership of ${TRUTH_DOMAIN_COUNT} truth domains; V2 must not override without signal",
         "lifecycle_authority" to

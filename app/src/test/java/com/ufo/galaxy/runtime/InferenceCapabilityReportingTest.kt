@@ -40,10 +40,20 @@ class InferenceCapabilityReportingTest {
         val tmpDir = File(System.getProperty("java.io.tmpdir"), "cap_report_test_${System.nanoTime()}")
         tmpDir.mkdirs()
         // Create stub model files so LocalInferenceRuntimeManager.checkModelFiles() passes.
-        File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        val assetManager = ModelAssetManager(tmpDir)
+        // 适配模型层替换:注册表由三条目(mobilevlm/seeclick/seeclick_bin)收敛为两条目
+        // (MAI-UI-2B LLM + mmproj),原 NCNN bin 第三条目已不存在。两个模型均为
+        // trust-on-first-use(静态 SHA-256 为 null),"stub" 内容首轮 verify 即 READY;
+        // 仍按 ModelAssetManagerTest 的既定做法保留 checksumOverrides 显式禁用校验,
+        // 让能力上报测试专注于 warmup 结果语义。
+        File(tmpDir, ModelAssetManager.VLM_FILE).writeText("stub")
+        File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).writeText("stub")
+        val assetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
+            )
+        )
         planner = StubPlannerService()
         grounding = StubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, assetManager)

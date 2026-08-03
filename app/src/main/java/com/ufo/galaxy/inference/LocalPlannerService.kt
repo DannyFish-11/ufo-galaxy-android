@@ -1,10 +1,10 @@
 package com.ufo.galaxy.inference
 
 /**
- * Local planner service interface for MobileVLM V2-1.7B on-device task planning.
+ * Local planner service interface for unified-VLM on-device task planning.
  *
  * Pluggable runtime: llama.cpp (GGUF INT4/INT8) or MLC-LLM backend.
- * Model: mtgv/MobileVLM_V2-1.7B (HuggingFace).
+ * Model: MAI-UI-2B(mradermacher/MAI-UI-2B-GGUF,Qwen3-VL-2B 底座)。
  *
  * Implementations must provide load/unload lifecycle hooks to manage on-device model
  * memory.
@@ -142,7 +142,7 @@ interface LocalPlannerService {
      */
     fun prewarm(): Boolean = loadModel()
 
-    /** Loads the MobileVLM model weights into device memory. Returns true on success. */
+    /** Loads the VLM model weights into device memory. Returns true on success. */
     fun loadModel(): Boolean
 
     /** Releases model weights from device memory. */
@@ -164,6 +164,19 @@ interface LocalPlannerService {
         constraints: List<String>,
         screenshotBase64: String? = null
     ): PlanResult
+
+    /**
+     * 双通道版本:除截图外同时携带结构化屏幕上下文(元素清单文本,来自
+     * [com.ufo.galaxy.perception.UiStructuredSnapshot.toPromptBlock];null/空 = 无
+     * 结构化通道)。默认实现忽略之并委托三参 [plan],既有实现与测试 fake 零感知;
+     * 支持双通道的实现(VlmPlanner)覆写,把元素清单与截图一同注入 prompt。
+     */
+    fun plan(
+        goal: String,
+        constraints: List<String>,
+        screenshotBase64: String?,
+        structuredContext: String?
+    ): PlanResult = plan(goal, constraints, screenshotBase64)
 
     /**
      * Produces a revised plan after [failedStep] encountered [error].
@@ -206,7 +219,7 @@ class NoOpPlannerService : LocalPlannerService {
         screenshotBase64: String?
     ): LocalPlannerService.PlanResult = LocalPlannerService.PlanResult(
         steps = emptyList(),
-        error = "MobileVLM planner not available: model not loaded"
+        error = "VLM planner not available: model not loaded"
     )
 
     override fun replan(
@@ -217,6 +230,6 @@ class NoOpPlannerService : LocalPlannerService {
         screenshotBase64: String?
     ): LocalPlannerService.PlanResult = LocalPlannerService.PlanResult(
         steps = emptyList(),
-        error = "MobileVLM planner not available: model not loaded"
+        error = "VLM planner not available: model not loaded"
     )
 }

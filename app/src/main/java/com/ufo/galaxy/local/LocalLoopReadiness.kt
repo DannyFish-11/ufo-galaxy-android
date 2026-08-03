@@ -10,8 +10,8 @@ package com.ufo.galaxy.local
  * directly except in tests.
  *
  * @property modelFilesReady       Local model weight files are present and verified on disk.
- * @property plannerLoaded         MobileVLM planner service is loaded and reachable.
- * @property groundingLoaded       SeeClick grounding service is loaded and reachable.
+ * @property plannerLoaded         Unified VLM planner service is loaded and reachable.
+ * @property groundingLoaded       Unified VLM grounding service is loaded and reachable.
  * @property accessibilityReady    HardwareKeyListener accessibility service is enabled.
  * @property screenshotReady       Screenshot capture subsystem is available.
  * @property actionExecutorReady   Action executor subsystem is available.
@@ -78,10 +78,10 @@ enum class LocalLoopFailureType(
     /** Required model weight files are missing or corrupted on disk. */
     MODEL_FILES_MISSING(isCritical = false),
 
-    /** MobileVLM planner service is not loaded or not reachable. */
+    /** Unified VLM planner service is not loaded or not reachable. */
     PLANNER_UNAVAILABLE(isCritical = false),
 
-    /** SeeClick grounding service is not loaded or not reachable. */
+    /** Unified VLM grounding service is not loaded or not reachable. */
     GROUNDING_UNAVAILABLE(isCritical = false),
 
     /** HardwareKeyListener accessibility service is not currently enabled. */

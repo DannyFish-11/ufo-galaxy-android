@@ -52,7 +52,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
@@ -1118,11 +1117,15 @@ class GalaxyWebSocketClient(
 
     init {
         // C13-FIX: Start the message consumer coroutine with backpressure handling.
-        // buffer() + conflate() ensures that if messages arrive faster than they can
-        // be processed, intermediate values are dropped and only the latest is delivered.
+        // 真 bug 修复:此前管线里加了 conflate(),它在消费者繁忙时只保留"最新一条"、
+        // 丢弃所有中间消息——而这条管线承载的是全部入站指令流(task_assign /
+        // goal_execution / task_cancel / 结果帧),不是可覆盖的状态流。触发场景:
+        // processMessage 正在处理一条消息时连续到达两条消息(如 task_assign 紧跟
+        // heartbeat_ack),前一条被 conflate 无声吞掉,任务永远不会在设备上执行;
+        // 这也使 handleMessage 中"高优先级消息绝不丢失"的信道回压设计完全失效。
+        // 保留有界 buffer(回压仍由 handleMessage 的优先级逻辑处理),移除 conflate。
         messageChannel.consumeAsFlow()
             .buffer(capacity = 64)
-            .conflate()
             .flowOn(Dispatchers.IO)
             .onEach { text -> processMessage(text) }
             .launchIn(scope)
@@ -1256,7 +1259,12 @@ class GalaxyWebSocketClient(
                 reconnectAttempts = 0
                 _reconnectAttemptCount.value = 0
                 // WS-1: reset pong timeout tracking on every successful open
-                lastPongTime = System.currentTimeMillis()
+                // CLOCK-FIX: must use SystemClock.elapsedRealtime() — the same clock
+                // used by onPongReceived() and sendHeartbeat()'s timeout check.
+                // Mixing in System.currentTimeMillis() (epoch) here made the first
+                // timeSinceLastPong computation hugely negative, silently disabling
+                // dead-connection detection until the first heartbeat_ack arrived.
+                lastPongTime = SystemClock.elapsedRealtime()
                 missedHeartbeats = 0
                 listeners.forEach { it.onConnected() }
 
@@ -1335,6 +1343,9 @@ class GalaxyWebSocketClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // LEAK-FIX: OkHttp requires the (possibly non-null) failure response to be
+                // closed, otherwise its connection/body is leaked for the lifetime of the client.
+                response?.close()
                 Log.e(TAG, "[WS:DISCONNECT] WebSocket failure: ${t.message}", t)
                 GalaxyLogger.log(GalaxyLogger.TAG_DISCONNECT, mapOf("type" to "failure", "error" to (t.message ?: "unknown")))
                 isConnected = false
@@ -1406,7 +1417,9 @@ class GalaxyWebSocketClient(
         try {
             val root = gson.fromJson(text, JsonObject::class.java)
             val msgTypeStr = root.get("type")?.asString
-            val traceId = root.get("trace_id")?.asString
+            // 真 bug 修复:空白 trace_id 需归一化为 null(下游会另生成 UUID),
+            // 否则监听方收到空串而非 null。
+            val traceId = root.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
 
             // PR-AUTH-UNIFIED: 认证应答在进入 MsgType 枚举分发之前拦截
             // (auth_ok/auth_failed/auth_invalid 不属于业务枚举)。
@@ -1414,8 +1427,31 @@ class GalaxyWebSocketClient(
                 handleAuthResponse(msgTypeStr, root)
                 return
             }
+
+            // 真 bug 修复:error/response 是不在 MsgType 枚举里的遗留字符串帧,
+            // 直接调 fromValue 会返回 null 而落到 onUnknownMessage,导致网关错误/
+            // 响应帧被静默当成未知消息。按各自语义显式路由。
+            if (msgTypeStr == "error") {
+                listeners.forEach { it.onError(root.get("message")?.asString ?: "") }
+                return
+            }
+            if (msgTypeStr == "response") {
+                val responsePayload = root.getAsJsonObject("payload")
+                listeners.forEach { it.onMessage(responsePayload?.get("content")?.asString ?: text) }
+                return
+            }
+
+            // 真 bug 修复:入站路由器丢失了合约明文要求的 legacy 类型重映射
+            // (CanonicalDispatchChain.kt / AndroidAuthoritativePathAlignmentAudit.kt:
+            // task_execute / task_status_query / command 必须经 MsgType.toV3Type 归一到
+            // task_assign)。原实现直接 fromValue(msgTypeStr) 跳过了这层,导致真机
+            // 跨设备 legacy 任务被误路由到 onUnknownMessage、永不在设备上执行。
             val msgType = try {
-                msgTypeStr?.let { com.ufo.galaxy.shared.protocol.MsgType.fromValue(it) }
+                msgTypeStr?.let {
+                    com.ufo.galaxy.shared.protocol.MsgType.fromValue(
+                        com.ufo.galaxy.shared.protocol.MsgType.toV3Type(it)
+                    )
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1426,7 +1462,10 @@ class GalaxyWebSocketClient(
             when (msgType) {
                 com.ufo.galaxy.shared.protocol.MsgType.TASK_ASSIGN -> {
                     val payload = root.getAsJsonObject("payload")
-                    val taskId = payload?.get("task_id")?.asString ?: ""
+                    // 真 bug 修复:legacy task_execute 等帧可能没有 payload 对象,
+                    // 需回退到顶层 task_id 字段(合约文档明确的兜底路径)。
+                    val taskId = payload?.get("task_id")?.asString
+                        ?: root.get("task_id")?.asString ?: ""
                     listeners.forEach { it.onTaskAssign(taskId, payload?.toString() ?: "{}", traceId) }
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.GOAL_EXECUTION -> {
@@ -1469,7 +1508,10 @@ class GalaxyWebSocketClient(
                 com.ufo.galaxy.shared.protocol.MsgType.HANDOFF_ENVELOPE_V2 -> {
                     val payload = root.getAsJsonObject("payload")
                     val taskId = payload?.get("task_id")?.asString ?: ""
-                    listeners.forEach { it.onHandoffEnvelopeV2(taskId, payload?.toString() ?: "{}", traceId) }
+                    // 真 bug 修复:envelope 层无 trace_id 时回退到 payload.trace_id
+                    // (合约:先查 envelope,再查 payload)。
+                    val handoffTraceId = traceId ?: payload?.get("trace_id")?.asString?.takeIf { it.isNotBlank() }
+                    listeners.forEach { it.onHandoffEnvelopeV2(taskId, payload?.toString() ?: "{}", handoffTraceId) }
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.OPERATOR_ACTION_REQUEST -> {
                     val payload = root.getAsJsonObject("payload")
@@ -2881,6 +2923,11 @@ class GalaxyWebSocketClient(
      * R3-3-FIX: Interval is dynamically adjusted based on Doze / Power Save state.
      */
     private fun startHeartbeat() {
+        // 真 bug 修复:启动前必须取消旧心跳任务。触发场景:配置了 token 时,
+        // AUTH_RESPONSE_TIMEOUT 兼容放行定时器与迟到的 auth_ok 处理可并发各调一次
+        // startHeartbeat,旧 Job 引用被覆盖后无法再被 stopHeartbeat 取消,产生两条
+        // 并行心跳循环——心跳频率翻倍且 missed-pong 判定被双重计数,误触发重连。
+        heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             // B5-FIX: Initial delay aligns to the next minute boundary for Doze batching.
             val interval = getHeartbeatIntervalMs()
@@ -2929,7 +2976,16 @@ class GalaxyWebSocketClient(
             if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
                 Log.e(TAG, "[WS:HEARTBEAT] Max missed heartbeats ($MAX_MISSED_HEARTBEATS) — forcing reconnect")
                 missedHeartbeats = 0
-                disconnect()
+                // WS-1-FIX: tear down the dead socket WITHOUT disarming auto-reconnect.
+                // Calling disconnect() here was a bug: it sets shouldReconnect=false
+                // (and closes with code 1000, which onClosed treats as an intentional
+                // close), so the scheduleReconnect() below could never fire — the
+                // device permanently dropped out of the distributed system on a dead
+                // link, exactly the terminal dead state the watchdog design eliminates.
+                stopHeartbeat()
+                webSocket?.cancel()
+                webSocket = null
+                isConnected = false
                 if (shouldReconnect) {
                     scheduleReconnect()
                 }
@@ -3184,6 +3240,14 @@ class GalaxyWebSocketClient(
                 ?: persistedInstallDeviceId()
         )
 
+    /**
+     * 本客户端【将用于鉴权握手】的规范设备 id(与 /ws/device 握手、心跳、AuthMessage 一致)。
+     *
+     * 配对端必须用【同一个 id】去登记/领取 token —— 否则服务端把 token 绑到"厂商_型号"
+     * 裸 id,而握手用的是"厂商_型号-8hex",id 不匹配 → 鉴权被拒("已配对"却连不上)。
+     */
+    fun currentDeviceId(): String = getDeviceId()
+
     /** [persistedInstallDeviceId] 在 Context 不可用时的进程内兜底缓存。 */
     @Volatile private var inMemoryDeviceIdFallback: String? = null
 
@@ -3317,6 +3381,24 @@ class GalaxyWebSocketClient(
     internal fun simulateDisconnected() {
         isConnected = false
         listeners.forEach { it.onDisconnected() }
+    }
+
+    /**
+     * PR-33 — For testing only: fires [Listener.onError] on all registered listeners
+     * without a real WebSocket failure.
+     *
+     * Allows unit tests to drive the `RECOVERING → FAILED` recovery state transition in
+     * [com.ufo.galaxy.runtime.RuntimeController]'s permanent WS listener (that transition
+     * only happens on the error callback, not on a repeated disconnect).
+     *
+     * 补齐:Pr33ReconnectResilienceTest 的 KDoc 一直引用本方法,但方法从未被实现,
+     * 相关测试只能用 simulateDisconnected() 顶替——而重复 disconnect 并不会走
+     * onError 通路,导致 RECOVERING→FAILED 断言必然失败。
+     *
+     * **Do not call from production code.**
+     */
+    internal fun simulateError(error: String = "simulated_ws_error") {
+        listeners.forEach { it.onError(error) }
     }
 
     /**

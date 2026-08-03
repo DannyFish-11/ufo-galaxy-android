@@ -2,6 +2,7 @@ package com.ufo.galaxy.input
 
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.CoroutineScope
@@ -10,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.Locale
@@ -72,11 +74,22 @@ class InputRouterPostureTest {
         }
     }
 
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED:清理 AipTransportManager 单例,避免 fake adapter 泄漏到其他测试类。
+        AipTransportManager.resetInstance()
+    }
+
     private fun buildCrossDeviceRouter(
         gateway: FakeGatewayClient = FakeGatewayClient(connected = true),
         localExecutor: LocalLoopExecutor = CapturingLocalLoopExecutor(),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     ): InputRouter {
+        // PR-AIP-UNIFIED:生产侧 InputRouter 统一经 AipTransportManager 单例发送上行消息,
+        // 测试必须把 fake gateway 注册为 websocket adapter,消息才能被捕获
+        // (与 InputRouterTest / NaturalLanguageInputManagerTest 同一修法)。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gateway)
         val settings = InMemoryAppSettings(crossDeviceEnabled = true)
         return InputRouter(
             settings = settings,
@@ -441,7 +454,12 @@ class InputRouterPostureTest {
     }
 
     @Test
-    fun `local route forwards control_only posture in LocalLoopOptions by default`() = runBlocking {
+    fun `local route executes with join_runtime even when caller posture is default control_only`() = runBlocking {
+        // 契约修正(随真 bug 修复联动):原断言"默认 control_only 原样透传给本地执行器"
+        // 恰好钉死了一个死路——LocalLoopExecutor 的 posture 门会拒绝 control_only,
+        // 等于默认配置下本机发起的一切本地任务必然失败。走到 LOCAL 分支即代表路由器
+        // 已做出"本地执行"决定,执行意图就是 JOIN_RUNTIME(执行器 KDoc 明确要求);
+        // 原始 posture 仍在 route_local 日志/元数据里如实记录。
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
@@ -450,14 +468,16 @@ class InputRouterPostureTest {
         delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
-            "LocalLoopOptions must carry control_only posture by default",
-            SourceRuntimePosture.CONTROL_ONLY,
+            "LOCAL execution must carry join_runtime (the act of routing local IS the join decision)",
+            SourceRuntimePosture.JOIN_RUNTIME,
             capturing.capturedOptions.first().sourceRuntimePosture
         )
     }
 
     @Test
-    fun `local route normalises unknown posture to control_only in LocalLoopOptions`() = runBlocking {
+    fun `local route executes with join_runtime even when caller posture is unknown`() = runBlocking {
+        // 契约修正:同上——未知 posture 归一为 control_only 只影响 wire 上报语义,
+        // 本地执行意图仍是 JOIN_RUNTIME,否则未知 posture 会让本地任务静默失败。
         val capturing = CapturingLocalLoopExecutor()
         val router = buildLocalRouter(localExecutor = capturing)
 
@@ -466,8 +486,8 @@ class InputRouterPostureTest {
         delay(100)
         assertEquals(1, capturing.capturedOptions.size)
         assertEquals(
-            "Unknown posture must be normalised to control_only for local executor",
-            SourceRuntimePosture.CONTROL_ONLY,
+            "LOCAL execution must carry join_runtime regardless of unknown caller posture",
+            SourceRuntimePosture.JOIN_RUNTIME,
             capturing.capturedOptions.first().sourceRuntimePosture
         )
     }

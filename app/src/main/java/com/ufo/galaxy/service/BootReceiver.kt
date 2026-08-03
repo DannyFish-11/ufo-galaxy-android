@@ -48,12 +48,7 @@ class BootReceiver : BroadcastReceiver() {
         // B2-FIX: Start GalaxyConnectionService first (primary service)
         if (!isServiceRunning(context, GalaxyConnectionService::class.java)) {
             val serviceIntent = GalaxyConnectionService.createMainEntryIntent(context)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
-            }
-            Log.i(TAG, "GalaxyConnectionService started from boot")
+            startServiceSafely(context, serviceIntent, "GalaxyConnectionService")
         } else {
             Log.d(TAG, "GalaxyConnectionService already running — skipping duplicate start (C4-FIX)")
         }
@@ -63,16 +58,32 @@ class BootReceiver : BroadcastReceiver() {
         Handler(Looper.getMainLooper()).postDelayed({
             if (!isServiceRunning(context, EnhancedFloatingService::class.java)) {
                 val floatingIntent = Intent(context, EnhancedFloatingService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(floatingIntent)
-                } else {
-                    context.startService(floatingIntent)
-                }
-                Log.i(TAG, "EnhancedFloatingService started from boot (delayed ${SECOND_SERVICE_DELAY_MS}ms)")
+                startServiceSafely(context, floatingIntent, "EnhancedFloatingService")
             } else {
                 Log.d(TAG, "EnhancedFloatingService already running — skipping duplicate start (C4-FIX)")
             }
         }, SECOND_SERVICE_DELAY_MS)
+    }
+
+    /**
+     * BUG-FIX(round2): Starts [intent] as a foreground service on API 26+, guarding against
+     * [android.app.ForegroundServiceStartNotAllowedException] on API 31+. Starting a
+     * foreground service from a BOOT_COMPLETED receiver is NOT among the exempted
+     * background starts, so the unguarded call crashed the app during boot on
+     * Android 12+. When the start is disallowed we log and skip — the services are
+     * re-started the next time the user opens the app.
+     */
+    private fun startServiceSafely(context: Context, intent: Intent, serviceName: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.i(TAG, "$serviceName started from boot")
+        } catch (e: Exception) {
+            Log.w(TAG, "$serviceName boot start not allowed (API ${Build.VERSION.SDK_INT}): ${e.message}")
+        }
     }
     
     /**

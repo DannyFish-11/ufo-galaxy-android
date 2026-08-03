@@ -16,8 +16,8 @@ import com.ufo.galaxy.data.AppSettings
  * @property maxRetriesPerStep Maximum retries for a single failing step before giving up.
  * @property stepTimeoutMs    Per-step wall-clock timeout in milliseconds. 0 = disabled.
  * @property goalTimeoutMs    Total session wall-clock timeout in milliseconds. 0 = disabled.
- * @property planner          Configuration for the MobileVLM planner component.
- * @property grounding        Configuration for the SeeClick grounding component.
+ * @property planner          Configuration for the unified VLM planner component.
+ * @property grounding        Configuration for the unified VLM grounding component.
  * @property fallback         Configuration for fallback behaviour when the primary path fails.
  */
 data class LocalLoopConfig(
@@ -66,7 +66,7 @@ data class LocalLoopConfig(
 }
 
 /**
- * Configuration for the MobileVLM planner component.
+ * Configuration for the unified VLM planner component.
  *
  * @property maxTokens    Maximum tokens the planner may generate per call.
  * @property temperature  Sampling temperature (lower = more deterministic).
@@ -85,7 +85,7 @@ data class PlannerConfig(
 }
 
 /**
- * Configuration for the SeeClick grounding component.
+ * Configuration for the unified VLM grounding component.
  *
  * @property timeoutMs    HTTP connect+read timeout for grounding calls (ms).
  * @property scaledMaxEdge Longest edge (px) for screenshot downscaling before grounding.

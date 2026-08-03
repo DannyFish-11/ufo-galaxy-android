@@ -15,12 +15,15 @@ import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.transport.AipTransportManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -46,6 +49,12 @@ class InputRouterTest {
 
     @get:Rule
     val tmpFolder = TemporaryFolder()
+
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED:清理 AipTransportManager 单例,避免 fake adapter 泄漏到其他测试类。
+        AipTransportManager.resetInstance()
+    }
 
     // ── Fake GatewayClient ────────────────────────────────────────────────────
 
@@ -111,7 +120,9 @@ class InputRouterTest {
     // ── Builder helpers ───────────────────────────────────────────────────────
 
     private fun buildLoopController(): LoopController {
-        val modelsDir = tmpFolder.newFolder("models")
+        // 测试修复:同一测试内可能多次构建 router/executor,固定名 "models" 第二次
+        // 因目录已存在抛 IOException;改用无参 newFolder() 每次分配唯一目录。
+        val modelsDir = tmpFolder.newFolder()
         return LoopController(
             localPlanner = LocalPlanner(SingleStepPlanner()),
             executorBridge = ExecutorBridge(
@@ -121,7 +132,7 @@ class InputRouterTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
     }
 
@@ -146,6 +157,11 @@ class InputRouterTest {
         onLocalResult: ((LocalLoopResult) -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ): InputRouter {
+        // PR-AIP-UNIFIED:生产侧 InputRouter 统一经 AipTransportManager 单例发送上行消息,
+        // 测试必须把 fake gateway 注册为 websocket adapter,消息才能被捕获
+        // (与 NaturalLanguageInputManagerTest / Pr993 / PrAcceptance 系列同一修法)。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gatewayClient)
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
         return InputRouter(
             settings = settings,

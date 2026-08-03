@@ -12,6 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -241,11 +242,16 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = buildDescriptor())
         controller.setActiveForTest()
 
+        // v2LifecycleEvents 是 replay=0 热流,同步发射先于订阅则事件永久丢失:
+        // 先以 UNDISPATCHED 订阅,再触发断连。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
+            }
+        }
         client.simulateDisconnected()
 
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
+        val event = eventJob.await()
         assertNotNull("Expected a DeviceDegraded event after WS disconnect", event)
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals("ws_recovering", degraded.degradationKind)
@@ -261,11 +267,15 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         controller.setActiveForTest()
         val expectedDurableId = controller.durableSessionContinuityRecord.value?.durableSessionId
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
+            }
+        }
         client.simulateDisconnected()
 
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
+        val event = eventJob.await()
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals(
             "DeviceDegraded durableSessionId must match durableSessionContinuityRecord",
@@ -280,11 +290,15 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         controller.setActiveForTest()
         val expectedEpoch = controller.durableSessionContinuityRecord.value?.sessionContinuityEpoch
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
+            }
+        }
         client.simulateDisconnected()
 
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
+        val event = eventJob.await()
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals(
             "DeviceDegraded sessionContinuityEpoch must match durable record epoch",
@@ -298,11 +312,15 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = buildDescriptor())
         controller.setActiveForTest()
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
+            }
+        }
         client.simulateDisconnected()
 
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
+        val event = eventJob.await()
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals("test-device", degraded.deviceId)
     }
@@ -314,19 +332,22 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = buildDescriptor())
         controller.setActiveForTest()
 
-        client.simulateDisconnected()
-        // Drain the RECOVERING event
-        withTimeoutOrNull(200) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
-        client.simulateDisconnected()
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+        // 先以 UNDISPATCHED 订阅(谓词直接过滤 ws_recovery_failed,可跨越前置 RECOVERING 事件),
+        // 再触发两阶段转换,规避 replay=0 热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+                }
             }
         }
+        client.simulateDisconnected()
+        // #115 曾把已删除的 simulateError 误替换为 simulateDisconnected;
+        // RECOVERING→FAILED 只能由 onError 驱动,恢复为触发 WS 错误。
+        client.testFireErrorOnListeners("connection refused")
+
+        val event = eventJob.await()
         assertNotNull("Expected a ws_recovery_failed DeviceDegraded event", event)
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertNotNull(
@@ -341,18 +362,20 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         controller.setActiveForTest()
         val expectedDurableId = controller.durableSessionContinuityRecord.value?.durableSessionId
 
-        client.simulateDisconnected()
-        withTimeoutOrNull(200) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
-        client.simulateDisconnected()
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+        // 先以 UNDISPATCHED 订阅(谓词直接过滤 ws_recovery_failed),再触发两阶段转换,
+        // 规避 replay=0 热流订阅-发射竞态;FAILED 由 onError 驱动(#115 曾误改为二次断连)。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+                }
             }
         }
+        client.simulateDisconnected()
+        client.testFireErrorOnListeners("connection refused")
+
+        val event = eventJob.await()
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals(
             "ws_recovery_failed DeviceDegraded durableSessionId must match durable record",
@@ -366,18 +389,20 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = buildDescriptor())
         controller.setActiveForTest()
 
-        client.simulateDisconnected()
-        withTimeoutOrNull(200) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceDegraded }
-        }
-        client.simulateDisconnected()
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+        // 先以 UNDISPATCHED 订阅(谓词直接过滤 ws_recovery_failed),再触发两阶段转换,
+        // 规避 replay=0 热流订阅-发射竞态;FAILED 由 onError 驱动(#115 曾误改为二次断连)。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+                }
             }
         }
+        client.simulateDisconnected()
+        client.testFireErrorOnListeners("connection refused")
+
+        val event = eventJob.await()
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals("test-device", degraded.deviceId)
     }
@@ -392,14 +417,18 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = null, deviceId = "no-descriptor-device")
         controller.setActiveForTest()
 
-        client.simulateDisconnected()
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+                }
             }
         }
+        client.simulateDisconnected()
+
+        val event = eventJob.await()
         assertNotNull(
             "ws_recovering DeviceDegraded must be emitted even without a hostDescriptor",
             event
@@ -411,14 +440,18 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = null, deviceId = "no-descriptor-device")
         controller.setActiveForTest()
 
-        client.simulateDisconnected()
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+                }
             }
         }
+        client.simulateDisconnected()
+
+        val event = eventJob.await()
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertTrue(
             "DeviceDegraded deviceId must be non-blank when no hostDescriptor",
@@ -433,21 +466,20 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, client) = buildController(descriptor = null, deviceId = "no-descriptor-device")
         controller.setActiveForTest()
 
-        client.simulateDisconnected()
-        withTimeoutOrNull(200) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+        // 先以 UNDISPATCHED 订阅(谓词直接过滤 ws_recovery_failed),再触发两阶段转换,
+        // 规避 replay=0 热流订阅-发射竞态;FAILED 由 onError 驱动(#115 曾误改为二次断连)。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+                }
             }
         }
         client.simulateDisconnected()
+        client.testFireErrorOnListeners("ws timeout")
 
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
-            }
-        }
+        val event = eventJob.await()
         assertNotNull(
             "ws_recovery_failed DeviceDegraded must be emitted even without a hostDescriptor",
             event
@@ -461,14 +493,18 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.setActiveForTest()
 
-        controller.notifyParticipantHealthChanged(ParticipantHealthState.DEGRADED)
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "health_degraded"
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "health_degraded"
+                }
             }
         }
+        controller.notifyParticipantHealthChanged(ParticipantHealthState.DEGRADED)
+
+        val event = eventJob.await()
         assertNotNull("Expected a health_degraded DeviceDegraded event", event)
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertNotNull(
@@ -482,14 +518,18 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.setActiveForTest()
 
-        controller.notifyParticipantHealthChanged(ParticipantHealthState.FAILED)
-
-        val event = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "health_failed"
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "health_failed"
+                }
             }
         }
+        controller.notifyParticipantHealthChanged(ParticipantHealthState.FAILED)
+
+        val event = eventJob.await()
         assertNotNull("Expected a health_failed DeviceDegraded event", event)
         val degraded = event as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertNotNull(
@@ -507,13 +547,17 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val activationDurableId = controller.durableSessionContinuityRecord.value?.durableSessionId
 
         // Trigger RECOVERING
-        client.simulateDisconnected()
-        val recoveringEvent = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val recoveringJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+                }
             }
         }
+        client.simulateDisconnected()
+        val recoveringEvent = recoveringJob.await()
         val recovering = recoveringEvent as V2MultiDeviceLifecycleEvent.DeviceDegraded
         assertEquals(
             "DeviceDegraded(ws_recovering) must carry the activation-era durableSessionId",
@@ -522,10 +566,14 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         )
 
         // Trigger RECOVERED
-        client.simulateConnected()
-        val reconnectedEvent = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceReconnected }
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val reconnectedJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first { it is V2MultiDeviceLifecycleEvent.DeviceReconnected }
+            }
         }
+        client.simulateConnected()
+        val reconnectedEvent = reconnectedJob.await()
         assertNotNull("Expected a DeviceReconnected event after reconnect", reconnectedEvent)
         val reconnected = reconnectedEvent as V2MultiDeviceLifecycleEvent.DeviceReconnected
         assertEquals(
@@ -544,23 +592,31 @@ class Pr50ReconnectLifecycleOutputSemanticsTest {
         val activationDurableId = controller.durableSessionContinuityRecord.value?.durableSessionId
 
         // Trigger RECOVERING
-        client.simulateDisconnected()
-        val recoveringEvent = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val recoveringJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovering"
+                }
             }
         }
+        client.simulateDisconnected()
+        val recoveringEvent = recoveringJob.await()
         val recovering = recoveringEvent as V2MultiDeviceLifecycleEvent.DeviceDegraded
 
         // Trigger FAILED
-        client.simulateDisconnected()
-        val failedEvent = withTimeoutOrNull(300) {
-            controller.v2LifecycleEvents.first {
-                it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
-                    (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+        // 同上:先订阅(UNDISPATCHED)再触发;FAILED 由 onError 驱动(#115 曾误改为二次断连)。
+        val failedJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.v2LifecycleEvents.first {
+                    it is V2MultiDeviceLifecycleEvent.DeviceDegraded &&
+                        (it as V2MultiDeviceLifecycleEvent.DeviceDegraded).degradationKind == "ws_recovery_failed"
+                }
             }
         }
+        client.testFireErrorOnListeners("connection refused")
+        val failedEvent = failedJob.await()
         assertNotNull("Expected a ws_recovery_failed DeviceDegraded event", failedEvent)
         val failed = failedEvent as V2MultiDeviceLifecycleEvent.DeviceDegraded
 

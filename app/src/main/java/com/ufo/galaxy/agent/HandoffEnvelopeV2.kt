@@ -132,6 +132,31 @@ data class HandoffEnvelopeV2(
 )
 
 /**
+ * 真 bug 修复:Gson 反序列化经 Unsafe 分配、跳过 Kotlin 构造器默认值——legacy/minimal
+ * 入站帧若省略 context / constraints / execution_context / recovery_context,这些"非空"
+ * 集合字段在运行时其实是 null,后续在跨设备接管消费路径解引用(如
+ * recovery_context.isNotEmpty())会抛 NPE。解析入站 envelope 后统一调用本方法,把 null
+ * 集合归一为空集合,兑现数据类文档承诺的"legacy 调用者安全默认值"。
+ */
+fun HandoffEnvelopeV2.withSafeCollectionDefaults(): HandoffEnvelopeV2 {
+    @Suppress("SENSELESS_COMPARISON")
+    val ctx: Map<String, String>? = context
+    @Suppress("SENSELESS_COMPARISON")
+    val cons: List<String>? = constraints
+    @Suppress("SENSELESS_COMPARISON")
+    val exec: Map<String, String>? = execution_context
+    @Suppress("SENSELESS_COMPARISON")
+    val rec: Map<String, String>? = recovery_context
+    if (ctx != null && cons != null && exec != null && rec != null) return this
+    return copy(
+        context = ctx ?: emptyMap(),
+        constraints = cons ?: emptyList(),
+        execution_context = exec ?: emptyMap(),
+        recovery_context = rec ?: emptyMap()
+    )
+}
+
+/**
  * Converts this [AgentRuntimeBridge.HandoffRequest] to a [HandoffEnvelopeV2].
  *
  * - [HandoffEnvelopeV2.runtime_session_id] is populated from

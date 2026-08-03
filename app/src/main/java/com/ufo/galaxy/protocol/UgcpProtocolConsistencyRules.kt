@@ -383,7 +383,7 @@ object UgcpProtocolConsistencyRules {
      * These are the detachment cause values carried in AttachedRuntimeSession.DetachCause.wireValue
      * and in the KEY_DETACH_CAUSE metadata key in attached-session payloads.
      *
-     * Canonical values: `explicit_detach`, `disconnect`, `disable`, `invalidation`.
+     * Canonical values: `explicit_detach`, `disconnect`, `disable`, `invalidation`, `normal`.
      */
     val attachedSessionDetachCauseRule: ConsistencyRule = ConsistencyRule(
         surface = ProtocolSurface.ATTACHED_SESSION_DETACH_CAUSE,
@@ -391,7 +391,11 @@ object UgcpProtocolConsistencyRules {
             "explicit_detach",
             "disconnect",
             "disable",
-            "invalidation"
+            "invalidation",
+            // 漂移收口:AttachedRuntimeSession.DetachCause 已有 NORMAL("normal")(正常生命周期
+            // 结束,有完整文档、代码在用),但本规范集长期只列 4 项 → 一致性门常红。补上 normal
+            // 使注册表与枚举对齐(类同 MsgType count 锚点的"枚举增值、锚点没跟上")。
+            "normal"
         ),
         transitionalAliases = emptyList(),
         notes = "Carried by AttachedRuntimeSession.DetachCause.wireValue and KEY_DETACH_CAUSE metadata key. " +
@@ -449,7 +453,14 @@ object UgcpProtocolConsistencyRules {
             "signal_id",
             "control_session_id",
             "mesh_session_id",
-            "durable_session_id"
+            "durable_session_id",
+            // 漂移收口:CanonicalSessionFamily 已声明这三个 canonicalTerm(ATTACHED_RUNTIME_SESSION
+            // / DELEGATION_TRANSFER_SESSION / CONVERSATION_SESSION),但本载体规范集没收录 →
+            // "所有 family canonicalTerm 必须在此规范集"这条一致性门常红。按规则自身 notes 的约定
+            // (新载体须登记并映射到 CanonicalSessionFamily)补齐。
+            "attached_runtime_session_id",
+            "transfer_session_context",
+            "conversation_session_id"
         ),
         transitionalAliases = listOf(
             TransitionalAlias(

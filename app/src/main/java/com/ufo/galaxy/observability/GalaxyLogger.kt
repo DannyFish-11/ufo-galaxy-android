@@ -2,7 +2,6 @@ package com.ufo.galaxy.observability
 
 import android.content.Context
 import android.util.Log
-import org.json.JSONObject
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
@@ -762,15 +761,60 @@ object GalaxyLogger {
         val tag: String,
         val fields: Map<String, Any?>
     ) {
-        /** Serialises this entry to a compact single-line JSON string. */
+        /**
+         * Serialises this entry to a compact single-line JSON string.
+         *
+         * 用纯 Kotlin 手写序列化,而非 org.json.JSONObject。原因:org.json 是 Android 框架
+         * 桩类,在纯 JVM 单测(testOptions.unitTests.returnDefaultValues=true)下其方法返回 null,
+         * `obj.toString()` 得到 null 撞上非空返回类型 → NPE(GalaxyLogger.kt:773)。由于本 logger
+         * 贯穿整个 runtime,该 NPE 会把上百个单测一起带崩。手写实现在真机与单测下行为一致。
+         */
         fun toJsonLine(): String {
-            val obj = JSONObject()
-            obj.put("ts", ts)
-            obj.put("tag", tag)
-            val fieldsObj = JSONObject()
-            fields.forEach { (k, v) -> fieldsObj.put(k, v) }
-            obj.put("fields", fieldsObj)
-            return obj.toString()
+            val sb = StringBuilder(64)
+            sb.append('{')
+            sb.append("\"ts\":").append(ts).append(',')
+            sb.append("\"tag\":").append(jsonQuote(tag)).append(',')
+            sb.append("\"fields\":{")
+            var first = true
+            for ((k, v) in fields) {
+                if (!first) sb.append(',')
+                first = false
+                sb.append(jsonQuote(k)).append(':').append(jsonValue(v))
+            }
+            sb.append("}}")
+            return sb.toString()
+        }
+
+        private companion object {
+            /** Render an arbitrary field value as a JSON token. */
+            private fun jsonValue(v: Any?): String = when (v) {
+                null -> "null"
+                is Boolean -> v.toString()
+                is Int, is Long, is Short, is Byte -> v.toString()
+                is Double -> if (v.isFinite()) v.toString() else jsonQuote(v.toString())
+                is Float -> if (v.isFinite()) v.toString() else jsonQuote(v.toString())
+                else -> jsonQuote(v.toString())
+            }
+
+            /** Quote + escape a string per JSON rules (RFC 8259). */
+            private fun jsonQuote(s: String): String {
+                val sb = StringBuilder(s.length + 2)
+                sb.append('"')
+                for (c in s) {
+                    when (c) {
+                        '"' -> sb.append("\\\"")
+                        '\\' -> sb.append("\\\\")
+                        '\n' -> sb.append("\\n")
+                        '\r' -> sb.append("\\r")
+                        '\t' -> sb.append("\\t")
+                        '\b' -> sb.append("\\b")
+                        '\u000C' -> sb.append("\\f")
+                        else -> if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
+                    }
+                }
+                sb.append('"')
+                return sb.toString()
+            }
         }
     }
 

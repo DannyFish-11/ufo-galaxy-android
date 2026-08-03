@@ -10,8 +10,18 @@ import java.nio.file.Paths
 class Pr122ProtectedReleaseEnforcementWorkflowTest {
 
     private fun workflowText(): String {
-        val path = Paths.get(".github", "workflows", "android-ci.yml")
-        return path.toFile().readText()
+        // 测试修复(FileNotFoundException 排查):单元测试的工作目录是 app/ 模块目录,
+        // 而 android-ci.yml 位于仓库根目录的 .github/workflows/ 下,需要向上级目录回溯查找。
+        var dir = Paths.get("").toAbsolutePath()
+        while (true) {
+            val candidate = dir.resolve(".github").resolve("workflows").resolve("android-ci.yml")
+            if (candidate.toFile().exists()) {
+                return candidate.toFile().readText()
+            }
+            dir = dir.parent ?: throw java.io.FileNotFoundException(
+                ".github/workflows/android-ci.yml not found in any ancestor directory"
+            )
+        }
     }
 
     @Test

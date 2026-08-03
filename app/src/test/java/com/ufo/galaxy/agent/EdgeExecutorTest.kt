@@ -535,7 +535,7 @@ class EdgeExecutorTest {
         assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
         assertNotNull(result.error)
         assertTrue("Error must mention planner not loaded",
-            result.error!!.contains("MobileVLM planner is not loaded"))
+            result.error!!.contains("VLM planner is not loaded"))
     }
 
     @Test
@@ -559,7 +559,7 @@ class EdgeExecutorTest {
         assertEquals(EdgeExecutor.STATUS_ERROR, result.status)
         assertNotNull(result.error)
         assertTrue("Error must mention grounding engine not loaded",
-            result.error!!.contains("SeeClick grounding engine is not loaded"))
+            result.error!!.contains("VLM grounding engine is not loaded"))
     }
 
     // ── Coordinate remapping via ImageScaler ──────────────────────────────────

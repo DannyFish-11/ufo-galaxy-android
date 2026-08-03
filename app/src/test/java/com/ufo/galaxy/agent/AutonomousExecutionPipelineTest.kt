@@ -4,6 +4,7 @@ import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.protocol.GoalExecutionPayload
+import com.ufo.galaxy.runtime.SourceRuntimePosture
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -85,6 +86,11 @@ class AutonomousExecutionPipelineTest {
         deviceRole: String = "phone"
     ): AutonomousExecutionPipeline {
         val settings = InMemoryAppSettings(
+            // 测试修复:生产新增的跨设备"运行时门"排在 goalExecutionEnabled/
+            // parallelExecutionEnabled 这类 feature flag 之前判定,默认 false 会让
+            // 每次调用都在运行时门直接短路成 STATUS_DISABLED,掩盖了本该测的
+            // feature-flag/成功路径。
+            crossDeviceEnabled = true,
             goalExecutionEnabled = goalExecutionEnabled,
             parallelExecutionEnabled = parallelExecutionEnabled,
             deviceRole = deviceRole
@@ -107,7 +113,11 @@ class AutonomousExecutionPipelineTest {
         groupId: String? = null,
         subtaskIndex: Int? = null,
         interruptionReason: String? = null,
-        recoveryContext: Map<String, String> = emptyMap()
+        recoveryContext: Map<String, String> = emptyMap(),
+        // 测试修复:缺省 null 会被 SourceRuntimePosture.isControlOnly(null) 判为
+        // true(安全默认值),在 posture 门被拦截；默认 JOIN_RUNTIME 使 payload
+        // 真正走到测试想验证的执行逻辑。
+        sourceRuntimePosture: String? = SourceRuntimePosture.JOIN_RUNTIME
     ) = GoalExecutionPayload(
         task_id = taskId,
         goal = goal,
@@ -115,7 +125,8 @@ class AutonomousExecutionPipelineTest {
         subtask_index = subtaskIndex,
         max_steps = 5,
         interruption_reason = interruptionReason,
-        recovery_context = recoveryContext
+        recovery_context = recoveryContext,
+        source_runtime_posture = sourceRuntimePosture
     )
 
     // ── goal_execution disabled ───────────────────────────────────────────────

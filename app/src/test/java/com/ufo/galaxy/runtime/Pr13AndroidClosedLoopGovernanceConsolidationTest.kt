@@ -46,8 +46,10 @@ class Pr13AndroidClosedLoopGovernanceConsolidationTest {
             AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.ACTIVE_RUNTIME.wireValue,
             canonical.reported_state_semantic_class
         )
+        // 生产端有意区分:FALLBACK/PARTIAL_COMPLETION 终态映射为 AUTHORITATIVE_DEGRADED_TERMINAL
+        // (仍为 terminal,但不得按干净的 AUTHORITATIVE_TERMINAL 全额记账)。
         assertEquals(
-            AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_TERMINAL.wireValue,
+            AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.AUTHORITATIVE_DEGRADED_TERMINAL.wireValue,
             canonical.result_uplink_semantic_class
         )
         assertEquals(

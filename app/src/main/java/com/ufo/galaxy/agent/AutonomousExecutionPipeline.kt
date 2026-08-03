@@ -13,6 +13,7 @@ import com.ufo.galaxy.runtime.PolicyRoutingContext
 import com.ufo.galaxy.runtime.SourceRuntimePosture
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.Dispatchers
 
 /**
@@ -255,7 +256,13 @@ class AutonomousExecutionPipeline(
         // WARNING-3-SAFE: This runBlocking is on Dispatchers.IO (not Main), confirmed safe.
         val baseResult = runBlocking(Dispatchers.IO) {
             withTimeoutOrNull(GOAL_EXECUTION_TIMEOUT_MS) {
-                goalExecutor.executeGoal(payload)
+                // 真 bug 修复(超时保护不生效):executeGoal 是纯阻塞调用、无挂起点,
+                // 直接包 withTimeoutOrNull 永远打不断——"硬超时"实为空话。第一道真保护
+                // 是执行器内部新实现的步边界截止(GoalExecutionPayload.effectiveTimeoutMs,
+                // 超限停手上报 STATUS_TIMEOUT);本层 runInterruptible 作兜底硬墙:外层
+                // 超时即中断执行线程,阻塞中的 HTTP 调用抛异常收敛返回,不再产生
+                // "超时后后台继续点击屏幕"的无限孤儿执行。
+                runInterruptible { goalExecutor.executeGoal(payload) }
             }
         } ?: run {
             Log.e(TAG, "goal_execution timed out after ${GOAL_EXECUTION_TIMEOUT_MS}ms; task_id=${payload.task_id}")

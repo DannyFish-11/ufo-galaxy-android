@@ -5,7 +5,7 @@ import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
 /**
  * Runtime-state-aware fallback implementation of [LocalGroundingService].
  *
- * **Replaces [NoOpGroundingService] as the canonical fallback** when the SeeClick grounding
+ * **Replaces [NoOpGroundingService] as the canonical fallback** when the unified VLM grounding
  * runtime is unavailable. Unlike [NoOpGroundingService], this implementation:
  *  - Carries the precise [runtimeState] that caused the degradation.
  *  - Returns [LocalGroundingService.GroundingResult] values whose [LocalGroundingService.GroundingResult.error]
@@ -16,8 +16,8 @@ import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
  * ## When to use
  * | Condition                                    | Service to use                                  |
  * |----------------------------------------------|-------------------------------------------------|
- * | Runtime `Running` (both components healthy)  | [com.ufo.galaxy.grounding.SeeClickGroundingEngine] |
- * | Runtime `Degraded` (one component healthy)   | [com.ufo.galaxy.grounding.SeeClickGroundingEngine] (degraded mode) |
+ * | Runtime `Running` (both components healthy)  | [com.ufo.galaxy.grounding.VlmGroundingEngine] |
+ * | Runtime `Degraded` (one component healthy)   | [com.ufo.galaxy.grounding.VlmGroundingEngine] (degraded mode) |
  * | Runtime `Failed`, `Stopped`, or `SafeMode`   | **[DegradedGroundingService]**                  |
  * | Model files missing before first start       | **[DegradedGroundingService]**                  |
  *

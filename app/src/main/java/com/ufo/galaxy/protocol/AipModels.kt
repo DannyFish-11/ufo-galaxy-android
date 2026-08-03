@@ -2053,9 +2053,9 @@ data class DeviceAuditReportPayload(
  * @param model_id              Canonical model identifier (e.g. `"mobilevlm_v2_1.7b"`).
  * @param runtime_type          Model runtime type string (e.g. `"LLAMA_CPP"`).
  * @param checksum_ok           Whether the model checksum passed verification.
- * @param mobilevlm_present     Whether the MobileVLM model file exists on device.
- * @param mobilevlm_checksum_ok Whether the MobileVLM checksum passed verification.
- * @param seeclick_present      Whether the SeeClick model files (param+bin) exist on device.
+ * @param mobilevlm_present     Whether the unified VLM LLM weight file exists on device(wire 字段名保持历史兼容)。
+ * @param mobilevlm_checksum_ok Whether the unified VLM checksum passed verification(wire 字段名保持历史兼容)。
+ * @param seeclick_present      Whether the VLM mmproj vision file exists on device(wire 字段名保持历史兼容)。
  * @param pending_first_download Whether the device is still awaiting its first model download.
  *
  * Local loop config (from [UFOGalaxyApplication.localLoopConfig]):

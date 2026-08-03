@@ -78,8 +78,21 @@ class RemoteConfigFetcher(
     private suspend fun fetchWithFallback(v1Url: String, legacyUrl: String): JSONObject? {
         val v1Result = fetchDirect(v1Url, endpoint = "v1") ?: return null
         if (v1Result.code == 404) {
+            // 两边的改动都要保留:
+            //   本分支 —— 把顺序换成"先打服务端真实存在的那条"(/api/config),
+            //             v1 留作服务端补上之后自动切换。实测 /api/v1/config 恒 404。
+            //   main   —— 修了一个真 bug:第二跳的结果没检查成功与否。fetchDirect 无论
+            //             HTTP 状态码如何都会解析出一个非空 body(onResponse 里无条件
+            //             JSONObject(...)),于是第二跳 404/500 时仍把空 body 当成功返回,
+            //             与本类文档"非 404 HTTP 错误立即返回 null"矛盾。
+            // 顺序与校验是两件正交的事,合起来才对。
             Log.w(TAG, "[CONFIG] primary $CONFIG_PRIMARY_PATH returned 404; trying $CONFIG_FUTURE_PATH")
-            return fetchDirect(legacyUrl, endpoint = "legacy")?.body
+            val secondHop = fetchDirect(legacyUrl, endpoint = "legacy") ?: return null
+            if (!secondHop.success) {
+                Log.w(TAG, "[CONFIG] http=${secondHop.code} endpoint=${CONFIG_FUTURE_PATH}")
+                return null
+            }
+            return secondHop.body
         }
         if (!v1Result.success) {
             Log.w(TAG, "[CONFIG] http=${v1Result.code} endpoint=v1")

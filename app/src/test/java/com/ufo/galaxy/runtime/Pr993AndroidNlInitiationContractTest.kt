@@ -17,9 +17,11 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.protocol.TaskSubmitPayload
+import com.ufo.galaxy.transport.AipTransportManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -136,6 +138,12 @@ class Pr993AndroidNlInitiationContractTest {
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED：清理 AipTransportManager 单例，避免 fake adapter 泄漏到其他测试类
+        AipTransportManager.resetInstance()
+    }
+
     // ── Fake GatewayClient ────────────────────────────────────────────────────
 
     private class FakeGatewayClient(
@@ -211,6 +219,10 @@ class Pr993AndroidNlInitiationContractTest {
         gateway: FakeGatewayClient = FakeGatewayClient(connected = false),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     ): InputRouter {
+        // PR-AIP-UNIFIED：生产侧 InputRouter 统一经 AipTransportManager 单例发送上行消息，
+        // 测试必须把 fake gateway 注册为 websocket adapter，消息才能被捕获。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gateway)
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
         val localLoopExecutor = DefaultLocalLoopExecutor(
             loopController = buildLoopController(),

@@ -339,7 +339,12 @@ class Pr8AndroidMeshParticipationContractTest {
         private const val taskIdKey = "task_id"
 
         private fun staleDelegatedResultPayload(taskId: String): String =
-            """{"$payloadKey":{"$taskIdKey":"$taskId"}}"""
+            // 测试修复(与 Pr74 同根因):生产端已有意新增 canonical ownership 预过滤,
+            // 缺 ownership 字段的消息会先被判为 OWNERSHIP_UNSPECIFIED_REPLAY_BLOCKED,
+            // 到不了 session-tag 判定轴;补上字段以专注验证 STALE_SESSION_BLOCKED 语义。
+            """{"type":"goal_execution_result","canonical_ownership_status":"canonical_bound",""" +
+                """"truth_ingress_class":"canonicalization_candidate","is_canonicalization_ready":true,""" +
+                """"$payloadKey":{"$taskIdKey":"$taskId"}}"""
     }
 
     private fun createHealthyOrchestrationRecord(): MultiDeviceParticipantOrchestrationState.StateRecord =

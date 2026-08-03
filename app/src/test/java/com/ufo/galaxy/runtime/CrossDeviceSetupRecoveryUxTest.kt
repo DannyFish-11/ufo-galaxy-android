@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -328,10 +329,12 @@ class CrossDeviceSetupRecoveryUxTest {
         val (controller, _) = buildController(settings = settings, timeoutMs = 150L)
 
         var received: CrossDeviceSetupError? = null
-        val job = launch { received = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.setupError.first() }
 
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertNotNull("setupError must emit on startWithTimeout failure", received)
     }
@@ -342,10 +345,12 @@ class CrossDeviceSetupRecoveryUxTest {
         val (controller, _) = buildController(settings = settings, timeoutMs = 150L)
 
         var received: CrossDeviceSetupError? = null
-        val job = launch { received = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.setupError.first() }
 
         controller.startWithTimeout()
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertEquals(
             "With configured gateway and unreachable server the category must be NETWORK",
@@ -362,12 +367,16 @@ class CrossDeviceSetupRecoveryUxTest {
         var setupErrReceived: CrossDeviceSetupError? = null
         var regErrReceived: String? = null
 
-        val j1 = launch { setupErrReceived = controller.setupError.first() }
-        val j2 = launch { regErrReceived = controller.registrationError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on these hot, no-replay
+        // SharedFlows; withTimeout bounds the wait so a lost race fails fast.
+        val j1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { setupErrReceived = controller.setupError.first() }
+        val j2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { regErrReceived = controller.registrationError.first() }
 
         controller.startWithTimeout()
-        j1.join()
-        j2.join()
+        withTimeout(2000) {
+            j1.join()
+            j2.join()
+        }
 
         assertNotNull("setupError must emit on failure", setupErrReceived)
         assertNotNull("registrationError must emit on the same failure", regErrReceived)
@@ -381,12 +390,16 @@ class CrossDeviceSetupRecoveryUxTest {
         var setupErrReason: String? = null
         var regErrReason: String? = null
 
-        val j1 = launch { setupErrReason = controller.setupError.first().reason }
-        val j2 = launch { regErrReason = controller.registrationError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on these hot, no-replay
+        // SharedFlows; withTimeout bounds the wait so a lost race fails fast.
+        val j1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { setupErrReason = controller.setupError.first().reason }
+        val j2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { regErrReason = controller.registrationError.first() }
 
         controller.startWithTimeout()
-        j1.join()
-        j2.join()
+        withTimeout(2000) {
+            j1.join()
+            j2.join()
+        }
 
         assertEquals(
             "setupError.reason must equal the registrationError string",
@@ -479,10 +492,12 @@ class CrossDeviceSetupRecoveryUxTest {
         val (controller, _) = buildController(settings = settings, timeoutMs = 150L)
 
         var received: CrossDeviceSetupError? = null
-        val job = launch { received = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.setupError.first() }
 
         controller.reconnect()
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertNotNull("reconnect must emit setupError when the new start attempt fails", received)
     }
@@ -493,10 +508,12 @@ class CrossDeviceSetupRecoveryUxTest {
         val (controller, _) = buildController(settings = settings, timeoutMs = 150L)
 
         var received: String? = null
-        val job = launch { received = controller.registrationError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on registrationError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { received = controller.registrationError.first() }
 
         controller.reconnect()
-        job.join()
+        withTimeout(2000) { job.join() }
 
         assertNotNull("reconnect must emit registrationError when the new start attempt fails", received)
     }
@@ -511,18 +528,20 @@ class CrossDeviceSetupRecoveryUxTest {
 
         // First attempt: no gateway → CONFIGURATION error.
         var firstErr: CrossDeviceSetupError? = null
-        val j1 = launch { firstErr = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val j1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { firstErr = controller.setupError.first() }
         controller.startWithTimeout()
-        j1.join()
+        withTimeout(2000) { j1.join() }
         assertEquals(CrossDeviceSetupError.Category.CONFIGURATION, firstErr!!.category)
 
         // Now configure a gateway and reconnect.
         settings.gatewayHost = "10.0.0.1"
 
         var secondErr: CrossDeviceSetupError? = null
-        val j2 = launch { secondErr = controller.setupError.first() }
+        val j2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { secondErr = controller.setupError.first() }
         controller.reconnect()
-        j2.join()
+        withTimeout(2000) { j2.join() }
 
         assertEquals(
             "After configuring a gateway, setupError category must switch to NETWORK",
@@ -539,18 +558,20 @@ class CrossDeviceSetupRecoveryUxTest {
 
         // First attempt: gateway configured → NETWORK error.
         var firstErr: CrossDeviceSetupError? = null
-        val j1 = launch { firstErr = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val j1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { firstErr = controller.setupError.first() }
         controller.startWithTimeout()
-        j1.join()
+        withTimeout(2000) { j1.join() }
         assertEquals(CrossDeviceSetupError.Category.NETWORK, firstErr!!.category)
 
         // Clear the gateway.
         settings.gatewayHost = ""
 
         var secondErr: CrossDeviceSetupError? = null
-        val j2 = launch { secondErr = controller.setupError.first() }
+        val j2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { secondErr = controller.setupError.first() }
         controller.reconnect()
-        j2.join()
+        withTimeout(2000) { j2.join() }
 
         assertEquals(
             "After clearing the gateway, setupError category must switch to CONFIGURATION",
@@ -625,12 +646,16 @@ class CrossDeviceSetupRecoveryUxTest {
         var consumer1: CrossDeviceSetupError? = null
         var consumer2: CrossDeviceSetupError? = null
 
-        val j1 = launch { consumer1 = controller.setupError.first() }
-        val j2 = launch { consumer2 = controller.setupError.first() }
+        // UNDISPATCHED closes the subscribe-before-emit race on setupError (hot,
+        // no-replay SharedFlow); withTimeout bounds the wait so a lost race fails fast.
+        val j1 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { consumer1 = controller.setupError.first() }
+        val j2 = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { consumer2 = controller.setupError.first() }
 
         controller.startWithTimeout()
-        j1.join()
-        j2.join()
+        withTimeout(2000) {
+            j1.join()
+            j2.join()
+        }
 
         assertNotNull("First consumer must receive setupError", consumer1)
         assertNotNull("Second consumer must receive setupError", consumer2)

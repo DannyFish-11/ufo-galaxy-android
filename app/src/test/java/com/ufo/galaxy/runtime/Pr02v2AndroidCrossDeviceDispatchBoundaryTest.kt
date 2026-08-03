@@ -335,7 +335,14 @@ class Pr02v2AndroidCrossDeviceDispatchBoundaryTest {
     }
 
     @Test fun `derive COMPAT_FALLBACK with no active execution returns NONE`() {
-        val result = derive(defaultInput(isAgentBridgeCompatEntry = true, hasDelegatedOrTakeoverExecution = false))
+        // 测试修复:defaultInput 默认 executionPathTag=CROSS_DEVICE_PATH,而
+        // isActiveExecution 把该 tag 本身视为活跃执行,"无活跃执行"必须连 tag
+        // 一起换成 LOCAL_PATH,否则恒推导出 INBOUND_EXECUTION。
+        val result = derive(defaultInput(
+            isAgentBridgeCompatEntry = true,
+            hasDelegatedOrTakeoverExecution = false,
+            executionPathTag = AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.LOCAL_PATH
+        ))
         assertEquals(
             AndroidCrossDeviceDispatchBoundaryContract.DispatchPathConsumptionKind.NONE,
             result.dispatchPathConsumptionKind
@@ -375,9 +382,11 @@ class Pr02v2AndroidCrossDeviceDispatchBoundaryTest {
     }
 
     @Test fun `derive CONTROLLED_CANONICAL_FALLBACK with no active execution returns NONE`() {
+        // 测试修复:同上,"无活跃执行"需把默认的 CROSS_DEVICE_PATH tag 换成 LOCAL_PATH。
         val result = derive(defaultInput(
             isAgentBridgeFallback = true,
-            hasDelegatedOrTakeoverExecution = false
+            hasDelegatedOrTakeoverExecution = false,
+            executionPathTag = AndroidRuntimeObservabilityAuditContract.ExecutionPathTag.LOCAL_PATH
         ))
         assertEquals(
             AndroidCrossDeviceDispatchBoundaryContract.DispatchPathConsumptionKind.NONE,

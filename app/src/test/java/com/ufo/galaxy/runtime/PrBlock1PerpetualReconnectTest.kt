@@ -187,7 +187,9 @@ class PrBlock1PerpetualReconnectTest {
             ReconnectRecoveryState.RECOVERING,
             controller.reconnectRecoveryState.value
         )
-        client.simulateDisconnected()
+        // #115 曾把已删除的 simulateError 误替换为 simulateDisconnected;
+        // RECOVERING→FAILED 只能由 onError 驱动,恢复为触发 WS 错误。
+        client.testFireErrorOnListeners("connection refused — watchdog cycle entered")
         assertEquals(
             "Precondition: must be FAILED after error",
             ReconnectRecoveryState.FAILED,
@@ -218,7 +220,8 @@ class PrBlock1PerpetualReconnectTest {
 
         // Drive to FAILED.
         client.simulateDisconnected()
-        client.simulateDisconnected()
+        // #115 曾误改为二次断连;FAILED 只能由 onError 驱动。
+        client.testFireErrorOnListeners("network unreachable")
 
         assertEquals(
             "Precondition: recovery state must be FAILED",
@@ -247,7 +250,8 @@ class PrBlock1PerpetualReconnectTest {
 
         // Drive to FAILED and back.
         client.simulateDisconnected()
-        client.simulateDisconnected()
+        // #115 曾误改为二次断连;FAILED 只能由 onError 驱动。
+        client.testFireErrorOnListeners("host unreachable")
         client.simulateConnected()
 
         assertEquals(
@@ -288,7 +292,8 @@ class PrBlock1PerpetualReconnectTest {
         controller.setActiveForTest()
 
         client.simulateDisconnected()
-        client.simulateDisconnected()
+        // #115 曾误改为二次断连;FAILED 只能由 onError 驱动。
+        client.testFireErrorOnListeners("max reconnect attempts")
 
         assertEquals(
             "Precondition: recovery state must be FAILED before stop",
@@ -311,7 +316,8 @@ class PrBlock1PerpetualReconnectTest {
         controller.setActiveForTest()
 
         client.simulateDisconnected()
-        client.simulateDisconnected()
+        // #115 曾误改为二次断连;FAILED 只能由 onError 驱动。
+        client.testFireErrorOnListeners("host unreachable")
 
         controller.stop()
 
@@ -331,7 +337,8 @@ class PrBlock1PerpetualReconnectTest {
 
         // ── Cycle 1 ────────────────────────────────────────────────────────
         client.simulateDisconnected()
-        client.simulateDisconnected()
+        // #115 曾误改为二次断连;FAILED 只能由 onError 驱动。
+        client.testFireErrorOnListeners("cycle 1 — connection refused")
         assertEquals(
             "Cycle 1: must be FAILED after error",
             ReconnectRecoveryState.FAILED,
@@ -356,7 +363,8 @@ class PrBlock1PerpetualReconnectTest {
             ReconnectRecoveryState.RECOVERING,
             controller.reconnectRecoveryState.value
         )
-        client.simulateDisconnected()
+        // #115 曾误改为二次断连;FAILED 只能由 onError 驱动。
+        client.testFireErrorOnListeners("cycle 2 — host unreachable")
         assertEquals(
             "Cycle 2: must be FAILED after second error",
             ReconnectRecoveryState.FAILED,

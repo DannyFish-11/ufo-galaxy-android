@@ -155,7 +155,7 @@ object AndroidAutonomyBoundary {
     ) {
 
         /**
-         * Android decomposes goals into action sequences using the on-device MobileVLM 1.7B
+         * Android decomposes goals into action sequences using the on-device unified VLM (MAI-UI-2B)
          * planner ([com.ufo.galaxy.loop.LocalPlanner]).
          *
          * **LOCAL_AUTONOMOUS**: Android plans independently; the plan is final and is not
@@ -170,7 +170,7 @@ object AndroidAutonomyBoundary {
             wireValue = "local_planning",
             displayName = "Local Planning",
             description = "Android decomposes goals into action steps using the on-device " +
-                "MobileVLM 1.7B planner.",
+                "unified VLM (MAI-UI-2B) planner.",
             autonomousInLocalMode = true,
             alwaysAndroidOwned = false,
             v2GovernedSemantics = "V2 owns initial goal decomposition authority; Android " +
@@ -178,18 +178,18 @@ object AndroidAutonomyBoundary {
         ),
 
         /**
-         * Android resolves UI element screen coordinates using the on-device SeeClick
+         * Android resolves UI element screen coordinates using the on-device unified VLM
          * grounding model ([com.ufo.galaxy.loop.ExecutorBridge]).
          *
          * **Always Android-owned** — grounding is an on-device operation in both modes.
-         * V2 never resolves screen coordinates; the SeeClick model is the sole grounding
+         * V2 never resolves screen coordinates; the on-device unified VLM is the sole grounding
          * authority for this device.
          */
         LOCAL_GROUNDING(
             wireValue = "local_grounding",
             displayName = "Local Grounding",
             description = "Android resolves UI element screen coordinates using the on-device " +
-                "SeeClick grounding model.",
+                "unified VLM (MAI-UI-2B) grounding model.",
             autonomousInLocalMode = true,
             alwaysAndroidOwned = true,
             v2GovernedSemantics = "Grounding is always Android-owned; V2 never grounds " +

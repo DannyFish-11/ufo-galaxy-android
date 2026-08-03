@@ -6,7 +6,7 @@ import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
  * Runtime-state-aware fallback implementation of [LocalPlannerService].
  *
  * **Replaces [NoOpPlannerService] as the canonical fallback** when the
- * MobileVLM planner runtime is unavailable. Unlike [NoOpPlannerService],
+ * unified VLM planner runtime is unavailable. Unlike [NoOpPlannerService],
  * this implementation:
  *  - Carries the precise [runtimeState] that caused the degradation.
  *  - Returns [LocalPlannerService.PlanResult] values whose [LocalPlannerService.PlanResult.error]
@@ -17,8 +17,8 @@ import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
  * ## When to use
  * | Condition                                    | Service to use                          |
  * |----------------------------------------------|-----------------------------------------|
- * | Runtime `Running` (both components healthy)  | [com.ufo.galaxy.planner.MobileVlmPlanner] |
- * | Runtime `Degraded` (one component healthy)   | [com.ufo.galaxy.planner.MobileVlmPlanner] (degraded mode) |
+ * | Runtime `Running` (both components healthy)  | [com.ufo.galaxy.planner.VlmPlanner] |
+ * | Runtime `Degraded` (one component healthy)   | [com.ufo.galaxy.planner.VlmPlanner] (degraded mode) |
  * | Runtime `Failed`, `Stopped`, or `SafeMode`   | **[DegradedPlannerService]**            |
  * | Model files missing before first start       | **[DegradedPlannerService]**            |
  *

@@ -7,8 +7,8 @@ package com.ufo.galaxy.runtime
  * readiness providers, recovery logic) should treat this as a point-in-time view and
  * re-query if they need fresh data.
  *
- * @property plannerHealth   Health of the MobileVLM planner runtime.
- * @property groundingHealth Health of the SeeClick grounding runtime.
+ * @property plannerHealth   Health of the unified VLM planner runtime.
+ * @property groundingHealth Health of the unified VLM grounding runtime.
  * @property snapshotTimeMs  Wall-clock time when this snapshot was taken (ms since epoch).
  * @property plannerError    Failure message for the planner; null when healthy.
  * @property groundingError  Failure message for the grounding engine; null when healthy.

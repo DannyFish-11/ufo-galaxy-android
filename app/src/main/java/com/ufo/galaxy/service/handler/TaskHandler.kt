@@ -214,6 +214,12 @@ class TaskHandler(
         val traceId = inboundTraceId?.takeIf { it.isNotBlank() }
             ?: java.util.UUID.randomUUID().toString()
 
+        // 真 bug 修复:onRemoteTaskStarted/Finished 必须成对调用。此前 payload 解析
+        // 失败或 goal 为空时在调用 Started 之前就 return/抛异常,但 finally 无条件
+        // 调用 Finished。触发场景:并行子任务场景下,一条畸形 subtask 消息会把
+        // 另一条仍在执行的远程任务的 isRemoteExecutionActive 标志误清为 false,
+        // 本地 loop 提前解锁并与远程执行相互干扰。
+        var remoteTaskStarted = false
         try {
             // Parse and execute subtask. Parallel subtasks are carried on the wire as
             // GoalExecutionPayload (there is no separate ParallelSubtaskPayload); the
@@ -228,6 +234,7 @@ class TaskHandler(
             }
 
             UFOGalaxyApplication.runtimeController.onRemoteTaskStarted()
+            remoteTaskStarted = true
 
             val goalPayload = subtaskPayload.copy(task_id = taskId)
 
@@ -251,7 +258,10 @@ class TaskHandler(
             Log.e(TAG, "parallel_subtask error: task_id=$taskId error=${e.message}", e)
             onSendGoalError(taskId, null, null, "subtask_error: ${e.message}", traceId)
         } finally {
-            UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+            // 仅在确实调用过 onRemoteTaskStarted 时才配对调用 Finished(见上方注释)
+            if (remoteTaskStarted) {
+                UFOGalaxyApplication.runtimeController.onRemoteTaskFinished()
+            }
         }
     }
 

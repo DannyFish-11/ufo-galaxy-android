@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- UFO Galaxy 主题 - 书法卷轴风格 -->
     <style name="Theme.UFOGalaxy" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- 主色调 - 墨色 -->
@@ -34,7 +34,8 @@
         
         <!-- 导航栏 -->
         <item name="android:navigationBarColor">@color/rice_white</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <!-- windowLightNavigationBar 需 API 27；minSdk 26 下由 tools:targetApi 抑制 NewApi。 -->
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
     
     <!-- 透明主题 - 用于悬浮窗 -->

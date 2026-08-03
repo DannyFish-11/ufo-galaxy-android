@@ -12,6 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -488,9 +489,12 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.openTestSession()
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-abc")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_ACCEPTED signal on reconciliationSignals", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_ACCEPTED, signal!!.kind)
     }
@@ -501,9 +505,12 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = descriptor)
         controller.openTestSession()
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-pid-check")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(expectedParticipantId(), signal!!.participantId)
     }
@@ -513,9 +520,12 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.openTestSession()
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-xyz")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals("task-xyz", signal!!.taskId)
     }
@@ -525,9 +535,12 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.openTestSession()
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-status")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(ReconciliationSignal.STATUS_RUNNING, signal!!.status)
     }
@@ -537,9 +550,12 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.openTestSession()
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-corr", correlationId = "corr-XYZ")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals("corr-XYZ", signal!!.correlationId)
     }
@@ -562,9 +578,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult emits TASK_RESULT on reconciliationSignals`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-1")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-1")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_RESULT signal on reconciliationSignals", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_RESULT, signal!!.kind)
     }
@@ -573,9 +593,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult emitted signal participantId matches hostDescriptor`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-pid")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-pid")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(expectedParticipantId(), signal!!.participantId)
     }
@@ -584,9 +608,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult emitted signal taskId matches provided taskId`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-2")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-2")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals("task-result-2", signal!!.taskId)
     }
@@ -595,9 +623,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult emitted signal status is STATUS_SUCCESS`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-status")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-status")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(ReconciliationSignal.STATUS_SUCCESS, signal!!.status)
         assertEquals(
@@ -616,9 +648,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult emits unified lifecycle surface with result handoff and closure mapping`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-lifecycle")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-lifecycle")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         val lifecycle = signal!!.payload[ReconciliationSignal.KEY_UNIFIED_ACTION_LIFECYCLE_SURFACE]
             as? Map<*, *>
@@ -636,9 +672,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult payload distinguishes local completion from external propagation`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-truth")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-truth")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             AndroidRuntimeEmissionTruthSemantics.LocalRuntimeStateClass
@@ -671,9 +711,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult payload marks clean completion as verified complete`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-result-completion-grade")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-completion-grade")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.COMPLETION.wireValue,
@@ -695,13 +739,19 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskResult in recovery state marks outcome as degraded recovery completion`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val acceptedJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-result-recovery")
-        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        acceptedJob.await()
         controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskResult("task-result-recovery")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.RECOVERY.wireValue,
@@ -726,15 +776,21 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
         controller.openTestSession()
 
+        val acceptedJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.recordDelegatedTaskAccepted("task-status-active")
-        withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        acceptedJob.await()
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate(
             taskId = "task-status-active",
             progressDetail = "step-1"
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_STATUS_UPDATE signal on reconciliationSignals", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
         assertEquals("step-1", signal.payload["progress_detail"])
@@ -765,9 +821,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskCancelled emits TASK_CANCELLED on reconciliationSignals`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-cancel-1")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskCancelled("task-cancel-1")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_CANCELLED signal on reconciliationSignals", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_CANCELLED, signal!!.kind)
     }
@@ -776,9 +836,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskCancelled emitted signal participantId matches hostDescriptor`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-cancel-pid")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskCancelled("task-cancel-pid")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(expectedParticipantId(), signal!!.participantId)
     }
@@ -787,9 +851,13 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishTaskCancelled emitted signal status is STATUS_CANCELLED`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-cancel-status")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskCancelled("task-cancel-status")
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(ReconciliationSignal.STATUS_CANCELLED, signal!!.status)
     }
@@ -800,12 +868,15 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot emits RUNTIME_TRUTH_SNAPSHOT on reconciliationSignals`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected RUNTIME_TRUTH_SNAPSHOT signal on reconciliationSignals", signal)
         assertEquals(ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT, signal!!.kind)
     }
@@ -814,9 +885,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot emitted signal has non-null runtimeTruth`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(ParticipantHealthState.HEALTHY)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertNotNull("runtimeTruth must be non-null for RUNTIME_TRUTH_SNAPSHOT", signal!!.runtimeTruth)
     }
@@ -825,9 +899,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot emitted signal hasRuntimeTruth is true`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(ParticipantHealthState.HEALTHY)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertTrue("hasRuntimeTruth must be true for RUNTIME_TRUTH_SNAPSHOT", signal!!.hasRuntimeTruth)
     }
@@ -836,9 +913,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot payload distinguishes local observation from external propagation`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(ParticipantHealthState.HEALTHY)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             AndroidRuntimeEmissionTruthSemantics.LocalRuntimeStateClass
@@ -861,9 +941,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot runtimeTruth participantId matches hostDescriptor`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(ParticipantHealthState.HEALTHY)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(expectedParticipantId(), signal!!.runtimeTruth!!.participantId)
     }
@@ -872,12 +955,15 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot runtimeTruth healthState matches provided healthState`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(
             healthState = ParticipantHealthState.DEGRADED,
             readinessState = ParticipantReadinessState.READY
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(ParticipantHealthState.DEGRADED, signal!!.runtimeTruth!!.healthState)
     }
@@ -886,12 +972,15 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `publishRuntimeTruthSnapshot runtimeTruth readinessState matches provided readinessState`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishRuntimeTruthSnapshot(
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY_WITH_FALLBACK
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(ParticipantReadinessState.READY_WITH_FALLBACK, signal!!.runtimeTruth!!.readinessState)
     }
@@ -902,6 +991,10 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyTakeoverFailed with FAILED cause emits TASK_FAILED signal`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-fail-1")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyTakeoverFailed(
             takeoverId = "to-1",
             taskId = "task-fail-1",
@@ -910,7 +1003,7 @@ class Pr52ReconciliationSignalEmissionTest {
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_FAILED signal for FAILED cause", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
     }
@@ -919,6 +1012,10 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyTakeoverFailed with TIMEOUT cause emits TASK_FAILED signal`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-timeout-1")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyTakeoverFailed(
             takeoverId = "to-2",
             taskId = "task-timeout-1",
@@ -927,7 +1024,7 @@ class Pr52ReconciliationSignalEmissionTest {
             cause = TakeoverFallbackEvent.Cause.TIMEOUT
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_FAILED signal for TIMEOUT cause", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
     }
@@ -936,6 +1033,10 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyTakeoverFailed with CANCELLED cause emits TASK_CANCELLED signal`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-cancel-1")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyTakeoverFailed(
             takeoverId = "to-3",
             taskId = "task-cancel-1",
@@ -944,7 +1045,7 @@ class Pr52ReconciliationSignalEmissionTest {
             cause = TakeoverFallbackEvent.Cause.CANCELLED
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_CANCELLED signal for CANCELLED cause", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_CANCELLED, signal!!.kind)
     }
@@ -953,6 +1054,10 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyTakeoverFailed with DISCONNECT cause emits TASK_FAILED signal`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-disconnect-1")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyTakeoverFailed(
             takeoverId = "to-4",
             taskId = "task-disconnect-1",
@@ -961,7 +1066,7 @@ class Pr52ReconciliationSignalEmissionTest {
             cause = TakeoverFallbackEvent.Cause.DISCONNECT
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected TASK_FAILED signal for DISCONNECT cause", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_FAILED, signal!!.kind)
     }
@@ -970,6 +1075,10 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyTakeoverFailed with DISCONNECT cause marks interruption as terminal incomplete`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-disconnect-grade")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyTakeoverFailed(
             takeoverId = "to-disconnect-grade",
             taskId = "task-disconnect-grade",
@@ -978,7 +1087,7 @@ class Pr52ReconciliationSignalEmissionTest {
             cause = TakeoverFallbackEvent.Cause.DISCONNECT
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             AndroidMissionCompletionSemanticsContract.TerminalOutcomeKind.INTERRUPTION.wireValue,
@@ -1009,6 +1118,10 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyTakeoverFailed emitted signal taskId matches provided taskId`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        controller.recordDelegatedTaskAccepted(taskId = "task-id-check")
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyTakeoverFailed(
             takeoverId = "to-5",
             taskId = "task-id-check",
@@ -1017,7 +1130,7 @@ class Pr52ReconciliationSignalEmissionTest {
             cause = TakeoverFallbackEvent.Cause.FAILED
         )
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals("task-id-check", signal!!.taskId)
     }
@@ -1043,6 +1156,7 @@ class Pr52ReconciliationSignalEmissionTest {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
         // First call — should emit a signal
+        controller.recordDelegatedTaskAccepted(taskId = "task-dup")
         controller.notifyTakeoverFailed(
             takeoverId = "to-dup",
             taskId = "task-dup",
@@ -1054,6 +1168,9 @@ class Pr52ReconciliationSignalEmissionTest {
         withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
 
         // Second call with same takeoverId — deduplication guard should suppress it
+        // specifically (not the activeTaskId-mismatch guard), so re-accept the same
+        // taskId first to keep activeTaskId matching for this second attempt.
+        controller.recordDelegatedTaskAccepted(taskId = "task-dup")
         controller.notifyTakeoverFailed(
             takeoverId = "to-dup",
             taskId = "task-dup",
@@ -1071,9 +1188,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyParticipantHealthChanged with DEGRADED emits PARTICIPANT_STATE signal`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyParticipantHealthChanged(ParticipantHealthState.DEGRADED)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected PARTICIPANT_STATE signal for DEGRADED health", signal)
         assertEquals(ReconciliationSignal.Kind.PARTICIPANT_STATE, signal!!.kind)
     }
@@ -1082,9 +1202,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyParticipantHealthChanged with HEALTHY emits PARTICIPANT_STATE signal`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyParticipantHealthChanged(ParticipantHealthState.HEALTHY)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull("Expected PARTICIPANT_STATE signal for HEALTHY health", signal)
         assertEquals(ReconciliationSignal.Kind.PARTICIPANT_STATE, signal!!.kind)
     }
@@ -1093,9 +1216,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyParticipantHealthChanged emitted signal payload contains health_state`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyParticipantHealthChanged(ParticipantHealthState.RECOVERING)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             ParticipantHealthState.RECOVERING.wireValue,
@@ -1107,9 +1233,12 @@ class Pr52ReconciliationSignalEmissionTest {
     fun `notifyParticipantHealthChanged payload keeps participant state local until external delivery occurs`() = runBlocking {
         val (controller, _) = buildController(descriptor = buildDescriptor())
 
+        val job = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.notifyParticipantHealthChanged(ParticipantHealthState.RECOVERING)
 
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = job.await()
         assertNotNull(signal)
         assertEquals(
             AndroidRuntimeEmissionTruthSemantics.LocalRuntimeStateClass

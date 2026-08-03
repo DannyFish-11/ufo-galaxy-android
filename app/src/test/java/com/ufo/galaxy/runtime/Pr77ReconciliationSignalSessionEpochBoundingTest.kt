@@ -166,8 +166,9 @@ class Pr77ReconciliationSignalSessionEpochBoundingTest {
         val record = controller.durableSessionContinuityRecord.value
         assertNotNull(record)
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让订阅在触发前同步建立,规避 replay=0 热流订阅-发射竞态。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_ACCEPTED }
             }
         }
@@ -192,8 +193,11 @@ class Pr77ReconciliationSignalSessionEpochBoundingTest {
         assertEquals(initialRecord!!.durableSessionId, reconnectedRecord!!.durableSessionId)
         assertEquals(1, reconnectedRecord.sessionContinuityEpoch)
 
-        val deferred = async {
-            withTimeout(500) {
+        // 终态信号守卫:必须先登记同 taskId 的受理记录,否则 publishTaskResult 静默 no-op。
+        controller.recordDelegatedTaskAccepted("task-after-reconnect")
+        // UNDISPATCHED:让订阅在触发前同步建立(谓词过滤 TASK_RESULT,自然跳过 TASK_ACCEPTED)。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_RESULT }
             }
         }

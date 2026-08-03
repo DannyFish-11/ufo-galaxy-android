@@ -14,7 +14,10 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
@@ -357,12 +360,15 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
     }
 
     @Test
-    fun `ALL_WIRE_VALUES contains all five health states`() {
-        assertEquals(5, ParticipantHealthState.ALL_WIRE_VALUES.size)
+    fun `ALL_WIRE_VALUES contains all six health states`() {
+        // 过期快照:生产枚举已有意新增 STARTING("starting")(启动/预热期,阻断能力上报),
+        // 基数 5→6,同步更新计数与包含断言。
+        assertEquals(6, ParticipantHealthState.ALL_WIRE_VALUES.size)
         assertTrue(ParticipantHealthState.ALL_WIRE_VALUES.contains("healthy"))
         assertTrue(ParticipantHealthState.ALL_WIRE_VALUES.contains("degraded"))
         assertTrue(ParticipantHealthState.ALL_WIRE_VALUES.contains("recovering"))
         assertTrue(ParticipantHealthState.ALL_WIRE_VALUES.contains("failed"))
+        assertTrue(ParticipantHealthState.ALL_WIRE_VALUES.contains("starting"))
         assertTrue(ParticipantHealthState.ALL_WIRE_VALUES.contains("unknown"))
     }
 
@@ -620,13 +626,17 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val surface = FormationCoordinationSurface()
         val descriptor = buildDescriptor().withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
 
+        // rebalanceEvents 是 replay=0 热流,先以 UNDISPATCHED 订阅再触发,规避订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onParticipantHealthChanged(
             descriptor = descriptor,
             newHealthState = ParticipantHealthState.DEGRADED,
             reconnectRecoveryState = ReconnectRecoveryState.IDLE
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.ReadinessChanged)
     }
@@ -636,13 +646,17 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val surface = FormationCoordinationSurface()
         val descriptor = buildDescriptor()
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onReconnectRecoveryStateChanged(
             descriptor = descriptor,
             previousRecoveryState = ReconnectRecoveryState.IDLE,
             newRecoveryState = ReconnectRecoveryState.RECOVERING
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.ReadinessChanged)
     }
@@ -652,6 +666,10 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val surface = FormationCoordinationSurface()
         val descriptor = buildDescriptor()
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onReconnectRecoveryStateChanged(
             descriptor = descriptor,
             previousRecoveryState = ReconnectRecoveryState.RECOVERING,
@@ -659,7 +677,7 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
             sessionContinuityEpoch = 1
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.ParticipantRejoined)
         assertEquals(1, (event as FormationRebalanceEvent.ParticipantRejoined).sessionContinuityEpoch)
@@ -670,13 +688,17 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val surface = FormationCoordinationSurface()
         val descriptor = buildDescriptor()
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onReconnectRecoveryStateChanged(
             descriptor = descriptor,
             previousRecoveryState = ReconnectRecoveryState.RECOVERING,
             newRecoveryState = ReconnectRecoveryState.FAILED
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.ReadinessChanged)
     }
@@ -701,6 +723,10 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
     fun `emits ParticipantLost on onParticipantLost`() = runBlocking {
         val surface = FormationCoordinationSurface()
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onParticipantLost(
             lostParticipantId = "p1",
             lostDeviceId = "d1",
@@ -709,7 +735,7 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
             expectedParticipantCount = 2
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.ParticipantLost)
     }
@@ -718,6 +744,15 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
     fun `emits DegradedFormationDetected when present less than expected on onParticipantLost`() = runBlocking {
         val surface = FormationCoordinationSurface()
 
+        // 同上:先以 UNDISPATCHED 建立单一持久订阅再触发;
+        // repeat(N){first()} 在两次 first() 之间会退订,replay=0 热流的事件会永久丢失,
+        // 改用 take(2).toList 一次性收齐两个事件。
+        val events = mutableListOf<FormationRebalanceEvent>()
+        val collectJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                surface.rebalanceEvents.take(2).toList(events)
+            }
+        }
         surface.onParticipantLost(
             lostParticipantId = "p1",
             lostDeviceId = "d1",
@@ -725,12 +760,7 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
             presentParticipantCount = 1,
             expectedParticipantCount = 2
         )
-
-        // Collect two events: ParticipantLost + DegradedFormationDetected
-        val events = mutableListOf<FormationRebalanceEvent>()
-        withTimeoutOrNull(100) {
-            repeat(2) { events.add(surface.rebalanceEvents.first()) }
-        }
+        collectJob.await()
         assertTrue(events.any { it is FormationRebalanceEvent.ParticipantLost })
         assertTrue(events.any { it is FormationRebalanceEvent.DegradedFormationDetected })
     }
@@ -739,12 +769,16 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
     fun `emits RecoveryCompleted on onRecoveryCompleted`() = runBlocking {
         val surface = FormationCoordinationSurface()
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onRecoveryCompleted(
             restoredParticipantCount = 2,
             recoveryTrigger = "participant_rejoined"
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.RecoveryCompleted)
         assertEquals("participant_rejoined", (event as FormationRebalanceEvent.RecoveryCompleted).recoveryTrigger)
@@ -755,6 +789,10 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val surface = FormationCoordinationSurface()
         val descriptor = buildDescriptor(RuntimeHostDescriptor.FormationRole.PRIMARY)
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { surface.rebalanceEvents.first() }
+        }
         surface.onRoleReassignmentRequested(
             descriptor = descriptor,
             requestedRole = RuntimeHostDescriptor.FormationRole.SECONDARY,
@@ -763,7 +801,7 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
             requestingCoordinator = "test-coordinator"
         )
 
-        val event = withTimeoutOrNull(100) { surface.rebalanceEvents.first() }
+        val event = eventJob.await()
         assertNotNull(event)
         assertTrue(event is FormationRebalanceEvent.RoleReassignmentRequested)
     }
@@ -782,9 +820,13 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val (controller, client) = buildController(descriptor = descriptor)
         controller.setActiveForTest()
 
+        // formationRebalanceEvent 是 replay=0 热流,先以 UNDISPATCHED 订阅再触发。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.formationRebalanceEvent.first() }
+        }
         client.simulateDisconnected()
 
-        val event = withTimeoutOrNull(200) { controller.formationRebalanceEvent.first() }
+        val event = eventJob.await()
         assertNotNull("Expected a formation rebalance event after WS disconnect", event)
         assertTrue(event is FormationRebalanceEvent.ReadinessChanged)
         assertEquals("ws_disconnect_active", (event as FormationRebalanceEvent.ReadinessChanged).trigger)
@@ -796,14 +838,19 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val (controller, client) = buildController(descriptor = descriptor)
         controller.setActiveForTest()
 
+        // 先以 UNDISPATCHED 订阅(谓词直接过滤 ParticipantRejoined,可跨越前置 ReadinessChanged),
+        // 再触发断连+重连,规避 replay=0 热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.formationRebalanceEvent.first { it is FormationRebalanceEvent.ParticipantRejoined }
+            }
+        }
         // First disconnect to enter RECOVERING
         client.simulateDisconnected()
-        withTimeoutOrNull(100) { controller.formationRebalanceEvent.first() }
-
         // Now reconnect — should emit ParticipantRejoined
         client.simulateConnected()
 
-        val event = withTimeoutOrNull(200) { controller.formationRebalanceEvent.first() }
+        val event = eventJob.await()
         assertNotNull("Expected a ParticipantRejoined event after WS reconnect", event)
         assertTrue(event is FormationRebalanceEvent.ParticipantRejoined)
         assertEquals(descriptor.deviceId, (event as FormationRebalanceEvent.ParticipantRejoined).rejoinedDeviceId)
@@ -815,13 +862,23 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val (controller, client) = buildController(descriptor = descriptor)
         controller.setActiveForTest()
 
+        // 先以 UNDISPATCHED 订阅(谓词直接过滤 ws_recovery_failed),再触发两阶段转换。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.formationRebalanceEvent.first {
+                    it is FormationRebalanceEvent.ReadinessChanged &&
+                        (it as FormationRebalanceEvent.ReadinessChanged).trigger == "ws_recovery_failed"
+                }
+            }
+        }
         client.simulateDisconnected()
-        withTimeoutOrNull(100) { controller.formationRebalanceEvent.first() }
 
         // WS error while recovering → FAILED
-        client.simulateDisconnected()
+        // #115 曾把已删除的 simulateError 误替换为 simulateDisconnected;
+        // RECOVERING→FAILED 只能由 onError 驱动,恢复为触发 WS 错误。
+        client.testFireErrorOnListeners("connection refused")
 
-        val event = withTimeoutOrNull(200) { controller.formationRebalanceEvent.first() }
+        val event = eventJob.await()
         assertNotNull("Expected a formation rebalance event after WS error", event)
         assertTrue(event is FormationRebalanceEvent.ReadinessChanged)
         assertEquals("ws_recovery_failed", (event as FormationRebalanceEvent.ReadinessChanged).trigger)
@@ -832,9 +889,13 @@ class Pr2FormationRebalanceAndRecoveryHooksTest {
         val descriptor = buildDescriptor()
         val (controller, _) = buildController(descriptor = descriptor)
 
+        // 同上:先订阅(UNDISPATCHED)再触发,规避热流订阅-发射竞态。
+        val eventJob = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.formationRebalanceEvent.first() }
+        }
         controller.notifyParticipantHealthChanged(ParticipantHealthState.DEGRADED)
 
-        val event = withTimeoutOrNull(200) { controller.formationRebalanceEvent.first() }
+        val event = eventJob.await()
         assertNotNull("Expected a formation rebalance event for DEGRADED health", event)
         assertTrue(event is FormationRebalanceEvent.ReadinessChanged)
     }

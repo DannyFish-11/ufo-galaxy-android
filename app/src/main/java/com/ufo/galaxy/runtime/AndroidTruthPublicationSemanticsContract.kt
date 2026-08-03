@@ -432,11 +432,13 @@ object AndroidTruthPublicationSemanticsContract {
             ) == EvidencePresenceKind.POSITIVE_EVIDENCE),
 
         // classifySnapshotEvidencePresence: planner/grounding mismatch → PARTIAL
+        // 自检数据修复:localLoopReady=null 会先命中规则 3(UNKNOWN),永远走不到
+        // 规则 4 的失配判定,该不变量因此恒为 false;给定确定值以真正验证 PARTIAL 规则。
         "classify_snapshot_subsystem_mismatch_yields_partial" to
             (classifySnapshotEvidencePresence(
                 warmupResult = "ok",
                 pendingFirstDownload = false,
-                localLoopReady = null,
+                localLoopReady = true,
                 plannerReady = true,
                 groundingReady = false,
                 offlineQueueDepth = 0,

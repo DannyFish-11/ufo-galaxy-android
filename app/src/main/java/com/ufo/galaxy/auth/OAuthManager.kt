@@ -1,3 +1,13 @@
+// 真 bug 修复:CancellableContinuation.tryResume/tryResumeWithException 在本项目
+// 引脚的 kotlinx-coroutines 版本中标注为 @InternalCoroutinesApi(@RequiresOptIn 默认
+// 严重级别为 ERROR),未经 opt-in 直接使用会导致编译失败——此前所有 CI 门都跑
+// debug 变体的 compileDebugKotlin,理应早已暴露,但显然是刚落地未经完整编译验证
+// 就被推送到主干。这里选择继续使用 tryResume 系列(而非改回 resume/resumeWithException),
+// 因为它是本文件里跨回调/超时/取消三条路径实现"至多 resume 一次"幂等语义的关键
+// API(resume() 在重复调用时会抛 IllegalStateException,tryResume 返回 null 静默失败),
+// 是这段并发安全代码的既有设计意图,不应更改行为,只需补上正确的 opt-in。
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+
 package com.ufo.galaxy.auth
 
 import android.app.Activity
@@ -16,6 +26,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.tasks.Task
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -28,9 +39,6 @@ import java.security.GeneralSecurityException
 import java.security.KeyStoreException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /**
  * OAuth 管理单例类，负责 Google Sign-In 和 GitHub OAuth 的完整流程。
@@ -503,24 +511,18 @@ class OAuthManager private constructor(private val context: Context) {
             customTabsIntent.launchUrl(activity, Uri.parse(authUrl))
         }
 
-        // 超时处理：2 分钟后自动取消
-        val handler = Handler(Looper.getMainLooper())
+        // 超时处理：2 分钟后自动失败。
+        // 该任务在流程完成（成功/失败）或协程取消时都会被移除，
+        // 避免上一轮登录遗留的陈旧超时任务误杀后续登录流程。
         val timeoutRunnable = Runnable {
-            githubOAuthContinuation?.let { cont ->
-                if ((cont as? kotlinx.coroutines.CancellableContinuation<*>)?.isActive == true) {
-                    cont.resumeWithException(OAuthException("GitHub 授权超时，请重试"))
-                }
-            }
-            githubOAuthContinuation = null
-            // 清除 state
-            securePrefs.edit().remove(KEY_GITHUB_OAUTH_STATE).commit()
+            notifyGitHubResult(null, "GitHub 授权超时，请重试")
         }
-        handler.postDelayed(timeoutRunnable, GITHUB_OAUTH_TIMEOUT_MS)
+        githubTimeoutRunnable = timeoutRunnable
+        mainHandler.postDelayed(timeoutRunnable, GITHUB_OAUTH_TIMEOUT_MS)
 
-        // 取消时清理
+        // 取消时清理：原子取出续体并移除超时任务（不会重复 resume）
         continuation.invokeOnCancellation {
-            githubOAuthContinuation = null
-            handler.removeCallbacks(timeoutRunnable)
+            takeGitHubContinuation()
         }
     }
 
@@ -606,18 +608,32 @@ class OAuthManager private constructor(private val context: Context) {
 
     /**
      * 通知等待中的 GitHub OAuth 挂起函数结果。
-     * 由 [handleGitHubCallback] 和 [Companion.handleGitHubOAuthBroadcast] 调用。
+     * 由 [handleGitHubCallback]、超时任务和 [Companion.handleGitHubOAuthBroadcast] 调用。
+     *
+     * 通过 [takeGitHubContinuation] 原子地取出并清空续体、同时移除超时任务，
+     * 配合 tryResume/tryResumeWithException 保证 resume 至多发生一次，
+     * 防止回调 / 超时 / 取消之间的二次 resume 竞态。
      */
     private fun notifyGitHubResult(code: String?, error: String?) {
-        val continuation = githubOAuthContinuation
+        // 无论是否有等待中的续体，流程结束都清除 state，避免残留
+        clearGitHubOAuthState()
+        val continuation = takeGitHubContinuation() ?: return
+        // 真 bug 修复:tryResume/tryResumeWithException 只是"预定"恢复并返回 token,
+        // 必须再调用 completeResume(token) 才会真正恢复协程;此前缺少 completeResume,
+        // 触发场景:GitHub 授权回调/超时到达后,signInWithGitHub 的挂起协程永远不被
+        // 恢复,登录界面永久停留在 Loading 状态(逻辑死路)。
         if (code != null) {
-            continuation?.resume(code)
+            continuation.tryResume(code)?.let { continuation.completeResume(it) }
         } else {
-            continuation?.resumeWithException(
+            continuation.tryResumeWithException(
                 OAuthException(error ?: "GitHub 授权失败")
-            )
+            )?.let { continuation.completeResume(it) }
         }
-        githubOAuthContinuation = null
+    }
+
+    /** 清除本次 GitHub OAuth 流程保存的 state。 */
+    private fun clearGitHubOAuthState() {
+        securePrefs.edit().remove(KEY_GITHUB_OAUTH_STATE).commit()
     }
 
     // ── Companion ───────────────────────────────────────────────────────────
@@ -664,10 +680,39 @@ class OAuthManager private constructor(private val context: Context) {
         // ── 内部挂起续体（用于 Activity 结果回调）──
 
         @Volatile
-        internal var googleSignInContinuation: Continuation<GoogleSignInAccount>? = null
+        internal var googleSignInContinuation: CancellableContinuation<GoogleSignInAccount>? = null
 
         @Volatile
-        internal var githubOAuthContinuation: Continuation<String>? = null
+        internal var githubOAuthContinuation: CancellableContinuation<String>? = null
+
+        /** 续体读取/清空操作的锁，保证原子性，防止多线程下的二次 resume 竞态 */
+        private val continuationLock = Any()
+
+        /** 主线程 Handler，用于 GitHub OAuth 超时任务 */
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        /** 当前 GitHub OAuth 流程的超时任务，完成/取消时移除 */
+        @Volatile
+        private var githubTimeoutRunnable: Runnable? = null
+
+        /**
+         * 原子地取出并清空等待中的 GitHub OAuth 续体，同时移除超时任务。
+         * 所有完成路径（回调、超时、取消）都经过此方法，保证 resume 至多发生一次。
+         *
+         * @return 等待中的续体；如果没有则返回 null
+         */
+        private fun takeGitHubContinuation(): CancellableContinuation<String>? {
+            val continuation: CancellableContinuation<String>?
+            val timeout: Runnable?
+            synchronized(continuationLock) {
+                continuation = githubOAuthContinuation
+                timeout = githubTimeoutRunnable
+                githubOAuthContinuation = null
+                githubTimeoutRunnable = null
+            }
+            timeout?.let { mainHandler.removeCallbacks(it) }
+            return continuation
+        }
 
         /** JSON Content-Type */
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
@@ -705,16 +750,13 @@ class OAuthManager private constructor(private val context: Context) {
          * @param error 错误信息，如果授权成功则为 null
          */
         fun handleGitHubOAuthBroadcast(code: String?, error: String?) {
-            githubOAuthContinuation?.let { continuation ->
-                if (code != null) {
-                    continuation.resume(code)
-                } else {
-                    continuation.resumeWithException(
-                        OAuthException(error ?: "GitHub 授权失败")
-                    )
-                }
+            val manager = instance
+            if (manager != null) {
+                manager.notifyGitHubResult(code, error)
+            } else {
+                // 单例尚未创建时没有等待中的流程，仍需安全清空续体与超时任务
+                takeGitHubContinuation()
             }
-            githubOAuthContinuation = null
         }
 
         /**
@@ -729,14 +771,24 @@ class OAuthManager private constructor(private val context: Context) {
             if (requestCode != RC_GOOGLE_SIGN_IN) return
 
             val task: Task<GoogleSignInAccount> = GoogleSignIn.getSignedInAccountFromIntent(data)
-            val continuation = googleSignInContinuation
+            // 原子取出并清空续体，配合 tryResume 防止与协程取消发生二次 resume 竞态
+            val continuation = synchronized(continuationLock) {
+                val c = googleSignInContinuation
+                googleSignInContinuation = null
+                c
+            } ?: return
 
+            // 真 bug 修复:tryResume/tryResumeWithException 返回的 token 必须传给
+            // completeResume 才会真正恢复协程;此前缺少 completeResume,触发场景:
+            // 用户在 Google 账号选择器中完成选择或取消后,performGoogleSignIn 的挂起
+            // 协程永远不被恢复,登录流程卡死在 Loading(逻辑死路)。
             try {
                 val account = task.getResult(ApiException::class.java)
                 if (account != null) {
-                    continuation?.resume(account)
+                    continuation.tryResume(account)?.let { continuation.completeResume(it) }
                 } else {
-                    continuation?.resumeWithException(OAuthException("Google 登录返回空账号"))
+                    continuation.tryResumeWithException(OAuthException("Google 登录返回空账号"))
+                        ?.let { continuation.completeResume(it) }
                 }
             } catch (e: ApiException) {
                 Log.e(TAG, "Google Sign-In 失败: code=${e.statusCode}, message=${e.message}")
@@ -745,12 +797,12 @@ class OAuthManager private constructor(private val context: Context) {
                     com.google.android.gms.common.api.CommonStatusCodes.NETWORK_ERROR -> "网络错误，请检查网络连接"
                     else -> "Google 登录失败 (${e.statusCode})"
                 }
-                continuation?.resumeWithException(OAuthException(message, e))
+                continuation.tryResumeWithException(OAuthException(message, e))
+                    ?.let { continuation.completeResume(it) }
             } catch (e: Exception) {
                 Log.e(TAG, "Google Sign-In 异常: ${e.message}")
-                continuation?.resumeWithException(OAuthException("Google 登录异常: ${e.message}", e))
-            } finally {
-                googleSignInContinuation = null
+                continuation.tryResumeWithException(OAuthException("Google 登录异常: ${e.message}", e))
+                    ?.let { continuation.completeResume(it) }
             }
         }
     }

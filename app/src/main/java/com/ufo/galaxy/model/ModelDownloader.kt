@@ -56,7 +56,7 @@ class ModelDownloader(
     /**
      * Describes a single model file to be downloaded.
      *
-     * @param modelId        Logical identifier (e.g. [ModelAssetManager.MODEL_ID_MOBILEVLM]).
+     * @param modelId        Logical identifier (e.g. [ModelAssetManager.MODEL_ID_VLM]).
      * @param url            Remote URL of the model file.
      * @param fileName       Local file name within [modelsDir].
      * @param expectedSha256 Expected SHA-256 hex digest; null skips verification.

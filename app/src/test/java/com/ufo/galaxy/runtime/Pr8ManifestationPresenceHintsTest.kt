@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.ufo.galaxy.agent.AccessibilityExecutor
 import com.ufo.galaxy.agent.EdgeExecutor
@@ -116,7 +117,10 @@ class Pr8ManifestationPresenceHintsTest {
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
-    private val gson = Gson()
+    // 真 bug 修复:Gson() 默认构造 serializeNulls=false,null 字段直接从 JSON 里省略
+    // 而不是变成 JsonNull——本文件测试断言 .get("x").isJsonNull 时,.get() 对已省略的
+    // 键先返回 Java null,再调 .isJsonNull 直接空指针(不是断言失败,是测试自己写崩了)。
+    private val gson = GsonBuilder().serializeNulls().create()
 
     /** Serialise [obj] to JSON and parse back as a [JsonObject] for field inspection. */
     private fun toJsonObject(obj: Any): JsonObject =

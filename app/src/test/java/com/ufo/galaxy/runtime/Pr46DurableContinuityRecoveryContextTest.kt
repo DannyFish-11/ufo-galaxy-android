@@ -231,10 +231,12 @@ class Pr46DurableContinuityRecoveryContextTest {
     // ── ContinuityRecoveryContext — KNOWN_INTERRUPTION_REASONS ───────────────
 
     @Test
-    fun `KNOWN_INTERRUPTION_REASONS contains exactly four entries`() {
+    fun `KNOWN_INTERRUPTION_REASONS contains exactly five entries`() {
+        // 过期断言:PR-7 增补 REASON_PROCESS_RECREATION(低内存杀进程后再附着),
+        // 快照计数随注册表演进更新为 5。
         assertEquals(
-            "KNOWN_INTERRUPTION_REASONS must have exactly 4 entries",
-            4,
+            "KNOWN_INTERRUPTION_REASONS must have exactly 5 entries",
+            5,
             ContinuityRecoveryContext.KNOWN_INTERRUPTION_REASONS.size
         )
     }

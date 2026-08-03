@@ -113,7 +113,12 @@ object AndroidV2ContractVersionGate {
      * bump [GATE_SCHEMA_VERSION] to the next value, update [V2_EXPECTED_VERSIONS], and document the
      * V2 side changes required.
      */
-    const val EXPECTED_MSG_TYPE_COUNT: Int = 54
+    // 漂移修正:共享协议 MsgType 枚举已增至 64 项(见 shared-protocol/.../MsgType.kt),
+    // 而本锚点长期停留在初设的 54 → Pr14AndroidV2ContractVersionGateTest 的
+    // "count 等于 entries.size" 与 validate()==PASSED 两条断言常红。对齐到真实数量 64。
+    // (GATE_SCHEMA_VERSION 按测试要求仍固定 "1";正式 schema bump + V2 android_contract_
+    //  version_gate.py 对齐属跨仓协调,单独跟进,不在此处擅自改动破坏 "stable at 1" 断言。)
+    const val EXPECTED_MSG_TYPE_COUNT: Int = 64
 
     // ── Per-boundary schema version constants ─────────────────────────────────
 

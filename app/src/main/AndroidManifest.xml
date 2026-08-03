@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.NFC" />
+    <!-- BUG-FIX(round2): MainActivity.requestBatteryOptimizationExemption() 发起
+         ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,缺此权限时系统静默忽略请求。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     
     <!-- 硬件特性 -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -182,6 +185,25 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- BUG-FIX(round2): GitHub OAuth 回调接收 Activity 此前未在 Manifest 声明。
+             OAuthManager 的 redirect_uri 为 ufo-galaxy://auth/callback,缺此声明时
+             浏览器重定向无人接收,GitHub 登录流程必然 120s 超时失败。
+             必须 exported=true(外部浏览器投递)+ Theme.NoDisplay(立即 finish)。 -->
+        <activity
+            android:name=".auth.OAuthCallbackActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="ufo-galaxy"
+                    android:host="auth"
+                    android:path="/callback" />
+            </intent-filter>
+        </activity>
 
         <!-- 原生表面③:全局文本入口(任意 App 选中文字→"问 Galaxy")。 -->
         <activity

@@ -488,6 +488,9 @@ class Pr30ObservabilityDiagnosticsTest {
     fun `notifyTakeoverFailed emits TAG_FALLBACK_DECISION log entry`() = runBlocking {
         GalaxyLogger.clear()
         val (controller, _) = buildController()
+        // 测试修复:notifyTakeoverFailed 受 shouldSuppressTerminalSignal 守卫保护,
+        // 必须先通过 recordDelegatedTaskAccepted 登记同一 taskId 为活跃任务,否则静默 no-op。
+        controller.recordDelegatedTaskAccepted(taskId = "task-fallback-signal")
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-fallback-signal-test",
             taskId = "task-fallback-signal",
@@ -507,6 +510,8 @@ class Pr30ObservabilityDiagnosticsTest {
     fun `TAG_FALLBACK_DECISION entry includes required fields`() = runBlocking {
         GalaxyLogger.clear()
         val (controller, _) = buildController()
+        // 测试修复:先登记活跃任务,绕过 shouldSuppressTerminalSignal 守卫。
+        controller.recordDelegatedTaskAccepted(taskId = "task-fields-test")
         controller.notifyTakeoverFailed(
             takeoverId = "takeover-fields-test",
             taskId = "task-fields-test",
@@ -528,6 +533,8 @@ class Pr30ObservabilityDiagnosticsTest {
         GalaxyLogger.clear()
         val (controller, _) = buildController()
         val event = makeFailureEvent(TakeoverFallbackEvent.Cause.FAILED)
+        // 测试修复:先登记活跃任务,绕过 shouldSuppressTerminalSignal 守卫。
+        controller.recordDelegatedTaskAccepted(taskId = event.taskId)
         controller.notifyTakeoverFailed(
             takeoverId = event.takeoverId,
             taskId = event.taskId,
@@ -546,6 +553,8 @@ class Pr30ObservabilityDiagnosticsTest {
         GalaxyLogger.clear()
         val (controller, _) = buildController()
         val event = makeFailureEvent(TakeoverFallbackEvent.Cause.TIMEOUT)
+        // 测试修复:先登记活跃任务,绕过 shouldSuppressTerminalSignal 守卫。
+        controller.recordDelegatedTaskAccepted(taskId = event.taskId)
         controller.notifyTakeoverFailed(
             takeoverId = event.takeoverId,
             taskId = event.taskId,
@@ -564,6 +573,8 @@ class Pr30ObservabilityDiagnosticsTest {
         GalaxyLogger.clear()
         val (controller, _) = buildController()
         val event = makeFailureEvent(TakeoverFallbackEvent.Cause.CANCELLED)
+        // 测试修复:先登记活跃任务,绕过 shouldSuppressTerminalSignal 守卫。
+        controller.recordDelegatedTaskAccepted(taskId = event.taskId)
         controller.notifyTakeoverFailed(
             takeoverId = event.takeoverId,
             taskId = event.taskId,
@@ -582,6 +593,8 @@ class Pr30ObservabilityDiagnosticsTest {
         GalaxyLogger.clear()
         val (controller, _) = buildController()
         val event = makeFailureEvent(TakeoverFallbackEvent.Cause.DISCONNECT)
+        // 测试修复:先登记活跃任务,绕过 shouldSuppressTerminalSignal 守卫。
+        controller.recordDelegatedTaskAccepted(taskId = event.taskId)
         controller.notifyTakeoverFailed(
             takeoverId = event.takeoverId,
             taskId = event.taskId,
@@ -601,6 +614,8 @@ class Pr30ObservabilityDiagnosticsTest {
             GalaxyLogger.clear()
             val (controller, _) = buildController()
             val takeoverId = "takeover-dedup-pr30"
+            // 测试修复:先登记活跃任务,绕过 shouldSuppressTerminalSignal 守卫。
+            controller.recordDelegatedTaskAccepted(taskId = "task-dedup")
             controller.notifyTakeoverFailed(
                 takeoverId = takeoverId,
                 taskId = "task-dedup",
@@ -609,6 +624,9 @@ class Pr30ObservabilityDiagnosticsTest {
                 cause = TakeoverFallbackEvent.Cause.FAILED
             )
             // Second call with the same takeoverId should be deduplicated
+            // 测试修复:终止信号会清空活跃任务,重新登记以便第二次调用真正命中
+            // takeoverId 去重守卫(而非被 shouldSuppressTerminalSignal 拦截)。
+            controller.recordDelegatedTaskAccepted(taskId = "task-dedup")
             controller.notifyTakeoverFailed(
                 takeoverId = takeoverId,
                 taskId = "task-dedup",

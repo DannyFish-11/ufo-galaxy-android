@@ -1032,12 +1032,21 @@ class Pr5AndroidParticipantLifecycleHardeningTest {
     }
 
     @Test
-    fun `hybrid capabilities needing re-announcement after process kill excludes no capabilities`() {
-        // All hybrid capabilities must re-announce after process kill — none can survive process death
+    fun `hybrid capabilities needing re-announcement after process kill excludes only staged mesh execution`() {
+        // 断言修正:并非所有 hybrid 能力都走"重宣告"——STAGED_MESH_EXECUTION 是
+        // invocation-scoped,注册表明确规定进程被杀后 Android 不得自主重传/恢复,
+        // 必须等 V2 重新调度(AWAIT_V2_REINVOCATION,rationale 有完整论证)。
+        // 其余全部能力都必须重宣告。
         val reannounce = HybridRuntimeContinuityContract.requiresReannounceAfterProcessKill
         assertEquals(
-            HybridParticipantCapabilityBoundary.HybridCapability.entries.size,
+            HybridParticipantCapabilityBoundary.HybridCapability.entries.size - 1,
             reannounce.size
+        )
+        assertFalse(
+            "STAGED_MESH_EXECUTION must NOT re-announce (awaits V2 re-invocation by contract)",
+            reannounce.contains(
+                HybridParticipantCapabilityBoundary.HybridCapability.STAGED_MESH_EXECUTION
+            )
         )
     }
 }

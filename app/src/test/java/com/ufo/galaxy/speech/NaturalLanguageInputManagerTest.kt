@@ -14,10 +14,13 @@ import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import com.ufo.galaxy.network.GatewayClient
+import com.ufo.galaxy.transport.AipTransportManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +40,12 @@ class NaturalLanguageInputManagerTest {
 
     @get:Rule
     val tmpFolder = TemporaryFolder()
+
+    @After
+    fun tearDown() {
+        // PR-AIP-UNIFIED:清理 AipTransportManager 单例,避免 fake adapter 泄漏到其他测试类。
+        AipTransportManager.resetInstance()
+    }
 
     // ── Fake GatewayClient ────────────────────────────────────────────────────
 
@@ -98,7 +107,10 @@ class NaturalLanguageInputManagerTest {
     // ── Builder helpers ───────────────────────────────────────────────────────
 
     private fun buildLoopController(): LoopController {
-        val modelsDir = tmpFolder.newFolder("models")
+        // 测试修复:一个测试方法内可能调用 buildRouter() 两次(如 submitVoiceResult
+        // behaves identically to submit),固定名字 "models" 在第二次调用时因同名
+        // 目录已存在抛 IOException;改用无参 newFolder() 每次分配唯一目录。
+        val modelsDir = tmpFolder.newFolder()
         return LoopController(
             localPlanner = LocalPlanner(FakePlannerService()),
             executorBridge = ExecutorBridge(
@@ -108,7 +120,7 @@ class NaturalLanguageInputManagerTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
     }
 
@@ -117,6 +129,10 @@ class NaturalLanguageInputManagerTest {
         gateway: FakeGatewayClient = FakeGatewayClient(connected = false),
         scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     ): InputRouter {
+        // PR-AIP-UNIFIED:生产侧 InputRouter 统一经 AipTransportManager 单例发送上行消息,
+        // 测试必须把 fake gateway 注册为 websocket adapter,消息才能被捕获。
+        AipTransportManager.resetInstance()
+        AipTransportManager.getInstance().registerAdapter("websocket", gateway)
         val settings = InMemoryAppSettings(crossDeviceEnabled = crossDeviceEnabled)
         val localLoopExecutor = DefaultLocalLoopExecutor(
             loopController = buildLoopController(),
@@ -242,13 +258,15 @@ class NaturalLanguageInputManagerTest {
 
     @Test
     fun `submitVoiceResult behaves identically to submit`() {
+        // 测试修复:AipTransportManager 是单例,后一次 buildRouter() 的 resetInstance+
+        // registerAdapter 会接管所有上行消息;必须"构建→提交"串行进行,不能先建两个
+        // router 再分别提交(与 Pr34RuntimeInteractionAcceptanceTest 同名测试的修法一致)。
         val gatewayForText = FakeGatewayClient(connected = true, sendResult = true)
-        val gatewayForVoice = FakeGatewayClient(connected = true, sendResult = true)
-
         val routerForText = buildRouter(crossDeviceEnabled = true, gateway = gatewayForText)
-        val routerForVoice = buildRouter(crossDeviceEnabled = true, gateway = gatewayForVoice)
-
         val textResult = NaturalLanguageInputManager(routerForText).submit("go home")
+
+        val gatewayForVoice = FakeGatewayClient(connected = true, sendResult = true)
+        val routerForVoice = buildRouter(crossDeviceEnabled = true, gateway = gatewayForVoice)
         val voiceResult = NaturalLanguageInputManager(routerForVoice).submitVoiceResult("go home")
 
         assertEquals("submit and submitVoiceResult must produce identical routing result",

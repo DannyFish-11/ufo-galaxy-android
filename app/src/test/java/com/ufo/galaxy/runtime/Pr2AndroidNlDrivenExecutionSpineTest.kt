@@ -711,7 +711,9 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val payload = GoalExecutionPayload(
             task_id = "t1",
             goal = "open settings",
-            execution_runtime_kind = "delegated_execution"
+            execution_runtime_kind = "delegated_execution",
+            // posture gate（PR #533 契约）：仅 join_runtime 允许本机执行，null 会被当作 control_only 拦截
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val result = pipeline.handleGoalExecution(payload)
         // The execution path may succeed or fail in a unit-test context; what matters
@@ -733,7 +735,9 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
             task_id = "t2",
             goal = "open settings",
             execution_runtime_kind = "delegated_execution",
-            problem_solving_role = "takeover_interactive"
+            problem_solving_role = "takeover_interactive",
+            // posture gate：join_runtime 才允许本机执行
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val result = pipeline.handleGoalExecution(payload)
         assertEquals("takeover_interactive", result.execution_spine_participation_kind)
@@ -751,7 +755,9 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val payload = GoalExecutionPayload(
             task_id = "t3",
             goal = "take screenshot",
-            execution_runtime_kind = "degraded_fallback"
+            execution_runtime_kind = "degraded_fallback",
+            // posture gate：join_runtime 才允许本机执行
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val result = pipeline.handleGoalExecution(payload)
         assertEquals("degraded_fallback", result.execution_spine_participation_kind)
@@ -771,7 +777,9 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
             goal = "parallel subtask",
             group_id = "grp1",
             subtask_index = 0,
-            execution_runtime_kind = "delegated_execution"
+            execution_runtime_kind = "delegated_execution",
+            // posture gate：join_runtime 才允许本机执行
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val result = pipeline.handleParallelSubtask(payload)
         assertNotNull("problem_solving_closure_class must be set", result.problem_solving_closure_class)
@@ -785,7 +793,9 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
             task_id = "t4",
             goal = "test goal",
             problem_solving_role = null,
-            execution_runtime_kind = null
+            execution_runtime_kind = null,
+            // posture gate：join_runtime 才允许本机执行（本测试只关心 role/kind 为 null 不崩溃）
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val result = pipeline.handleGoalExecution(payload)
         // Should not throw; should classify from null runtime kind → DELEGATED_EXECUTION
@@ -799,7 +809,9 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
         val payload = GoalExecutionPayload(
             task_id = "t5",
             goal = "test",
-            execution_runtime_kind = null
+            execution_runtime_kind = null,
+            // posture gate：join_runtime 才允许本机执行
+            source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val result = pipeline.handleGoalExecution(payload)
         assertEquals("delegated_execution", result.execution_spine_participation_kind)

@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
@@ -139,7 +140,9 @@ import org.junit.Test
  */
 class Pr8AndroidCanonicalRuntimeTruthUnificationTest {
 
-    private val gson = Gson()
+    // 真 bug 修复:Gson() 默认 serializeNulls=false,null 字段被省略而非变成 JsonNull,
+    // 断言 .get("x").isJsonNull 时对已省略键先拿到 Java null 再空指针。
+    private val gson = GsonBuilder().serializeNulls().create()
 
     // ── Minimal payload factories ─────────────────────────────────────────────
 

@@ -30,6 +30,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.input.InputRouter
@@ -181,13 +182,12 @@ class EnhancedFloatingService : Service() {
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         
-        // 注册唤醒广播
+        // 注册唤醒广播 —— 用 ContextCompat 统一带上导出标志（应用内广播，NOT_EXPORTED），
+        // 跨全部 API 级别正确处理，消除 UnspecifiedRegisterReceiverFlag lint 错误。
         val filter = IntentFilter(ACTION_WAKE_UP)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(wakeUpReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(wakeUpReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this, wakeUpReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         
         // 创建悬浮视图
         createFloatingView()
@@ -893,12 +893,19 @@ class EnhancedFloatingService : Service() {
      * 开始语音输入：悬浮窗暂不支持内嵌语音识别，提示用户长按悬浮窗打开主界面。
      */
     private fun startVoiceInput() {
-        Log.d(TAG, "语音输入仅在主界面支持；提示用户打开主界面")
-        android.widget.Toast.makeText(
-            this,
-            "请长按悬浮窗打开主界面以使用语音输入",
-            android.widget.Toast.LENGTH_SHORT
-        ).show()
+        // 打开主界面并自动进入语音对话(复用主界面既有语音流 + TTS),
+        // 而不是像以前那样只弹一句"请打开主界面"的占位提示。
+        Log.d(TAG, "悬浮岛语音 → 打开主界面并自动开始语音")
+        try {
+            startActivity(
+                Intent(this, MainActivity::class.java).apply {
+                    action = MainActivity.ACTION_ASSIST_VOICE
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "悬浮岛打开语音对话失败: ${e.message}")
+        }
     }
     
     /**

@@ -13,6 +13,8 @@ import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
@@ -658,12 +660,24 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         assertNull("Expected no signal when hostDescriptor is null", signal)
     }
 
+    // 测试修复(两处根因):
+    // 1. publishTaskStatusUpdate 现在要求 activeTaskId == taskId 且状态为 RUNNING(Stage 10
+    //    真实性收紧),否则静默抑制——各测试须先 recordDelegatedTaskAccepted(同一 taskId)。
+    // 2. reconciliationSignals 是 replay=0 的热流,生产方在 runBlocking 主体里同步 tryEmit;
+    //    "先 publish 后 first()" 的顺序必然丢信号。统一改为先以
+    //    async(start = CoroutineStart.UNDISPATCHED) 订阅(挂起在 first)再触发生产方。
+    //    recordDelegatedTaskAccepted 放在订阅之前,使其 TASK_ACCEPTED 信号不被捕获。
+
     @Test
     fun `publishTaskStatusUpdate emits TASK_STATUS_UPDATE on reconciliationSignals`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-1")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-1")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull("Expected TASK_STATUS_UPDATE signal", signal)
         assertEquals(ReconciliationSignal.Kind.TASK_STATUS_UPDATE, signal!!.kind)
     }
@@ -672,8 +686,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal status is STATUS_IN_PROGRESS`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-2")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-2")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals(ReconciliationSignal.STATUS_IN_PROGRESS, signal!!.status)
     }
@@ -682,8 +700,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal participantId matches hostDescriptor`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-3")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-3")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals(expectedParticipantId(), signal!!.participantId)
     }
@@ -692,8 +714,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal taskId matches provided taskId`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-tid")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-tid")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals("task-su-tid", signal!!.taskId)
     }
@@ -702,8 +728,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal correlationId is echoed when provided`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-4")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-4", correlationId = "corr-62")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals("corr-62", signal!!.correlationId)
     }
@@ -712,8 +742,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal payload contains progress_detail when provided`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-5")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-5", progressDetail = "step 3 of 7")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals("step 3 of 7", signal!!.payload["progress_detail"])
     }
@@ -722,9 +756,14 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate in recovering state reports resumed in progress semantics`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        // 先登记活跃任务(此时 RESUMED_CLEANLY),再置入 RECOVERING 状态验证恢复中语义。
+        controller.recordDelegatedTaskAccepted("task-su-recovering")
         controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-recovering", progressDetail = "rebind")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals(
             AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.RESUMED_EXECUTION.wireValue,
@@ -746,10 +785,13 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-result-recovery-failed")
         controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.FAILED)
-        controller.publishTaskResult("task-result-recovery-failed")
-        val signal = withTimeoutOrNull(200) {
-            controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_RESULT }
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) {
+                controller.reconciliationSignals.first { it.kind == ReconciliationSignal.Kind.TASK_RESULT }
+            }
         }
+        controller.publishTaskResult("task-result-recovery-failed")
+        val signal = deferred.await()
         assertNotNull(signal)
         assertEquals(
             AndroidRuntimeEmissionTruthSemantics.ExecutionContinuityClass.DEGRADED_CONTINUITY.wireValue,
@@ -765,8 +807,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal payload does not contain progress_detail when omitted`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-6")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-6")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertFalse(signal!!.payload.containsKey("progress_detail"))
     }
@@ -775,8 +821,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal isTerminal is false`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-7")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-7")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertFalse(signal!!.isTerminal)
     }
@@ -785,8 +835,12 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
     fun `publishTaskStatusUpdate emitted signal signalId is non-blank`() = runBlocking {
         val (controller, _) = buildController(buildDescriptor())
         controller.setActiveForTest()
+        controller.recordDelegatedTaskAccepted("task-su-8")
+        val deferred = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(2000) { controller.reconciliationSignals.first() }
+        }
         controller.publishTaskStatusUpdate("task-su-8")
-        val signal = withTimeoutOrNull(200) { controller.reconciliationSignals.first() }
+        val signal = deferred.await()
         assertNotNull(signal)
         assertTrue(signal!!.signalId.isNotBlank())
     }
@@ -799,7 +853,9 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-dc-1")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = launch {
+        // 测试修复:simulateDisconnected 在监听器回调里同步 tryEmit TASK_FAILED,默认 launch
+        // 的收集协程要等父协程挂起后才启动,信号在订阅前已丢失;改 UNDISPATCHED 先订阅。
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         // Simulate WS disconnect while task is active
@@ -818,7 +874,8 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-dc-2")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = launch {
+        // 测试修复:同上,断连的 TASK_FAILED 为同步发射,须 UNDISPATCHED 先订阅。
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()
@@ -835,7 +892,8 @@ class Pr62ParticipantLiveExecutionSurfaceTest {
         controller.setActiveForTest()
         controller.recordDelegatedTaskAccepted("task-dc-3")
         val signals = mutableListOf<ReconciliationSignal>()
-        val job = launch {
+        // 测试修复:同上,断连的 TASK_FAILED 为同步发射,须 UNDISPATCHED 先订阅。
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
             controller.reconciliationSignals.collect { signals.add(it) }
         }
         wsClient.simulateDisconnected()

@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * **Local runtime lifecycle manager** for the on-device inference pair (planner + grounding).
  *
  * This class is the single authority for starting, stopping, health-checking, and recovering
- * the MobileVLM planner and SeeClick grounding runtimes. It enforces **real inference
+ * the unified VLM planner and grounding runtimes. It enforces **real inference
  * readiness** — not just endpoint liveness — before reporting a component as healthy.
  *
  * ## Lifecycle
@@ -38,14 +38,21 @@ import kotlinx.coroutines.flow.asStateFlow
  * - [restart]: stop + start in one call; useful after repeated health failures.
  * - [healthCheck]: non-mutating snapshot; call at any time.
  *
- * @param plannerService     MobileVLM planner backend.
- * @param groundingService   SeeClick grounding backend.
+ * @param plannerService     Unified VLM planner backend.
+ * @param groundingService   Unified VLM grounding backend.
  * @param modelAssetManager  Model file registry; consulted during start for file readiness.
  */
 class LocalInferenceRuntimeManager(
     private val plannerService: LocalPlannerService,
     private val groundingService: LocalGroundingService,
-    private val modelAssetManager: ModelAssetManager
+    private val modelAssetManager: ModelAssetManager,
+    /**
+     * 本地 llama-server 进程控制器(闭环自启动)。非 null 时 [start] 在模型文件
+     * 就绪检查通过后先确保服务进程在跑,[stop] 时一并停掉;二进制未供给
+     * (NotProvisioned)不视为启动失败 —— 服务可能由外部方式(Termux 等)提供,
+     * 交由随后的 warmup HEALTH_CHECK 阶段实测裁决。null(默认)= 行为与旧版一致。
+     */
+    private val llamaServerController: com.ufo.galaxy.inference.LlamaServerController? = null
 ) {
 
     // ── Observable state ─────────────────────────────────────────────────────
@@ -102,7 +109,7 @@ class LocalInferenceRuntimeManager(
          * The runtime startup pipeline failed. This is a **startup-specific** failure,
          * distinct from a post-startup crash or safe-mode block.
          *
-         * [reason] describes the failure cause (e.g. "Model files not ready: 'mobilevlm'=MISSING").
+         * [reason] describes the failure cause (e.g. "Model files not ready: 'mai_ui_2b'=MISSING").
          * [stage] identifies the startup phase at which the pipeline stopped.
          *
          * ## Recovery
@@ -209,6 +216,11 @@ class LocalInferenceRuntimeManager(
             return fileResult
         }
 
+        // Step 1b: 闭环自启动 —— 模型文件就绪后拉起本地 llama-server(若已供给)。
+        // NotProvisioned/Failed 都不在此处判死:服务可能已由外部起好,由 Step 2 的
+        // warmup HEALTH_CHECK 实测说话;这里只做尽力拉起 + 结构化留痕。
+        llamaServerController?.ensureRunning()
+
         // Step 2a: warm up the planner runtime first
         val plannerResult = startPlanner()
 
@@ -264,6 +276,8 @@ class LocalInferenceRuntimeManager(
         GalaxyLogger.log(TAG, mapOf("event" to "inference_runtime_stop"))
         plannerService.unloadModel()
         groundingService.unloadModel()
+        // 闭环自启动的对称收尾:本管理器拉起的 llama-server 一并停掉,释放权重内存。
+        llamaServerController?.stop()
         isInSafeMode = false
         _state.value = ManagerState.Stopped
     }

@@ -11,7 +11,7 @@ import com.ufo.galaxy.protocol.TaskAssignPayload
  *
  * Converts a [GoalExecutionPayload] into a [TaskAssignPayload] and delegates to
  * [EdgeExecutor.handleTaskAssign] for the full pipeline
- * (screenshot → MobileVLM → SeeClick → AccessibilityService). The result is wrapped
+ * (screenshot → unified VLM plan → unified VLM ground → AccessibilityService). The result is wrapped
  * in a [GoalResultPayload] that includes [GoalExecutionPayload.group_id],
  * [GoalExecutionPayload.subtask_index], [latency_ms], and [device_id] so that the
  * server can converge parallel-group results.
@@ -64,7 +64,9 @@ class LocalGoalExecutor(
         )
 
         val taskResult = try {
-            edgeExecutor.handleTaskAssign(taskAssign)
+            // 把 goal 的 effectiveTimeoutMs(默认 30s、上限 5min)真正传给执行器——
+            // 此前在此转换处被丢弃,步边界截止检查因此从未生效。
+            edgeExecutor.handleTaskAssign(taskAssign, deadlineMs = payload.effectiveTimeoutMs)
         } catch (e: Exception) {
             Log.e(TAG, "executeGoal unexpected error task_id=${payload.task_id}: ${e.message}", e)
             val latencyMs = System.currentTimeMillis() - startMs

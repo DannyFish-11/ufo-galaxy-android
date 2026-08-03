@@ -532,9 +532,13 @@ class Pr4AndroidEvaluatorArtifactEmissionTest {
         val entry = AndroidAuthoritativePathAlignmentAudit.entries
             .firstOrNull { it.behaviorId == "device_strategy_report" }
         assertNotNull("device_strategy_report must be present in audit registry", entry)
+        // 注册表数据修复联动:该条目自述 advisory/observation-only、语义 OBSERVATION_SIGNAL
+        // 且带 deferralNote,按 BehaviorTier KDoc(CANONICAL_DEFAULT ⇒ 应被 V2 视为
+        // canonical participant evidence)应属 OBSERVATION_ONLY;PR-251 落地时误标,
+        // 此处断言随注册表修复同步更新。
         assertEquals(
-            "strategy report must be CANONICAL_DEFAULT tier",
-            AndroidAuthoritativePathAlignmentAudit.BehaviorTier.CANONICAL_DEFAULT,
+            "strategy report must be OBSERVATION_ONLY tier (advisory-only, not canonical evidence)",
+            AndroidAuthoritativePathAlignmentAudit.BehaviorTier.OBSERVATION_ONLY,
             entry!!.tier
         )
         assertEquals(

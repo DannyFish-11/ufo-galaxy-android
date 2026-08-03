@@ -37,6 +37,31 @@ android {
         buildConfigField "String", "GALAXY_SERVER_URL", '"wss://localhost:9000"'
         buildConfigField "String", "API_VERSION", '"v3.0"'
         buildConfigField "boolean", "CROSS_DEVICE_ENABLED", "true"
+
+        // ── 模型权重的 SHA-256 钉死（三仓-8）────────────────────────────────
+        //
+        // ModelAssetManager 此前把这两个摘要写死为 Kotlin 里的 `null`，运行时走
+        // trust-on-first-use：首次下载什么就信什么，算出摘要落盘，此后强制校验。
+        // TOFU 能防"下载之后被篡改/损坏"，**防不住"首次下载时就已经被投毒"** ——
+        // 毒化的摘要一旦被持久化，之后每次校验都"通过"。
+        //
+        // 之所以不在源码里直接填死：本仓的 CI/开发环境不一定能访问 HuggingFace，
+        // 而**编造一个摘要比留空更危险**（要么所有下载失败，要么给出"已校验"的假象）。
+        // 所以做成构建期可注入：能访问上游的人无需改一行 Kotlin 即可钉死。
+        //
+        // 取得真实摘要（HuggingFace 对 LFS 文件直接给 sha256）：
+        //   curl -s 'https://huggingface.co/api/models/mradermacher/MAI-UI-2B-GGUF?blobs=true' \
+        //     | jq -r '.siblings[] | select(.rfilename|endswith(".gguf")) | "\(.rfilename) \(.lfs.sha256)"'
+        // 然后写进 gradle.properties（或 -P 传参、或 CI secret）：
+        //   galaxy.model.vlm.sha256=<64位十六进制>
+        //   galaxy.model.vlmMmproj.sha256=<64位十六进制>
+        //
+        // 留空 = 显式承认"本次构建走 TOFU"，运行时会把这个事实上报给 V2 并在
+        // 诊断里可见（见 ModelAssetManager.checksumProvenance）。
+        buildConfigField "String", "MODEL_VLM_SHA256",
+                "\"${project.findProperty('galaxy.model.vlm.sha256') ?: ''}\""
+        buildConfigField "String", "MODEL_VLM_MMPROJ_SHA256",
+                "\"${project.findProperty('galaxy.model.vlmMmproj.sha256') ?: ''}\""
         // R3-3-FIX: Certificate pinning hash for release builds. Set to placeholder by default.
         // Before release: generate hash with:
         //   openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \
@@ -85,19 +110,48 @@ android {
     }
 
     // Round-4 HIGH: fail release builds when certificate-pinning hash is still a placeholder
+    //
+    // 真 bug 修复:原实现用 variant.buildConfigFields["CERT_PIN_HASH"] 反查已配置的值,
+    // 但 applicationVariants.all 是旧 Variant API(ApplicationVariantImpl),该对象没有
+    // 复数形式的 buildConfigFields 属性——那是新 Variant API(com.android.build.api.variant.Variant)
+    // 才有的东西;旧 API 只有单数形式的写入方法 variant.buildConfigField(type, name, value)。
+    // 此前所有 CI 门只跑 debug 变体,release 分支从未真正执行到这段 doFirst,bug 一直隐身,
+    // 直到 gate 6/7(唯一跑 `./gradlew :app:test`,同时构建 debug+release)第一次真正执行。
+    // 改为直接从 project property 驱动判断,不再依赖不存在的反查 API；顺带把错误提示里
+    // 一直承诺、但从未真正接线的 -PcertPinHash 覆盖开关落到实处。
+    //
+    // 第二轮真 bug 修复:上一轮把校验挂在 variant.preBuildProvider(preReleaseBuild)上——
+    // 但 preBuild 是 release 变体几乎所有下游任务的公共前置依赖,不仅是 assembleRelease/
+    // bundleRelease 这类真正"打包出可分发产物"的任务,也连累了 testReleaseUnitTest
+    // (纯编译+跑 release 变体 JVM 单测,产物不出仓库、不涉及签名分发,gate 6/7 因此
+    // 被这条本该只守"分发前最后一关"的护栏误伤)。护栏意图本身正确、不该削弱——
+    // 错的是钩子太靠前太宽。迁移到只在真正打包分发产物的 assemble<Variant>/
+    // bundle<Variant> 任务上触发,按任务名匹配(不依赖不稳定的 variant provider getter,
+    // 避免重蹈上一轮"属性不存在"的覆辙);占位符哈希依旧绝对进不了任何可分发产物。
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
-            variant.preBuildProvider.get().doFirst {
-                def pinHash = variant.buildConfigFields["CERT_PIN_HASH"]?.value
-                if (!pinHash || pinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
-                    throw new GradleException(
-                        "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
-                        "Generate the real hash with:\n" +
-                        "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
-                        "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
-                        "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
-                        "Then set it in build.gradle or via -PcertPinHash=sha256/YOUR_HASH"
-                    )
+            def pinHashOverride = project.findProperty('certPinHash')
+            if (pinHashOverride) {
+                variant.buildConfigField "String", "CERT_PIN_HASH", "\"${pinHashOverride}\""
+            }
+            def effectivePinHash = pinHashOverride
+                ? "\"${pinHashOverride}\"".toString()
+                : '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"'
+            def variantNameCap = variant.name.capitalize()
+            tasks.matching {
+                it.name == "assemble${variantNameCap}" || it.name == "bundle${variantNameCap}"
+            }.configureEach { packagingTask ->
+                packagingTask.doFirst {
+                    if (effectivePinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
+                        throw new GradleException(
+                            "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
+                            "Generate the real hash with:\n" +
+                            "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
+                            "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
+                            "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
+                            "Then set it in build.gradle or via -PcertPinHash=sha256/YOUR_HASH"
+                        )
+                    }
                 }
             }
         }
@@ -213,6 +267,12 @@ dependencies {
     // 测试
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
+    // 真机上 org.json 是 android.jar 里的真实实现;但纯 JVM 单测用的是 android.jar 桩,
+    // 在 returnDefaultValues=true 下其方法返回 null,导致任何用 JSONObject 的生产代码
+    // (共 16 个文件:GalaxyLogger/OAuthManager/DevicePairingClient/AipTransportManager…)
+    // 的返回值撞非空类型 → NPE,连锁把上百个单测带崩。加入 org.json 的【真实】Maven 制品到
+    // 测试类路径,单测即用真实实现而非桩,一次性根治所有 org.json 触发的 NPE。
+    testImplementation 'org.json:json:20240303'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')

@@ -7,6 +7,7 @@ import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -135,7 +136,7 @@ class LoopControllerTest {
     ): LoopController {
         val modelsDir = tmpFolder.newFolder("models")
         val manager = ModelAssetManager(modelsDir)
-        val downloader = ModelDownloader(modelsDir)
+        val downloader = noNetworkModelDownloader(modelsDir)
         val planner = LocalPlanner(plannerService)
         val bridge = ExecutorBridge(
             groundingService = grounder,
@@ -285,19 +286,23 @@ class LoopControllerTest {
     }
 
     @Test
-    fun `replan produces no steps returns replan_failed`() = runBlocking {
+    fun `replan exhausts retries after rule-based fallback still fails returns step_exhausted`() = runBlocking {
+        // 断言更新:PlannerFallbackLadder 第 4 阶段(基于关键词的规则兜底)保证 replan
+        // 不会再返回空计划(见 PlannerFallbackLadder.replan 与 LocalPlanner.replan 文档注释)。
+        // 因此原先"replan 产生空步骤 → STOP_REPLAN_FAILED"场景已不可达:规则兜底会生成一个
+        // 恢复步骤,该步骤失败后耗尽重试次数,最终以 STOP_STEP_EXHAUSTED 结束。
         val accessibility = FakeAccessibilityExecutor(returns = false)
         val ctrl = buildController(
             plannerService = MultiStepPlannerService(
                 steps = listOf("tap" to "first"),
-                replanStep = null  // replan fails
+                replanStep = null  // model-backed replan stages fail; rule-based stage 4 still succeeds
             ),
             accessibility = accessibility,
             maxRetriesPerStep = 1
         )
         val result = ctrl.execute("task")
         assertEquals(LoopController.STATUS_FAILED, result.status)
-        assertEquals(LoopController.STOP_REPLAN_FAILED, result.stopReason)
+        assertEquals(LoopController.STOP_STEP_EXHAUSTED, result.stopReason)
     }
 
     // ── Max-steps budget ──────────────────────────────────────────────────────
@@ -342,7 +347,7 @@ class LoopControllerTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
         assertEquals(LoopController.DEFAULT_MAX_STEPS, ctrl.maxSteps)
     }
@@ -359,7 +364,7 @@ class LoopControllerTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
         assertEquals(LoopController.DEFAULT_MAX_RETRIES, ctrl.maxRetriesPerStep)
     }

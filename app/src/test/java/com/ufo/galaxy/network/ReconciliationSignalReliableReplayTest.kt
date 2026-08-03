@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.ReconciliationSignalPayload
+import com.ufo.galaxy.runtime.AndroidCanonicalOwnershipIngressContract
 import com.ufo.galaxy.runtime.AndroidCompletionClosureUplinkContract
 import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
 import com.ufo.galaxy.runtime.AndroidGovernanceExecutionPolicyIngressContract
@@ -74,7 +75,18 @@ class ReconciliationSignalReliableReplayTest {
         signalId = signalId,
         durableSessionId = durableSessionId,
         sessionContinuityEpoch = sessionEpoch,
-        reconciliationEpoch = reconciliationEpoch
+        reconciliationEpoch = reconciliationEpoch,
+        // 测试修复:taskAccepted() 本身不往 payload 写 execution_continuity_class 等运行时真值
+        // 字段;生产代码(RuntimeController.currentSignalEmissionTruthPayload)总是通过
+        // additionalPayload 显式补齐后才发送。测试之前遗漏这步,导致 toEnvelopeJson() 里的
+        // requireNotNull(TruthSnapshot.fromPayload(...)) 必然抛 IllegalArgumentException。
+        additionalPayload = AndroidRuntimeEmissionTruthSemantics.derive(
+            recoveryPhase = null,
+            isContinuation = false,
+            interruptionReason = null,
+            isTerminal = false,
+            deliveryDisposition = AndroidRuntimeEmissionTruthSemantics.DeliveryDisposition.LOCAL_SIGNAL_EMITTED
+        ).toPayloadMap()
     )
 
     private fun toEnvelopeJson(signal: ReconciliationSignal): String {
@@ -117,9 +129,21 @@ class ReconciliationSignalReliableReplayTest {
             correlation_id = signal.correlationId,
             durable_session_id = signal.durableSessionId,
             session_continuity_epoch = signal.sessionContinuityEpoch,
+            // 测试修复:discardForDifferentSession() 在 AUTHORITY_FILTERING 阶段会对
+            // authoritySensitiveReplayTypes(含 reconciliation_signal)先做 ownership 校验;
+            // 缺 canonical ownership 字段会被判为 OWNERSHIP_UNSPECIFIED 并直接丢弃,导致
+            // 重连回放测试拿不到任何回放消息。补齐三字段使其判为 CANONICALIZED_TRUTH,
+            // 与生产端 GalaxyConnectionService.sendReconciliationSignal 注入 ownership 的效果一致。
             payload = signal.payload +
                 emissionTruth.toPayloadMap() +
-                mapOf(ReconciliationSignal.KEY_STABLE_DEDUPE_KEY to signal.stableDedupeKey),
+                mapOf(
+                    ReconciliationSignal.KEY_STABLE_DEDUPE_KEY to signal.stableDedupeKey,
+                    AndroidCanonicalOwnershipIngressContract.KEY_OWNERSHIP_STATUS to
+                        AndroidCanonicalOwnershipIngressContract.OwnershipStatus.CANONICAL_BOUND.wireValue,
+                    AndroidCanonicalOwnershipIngressContract.KEY_TRUTH_INGRESS_CLASS to
+                        AndroidCanonicalOwnershipIngressContract.TruthIngressClass.CANONICALIZATION_CANDIDATE.wireValue,
+                    AndroidCanonicalOwnershipIngressContract.KEY_CANONICALIZATION_READY to true
+                ),
             runtime_truth = signal.runtimeTruth?.toMap(),
             uplink_lineage_schema_version = AndroidUplinkLineageMetadataContract.SCHEMA_VERSION,
             uplink_lineage_execution_id = lineage.executionIdentity,
@@ -518,6 +542,11 @@ class ReconciliationSignalReliableReplayTest {
     fun `goal_execution_result replay is annotated as replayed terminal delivery`() {
         val client = buildClient(durableSessionId = "durable-replay", sessionEpoch = 6)
         val recordingSocket = RecordingWebSocket()
+        // 测试修复:discardForDifferentSession() 回放前先做 ownership 校验(goal_execution_result
+        // 也在 authoritySensitiveReplayTypes 中),缺 canonical ownership 字段会被判为
+        // OWNERSHIP_UNSPECIFIED 直接丢弃,导致回放集合为空、.single{} 抛 NoSuchElementException。
+        // 补齐 ownership 三字段 + session_continuity_epoch(满足 ORDERING_METADATA_REQUIRED_TYPES
+        // 的 epoch 校验,与本测试 buildClient(sessionEpoch = 6) 一致)使其能通过 AUTHORITY_FILTERING。
         val raw = """
             {
               "type":"goal_execution_result",
@@ -527,7 +556,11 @@ class ReconciliationSignalReliableReplayTest {
                 "status":"success",
                 "is_continuation":true,
                 "continuity_recovery_state":"recovering",
-                "uplink_lineage_dedupe_key":"goal-replay-lineage"
+                "uplink_lineage_dedupe_key":"goal-replay-lineage",
+                "canonical_ownership_status":"canonical_bound",
+                "truth_ingress_class":"canonicalization_candidate",
+                "is_canonicalization_ready":true,
+                "session_continuity_epoch":6
               }
             }
         """.trimIndent()

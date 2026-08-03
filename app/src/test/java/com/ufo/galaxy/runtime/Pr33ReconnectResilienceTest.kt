@@ -435,7 +435,9 @@ class Pr33ReconnectResilienceTest {
         )
 
         // Terminal error (e.g. max reconnect attempts exhausted).
-        client.simulateDisconnected()
+        // #115 曾把已删除的 simulateError 误替换为 simulateDisconnected;
+        // RECOVERING→FAILED 只能由 onError 驱动,恢复为触发 WS 错误。
+        client.testFireErrorOnListeners("无法连接到服务器")
 
         assertEquals(
             "Recovery state must be FAILED after WS error while RECOVERING",
@@ -449,7 +451,8 @@ class Pr33ReconnectResilienceTest {
         val (controller, client) = buildController()
 
         // Runtime is not Active; error must not affect recovery state.
-        client.simulateDisconnected()
+        // #115 曾把已删除的 simulateError 误替换为 simulateDisconnected;恢复为 WS 错误触发。
+        client.testFireErrorOnListeners("some error")
 
         assertEquals(
             "Recovery state must remain IDLE when error occurs outside RECOVERING",
@@ -506,7 +509,9 @@ class Pr33ReconnectResilienceTest {
         val (controller, client) = buildController()
         controller.setActiveForTest()
         client.simulateDisconnected()
-        client.simulateDisconnected()
+        // #115 曾把已删除的 simulateError 误替换为 simulateDisconnected;
+        // RECOVERING→FAILED 只能由 onError 驱动,恢复为触发 WS 错误。
+        client.testFireErrorOnListeners("max attempts reached")
         assertEquals(
             "Precondition: must be FAILED before stop",
             ReconnectRecoveryState.FAILED,

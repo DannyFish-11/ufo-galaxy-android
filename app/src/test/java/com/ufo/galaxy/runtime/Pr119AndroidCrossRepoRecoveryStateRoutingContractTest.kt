@@ -693,8 +693,11 @@ class Pr119AndroidCrossRepoRecoveryStateRoutingContractTest {
         val controller = buildController()
         controller.setActiveForTest()
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让 async 块立即执行到第一个挂起点(即 reconciliationSignals 的订阅),
+        // 保证【订阅先于下面的 publish】—— reconciliationSignals 是无 replay 的热 SharedFlow,
+        // 若订阅晚于发射,信号丢失 → withTimeout 必超时(慢 CI 上偶发 flaky 的根因)。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }
@@ -731,8 +734,11 @@ class Pr119AndroidCrossRepoRecoveryStateRoutingContractTest {
         val controller = buildController(settings)
         controller.onAppLifecycleTransition(AndroidAppLifecycleTransition.PROCESS_RECREATED)
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让 async 块立即执行到第一个挂起点(即 reconciliationSignals 的订阅),
+        // 保证【订阅先于下面的 publish】—— reconciliationSignals 是无 replay 的热 SharedFlow,
+        // 若订阅晚于发射,信号丢失 → withTimeout 必超时(慢 CI 上偶发 flaky 的根因)。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }
@@ -765,8 +771,11 @@ class Pr119AndroidCrossRepoRecoveryStateRoutingContractTest {
         controller.setActiveForTest()
         controller.setReconnectRecoveryStateForTest(ReconnectRecoveryState.RECOVERING)
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让 async 块立即执行到第一个挂起点(即 reconciliationSignals 的订阅),
+        // 保证【订阅先于下面的 publish】—— reconciliationSignals 是无 replay 的热 SharedFlow,
+        // 若订阅晚于发射,信号丢失 → withTimeout 必超时(慢 CI 上偶发 flaky 的根因)。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }
@@ -811,8 +820,11 @@ class Pr119AndroidCrossRepoRecoveryStateRoutingContractTest {
         val controller = buildController(settings)
         controller.onAppLifecycleTransition(AndroidAppLifecycleTransition.PROCESS_RECREATED)
 
-        val deferred = async {
-            withTimeout(500) {
+        // UNDISPATCHED:让 async 块立即执行到第一个挂起点(即 reconciliationSignals 的订阅),
+        // 保证【订阅先于下面的 publish】—— reconciliationSignals 是无 replay 的热 SharedFlow,
+        // 若订阅晚于发射,信号丢失 → withTimeout 必超时(慢 CI 上偶发 flaky 的根因)。
+        val deferred = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            withTimeout(2000) {
                 controller.reconciliationSignals.first {
                     it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
                 }

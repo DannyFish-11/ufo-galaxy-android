@@ -49,10 +49,20 @@ class Pr73LocalIntelligenceActivationPolicyTest {
     fun setUp() {
         tmpDir = File(System.getProperty("java.io.tmpdir"), "pr73_${System.nanoTime()}")
         tmpDir.mkdirs()
-        File(tmpDir, ModelAssetManager.MOBILEVLM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_PARAM_FILE).writeText("stub")
-        File(tmpDir, ModelAssetManager.SEECLICK_BIN_FILE).writeText("stub")
-        val assetManager = ModelAssetManager(tmpDir)
+        // 适配模型层替换:注册表由三条目(mobilevlm/seeclick/seeclick_bin)收敛为两条目
+        // (MAI-UI-2B LLM + mmproj),原 NCNN bin 第三条目已不存在。两个模型均为
+        // trust-on-first-use(静态 SHA-256 为 null),"stub" 内容首轮 verify 即 READY;
+        // 仍按 ModelAssetManagerTest 的既定做法保留 checksumOverrides 显式禁用校验,
+        // 让激活策略测试专注于 warmup 语义本身。
+        File(tmpDir, ModelAssetManager.VLM_FILE).writeText("stub")
+        File(tmpDir, ModelAssetManager.VLM_MMPROJ_FILE).writeText("stub")
+        val assetManager = ModelAssetManager(
+            tmpDir,
+            checksumOverrides = mapOf(
+                ModelAssetManager.MODEL_ID_VLM to null,
+                ModelAssetManager.MODEL_ID_VLM_MMPROJ to null
+            )
+        )
         planner = StubPlannerService()
         grounding = StubGroundingService()
         manager = LocalInferenceRuntimeManager(planner, grounding, assetManager)
@@ -671,9 +681,12 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         grounding.warmupSucceeds = false
         manager.start()
 
+        // 过期断言:start() 管线内的双侧失败按生产语义进入 FailedStartup(启动期失败);
+        // Failed 仅保留给启动成功之后的运行期崩溃(见 ManagerState.FailedStartup KDoc)。
+        // 两者对能力面的效果一致(均映射 DISABLED / UNAVAILABLE_FAILED)。
         assertTrue(
-            "Pre-condition: state must be Failed after both runtimes fail",
-            manager.state.value is LocalInferenceRuntimeManager.ManagerState.Failed
+            "Pre-condition: state must be FailedStartup after both runtimes fail",
+            manager.state.value is LocalInferenceRuntimeManager.ManagerState.FailedStartup
         )
 
         val snapshot = LocalIntelligenceActivationPolicySurface.buildSnapshot(
@@ -813,7 +826,13 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         private var crashed = false
 
         override fun loadModel(): Boolean {
-            if (crashed) return false
+            // 桩修复:原实现 crashed=true 后 loadModel 永远失败且无任何清除路径,
+            // "成功恢复"场景在构造上就不可能(recoverIfUnhealthy→start→loadModel
+            // 必败→FailedStartup),导致恢复类测试确定性失败。语义修正为:
+            // 一次成功的重新加载(warmupSucceeds=true)即修复崩溃——与
+            // "Recovery: planner comes back" 的测试意图一致。
+            if (crashed && !warmupSucceeds) return false
+            crashed = false
             loaded = warmupSucceeds
             return loaded
         }
@@ -830,9 +849,16 @@ class Pr73LocalIntelligenceActivationPolicyTest {
         }
 
         override fun warmupWithResult(): com.ufo.galaxy.inference.WarmupResult {
-            if (crashed) return com.ufo.galaxy.inference.WarmupResult.failure(
-                com.ufo.galaxy.inference.WarmupResult.WarmupStage.HEALTH_CHECK, "Crashed"
-            )
+            // 桩修复(与 loadModel 同语义):LocalInferenceRuntimeManager.start() 的
+            // warmup 实际走本方法;原实现 crashed=true 后永远失败且无清除路径,
+            // "成功恢复"场景在构造上不可能。语义修正为:一次成功的 warmup
+            // (warmupSucceeds=true)即修复崩溃。
+            if (crashed && !warmupSucceeds) {
+                return com.ufo.galaxy.inference.WarmupResult.failure(
+                    com.ufo.galaxy.inference.WarmupResult.WarmupStage.HEALTH_CHECK, "Crashed"
+                )
+            }
+            crashed = false
             loaded = warmupSucceeds
             return if (warmupSucceeds) com.ufo.galaxy.inference.WarmupResult.success()
             else com.ufo.galaxy.inference.WarmupResult.failure(

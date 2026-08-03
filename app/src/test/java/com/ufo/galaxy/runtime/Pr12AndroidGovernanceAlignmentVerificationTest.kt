@@ -77,7 +77,9 @@ class Pr12AndroidGovernanceAlignmentVerificationTest {
                 name = "partial-completion-surface",
                 phase = AndroidExecutionLifecycleContract.ExecutionLifecyclePhase.ACTIVATING,
                 expectedStateSemantic = AndroidCanonicalRuntimeTruthContract.ReportedStateSemanticClass.DERIVED_LOCAL,
-                expectedDegradedSemantic = AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.PARTIAL,
+                // 分类优先级(classifyDegradedCondition 文档序):非空 fallback tier 命中规则3 FALLBACK,
+                // 先于规则5 PARTIAL(plannerReady != groundingReady),故本场景期望 FALLBACK。
+                expectedDegradedSemantic = AndroidCanonicalRuntimeTruthContract.DegradedConditionClass.FALLBACK,
                 expectedResultSemantic = AndroidCanonicalRuntimeTruthContract.ResultUplinkSemanticClass.INFORMATIONAL,
                 expectedResultRule = ExecutionUplinkDiscipline.ResultUplinkRule.PROHIBITED,
                 expectedStateRule = ExecutionUplinkDiscipline.StateUplinkRule.REQUIRED,

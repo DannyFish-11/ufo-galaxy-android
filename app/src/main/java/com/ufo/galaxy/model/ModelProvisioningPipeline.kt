@@ -152,6 +152,15 @@ class ModelProvisioningPipeline(
                 ?: ProvisioningResult.Failure.DownloadError(modelId, "unknown download error")
         }
 
+        // ── Stage 6.5: TOFU checksum persistence ──────────────────────────────
+        // 真 bug 修复(校验闭环缺失):trust-on-first-use 契约要求首次成功下载后
+        // 调用 persistComputedChecksum 固化基线摘要,否则该模型永远没有期望摘要,
+        // verifyModel 每次都跳过校验,损坏/篡改无法被发现。仅在当前无有效摘要
+        // (首次下载窗口)时持久化,不覆盖已有基线。
+        if (modelAssetManager.effectiveChecksum(modelId) == null) {
+            modelAssetManager.persistComputedChecksum(modelId)
+        }
+
         // ── Stage 7: Activation ───────────────────────────────────────────────
         val installedFile = File(modelAssetManager.modelsDir, spec.fileName)
         return try {

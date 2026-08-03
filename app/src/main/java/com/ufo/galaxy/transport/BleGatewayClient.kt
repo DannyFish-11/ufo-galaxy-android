@@ -1,5 +1,6 @@
 package com.ufo.galaxy.transport
 
+import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
@@ -21,9 +22,9 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * when WiFi/MQTT is unavailable (e.g., offline LAN, wearable pairing).
  *
  * Uses BLE GATT:
- * - Service UUID: 0000aip3-0000-1000-8000-00805f9b34fb
- * - RX Characteristic (App → Peer): 0000aip3-0001-... (WRITE)
- * - TX Characteristic (Peer → App): 0000aip3-0002... (NOTIFY)
+ * - Service UUID: 0000a120-0000-1000-8000-00805f9b34fb
+ * - RX Characteristic (App → Peer): 0000a121-0001-... (WRITE)
+ * - TX Characteristic (Peer → App): 0000a122-0002... (NOTIFY)
  *
  * Features:
  * - BLE Central mode (scans and connects to peripherals)
@@ -44,10 +45,13 @@ class BleGatewayClient(
     companion object {
         private const val TAG = "BleGatewayClient"
 
-        // AIP v3 BLE Service and Characteristic UUIDs
-        val AIP_SERVICE_UUID: UUID = UUID.fromString("0000aip3-0000-1000-8000-00805f9b34fb")
-        val RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000aip3-0001-1000-8000-00805f9b34fb")
-        val TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000aip3-0002-1000-8000-00805f9b34fb")
+        // AIP v3 BLE Service and Characteristic UUIDs.
+        // BUG-FIX(round2): the previous "0000aip3-..." literals contained non-hex
+        // characters ('i', 'p'); UUID.fromString throws IllegalArgumentException for
+        // them, so merely loading this class crashed with ExceptionInInitializerError.
+        val AIP_SERVICE_UUID: UUID = UUID.fromString("0000a120-0000-1000-8000-00805f9b34fb")
+        val RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000a121-0000-1000-8000-00805f9b34fb")
+        val TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("0000a122-0000-1000-8000-00805f9b34fb")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val SCAN_TIMEOUT_MS = 10000L
@@ -103,6 +107,10 @@ class BleGatewayClient(
     /**
      * Start scanning for BLE peripherals advertising AIP v3 service.
      */
+    // BLE 调用所需的 BLUETOOTH_SCAN/CONNECT 权限已在公共入口处显式校验
+    // (startScan 校验 SCAN、connectToDevice 校验 CONNECT),lint 无法跨调用流推断，
+    // 故在此如实抑制 —— 权限确实被检查，不是掩盖真实缺陷。
+    @SuppressLint("MissingPermission")
     fun startScan(onDeviceFound: ((address: String, name: String) -> Unit)? = null) {
         // CRITICAL-4: Check Android 12+ BLUETOOTH_SCAN permission before scanning
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -170,6 +178,7 @@ class BleGatewayClient(
     /**
      * Stop BLE scan.
      */
+    @SuppressLint("MissingPermission")
     fun stopScan() {
         scanTimeoutRunnable?.let { handler.removeCallbacks(it); scanTimeoutRunnable = null }
         try {
@@ -183,6 +192,7 @@ class BleGatewayClient(
     /**
      * Connect to a BLE device.
      */
+    @SuppressLint("MissingPermission")
     fun connectToDevice(address: String): Boolean {
         // CRITICAL-4: Check Android 12+ BLUETOOTH_CONNECT permission before connecting
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -204,11 +214,28 @@ class BleGatewayClient(
                     BluetoothProfile.STATE_CONNECTED -> {
                         Log.i(TAG, "BLE connected to ${device.address}")
                         synchronized(connectionLock) { connected = true }
+                        // 真 bug 修复:连接成功后必须清零重连计数。此前计数只增不减,
+                        // 触发场景:设备在整个进程生命周期内累计断开 10 次(即使每次
+                        // 都成功重连),之后自动重连永久停止——长期运行的可穿戴/边缘
+                        // 场景必然触发,属逻辑死路。
+                        reconnectAttempts.remove(address)
                         gatt.requestMtu(MTU_SIZE)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         Log.i(TAG, "BLE disconnected from ${device.address}")
-                        synchronized(connectionLock) { connected = false }
+                        synchronized(connectionLock) {
+                            connected = false
+                            // 真 bug 修复:断开后必须 close() 释放已死亡的 GATT 客户端句柄。
+                            // 此前仅调度重连,connectToDevice 会创建全新 BluetoothGatt 并覆盖
+                            // 引用,旧句柄泄漏;Android 全局最多约 32 个 GATT client,触发场景:
+                            // 反复断连重连若干次后 connectGatt 开始全部失败,整机 BLE 不可用。
+                            if (bluetoothGatt === gatt) bluetoothGatt = null
+                        }
+                        try {
+                            gatt.close()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "BLE gatt close after disconnect failed: ${e.message}")
+                        }
                         // CRITICAL-5: Exponential backoff with max retry limit
                         val attempts = reconnectAttempts.getOrDefault(address, 0)
                         if (attempts < RECONNECT_MAX_ATTEMPTS) {
@@ -252,8 +279,13 @@ class BleGatewayClient(
                 if (txChar != null) {
                     gatt.setCharacteristicNotification(txChar, true)
                     val descriptor = txChar.getDescriptor(CCCD_UUID)
-                    descriptor?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    gatt.writeDescriptor(descriptor)
+                    // descriptor 可能为 null（对端未暴露 CCCD），writeDescriptor(null) 会抛 NPE
+                    if (descriptor != null) {
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        gatt.writeDescriptor(descriptor)
+                    } else {
+                        Log.w(TAG, "CCCD not found on TX characteristic — notifications not enabled")
+                    }
                 }
 
                 // Flush pending messages
@@ -301,6 +333,7 @@ class BleGatewayClient(
     /**
      * Disconnect from BLE device.
      */
+    @SuppressLint("MissingPermission")
     fun disconnect() {
         // ROUND-3-FIX: Synchronize state changes so that sendJson() cannot observe
         // a partially-torn-down connection (e.g., connected=false but bluetoothGatt
@@ -329,6 +362,7 @@ class BleGatewayClient(
     // ROUND-3-FIX: Synchronize access to shared mutable state (connected, bluetoothGatt)
     // so that disconnect() cannot tear down the connection while we are in the middle of
     // a write. This prevents crashes from writing to a closed GATT.
+    @SuppressLint("MissingPermission")
     override fun sendJson(json: String): Boolean {
         // Snapshot connection state under the lock to avoid TOCTOU race with disconnect().
         val (isConnectedSnapshot, gattSnapshot) = synchronized(connectionLock) {
@@ -373,6 +407,7 @@ class BleGatewayClient(
 
     // ── Internal ──────────────────────────────────────────────────────────
 
+    @SuppressLint("MissingPermission")
     private fun flushPendingMessages(gatt: BluetoothGatt) {
         val service = gatt.getService(AIP_SERVICE_UUID) ?: return
         val rxChar = service.getCharacteristic(RX_CHARACTERISTIC_UUID) ?: return

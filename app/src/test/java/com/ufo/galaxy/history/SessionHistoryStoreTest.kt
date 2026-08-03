@@ -35,9 +35,12 @@ class SessionHistoryStoreTest {
 
     @Test
     fun `all returns entries newest-first`() {
-        store.save(makeSummary("s1", savedAt = 1000L))
-        store.save(makeSummary("s2", savedAt = 2000L))
-        store.save(makeSummary("s3", savedAt = 3000L))
+        // 测试修复:savedAt 必须相对"当前时间"取值,而非原始的 1000L/2000L/3000L
+        // (约等于 1970 年),否则会被 7 天 TTL 淘汰逻辑(evictStale)在 save() 时立即清除。
+        val base = System.currentTimeMillis()
+        store.save(makeSummary("s1", savedAt = base - 2000L))
+        store.save(makeSummary("s2", savedAt = base - 1000L))
+        store.save(makeSummary("s3", savedAt = base))
         val all = store.all()
         assertEquals(3, all.size)
         assertEquals("s3", all[0].sessionId)
@@ -92,8 +95,11 @@ class SessionHistoryStoreTest {
 
     @Test
     fun `oldest entries are evicted when maxEntries exceeded`() {
+        // 测试修复:savedAt 锚定到当前时间,避免被 7 天 TTL 淘汰逻辑提前清除
+        // (原写法用 i * 1000L,约等于 1970 年,保存后立即被判过期)。
         val smallStore = SessionHistoryStore(prefs = null, maxEntries = 3)
-        repeat(5) { i -> smallStore.save(makeSummary("s$i", savedAt = i * 1000L)) }
+        val base = System.currentTimeMillis()
+        repeat(5) { i -> smallStore.save(makeSummary("s$i", savedAt = base + i * 1000L)) }
         assertEquals(3, smallStore.size())
         // Newest three should be retained
         val ids = smallStore.all().map { it.sessionId }.toSet()

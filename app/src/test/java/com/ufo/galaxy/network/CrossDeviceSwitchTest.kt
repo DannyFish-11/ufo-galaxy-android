@@ -537,15 +537,18 @@ class CrossDeviceSwitchTest {
         // when flushOfflineQueue calls discardForDifferentSession(durableSessionId) before
         // draining on reconnect.
         val queue = OfflineTaskQueue(prefs = null)
+        // PR-74:goal_execution_result 属 authority-sensitive 类型,先经 canonical-ownership 门禁。
+        // 需带 canonical_bound + is_canonicalization_ready 才可 replay,否则会因 OWNERSHIP_UNSPECIFIED
+        // 被拦截(与会话无关)。两条均标为 canonical,使唯一差异为 sessionTag,精确验证会话清退。
         queue.enqueue(
             "goal_execution_result",
-            """{"type":"goal_execution_result","payload":{"task_id":"t-old","status":"success"}}""",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-old","status":"success","canonical_ownership_status":"canonical_bound","is_canonicalization_ready":true}}""",
             sessionTag = "session-OLD",
             sessionEpoch = 1
         )
         queue.enqueue(
             "goal_execution_result",
-            """{"type":"goal_execution_result","payload":{"task_id":"t-current","status":"success"}}""",
+            """{"type":"goal_execution_result","payload":{"task_id":"t-current","status":"success","canonical_ownership_status":"canonical_bound","is_canonicalization_ready":true}}""",
             sessionTag = "session-CURRENT",
             sessionEpoch = 1
         )

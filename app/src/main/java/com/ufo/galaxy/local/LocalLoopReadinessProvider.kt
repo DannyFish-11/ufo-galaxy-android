@@ -43,8 +43,8 @@ interface LocalLoopReadinessProvider {
  * 5. Screenshot and action-executor availability (derived from accessibility binding).
  *
  * @param modelAssetManager  Source of model file status.
- * @param plannerService     MobileVLM planner backend.
- * @param groundingService   SeeClick grounding backend.
+ * @param plannerService     Unified VLM planner backend.
+ * @param groundingService   Unified VLM grounding backend.
  */
 class DefaultLocalLoopReadinessProvider(
     private val modelAssetManager: ModelAssetManager,

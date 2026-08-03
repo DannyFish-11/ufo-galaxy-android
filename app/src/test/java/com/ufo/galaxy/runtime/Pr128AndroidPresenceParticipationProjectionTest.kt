@@ -12,6 +12,7 @@ import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -255,7 +256,10 @@ class Pr128AndroidPresenceParticipationProjectionTest {
             controller.setActiveForTest()
 
             controller.onAppLifecycleTransition(AndroidAppLifecycleTransition.FOREGROUND)
-            val foregroundDeferred = async {
+            // 测试修复:reconciliationSignals 是 replay=0 热流,默认 async 要等父协程
+            // 挂起才开始收集,生产方同步 tryEmit 的信号在订阅前就已丢失;
+            // 用 UNDISPATCHED 确保先订阅(挂起在 first)再触发生产方。
+            val foregroundDeferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(500) {
                     controller.reconciliationSignals.first {
                         it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT
@@ -269,7 +273,8 @@ class Pr128AndroidPresenceParticipationProjectionTest {
             val foregroundSignal = foregroundDeferred.await()
 
             controller.onAppLifecycleTransition(AndroidAppLifecycleTransition.BACKGROUND)
-            val backgroundDeferred = async {
+            // 测试修复:同上,先订阅后发布。
+            val backgroundDeferred = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(500) {
                     controller.reconciliationSignals.first {
                         it.kind == ReconciliationSignal.Kind.RUNTIME_TRUTH_SNAPSHOT

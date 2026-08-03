@@ -352,7 +352,10 @@ class Pr7BAndroidTruthPublicationSemanticsTest {
         val result = AndroidTruthPublicationSemanticsContract.classifySnapshotEvidencePresence(
             warmupResult = "ok",
             pendingFirstDownload = false,
-            localLoopReady = null,
+            // 测试修复:localLoopReady=null 会先命中规则 3(关键信号缺失 → UNKNOWN),
+            // 根本走不到规则 4 的 planner/grounding 失配判定;本测试要隔离验证的
+            // 是 PARTIAL 规则,故给定确定值。
+            localLoopReady = true,
             plannerReady = true,
             groundingReady = false,
             offlineQueueDepth = 0,
@@ -372,7 +375,8 @@ class Pr7BAndroidTruthPublicationSemanticsTest {
         val result = AndroidTruthPublicationSemanticsContract.classifySnapshotEvidencePresence(
             warmupResult = "ok",
             pendingFirstDownload = false,
-            localLoopReady = null,
+            // 测试修复:同上,localLoopReady=null 会先命中 UNKNOWN 规则,给定确定值。
+            localLoopReady = true,
             plannerReady = false,
             groundingReady = true,
             offlineQueueDepth = 0,
