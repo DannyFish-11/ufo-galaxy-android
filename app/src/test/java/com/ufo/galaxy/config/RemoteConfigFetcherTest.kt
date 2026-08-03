@@ -11,12 +11,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * Unit tests for [RemoteConfigFetcher] v1-first with 404 fallback behavior.
+ * Unit tests for [RemoteConfigFetcher]:先打服务端真实存在的那条,404 才走第二跳。
+ *
+ * 这段说明本身被改过一次 —— 原文写的是"v1-first",而顺序在这一轮被换过来了。
+ * 一份还在描述旧顺序的类注释比没有注释更糟:它会让下一个人按错误的前提去读用例。
  *
  * All HTTP calls are intercepted via a custom [OkHttpClient] interceptor to avoid
  * real network I/O.  Tests verify:
- *  - [RemoteConfigFetcher.fetchConfig] calls `GET /api/v1/config` first.
- *  - [RemoteConfigFetcher.fetchConfig] falls back to `GET /api/config` on 404.
+ *  - [RemoteConfigFetcher.fetchConfig] calls `GET /api/config` first(实测 V2 上存在的那条)。
+ *  - [RemoteConfigFetcher.fetchConfig] falls back to `GET /api/v1/config` on 404(预留路径)。
  *  - [RemoteConfigFetcher.fetchConfig] does NOT fall back on non-404 HTTP errors.
  *  - Network exceptions are surfaced as `null` without a second attempt.
  *  - The returned [org.json.JSONObject] contains values from the server response.
@@ -149,7 +152,13 @@ class RemoteConfigFetcherTest {
         val result = f.fetchConfig()
         assertNull("fetchConfig must return null on v1 500 without fallback", result)
         assertEquals("Only one request must be made (no fallback on 500)", 1, urls.size)
-        assertTrue("Request must target v1 path", urls[0].contains("/api/v1/"))
+        // 这里此前钉的是 "含 /api/v1/",那是顺序换过来之前的写法。首选路径改成
+        // /api/config 之后它就恒假了 —— 而这条用例真正要验的是"500 不触发第二跳"
+        // (上面那句 urls.size == 1),路径只是用来确认第一跳打对了地方。
+        assertTrue(
+            "Request must target the primary path (${RemoteConfigFetcher.CONFIG_PRIMARY_PATH})",
+            urls[0].contains(RemoteConfigFetcher.CONFIG_PRIMARY_PATH)
+        )
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.ufo.galaxy.contract
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -70,6 +71,25 @@ import java.io.File
  * 本测试因此只扫 `/api/`,不扫 `/auth/` —— 把一个悬而未决的架构问题变成一条红线,
  * 只会让人把红线注释掉。
  *
+ * 第二次触发(合入 main 之后)
+ * ---------------------------
+ * 合入 main 带进来一个 `DevicePairingClient`,它调 `/api/v1/pairing/` 那一族。
+ * 这份测试当即判红 —— 而**它报的位置对、结论错**,值得记下来:
+ *
+ * 客户端调的是 `/api/v1/pairing/claim/$requestId`(参数化),V2 上确实有
+ * `/api/v1/pairing/claim/{request_id}`。判红的原因在扫描器自己身上:它对每个
+ * token 先 `trimEnd('/')`,于是参数化调用被归一成了裸路径 `/api/v1/pairing/claim`,
+ * 而那一条 V2 上没有。**两种形态被揉成了同一个字符串。**
+ *
+ * 这不只是噪声问题 —— 它把本文件顶部那个 405 缺陷判成了看不见:裸的
+ * `POST /api/v1/devices/heartbeat` 撞上 `GET /api/v1/devices/{device_id}` 返回 405,
+ * 而"裸路径 vs 参数化"正是唯一能把这两者分开的信息。所以这一轮保留了尾部斜杠,
+ * 并把参数化的父路径单独列成 [APPROVED_PARAM_PARENTS](精确,不是前缀)。
+ *
+ * 顺带确认了一件跨仓的事:`/api/v1/pairing/` 那一族原先**只挂在网关侧**,统一
+ * 启动器的权威 API 层上没有 —— 手机端发起入网会 404。V2 那边已由
+ * `core/gateway_surface_merge.py` 并入权威层,本轮实测 381 条路由里 PRESENT。
+ *
  * 一个 Kotlin 的坑(这份文件踩过)
  * -------------------------------
  * Kotlin 的块注释**可嵌套**(与 Java 不同)。KDoc 里写 `/auth/` 加一个星号,
@@ -98,7 +118,7 @@ class V2ServerPathContractTest {
             .forEach { file ->
                 scanned++
                 pathsInStringLiterals(file.readText()).forEach { path ->
-                    if (path !in APPROVED_PATHS && APPROVED_PREFIXES.none { path.startsWith(it) }) {
+                    if (!isApproved(path)) {
                         offenders += "$path   ← ${file.name}"
                     }
                 }
@@ -116,6 +136,32 @@ class V2ServerPathContractTest {
         }
     }
 
+    /**
+     * 守卫自身的守卫:裸路径与参数化路径**必须**得到不同的结论。
+     *
+     * 没有这一条,[isApproved] 的那个分支就是一段没人验过的逻辑 ——
+     * 而它恰恰是本文件这一轮唯一改动的地方。把它写反(比如两条都走
+     * [APPROVED_PARAM_PARENTS])会让整份契约测试恒绿,而恒绿的契约测试
+     * 与没有测试等价。
+     */
+    @Test
+    fun `a bare path is not excused by an approved parameterised parent`() {
+        // 参数化:V2 上有 /api/v1/pairing/claim/{request_id} —— 放行。
+        assertTrue("参数化调用应放行", isApproved("/api/v1/pairing/claim/"))
+        // 裸路径:V2 上没有 /api/v1/pairing/claim 这条 —— 必须拦。
+        assertFalse("裸路径不该被父路径的参数化放行豁免", isApproved("/api/v1/pairing/claim"))
+
+        // 同一组对照放在 devices 上再来一次 —— 这一族有 APPROVED_PREFIXES 兜着,
+        // 所以裸路径确实会被前缀放行;拦它的是 PROVEN_ABSENT(见下一条用例)。
+        // 写出来是为了说明两套机制的分工,而不是让人以为前缀也能区分这两种形态。
+        assertTrue(isApproved("/api/v1/devices/"))
+        assertTrue(isApproved("/api/v1/devices/telemetry"))
+
+        // 完全没见过的东西照拦不误。
+        assertFalse(isApproved("/api/v1/totally/made/up"))
+        assertFalse(isApproved("/api/v1/made-up-parent/"))
+    }
+
     /** 已被实测证伪的路径,任何时候都不许再出现在生产代码里。 */
     @Test
     fun `paths proven absent on V2 never come back`() {
@@ -124,7 +170,15 @@ class V2ServerPathContractTest {
         root.walkTopDown()
             .filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
             .forEach { file ->
-                val literals = pathsInStringLiterals(file.readText())
+                // 这里只比**裸路径**。末尾带斜杠的 token 是"调用点在后面拼了一个
+                // 路径参数",那是另一条路由,不该拿来和裸路径黑名单比。
+                //
+                // 曾经想过"先 trimEnd('/') 再比,免得漏"—— 那样会埋一个反向的雷:
+                // 本文件顶部已经写明 V2 上没有裸的 /api/v1/pairing/claim,谁按这句话
+                // 把它加进 PROVEN_ABSENT,正确的 `/claim/$requestId` 调用就会被误判。
+                // 而"漏"其实并不存在:`"$base/api/v1/health/"` 这种写法末尾带斜杠,
+                // 会去查 APPROVED_PARAM_PARENTS 而查不到,上面第一条用例就拦下了。
+                val literals = pathsInStringLiterals(file.readText()).filterNot { it.endsWith("/") }.toSet()
                 PROVEN_ABSENT.forEach { (path, note) ->
                     if (path in literals) {
                         resurrected += "$path   ← ${file.name}   ($note)"
@@ -148,8 +202,32 @@ class V2ServerPathContractTest {
      */
     private fun pathsInStringLiterals(text: String): Set<String> =
         STRING_LITERAL.findAll(text)
-            .flatMap { lit -> PATH_IN_LITERAL.findAll(lit.value).map { it.value.trimEnd('/') } }
+            .flatMap { lit -> PATH_IN_LITERAL.findAll(lit.value).map { it.value } }
             .toSet()
+
+    /**
+     * 一条扫出来的路径算不算数。
+     *
+     * **末尾那个斜杠是信息,不是噪声。**
+     * 这里此前对每个 token 先 `trimEnd('/')` 再比,于是
+     * `"$base/api/v1/pairing/claim/$requestId"`(正确:V2 上是
+     * `/api/v1/pairing/claim/{request_id}`)和裸的 `"/api/v1/pairing/claim"`
+     * (V2 上根本没有这条)会被归一成同一个字符串 —— 两者从此无法区分。
+     *
+     * 而"裸路径撞上一条参数化路由"正是本文件顶部记的那个 405 缺陷的形状:
+     * `POST /api/v1/devices/heartbeat` 撞上 `GET /api/v1/devices/{device_id}`,
+     * 拿到 405 而不是 404。把这两种形态揉成一个,等于把这一整类缺陷判成看不见。
+     *
+     * 所以分两条路判:
+     *  - token 以 `/` 收尾 → 调用点在后面拼了路径参数,查 [APPROVED_PARAM_PARENTS];
+     *  - 否则 → 是一条完整路径,查 [APPROVED_PATHS] 或 [APPROVED_PREFIXES]。
+     */
+    private fun isApproved(token: String): Boolean {
+        if (token.endsWith("/")) {
+            return token.trimEnd('/') in APPROVED_PARAM_PARENTS
+        }
+        return token in APPROVED_PATHS || APPROVED_PREFIXES.any { token.startsWith(it) }
+    }
 
     private fun locateMainSourceRoot(): File {
         // 单测的工作目录在不同调用方式下不一样(模块目录 / 仓库根),两种都试。
@@ -192,17 +270,42 @@ class V2ServerPathContractTest {
             "/api/v1/operator/devices/ecosystem",
             "/api/v1/sessions/ingest_turns",
             "/api/v1/sessions/reconcile",
+            // 设备准入(DevicePairingClient)。这一族在 V2 上原本只挂在网关侧,
+            // 统一启动器的权威 API 层上没有 —— 也就是说手机端发起入网会 404。
+            // 现已由 core/gateway_surface_merge.py 并入权威层,实测 PRESENT。
+            "/api/v1/pairing/enroll",
             // 预留:服务端补上之后 RemoteConfigFetcher 会自动切过去(当前实测 404,
             // 只作为第二跳,不作为首选)。
             "/api/v1/config",
         )
 
         /**
-         * 带路径参数的族。字面量拼出来的具体值无法逐条枚举,按前缀放行。
+         * 调用点在其后拼了路径参数的那些父路径 —— token 形如 `/api/v1/pairing/claim/`。
          *
-         * 这一放行是**故意宽的** —— 精确的拦截交给下面的 PROVEN_ABSENT。两者分工:
-         * 前缀负责"别为了参数化路径产生噪声",黑名单负责"这几条确凿的别再回来"。
-         * 都做成精确名单的话,每加一个 device 子路由都要改这里,很快就没人维护了。
+         * 与 [APPROVED_PREFIXES] 的区别是**精确**:列在这里表示"V2 上确实有一条
+         * `<父路径>/{参数}` 的路由",而裸的父路径本身**不**被这条放行。
+         * 逐条实测过(把 core.api_routes + core.health_check 组装成 381 条权威路由再比):
+         *
+         *   /api/v1/devices        → /api/v1/devices/{device_id}/heartbeat 等 22 条
+         *   /api/v1/pairing/claim  → /api/v1/pairing/claim/{request_id}
+         *   /api/v1/pairing/status → /api/v1/pairing/status/{request_id}
+         */
+        private val APPROVED_PARAM_PARENTS = setOf(
+            "/api/v1/devices",
+            "/api/v1/pairing/claim",
+            "/api/v1/pairing/status",
+        )
+
+        /**
+         * 整族放行的前缀 —— 用于"这一族下面会不断加子路由"的地方。
+         *
+         * 这一放行是**故意宽的**。三套机制的分工:
+         *  - 前缀:别让"这一族又加了一条子路由"变成噪声;
+         *  - [APPROVED_PARAM_PARENTS]:精确表达"这里拼的是一个路径参数";
+         *  - [PROVEN_ABSENT]:这几条确凿不存在的,任何时候都不许回来。
+         *
+         * 都做成精确名单的话,每加一个 device 子路由都要改这里,很快就没人维护了;
+         * 反过来全靠前缀,则[isApproved] 里那条"裸路径 vs 参数化"的区分会失效。
          */
         private val APPROVED_PREFIXES = listOf(
             "/api/v1/devices/",  // /{device_id}/heartbeat、/telemetry 等
