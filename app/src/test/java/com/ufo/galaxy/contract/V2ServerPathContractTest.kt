@@ -58,18 +58,22 @@ import java.io.File
  * 服务端加了新路由、或改了旧路由,这里就该跟着更新 —— 而**更新它的动作本身**
  * 就是在强迫有人回答一句"手机端要不要跟着改"。
  *
- * 已知开着的一条(不在本测试范围内)
- * --------------------------------
- * `/auth/oauth/device/start` 与 `/auth/oauth/device/poll`(WearOS 用)、以及
- * `/auth/oauth/{google,github,logout}`(Android 的 OAuthManager 用)**不在这 354 条里** ——
- * 它们由 `nodes/Node_05_Auth/oauth_routes.py` 提供,那是一个**独立节点进程**,
- * 不在统一启动器的 9000 端口上。也就是说客户端拿 restBaseUrl 去打 `/auth/` 那一族会 404,
- * 除非部署时另有反代把它们转到 Auth 节点。
+ * `/auth/` 那一族:曾经开着,现在收了
+ * ------------------------------------
+ * 这里原先写着"`/auth/oauth/` 那一族由独立节点进程提供,不在 9000 上,所以本测试
+ * 只扫 `/api/`" —— **那个判断只对了一半**。
  *
- * 这里刻意**不改客户端**:该由谁承载 `/auth/` 那一族是进程拓扑问题(启动器代理过去,
- * 还是客户端另配一个 auth base url),属于 125 节点进程模型那一摊,不是路径笔误。
- * 本测试因此只扫 `/api/`,不扫 `/auth/` —— 把一个悬而未决的架构问题变成一条红线,
- * 只会让人把红线注释掉。
+ * 后来在 V2 仓里查清楚:`register_oauth_routes()` 定义在
+ * `nodes/Node_05_Auth/oauth_routes.py`,而全仓只有它自己那一行 —— 从来没有被调用过。
+ * 也就是说那一族既不在统一启动器的 9000 上,**也不在 Node_05 自己的 8005 上**,
+ * 任何进程都没有服务过它们。不是"进程拓扑没定",是没人挂。
+ *
+ * V2 侧已把它并入权威层(`core/auth_surface_merge.py`),所以本测试从这一轮起
+ * **把 `/auth/` 也纳入扫描**。留着不扫等于把一条已经能验的契约继续蒙着。
+ *
+ * 纳入后第一个被误判的是 `ufo-galaxy://auth/callback` —— 那是 GitHub OAuth 的
+ * 客户端回调地址(系统按 scheme 把浏览器拉回 App),不是服务端路由。所以扫描器
+ * 先按 scheme 整条排除自定义深链,只留 http(s) 与相对路径。
  *
  * 第二次触发(合入 main 之后)
  * ---------------------------
@@ -202,6 +206,7 @@ class V2ServerPathContractTest {
      */
     private fun pathsInStringLiterals(text: String): Set<String> =
         STRING_LITERAL.findAll(text)
+            .filterNot { CUSTOM_SCHEME_URI.containsMatchIn(it.value) }
             .flatMap { lit -> PATH_IN_LITERAL.findAll(lit.value).map { it.value } }
             .toSet()
 
@@ -247,8 +252,19 @@ class V2ServerPathContractTest {
         /** 单行双引号字符串字面量。够用:所有 URL 拼接都在单行里。 */
         private val STRING_LITERAL = Regex("\"[^\"\\n]*\"")
 
+        /**
+         * 自定义 scheme 的深链,不是服务端路径。
+         *
+         * ``ufo-galaxy://auth/callback`` 是 GitHub OAuth 的**客户端回调地址** ——
+         * 系统按 scheme 把浏览器拉回 App,V2 上不存在也不该存在这条路由。
+         * 把 /auth/ 纳入扫描后它第一个被误判,所以先按 scheme 整条排除。
+         *
+         * 只排非 http(s) 的:``https://...`` 里出现的路径仍然要查,那种才是真调用。
+         */
+        private val CUSTOM_SCHEME_URI = Regex("\\b(?!https?\\b)[a-zA-Z][a-zA-Z0-9+.-]*://")
+
         /** 字面量里的服务端路径(允许 "$base/api/..." 这种插值前缀)。 */
-        private val PATH_IN_LITERAL = Regex("/api/v?[0-9]*/?[A-Za-z0-9/_\\-]*")
+        private val PATH_IN_LITERAL = Regex("/(?:api|auth)/v?[0-9]*/?[A-Za-z0-9/_\\-]*")
 
         /**
          * V2 上实测存在的、手机端会用到的路径。
@@ -270,6 +286,18 @@ class V2ServerPathContractTest {
             "/api/v1/operator/devices/ecosystem",
             "/api/v1/sessions/ingest_turns",
             "/api/v1/sessions/reconcile",
+            // OAuth 登录面。这一族此前**任何进程都没有服务过** ——
+            // register_oauth_routes() 在 V2 仓里从来没被调用过,既不在统一启动器的
+            // 9000 上,也不在 Node_05_Auth 自己的 8005 上。V2 侧已把它并入权威层
+            // (core/auth_surface_merge.py),本清单随之把 /auth/ 纳入扫描范围。
+            "/auth/oauth/google",
+            "/auth/oauth/github",
+            "/auth/oauth/logout",
+            "/auth/oauth/refresh",
+            "/auth/oauth/providers",
+            "/auth/oauth/callback",
+            "/auth/oauth/me",
+            "/auth/oauth/health",
             // 设备准入(DevicePairingClient)。这一族在 V2 上原本只挂在网关侧,
             // 统一启动器的权威 API 层上没有 —— 也就是说手机端发起入网会 404。
             // 现已由 core/gateway_surface_merge.py 并入权威层,实测 PRESENT。
