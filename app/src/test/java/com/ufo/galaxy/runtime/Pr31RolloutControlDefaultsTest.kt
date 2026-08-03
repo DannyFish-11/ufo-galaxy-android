@@ -12,7 +12,7 @@ import com.ufo.galaxy.loop.ExecutorBridge
 import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
-import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.ui.viewmodel.MainUiState
@@ -187,7 +187,7 @@ class Pr31RolloutControlDefaultsTest {
             ),
             screenshotProvider = FakeScreenshotProvider(),
             modelAssetManager = ModelAssetManager(modelsDir),
-            modelDownloader = ModelDownloader(modelsDir)
+            modelDownloader = noNetworkModelDownloader(modelsDir)
         )
     }
 

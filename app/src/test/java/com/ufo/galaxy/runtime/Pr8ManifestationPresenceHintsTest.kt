@@ -13,7 +13,7 @@ import com.ufo.galaxy.loop.ExecutorBridge
 import com.ufo.galaxy.loop.LocalPlanner
 import com.ufo.galaxy.loop.LoopController
 import com.ufo.galaxy.model.ModelAssetManager
-import com.ufo.galaxy.model.ModelDownloader
+import com.ufo.galaxy.model.noNetworkModelDownloader
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.protocol.DeviceExecutionEventPayload
 import com.ufo.galaxy.protocol.DeviceStateSnapshotPayload
@@ -133,7 +133,7 @@ class Pr8ManifestationPresenceHintsTest {
     private fun buildLoopController(): LoopController {
         val dir = tmpFolder.newFolder()
         val assetManager = ModelAssetManager(dir)
-        val downloader = ModelDownloader(dir)
+        val downloader = noNetworkModelDownloader(dir)
         val planner = LocalPlanner(NoOpPlannerService())
         val grounding = NoOpGroundingService()
         val executor = object : AccessibilityExecutor {
