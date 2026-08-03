@@ -6,7 +6,6 @@ import com.ufo.galaxy.agent.NoOpImageScaler
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
 import com.ufo.galaxy.model.ModelAssetManager
-import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.model.noNetworkModelDownloader
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
