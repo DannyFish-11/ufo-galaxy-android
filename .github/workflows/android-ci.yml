@@ -319,9 +319,20 @@ jobs:
   all-unit-tests:
     name: "All Unit Tests [gate 6/7]"
     runs-on: ubuntu-latest
-    # 全量 12000+ 测试实测 ~16.5 分钟,20 分钟余量太薄(一次真实超时被杀,浪费整轮
-    # CI 排查)。30 分钟仍能拦住真挂起,同时给套件自然增长留出余量。
-    timeout-minutes: 30
+    # 30 → 45。这不是"红了就调大",数字是量出来的:
+    #
+    #   4d50ddc  "Run all JVM unit tests" 13分38秒
+    #   2b0d999  同一步骤            **28分21秒**   ← 只剩 86 秒就撞上 30 分钟
+    #
+    # 两轮的准备阶段都只有约 10 秒(JDK 7s + checkout 2s),所以不是冷缓存,
+    # 是测试任务本身翻了 2.08 倍。30 这个数字是套件跑 ~16.5 分钟时定的,
+    # 现在余量已经没了 —— 下一轮有相当概率在**产出诊断数据之前**就被杀掉,
+    # 而超时被杀时 if:always() 的步骤也拿不到东西。
+    #
+    # 所以先给回可比的余量(~1.6 倍),让下面那个"最慢的测试类"步骤把数据打出来,
+    # 再根据数据决定是某个类真的慢、还是套件整体自然增长。
+    # **这一条是待定项,不是结论** —— 拿到数据后应当回来重新定。
+    timeout-minutes: 45
     needs: [protocol-contract-guard, runtime-regression, cross-repo-compatibility-guard, e2e-verification-gate]
 
     steps:
@@ -340,6 +351,40 @@ jobs:
 
       - name: Run all JVM unit tests
         run: ./gradlew :app:test
+
+      # 把"最慢的测试类"打进**作业日志**,而不只是产物。
+      #
+      # 产物(all-unit-test-results)托管在 blob 存储上,排查时未必拿得到;
+      # 而作业日志是任何人、任何工具都读得到的。本仓在 CodeQL 那边已经吃过一次
+      # 同样的亏:结果只进 Security 页,于是"还剩几条告警"没人答得上来。
+      - name: 最慢的测试类(诊断用)
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          from collections import defaultdict
+          per_class, total, cases = defaultdict(float), 0.0, 0
+          for f in glob.glob("app/build/test-results/**/*.xml", recursive=True):
+              try:
+                  root = ET.parse(f).getroot()
+              except ET.ParseError:
+                  continue
+              for tc in root.iter("testcase"):
+                  t = float(tc.get("time") or 0)
+                  per_class[tc.get("classname") or "?"] += t
+                  total += t
+                  cases += 1
+          if not cases:
+              print("没有解析到任何 testcase —— 诊断步骤本身没生效,别当成'没有慢的'")
+              raise SystemExit(0)
+          print(f"用例 {cases} 条 · 累计 {total/60:.1f} 分钟(并行执行,墙钟会更短)")
+          print("\n最慢的 25 个测试类:")
+          for name, secs in sorted(per_class.items(), key=lambda kv: -kv[1])[:25]:
+              print(f"  {secs:8.1f}s  {name}")
+          top = sum(s for _, s in sorted(per_class.items(), key=lambda kv: -kv[1])[:25])
+          print(f"\n这 25 个占总时长 {top/total*100:.0f}% —— 占比高说明是少数类拖慢的(该去查它们),"
+                f"占比低说明是套件整体增长(那才该调 timeout)。")
+          PY
 
       - name: Upload full test results
         if: always()
