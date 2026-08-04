@@ -104,6 +104,7 @@ import com.ufo.galaxy.transport.TcpDirectClient
 import com.ufo.galaxy.transport.TcpDirectServer
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.toWireJson
 import com.ufo.galaxy.protocol.AckPayload
 import com.ufo.galaxy.protocol.CoordSyncAckPayload
 import com.ufo.galaxy.protocol.CancelResultPayload
@@ -2856,7 +2857,7 @@ class GalaxyConnectionService : Service() {
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(taskId, MsgType.CANCEL_RESULT)
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         if (!sent) {
             GalaxyLogger.log(
                 TAG, mapOf(
@@ -2952,7 +2953,7 @@ class GalaxyConnectionService : Service() {
             trace_id = traceId,
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId
         )
-        transportManager.sendJson(gson.toJson(envelope))
+        transportManager.sendJson(envelope.toWireJson())
     }
 
     // ── LIQUID-ISLAND: Liquid event handler ────────────────────────────────────
@@ -3478,7 +3479,7 @@ class GalaxyConnectionService : Service() {
                 result.task_id, MsgType.HANDOFF_ENVELOPE_V2_RESULT, traceId
             )
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         Log.i(
             TAG,
             "[PR-H:HANDOFF_V2_RESULT] ack/result emitted task_id=${result.task_id} " +
@@ -4280,7 +4281,7 @@ class GalaxyConnectionService : Service() {
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(ackPayload.message_id, MsgType.ACK)
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         Log.d(TAG, "[ADVANCED:ACK] type_acked=${type.value} message_id=${ackPayload.message_id} sent=$sent")
     }
 
@@ -4317,7 +4318,7 @@ class GalaxyConnectionService : Service() {
                 idempotency_key = signal.signalId,
                 runtime_session_id = UFOGalaxyApplication.runtimeSessionId
             )
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             if (sent) {
                 Log.d(TAG, "[DELEGATED_SIGNAL] sent signal_id=${signal.signalId} kind=${signal.kind.wireValue} task_id=${signal.taskId}")
             } else {
@@ -4818,7 +4819,7 @@ class GalaxyConnectionService : Service() {
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_READINESS_REPORT)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(
                 TAG,
                 "[DEVICE_READINESS_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
@@ -5807,7 +5808,7 @@ class GalaxyConnectionService : Service() {
                 idempotency_key = buildIdempotencyKey(deviceId, MsgType.DEVICE_STATE_SNAPSHOT)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(
                 TAG,
                 "[DEVICE_STATE_SNAPSHOT] device_id=$deviceId model_ready=$modelReady " +
@@ -5926,7 +5927,7 @@ class GalaxyConnectionService : Service() {
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_GOVERNANCE_REPORT)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(
                 TAG,
                 "[DEVICE_GOVERNANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
@@ -6016,7 +6017,7 @@ class GalaxyConnectionService : Service() {
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_ACCEPTANCE_REPORT)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(
                 TAG,
                 "[DEVICE_ACCEPTANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
@@ -6106,7 +6107,7 @@ class GalaxyConnectionService : Service() {
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_STRATEGY_REPORT)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(
                 TAG,
                 "[DEVICE_STRATEGY_REPORT] sent snapshot_id=${snapshot.snapshotId} " +
@@ -6216,7 +6217,7 @@ class GalaxyConnectionService : Service() {
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(payload.task_id, MsgType.HYBRID_RESULT)
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         Log.i(
             TAG,
             "[ADVANCED:HYBRID_RESULT] task_id=${payload.task_id} status=${payload.status} sent=$sent"
@@ -6250,7 +6251,7 @@ class GalaxyConnectionService : Service() {
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(taskId.ifBlank { "hybrid_degrade" }, MsgType.HYBRID_DEGRADE)
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         Log.i(TAG, "[ADVANCED:HYBRID_DEGRADE] task_id=$taskId sent=$sent reason=$reason")
         GalaxyLogger.log(
             TAG, mapOf(
@@ -6505,7 +6506,7 @@ class GalaxyConnectionService : Service() {
             runtime_session_id = UFOGalaxyApplication.runtimeSessionId,
             idempotency_key = buildIdempotencyKey(syncId, MsgType.COORD_SYNC)
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
 
         GalaxyLogger.log(
             GalaxyLogger.TAG_COORD_SYNC, mapOf(
@@ -7110,7 +7111,7 @@ class GalaxyConnectionService : Service() {
             ),
             source_runtime_posture = response.source_runtime_posture
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         crossRepoRegressionHooks.recordOwnershipTransfer(
             status = if (sent) ScenarioOutcomeStatus.PASSED else ScenarioOutcomeStatus.FAILED,
             reason = if (sent) null else "takeover_response_send_failed"
@@ -7541,7 +7542,7 @@ class GalaxyConnectionService : Service() {
                 traceId = result.trace_id?.ifBlank { null } ?: result.action_id
             )
         )
-        val sent = transportManager.sendJson(gson.toJson(envelope))
+        val sent = transportManager.sendJson(envelope.toWireJson())
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "operator_action_result_sent",

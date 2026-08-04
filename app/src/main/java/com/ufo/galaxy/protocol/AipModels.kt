@@ -60,6 +60,10 @@ import com.ufo.galaxy.shared.protocol.MsgType
 import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 
+// PR-SHARED-ENVELOPE: 本类不再是线格式 —— 它是 App 内的**构造 DTO**(typed 调用面,
+// snake_case 具名参数,gson JsonElement payload)。所有真正上线的字节统一由
+// [toWireJson] 经 shared-protocol 的 canonical AipMessage(kotlinx)序列化产生;
+// 字段映射由 [toShared] 一处完成,EnvelopeWireParityTest 契约钉保证映射不漂移。
 data class AipMessage(
     val type: MsgType,
     val payload: JsonElement = JsonNull.INSTANCE,
@@ -78,6 +82,41 @@ data class AipMessage(
     val dispatch_trace_id: String? = null,
     val session_correlation_id: String? = null
 )
+
+/**
+ * 字段映射桥:App 构造 DTO → shared canonical 信封。**唯一**的映射点;
+ * 任一侧增删字段时这里编译报错或 EnvelopeWireParityTest 变红。
+ * payload 经字符串桥转换(gson JsonElement → kotlinx JsonElement)。
+ */
+fun AipMessage.toShared(): com.ufo.galaxy.shared.protocol.AipMessage =
+    com.ufo.galaxy.shared.protocol.AipMessage(
+        type = type,
+        payload = if (payload.isJsonNull) {
+            kotlinx.serialization.json.JsonNull
+        } else {
+            com.ufo.galaxy.shared.protocol.AipMessage.DefaultJson.parseToJsonElement(payload.toString())
+        },
+        correlationId = correlation_id ?: "",
+        protocol = protocol,
+        version = version,
+        timestamp = timestamp,
+        deviceId = device_id ?: "",
+        traceId = trace_id ?: "",
+        sessionId = session_id ?: "",
+        routeMode = route_mode,
+        runtimeSessionId = runtime_session_id,
+        idempotencyKey = idempotency_key,
+        sourceRuntimePosture = source_runtime_posture,
+        dispatchTraceId = dispatch_trace_id,
+        sessionCorrelationId = session_correlation_id,
+    )
+
+/**
+ * 单一线格式出口:上线字节永远由 shared canonical 类(kotlinx)产生。
+ * 调用点一律用本函数,不得再对信封直接 gson.toJson —— 线格式双定义到此为止。
+ */
+fun AipMessage.toWireJson(): String =
+    com.ufo.galaxy.shared.protocol.AipMessage.toJson(toShared())
 
 /**
  * PR-CROSS-SYNC: State event payload — V2 pushes phase transitions and state changes

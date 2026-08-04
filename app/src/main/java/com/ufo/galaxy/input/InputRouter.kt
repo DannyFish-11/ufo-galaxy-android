@@ -11,6 +11,7 @@ import com.ufo.galaxy.local.LocalLoopResult
 import com.ufo.galaxy.network.GatewayClient
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.toWireJson
 import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.TaskSubmitContext
@@ -399,7 +400,7 @@ class InputRouter(
             idempotency_key = "${AndroidNlSemanticContract.idempotencyKeyPrefix(packagingStrategy)}-${UUID.randomUUID()}",
             source_runtime_posture = posture
         )
-        val json = gson.toJson(envelope)
+        val json = envelope.toWireJson()
         val sent = AipTransportManager.getInstance().sendJson(json)
         return if (sent) {
             Log.i(TAG, "[ROUTE] route_mode=cross_device task_id=$taskId device_id=$deviceId posture=$posture text=${text.take(60)} nl_initiation=${nlInitiation != null}")

@@ -89,10 +89,14 @@ data class AipMessage(
 
     companion object {
         /** Canonical JSON serializer for AipMessage. */
+        @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
         val DefaultJson = kotlinx.serialization.json.Json {
             ignoreUnknownKeys = true
             isLenient = true
             encodeDefaults = true
+            // 与 gson 历史线格式对齐:null 可选字段省略而不是显式 null(网关按
+            // 「缺失/blank 均视为未提供」处理,两种编码语义等价,选省略更省字节)。
+            explicitNulls = false
         }
 
         /** Deserialize from a JSON string using kotlinx.serialization. */

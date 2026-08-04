@@ -15,6 +15,7 @@ import com.ufo.galaxy.data.AIPMessageType
 import com.ufo.galaxy.data.CapabilityReport
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.toWireJson
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 import com.ufo.galaxy.runtime.AndroidAuthoritativeParticipationTruth
 import com.ufo.galaxy.runtime.AndroidCapabilityExportContract
@@ -2599,7 +2600,7 @@ class GalaxyWebSocketClient(
 
         // Route through sendJson() so the cross-device gate and connection check
         // are applied uniformly — the same as every other cross-device uplink message.
-        return sendJson(gson.toJson(envelope))
+        return sendJson(envelope.toWireJson())
     }
 
     /**
@@ -2634,7 +2635,7 @@ class GalaxyWebSocketClient(
             runtime_session_id = runtimeSessionId,
             idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_JOIN.value)
         )
-        val sent = sendJson(gson.toJson(envelope))
+        val sent = sendJson(envelope.toWireJson())
         if (sent) {
             Log.i(TAG, "[MESH:JOIN] mesh_id=$meshId role=$role device_id=${maskDeviceId(deviceId)} trace_id=$sessionTraceId")
         }
@@ -2667,7 +2668,7 @@ class GalaxyWebSocketClient(
             runtime_session_id = runtimeSessionId,
             idempotency_key = buildIdempotencyKey(taskId = meshId, type = MsgType.MESH_LEAVE.value)
         )
-        val sent = sendJson(gson.toJson(envelope))
+        val sent = sendJson(envelope.toWireJson())
         clearMeshRejoinContext()
         Log.i(TAG, "[MESH:LEAVE] mesh_id=$meshId reason=$reason device_id=${maskDeviceId(deviceId)} sent=$sent")
         return sent
@@ -2706,7 +2707,7 @@ class GalaxyWebSocketClient(
             meshId = context.meshId,
             role = context.role,
             capabilityCount = context.capabilities.size,
-            json = gson.toJson(envelope)
+            json = envelope.toWireJson()
         )
     }
 
@@ -2779,7 +2780,7 @@ class GalaxyWebSocketClient(
             idempotency_key = buildIdempotencyKey(taskId = taskId, type = MsgType.MESH_RESULT.value)
         )
         Log.i(TAG, "[MESH:RESULT] mesh_id=$meshId task_id=$taskId status=$status results=${results.size} trace_id=$sessionTraceId")
-        return sendJson(gson.toJson(envelope))
+        return sendJson(envelope.toWireJson())
     }
 
     /**
@@ -2819,7 +2820,7 @@ class GalaxyWebSocketClient(
                 runtime_session_id = runtimeSessionId,
                 idempotency_key = payload.event_id
             )
-            val sent = sendJson(gson.toJson(envelope))
+            val sent = sendJson(envelope.toWireJson())
             if (sent) {
                 Log.d(
                     TAG, "[DEVICE_EXEC_EVENT] sent event_id=${payload.event_id} " +
@@ -2864,7 +2865,7 @@ class GalaxyWebSocketClient(
                 runtime_session_id = runtimeSessionId,
                 idempotency_key = enrichedPayload.emission_id
             )
-            val sent = sendJson(gson.toJson(envelope))
+            val sent = sendJson(envelope.toWireJson())
             if (sent) {
                 Log.d(
                     TAG,
