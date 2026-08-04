@@ -5,6 +5,7 @@ import com.google.gson.Gson
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
+import com.ufo.galaxy.protocol.toWireJson
 import com.ufo.galaxy.protocol.DeviceAcceptanceReportPayload
 import com.ufo.galaxy.protocol.DeviceGovernanceReportPayload
 import com.ufo.galaxy.protocol.DeviceReadinessReportPayload
@@ -104,7 +105,7 @@ class StateHandler(
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_READINESS_REPORT, null)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(TAG, "[DEVICE_READINESS_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
             GalaxyLogger.log(
                 TAG, mapOf(
@@ -240,7 +241,7 @@ class StateHandler(
                 idempotency_key = buildIdempotencyKey(snapshotKey, MsgType.DEVICE_STATE_SNAPSHOT, null)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(TAG, "[DEVICE_STATE_SNAPSHOT] sent snapshot_sequence=${snapshotStamp.snapshotSequence} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_STATE_SNAPSHOT] error: ${e.message}", e)
@@ -299,7 +300,7 @@ class StateHandler(
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_GOVERNANCE_REPORT, null)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(TAG, "[DEVICE_GOVERNANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_GOVERNANCE_REPORT] error: ${e.message}", e)
@@ -358,7 +359,7 @@ class StateHandler(
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_ACCEPTANCE_REPORT, null)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(TAG, "[DEVICE_ACCEPTANCE_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_ACCEPTANCE_REPORT] error: ${e.message}", e)
@@ -417,7 +418,7 @@ class StateHandler(
                 idempotency_key = buildIdempotencyKey(snapshot.snapshotId, MsgType.DEVICE_STRATEGY_REPORT, null)
             )
 
-            val sent = transportManager.sendJson(gson.toJson(envelope))
+            val sent = transportManager.sendJson(envelope.toWireJson())
             Log.i(TAG, "[DEVICE_STRATEGY_REPORT] sent snapshot_id=${snapshot.snapshotId} sent=$sent")
         } catch (e: Exception) {
             Log.e(TAG, "[DEVICE_STRATEGY_REPORT] error: ${e.message}", e)

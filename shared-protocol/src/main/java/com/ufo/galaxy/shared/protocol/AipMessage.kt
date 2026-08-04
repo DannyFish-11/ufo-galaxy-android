@@ -21,8 +21,10 @@ import kotlinx.serialization.json.JsonObject
  * - All fields from the Android AipMessage are retained (it is the superset).
  * - Wear-OS-specific convenience accessors (payloadObject, token, id, command,
  *   success, event, msgType) are added as extension properties.
- * - kotlinx.serialization is the **primary** serializer; Gson interop is
- *   available via the [toGsonJson] / [fromGsonJson] helpers when needed.
+ * - kotlinx.serialization is the **primary** serializer.  Android 主 App 的
+ *   gson 系信封([com.ufo.galaxy.protocol.AipMessage])与本类的线格式一致性由
+ *   EnvelopeWireParityTest 契约钉保证 —— 两边任何一侧增删/改名字段都会红。
+ *   (旧文档曾声称存在 toGsonJson/fromGsonJson helper,从未实现,已按实际更正。)
  *
  * @param type           Message type identifier (canonical [MsgType] enum).
  * @param payload        Typed payload as [JsonElement]; default [JsonNull].
@@ -87,10 +89,14 @@ data class AipMessage(
 
     companion object {
         /** Canonical JSON serializer for AipMessage. */
+        @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
         val DefaultJson = kotlinx.serialization.json.Json {
             ignoreUnknownKeys = true
             isLenient = true
             encodeDefaults = true
+            // 与 gson 历史线格式对齐:null 可选字段省略而不是显式 null(网关按
+            // 「缺失/blank 均视为未提供」处理,两种编码语义等价,选省略更省字节)。
+            explicitNulls = false
         }
 
         /** Deserialize from a JSON string using kotlinx.serialization. */
