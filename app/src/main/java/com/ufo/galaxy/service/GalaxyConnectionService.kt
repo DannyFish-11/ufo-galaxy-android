@@ -98,7 +98,10 @@ import com.ufo.galaxy.session.DurableParticipantIdentity
 import com.ufo.galaxy.network.GalaxyWebSocketClient
 import com.ufo.galaxy.transport.AipTransportManager
 import com.ufo.galaxy.transport.LanDiscoveryManager
+import com.ufo.galaxy.transport.LanServiceAnnouncer
+import com.ufo.galaxy.transport.MeshRelayNode
 import com.ufo.galaxy.transport.TcpDirectClient
+import com.ufo.galaxy.transport.TcpDirectServer
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.protocol.AipMessage
 import com.ufo.galaxy.protocol.AckPayload
@@ -244,6 +247,12 @@ class GalaxyConnectionService : Service() {
     // AipTransportManager，同一个入站消息路由（wsListener.onMessage），不是平行系统。
     private var lanDiscovery: LanDiscoveryManager? = null
     private var tcpDirectClient: TcpDirectClient? = null
+
+    // 中继节点三件套:监听服务端(可被直连) + mDNS 广播(被 V2 lan_discovery 发现)
+    // + mesh 参与体(手机可当 AODV 中继)。
+    private var tcpDirectServer: TcpDirectServer? = null
+    private var lanAnnouncer: LanServiceAnnouncer? = null
+    private var meshRelay: MeshRelayNode? = null
 
     // ROUND-3-FIX: onStartCommand 会对同一个运行中的服务实例重复触发
     // （每次 startService/startForegroundService 调用，例如 MainActivity 每次启动都会
@@ -1639,7 +1648,27 @@ class GalaxyConnectionService : Service() {
      * `"tcp"` 适配器。全程尽力而为：发现失败/连接失败只记日志，绝不影响 WS 主链路。
      */
     private fun startLanDirectTransport() {
-        lanDiscovery = LanDiscoveryManager(this) { host, port, gatewayId ->
+        // ① 中继节点:mesh 参与体 + 监听服务端 + mDNS 广播。入站(普通帧与 mesh
+        // 终点投递)都走 wsListener.onMessage —— 与 WS 同一条消息路由。
+        try {
+            val relay = MeshRelayNode(nodeId = localDeviceId) { aip, _meta ->
+                wsListener.onMessage(aip.toString())
+            }
+            val server = TcpDirectServer(onMessage = { json -> wsListener.onMessage(json) }, meshRelay = relay)
+            val port = server.start(0)
+            meshRelay = relay
+            tcpDirectServer = server
+            lanAnnouncer = LanServiceAnnouncer(this, deviceId = localDeviceId).also { it.start(port) }
+        } catch (e: Exception) {
+            Log.w(TAG, "中继节点启动失败（不影响 WS 主链路）: ${e.message}")
+        }
+
+        // ② 发现:每个 LAN peer 都进 mesh 邻接(跳过自己);网关(device_id=local)
+        // 另建 TcpDirectClient 注册为 "tcp" 适配器(WS 断时的直连兜底)。
+        lanDiscovery = LanDiscoveryManager(this) { host, port, peerId ->
+            if (peerId == localDeviceId) return@LanDiscoveryManager
+            meshRelay?.addNeighbor(peerId, host, port)
+            if (peerId != "local") return@LanDiscoveryManager
             serviceScope.launch(Dispatchers.IO) {
                 try {
                     val existing = tcpDirectClient
@@ -1654,7 +1683,7 @@ class GalaxyConnectionService : Service() {
                     if (client.connect(host, port)) {
                         tcpDirectClient = client
                         transportManager.registerAdapter("tcp", client)
-                        Log.i(TAG, "TCP 直连网关 $gatewayId @ $host:$port 已注册为 tcp 适配器")
+                        Log.i(TAG, "TCP 直连网关 $peerId @ $host:$port 已注册为 tcp 适配器")
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "TCP 直连建立失败（不影响 WS 主链路）: ${e.message}")
@@ -1795,6 +1824,10 @@ class GalaxyConnectionService : Service() {
         }
         try {
             lanDiscovery?.stop()
+            lanAnnouncer?.stop()
+            tcpDirectServer?.close()
+            tcpDirectServer = null
+            meshRelay = null
             transportManager.unregisterAdapter("tcp")
             tcpDirectClient?.close()
             tcpDirectClient = null
