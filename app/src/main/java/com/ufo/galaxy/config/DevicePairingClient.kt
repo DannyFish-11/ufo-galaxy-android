@@ -14,7 +14,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /**
  * DevicePairingClient — 设备端配对客户端。
  *
- * 注:KDoc 内避免出现字面 "斜杠星" 序列——Kotlin 块注释可嵌套,会吞掉本段的收尾。
+ * 注:KDoc 内不要写出字面 "斜杠星" 序列(例如用 `路径/*` 表示通配)——Kotlin 块注释
+ * **可嵌套**,那个序列会开一层新注释,本段的收尾 `*/` 只关掉它,外层一路吞到文件末尾。
+ * 这不是假设:本文件就这么坏过一次,整个类变成 Unresolved reference。要表达通配请写
+ * 具体端点名,或改用中文省略号。
  *
  * 一步换令牌
  * ==========
@@ -26,7 +29,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * ==========
  * 此前走的是 `/api/v1/pairing/enroll` → 轮询 `status` → `claim/{request_id}`
  * 这条「设备申请 · 桌面批准 · 设备领取」的三段式。手表那侧又是另一套
- * (`/auth/oauth/device/*` 的 OAuth device flow)。三种设备三条路,行为、失败模式、
+ * (`/auth/oauth/device/start` 起头的 OAuth device flow)。三种设备三条路,行为、失败模式、
  * 凭证形态各不相同,而它们要接的是同一台机器。
  *
  * 现在三仓统一到 `/api/v1/pair/claim` 这一条。
