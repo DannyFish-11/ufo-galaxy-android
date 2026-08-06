@@ -326,6 +326,57 @@ interface AppSettings {
     }
 
     /**
+     * 依次要试的 WebSocket 地址，已排好序。
+     *
+     * 配对时网关把它**所有**可达路径交了过来（[gatewayCandidatesJson]）。同一台手机
+     * 在家、在公司、带流量出门，能连通的是**不同**的那一条 —— 只认一个地址等于
+     * 换个网就连不上，而用户看到的只是"连不上"，没有线索说该换哪条。
+     *
+     * 顺序由 [com.ufo.galaxy.shared.protocol.ConnectionPathPlanner] 决定（上次通的
+     * 那条提前 + 其余按 priority），**不在这里另写一套** —— 手表那侧读的是同一个类，
+     * 两边顺序不一致会让同一个故障在两台设备上表现不同。
+     *
+     * 没配对过、或配对时服务端没给候选（老版本网关）→ 退回 [effectiveGatewayWsUrl]
+     * 那条单地址逻辑。返回空表意味着"连地址都没有"，调用方不该把它当成"试过都不通"。
+     */
+    fun effectiveCandidateWsUrls(): List<String> {
+        val parsed = parseCandidates(gatewayCandidatesJson)
+        if (parsed.isEmpty()) {
+            return effectiveGatewayWsUrl().takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+        }
+        return com.ufo.galaxy.shared.protocol.ConnectionPathPlanner
+            .planAttempts(parsed, lastGoodCandidateKind.takeIf { it.isNotBlank() })
+            .map { it.url }
+    }
+
+    /** 解析 [gatewayCandidatesJson]；坏掉的条目跳过，整份坏掉返回空表并留痕。 */
+    fun parseCandidates(
+        raw: String = gatewayCandidatesJson,
+    ): List<com.ufo.galaxy.shared.protocol.ConnectionPathPlanner.Candidate> {
+        if (raw.isBlank()) return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val url = o.optString("url")
+                if (url.isBlank()) return@mapNotNull null
+                com.ufo.galaxy.shared.protocol.ConnectionPathPlanner.Candidate(
+                    kind = o.optString("kind").ifBlank { "unknown" },
+                    url = url,
+                    // 缺 priority 按数组次序兜底，而不是丢掉这一条 ——
+                    // 丢掉等于少一条可达路径，而那正是这个字段存在的理由。
+                    priority = o.optInt("priority", i + 1),
+                )
+            }
+        } catch (e: Exception) {
+            // 存坏了 ≠ 没配过。静默当成空表会让设备退回单地址逻辑，
+            // 表现成"换个网就连不上"，而没人知道是这份缓存坏了。
+            android.util.Log.w("AppSettings", "候选路径缓存存在但解不出（不等于没配过）: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
      * Builds the effective REST base URL from the fine-grained fields when
      * [gatewayHost] is set, otherwise falls back to [restBaseUrl].
      */
