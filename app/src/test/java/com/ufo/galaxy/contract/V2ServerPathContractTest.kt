@@ -150,16 +150,19 @@ class V2ServerPathContractTest {
      */
     @Test
     fun `a bare path is not excused by an approved parameterised parent`() {
-        // 参数化:V2 上有 /api/v1/pairing/claim/{request_id} —— 放行。
-        assertTrue("参数化调用应放行", isApproved("/api/v1/pairing/claim/"))
-        // 裸路径:V2 上没有 /api/v1/pairing/claim 这条 —— 必须拦。
-        assertFalse("裸路径不该被父路径的参数化放行豁免", isApproved("/api/v1/pairing/claim"))
+        // 这一组对照原先用的是 /api/v1/pairing/claim —— 那一族已随三仓统一到
+        // /api/v1/pair/claim 而从放行清单里摘掉了。演示扫描器语义要用清单里**还在**
+        // 的条目,否则"参数化放行"这一支根本没被走到,断言恒真、区分度归零。
+        //
+        // /api/v1/devices 仍在 APPROVED_PARAM_PARENTS 里,拿它来演示。
+        assertTrue("参数化调用应放行", isApproved("/api/v1/devices/"))
 
-        // 同一组对照放在 devices 上再来一次 —— 这一族有 APPROVED_PREFIXES 兜着,
-        // 所以裸路径确实会被前缀放行;拦它的是 PROVEN_ABSENT(见下一条用例)。
-        // 写出来是为了说明两套机制的分工,而不是让人以为前缀也能区分这两种形态。
-        assertTrue(isApproved("/api/v1/devices/"))
+        // 同一族的裸路径确实会被 APPROVED_PREFIXES 兜住 —— 这正是两套机制的分工:
+        // 参数化放行判的是形态,前缀放行判的是族。拦裸路径靠的是 PROVEN_ABSENT。
         assertTrue(isApproved("/api/v1/devices/telemetry"))
+
+        // 统一之后的那条必须在放行清单里,否则设备接入会被本守卫判红。
+        assertTrue("统一后的接纳端点应放行", isApproved("/api/v1/pair/claim"))
 
         // 完全没见过的东西照拦不误。
         assertFalse(isApproved("/api/v1/totally/made/up"))
@@ -298,10 +301,16 @@ class V2ServerPathContractTest {
             "/auth/oauth/callback",
             "/auth/oauth/me",
             "/auth/oauth/health",
-            // 设备准入(DevicePairingClient)。这一族在 V2 上原本只挂在网关侧,
-            // 统一启动器的权威 API 层上没有 —— 也就是说手机端发起入网会 404。
-            // 现已由 core/gateway_surface_merge.py 并入权威层,实测 PRESENT。
-            "/api/v1/pairing/enroll",
+            // 设备接纳。三仓统一到这一条:桌面出示名片(短码/二维码),设备把码连同
+            // **自己的身份**交过来,当场换回属于自己的能力令牌 + 可达路径清单。
+            //
+            // 换掉了 `/api/v1/pairing/enroll → status → claim/{rid}` 那条三段式
+            // (手表那侧还另有一套 OAuth device flow)。三种设备三条路,凭证形态与
+            // 失败模式各不相同,而它们要接的是同一台机器。
+            //
+            // V2 侧对这条**免鉴权** —— 还没配对的设备手里没有任何令牌,要求它先带
+            // 令牌才能来换令牌就是死锁。凭证是那个一次性短码本身。
+            "/api/v1/pair/claim",
             // 预留:服务端补上之后 RemoteConfigFetcher 会自动切过去(当前实测 404,
             // 只作为第二跳,不作为首选)。
             "/api/v1/config",
@@ -320,8 +329,6 @@ class V2ServerPathContractTest {
          */
         private val APPROVED_PARAM_PARENTS = setOf(
             "/api/v1/devices",
-            "/api/v1/pairing/claim",
-            "/api/v1/pairing/status",
         )
 
         /**

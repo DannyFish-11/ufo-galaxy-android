@@ -64,7 +64,7 @@ fun NetworkSettingsScreen(
     /** 配对可读状态(等待批准…/已配对 ✓);null = 未在配对。 */
     pairingStatus: String? = null,
     /** 点击"配对此设备":零输入发起配对,别处批准后领取本机专属 token。 */
-    onPairDevice: () -> Unit = {},
+    onPairDevice: (String) -> Unit = {},
     onClose: () -> Unit
 ) {
     // Form state
@@ -73,6 +73,8 @@ fun NetworkSettingsScreen(
     var useTls by remember { mutableStateOf(initialUseTls) }
     var allowSelfSigned by remember { mutableStateOf(initialAllowSelfSigned) }
     var deviceId by remember { mutableStateOf(initialDeviceId) }
+    // 配对短码：只在本屏活着，不落存储 —— 它是一次性凭证，存下来只会延长暴露窗口。
+    var pairingCode by remember { mutableStateOf("") }
     var restBase by remember { mutableStateOf(initialRestBase) }
     var metricsEndpoint by remember { mutableStateOf(initialMetricsEndpoint) }
 
@@ -258,19 +260,35 @@ fun NetworkSettingsScreen(
                 }
             }
 
-            // ── 设备配对(零输入·别处批准)────────────────────────────────────
+            // ── 设备配对(输入桌面出示的短码)──────────────────────────────────
             SectionTitle("设备配对")
 
             Text(
-                "本设备无需扫码或手填 token:点下方按钮发起配对,再到【已信任设备】" +
-                    "(桌面/手机)上经智能体判断后批准,本机即自动领取专属 token 并接入。",
+                "在桌面面板点「出示名片」,把那 6 位短码输进来。短码一次性、10 分钟过期,",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "接进来之后本机会拿到自己的令牌和所有可达路径,换网也不用重配。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Button(
-                onClick = onPairDevice,
+            OutlinedTextField(
+                value = pairingCode,
+                onValueChange = { pairingCode = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(6) },
+                label = { Text("配对短码") },
+                placeholder = { Text("例如 HQ25G6") },
+                singleLine = true,
                 enabled = !isPairing,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Button(
+                onClick = { onPairDevice(pairingCode) },
+                // 码没填够 6 位就别让点 —— 点了必然被服务端判无效，
+                // 而每一次无效都会记进那边的按来源节流，白白消耗重试额度。
+                enabled = !isPairing && pairingCode.length == 6,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (isPairing) {

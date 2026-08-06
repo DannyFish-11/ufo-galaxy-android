@@ -510,7 +510,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             onRunDiagnostics = { viewModel.runNetworkDiagnostics() },
             isPairing = uiState.isPairing,
             pairingStatus = uiState.pairingStatus,
-            onPairDevice = { viewModel.pairThisDevice() },
+            onPairDevice = { code -> viewModel.pairThisDevice(code = code) },
             onClose = { viewModel.closeNetworkSettings() }
         )
         return

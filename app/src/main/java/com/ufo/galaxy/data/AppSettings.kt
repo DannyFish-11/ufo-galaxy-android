@@ -192,6 +192,28 @@ interface AppSettings {
     var gatewayToken: String
 
     /**
+     * 配对时拿回来的**可达路径清单**（JSON 数组字符串），已按可达性排序。
+     *
+     * 形如 `[{"kind":"lan","url":"ws://…/ws/device/<gw>","priority":1}, …]`。
+     *
+     * 为什么必须存：`gatewayHost` 那一个地址出了网段就是死地址。同一台手机在家、
+     * 在公司、带流量出门，能连通的是**不同**的那一条 —— 只留一个地址等于换个网就
+     * 连不上，而用户看到的只是"连不上"，没有任何线索说该换哪条。
+     *
+     * 空串 = 还没配对过，或配对时服务端没给（老版本网关）。此时退回
+     * [effectiveGatewayWsUrl] 那条单地址逻辑。
+     */
+    var gatewayCandidatesJson: String
+
+    /**
+     * 上一次**连通成功**的那条路径的 kind（lan / tailscale / funnel）。
+     *
+     * 下次优先试它：绝大多数情况下网络环境没变，先试上次通的那条能省掉整轮试探。
+     * 空串 = 还没成功连过，按 priority 从头试。
+     */
+    var lastGoodCandidateKind: String
+
+    /**
      * PR-7 — Prior durable session ID for process-recreation re-attach.
      *
      * Persisted when a durable session era ends (clean stop or era invalidation).
@@ -559,6 +581,8 @@ class InMemoryAppSettings(
     override var deviceId: String = "",
     override var metricsEndpoint: String = "",
     override var gatewayToken: String = "",
+    override var gatewayCandidatesJson: String = "",
+    override var lastGoodCandidateKind: String = "",
     override var lastDurableSessionId: String = "",
     override var durableParticipantId: String = "",
     override var inflightContinuityRecoveryArtifact: String = "",
@@ -804,6 +828,19 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
             securePrefs.edit().putString(KEY_GATEWAY_TOKEN, value).apply()
         }
 
+    // ── 配对拿回来的可达路径 ─────────────────────────────────────────────────
+    //
+    // 放在普通 prefs 而不是加密存储：这是**地址**不是凭证，加密没有收益，
+    // 却会让"面板显示当前走哪条路"这类诊断多一层 Keystore 依赖。
+
+    override var gatewayCandidatesJson: String
+        get() = prefs.getString(KEY_GATEWAY_CANDIDATES, "") ?: ""
+        set(value) { asyncCommit { putString(KEY_GATEWAY_CANDIDATES, value) } }
+
+    override var lastGoodCandidateKind: String
+        get() = prefs.getString(KEY_LAST_GOOD_CANDIDATE, "") ?: ""
+        set(value) { asyncCommit { putString(KEY_LAST_GOOD_CANDIDATE, value) } }
+
     // ── PR-7: Prior durable session ID (process-recreation re-attach hint) ────
 
     override var lastDurableSessionId: String
@@ -896,6 +933,8 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_GATEWAY_TOKEN = "gateway_token"
 
         // PR-7: Process-recreation re-attach hint key
+        const val KEY_GATEWAY_CANDIDATES = "gateway_candidates_json"
+        const val KEY_LAST_GOOD_CANDIDATE = "last_good_candidate_kind"
         const val KEY_LAST_DURABLE_SESSION_ID = "last_durable_session_id"
 
         // PR-8Android: Stable per-installation participant ID key
