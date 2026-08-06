@@ -574,6 +574,60 @@ class GalaxyWebSocketClient(
 
     private var reconnectAttempts = 0
     private var reconnectJob: Job? = null
+
+    /**
+     * 配对时网关交过来的**全部**可达地址，已按 ConnectionPathPlanner 排好序。
+     *
+     * 为什么连接层要拿整张表而不是一个地址
+     * ====================================
+     * 同一台手机在家、在公司、带流量出门，能连通的是**不同**的那一条。只认一个地址
+     * 等于换个网就连不上，而用户看到的只是"连不上"，没有任何线索说该换哪条 ——
+     * 于是他会去重装应用、重启路由器，而真正该做的只是换一条路再试。
+     *
+     * 空表表示"没配过对/网关没给候选"，此时沿用构造时的 [serverUrl] 单地址逻辑。
+     */
+    private var connectionCandidates: List<String> = emptyList()
+
+    /** 下一次重连该用第几条候选。成功连上后归零（下次断线优先重试同一条）。 */
+    private var candidateCursor = 0
+
+    /**
+     * 交入候选地址表。顺序由调用方（AppSettings.effectiveCandidateWsUrls）决定 ——
+     * 这里**不再排一次序**，两处各排各的必然会漂。
+     */
+    fun setConnectionCandidates(urls: List<String>) {
+        connectionCandidates = urls.filter { it.isNotBlank() }
+        candidateCursor = 0
+    }
+
+    /** 当前正在用（或下次将用）的地址，供上层记录"上次通的是哪条"。 */
+    fun currentServerUrl(): String = serverUrl
+
+    /**
+     * 轮到下一条候选。
+     *
+     * 每次重连**换一条**，而不是在同一条上重试到死：后者正是"出门就连不上"的形状 ——
+     * 局域网那条在外面永远超时，重试多少次都一样。走完一轮回到第一条，
+     * 因为环境随时可能变回去（比如到家连上 WiFi）。
+     *
+     * 注：证书 pin（BuildConfig.CERT_PIN_HASH）是在构造 OkHttpClient 时按当时的 host
+     * 绑定的，换 host 不会重新 pin —— 与既有的 [updateRuntimeConnectionConfig] 同一行为。
+     * 默认构建没有配置真实 pin（占位值会关闭 pinning），所以这条路径不受影响；
+     * 若确实为自建网关配了 pin，多路径就得让 pin 覆盖全部候选 host。
+     */
+    private fun advanceToNextCandidate() {
+        if (connectionCandidates.size <= 1) return
+        candidateCursor = (candidateCursor + 1) % connectionCandidates.size
+        val next = connectionCandidates[candidateCursor]
+        if (next != serverUrl) {
+            serverUrl = next
+            Log.i(
+                TAG,
+                "[WS:RETRY] Switching to candidate ${candidateCursor + 1}/${connectionCandidates.size}: " +
+                    sanitizeUrlForLogging(next)
+            )
+        }
+    }
     private var heartbeatJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -1259,6 +1313,8 @@ class GalaxyWebSocketClient(
                 isConnected = true
                 reconnectAttempts = 0
                 _reconnectAttemptCount.value = 0
+                // 这条通了 —— 下次断线先重试它，别又从第一条开始整轮试探。
+                candidateCursor = connectionCandidates.indexOf(serverUrl).takeIf { it >= 0 } ?: 0
                 // WS-1: reset pong timeout tracking on every successful open
                 // CLOCK-FIX: must use SystemClock.elapsedRealtime() — the same clock
                 // used by onPongReceived() and sendHeartbeat()'s timeout check.
@@ -3087,6 +3143,7 @@ class GalaxyWebSocketClient(
         reconnectJob = scope.launch {
             delay(delay)
             if (shouldReconnect && !isConnected) {
+                advanceToNextCandidate()
                 connect()
             }
         }

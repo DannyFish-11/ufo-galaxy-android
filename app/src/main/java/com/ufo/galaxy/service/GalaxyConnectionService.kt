@@ -1234,6 +1234,15 @@ class GalaxyConnectionService : Service() {
         wsListener = object : GalaxyWebSocketClient.Listener {
             override fun onConnected() {
                 Log.d(TAG, "已连接到 Galaxy")
+                // 记下**这一条**通了。下次断线优先重试它，省掉一整轮试探 ——
+                // 在外面走流量时，局域网那条每次都要白等一个超时才轮到能用的。
+                // 认不出来（老网关没给候选）就清空，而不是留一个猜的值。
+                runCatching {
+                    val settings = UFOGalaxyApplication.appSettings
+                    val url = webSocketClient.currentServerUrl()
+                    settings.lastGoodCandidateKind =
+                        settings.parseCandidates().firstOrNull { it.url == url }?.kind ?: ""
+                }.onFailure { Log.d(TAG, "记录 last-good 路径失败(非致命): ${it.message}") }
                 // 原生表面在场状态源:连接态置真,驱动小组件/磁贴/背屏刷新。
                 com.ufo.galaxy.surface.PresenceStateStore.update(
                     this@GalaxyConnectionService, connected = true

@@ -1063,9 +1063,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "pairThisDevice: paired, token stored, ${result.candidates.size} 条可达路径; reconnecting"
                 )
                 _uiState.update { it.copy(isPairing = false, pairingStatus = "已配对 ✓") }
+                // 刚拿到的候选路径要立刻交给连接层 —— 存进设置但不交出去的话，
+                // 这一整套多路径就要等到下次冷启动才生效，而"配完对连不上"恰恰
+                // 发生在此刻。
+                UFOGalaxyApplication.webSocketClient.setConnectionCandidates(s.effectiveCandidateWsUrls())
                 // 用新 token 刷新 WS 配置并(若已开跨设备)重连,口径与 saveNetworkSettings 一致。
                 UFOGalaxyApplication.webSocketClient.updateRuntimeConnectionConfig(
-                    serverUrl = s.effectiveGatewayWsUrl(),
+                    serverUrl = s.effectiveCandidateWsUrls().firstOrNull() ?: s.effectiveGatewayWsUrl(),
                     gatewayToken = s.gatewayToken,
                     runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
                     deviceId = deviceId
