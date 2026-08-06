@@ -192,6 +192,28 @@ interface AppSettings {
     var gatewayToken: String
 
     /**
+     * 配对时拿回来的**可达路径清单**（JSON 数组字符串），已按可达性排序。
+     *
+     * 形如 `[{"kind":"lan","url":"ws://…/ws/device/<gw>","priority":1}, …]`。
+     *
+     * 为什么必须存：`gatewayHost` 那一个地址出了网段就是死地址。同一台手机在家、
+     * 在公司、带流量出门，能连通的是**不同**的那一条 —— 只留一个地址等于换个网就
+     * 连不上，而用户看到的只是"连不上"，没有任何线索说该换哪条。
+     *
+     * 空串 = 还没配对过，或配对时服务端没给（老版本网关）。此时退回
+     * [effectiveGatewayWsUrl] 那条单地址逻辑。
+     */
+    var gatewayCandidatesJson: String
+
+    /**
+     * 上一次**连通成功**的那条路径的 kind（lan / tailscale / funnel）。
+     *
+     * 下次优先试它：绝大多数情况下网络环境没变，先试上次通的那条能省掉整轮试探。
+     * 空串 = 还没成功连过，按 priority 从头试。
+     */
+    var lastGoodCandidateKind: String
+
+    /**
      * PR-7 — Prior durable session ID for process-recreation re-attach.
      *
      * Persisted when a durable session era ends (clean stop or era invalidation).
@@ -301,6 +323,57 @@ interface AppSettings {
         val afterScheme = base.substringAfter("://")
         val defaultPath = CANONICAL_WS_DEVICE_PATH_TEMPLATE.replace("{device_id}", resolveDeviceIdForPath())
         return if (afterScheme.contains('/')) base else "$base$defaultPath"
+    }
+
+    /**
+     * 依次要试的 WebSocket 地址，已排好序。
+     *
+     * 配对时网关把它**所有**可达路径交了过来（[gatewayCandidatesJson]）。同一台手机
+     * 在家、在公司、带流量出门，能连通的是**不同**的那一条 —— 只认一个地址等于
+     * 换个网就连不上，而用户看到的只是"连不上"，没有线索说该换哪条。
+     *
+     * 顺序由 [com.ufo.galaxy.shared.protocol.ConnectionPathPlanner] 决定（上次通的
+     * 那条提前 + 其余按 priority），**不在这里另写一套** —— 手表那侧读的是同一个类，
+     * 两边顺序不一致会让同一个故障在两台设备上表现不同。
+     *
+     * 没配对过、或配对时服务端没给候选（老版本网关）→ 退回 [effectiveGatewayWsUrl]
+     * 那条单地址逻辑。返回空表意味着"连地址都没有"，调用方不该把它当成"试过都不通"。
+     */
+    fun effectiveCandidateWsUrls(): List<String> {
+        val parsed = parseCandidates(gatewayCandidatesJson)
+        if (parsed.isEmpty()) {
+            return effectiveGatewayWsUrl().takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+        }
+        return com.ufo.galaxy.shared.protocol.ConnectionPathPlanner
+            .planAttempts(parsed, lastGoodCandidateKind.takeIf { it.isNotBlank() })
+            .map { it.url }
+    }
+
+    /** 解析 [gatewayCandidatesJson]；坏掉的条目跳过，整份坏掉返回空表并留痕。 */
+    fun parseCandidates(
+        raw: String = gatewayCandidatesJson,
+    ): List<com.ufo.galaxy.shared.protocol.ConnectionPathPlanner.Candidate> {
+        if (raw.isBlank()) return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val url = o.optString("url")
+                if (url.isBlank()) return@mapNotNull null
+                com.ufo.galaxy.shared.protocol.ConnectionPathPlanner.Candidate(
+                    kind = o.optString("kind").ifBlank { "unknown" },
+                    url = url,
+                    // 缺 priority 按数组次序兜底，而不是丢掉这一条 ——
+                    // 丢掉等于少一条可达路径，而那正是这个字段存在的理由。
+                    priority = o.optInt("priority", i + 1),
+                )
+            }
+        } catch (e: Exception) {
+            // 存坏了 ≠ 没配过。静默当成空表会让设备退回单地址逻辑，
+            // 表现成"换个网就连不上"，而没人知道是这份缓存坏了。
+            android.util.Log.w("AppSettings", "候选路径缓存存在但解不出（不等于没配过）: ${e.message}")
+            emptyList()
+        }
     }
 
     /**
@@ -559,6 +632,8 @@ class InMemoryAppSettings(
     override var deviceId: String = "",
     override var metricsEndpoint: String = "",
     override var gatewayToken: String = "",
+    override var gatewayCandidatesJson: String = "",
+    override var lastGoodCandidateKind: String = "",
     override var lastDurableSessionId: String = "",
     override var durableParticipantId: String = "",
     override var inflightContinuityRecoveryArtifact: String = "",
@@ -804,6 +879,19 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
             securePrefs.edit().putString(KEY_GATEWAY_TOKEN, value).apply()
         }
 
+    // ── 配对拿回来的可达路径 ─────────────────────────────────────────────────
+    //
+    // 放在普通 prefs 而不是加密存储：这是**地址**不是凭证，加密没有收益，
+    // 却会让"面板显示当前走哪条路"这类诊断多一层 Keystore 依赖。
+
+    override var gatewayCandidatesJson: String
+        get() = prefs.getString(KEY_GATEWAY_CANDIDATES, "") ?: ""
+        set(value) { asyncCommit { putString(KEY_GATEWAY_CANDIDATES, value) } }
+
+    override var lastGoodCandidateKind: String
+        get() = prefs.getString(KEY_LAST_GOOD_CANDIDATE, "") ?: ""
+        set(value) { asyncCommit { putString(KEY_LAST_GOOD_CANDIDATE, value) } }
+
     // ── PR-7: Prior durable session ID (process-recreation re-attach hint) ────
 
     override var lastDurableSessionId: String
@@ -896,6 +984,8 @@ class SharedPrefsAppSettings(context: Context) : AppSettings {
         const val KEY_GATEWAY_TOKEN = "gateway_token"
 
         // PR-7: Process-recreation re-attach hint key
+        const val KEY_GATEWAY_CANDIDATES = "gateway_candidates_json"
+        const val KEY_LAST_GOOD_CANDIDATE = "last_good_candidate_kind"
         const val KEY_LAST_DURABLE_SESSION_ID = "last_durable_session_id"
 
         // PR-8Android: Stable per-installation participant ID key

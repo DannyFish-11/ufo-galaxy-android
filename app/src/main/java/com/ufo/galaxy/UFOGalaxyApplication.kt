@@ -570,6 +570,9 @@ class UFOGalaxyApplication : Application() {
             runtimeSessionId = runtimeSessionId,
             configuredDeviceId = appSettings.deviceId
         )
+        // 把配对时拿到的**全部**可达地址交给连接层。只交一个地址等于换个网就连不上，
+        // 而用户看到的只是"连不上" —— 没有线索说该换哪条路。空表时连接层沿用 wsUrl。
+        client.setConnectionCandidates(appSettings.effectiveCandidateWsUrls())
         webSocketClient = client
         webSocketClientRef = WeakReference(client)
         // PR-AIP-UNIFIED: Register WebSocket to unified transport manager.

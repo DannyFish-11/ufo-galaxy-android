@@ -1,113 +1,162 @@
 package com.ufo.galaxy.config
 
 import android.util.Log
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * DevicePairingClient — 设备端配对客户端(与 V2 后端 /api/v1/pairing/ 端点对接)。
+ * DevicePairingClient — 设备端配对客户端。
  *
- * 注:KDoc 内避免出现字面 "斜杠星" 序列——Kotlin 块注释可嵌套,会吞掉本段的收尾。
+ * 注:KDoc 内不要写出字面 "斜杠星" 序列(例如用 `路径/*` 表示通配)——Kotlin 块注释
+ * **可嵌套**,那个序列会开一层新注释,本段的收尾 `*/` 只关掉它,外层一路吞到文件末尾。
+ * 这不是假设:本文件就这么坏过一次,整个类变成 Unresolved reference。要表达通配请写
+ * 具体端点名,或改用中文省略号。
  *
- * 这是"别处批准 + 智能体准入"配对流程的设备半边,新设备【零输入】:
- *   1. [enroll]  提交入伙请求(带自己的 device_id/type/name),拿到 request_id;
- *   2. 轮询 [status] 等你在【已信任设备】上(桌面/手机)经智能体判断后批准;
- *   3. 批准后 [claim] 一次性领取本设备【专属 token】,存进加密存储([AppSettings.gatewayToken]);
- *   4. 之后连接 /ws/device/{id} 用自己的 token 鉴权。
+ * 一步换令牌
+ * ==========
+ * 桌面面板出示名片(二维码 + 6 位短码),本机把**码**连同**自己的身份**交给
+ * `/api/v1/pair/claim`,当场换回一枚属于自己的能力令牌,外加"接下来往哪儿连"的
+ * 候选路径清单。没有轮询、没有等待批准 —— 你手里的那个码就是凭证。
  *
- * 服务端不把 token 回给未鉴权设备——token 由服务端在批准后经 claim 交出;request_id
- * 是 uuid4,充当"领取自己 token"的一次性能力凭据。全程本设备不扫码、不打 IP、不填 token。
+ * 换掉了什么
+ * ==========
+ * 此前走的是 `/api/v1/pairing/enroll` → 轮询 `status` → `claim/{request_id}`
+ * 这条「设备申请 · 桌面批准 · 设备领取」的三段式。手表那侧又是另一套
+ * (`/auth/oauth/device/start` 起头的 OAuth device flow)。三种设备三条路,行为、失败模式、
+ * 凭证形态各不相同,而它们要接的是同一台机器。
  *
- * HTTP 风格与 [RemoteConfigFetcher] 一致(OkHttp + suspendCancellableCoroutine enqueue)。
+ * 现在三仓统一到 `/api/v1/pair/claim` 这一条。
+ *
+ * 令牌签给谁
+ * ==========
+ * 签给**本机**。名片只证明"这个人手里有一张桌面签发、还没过期的邀请",不证明
+ * "这个人就是名片上那台机器" —— 邀请本来就可转交(口述短码、转发二维码都是设计
+ * 里的用法)。所以 [deviceId] 必须是本机**将用于 WS 鉴权握手的那个规范 id**:
+ * 服务端把它写进令牌 subject,设备入口再拿 subject 与握手时自报的 id 对一次。
+ * 两者不一致就是"已配对却连不上"。
  */
 class DevicePairingClient(
     private val restBaseUrl: String,
     private val httpClient: OkHttpClient = defaultClient(),
 ) {
 
-    /** 配对结果。ok=true 时 token 非空。 */
+    /**
+     * 配对结果。
+     *
+     * @param candidates 桌面的可达路径,已按可达性排序(lan → tailscale → funnel)。
+     *   **必须存下来**:只留 `endpoints` 里那个内网地址的话,出了网段就是死地址,
+     *   带流量单独出门时一条都连不上。
+     */
     data class PairingResult(
         val ok: Boolean,
         val token: String? = null,
+        val candidates: List<Candidate> = emptyList(),
+        val gatewayDeviceId: String? = null,
+        val scopes: List<String> = emptyList(),
         val status: String? = null,
         val error: String? = null,
     )
 
-    /** 提交入伙请求,成功返回 request_id,否则 null。 */
-    suspend fun enroll(deviceId: String, deviceType: String?, name: String?): String? {
-        val body = JSONObject().apply {
-            put("device_id", deviceId)
-            if (deviceType != null) put("device_type", deviceType)
-            if (name != null) put("name", name)
-        }
-        val res = post("${base()}$PATH_ENROLL", body) ?: return null
-        val json = res.body ?: return null
-        if (!json.optBoolean("ok", false)) {
-            Log.w(TAG, "[PAIR] enroll rejected: ${json.optString("error")}")
-            return null
-        }
-        return json.optString("request_id").takeIf { it.isNotBlank() }
-    }
-
-    /** 查询请求状态(pending/approved/denied/expired/claimed);失败/未知返回 null。 */
-    suspend fun status(requestId: String): String? {
-        val res = get("${base()}/api/v1/pairing/status/$requestId") ?: return null
-        val json = res.body ?: return null
-        if (!json.optBoolean("ok", false)) return null
-        return json.optString("status").takeIf { it.isNotBlank() }
-    }
-
-    /** 领取本设备专属 token(仅批准后、一次性);拿不到返回 null。 */
-    suspend fun claim(requestId: String): String? {
-        val res = post("${base()}/api/v1/pairing/claim/$requestId", JSONObject()) ?: return null
-        val json = res.body ?: return null
-        if (!json.optBoolean("ok", false)) return null
-        return json.optString("token").takeIf { it.isNotBlank() }
-    }
+    /** 一条候选路径。[priority] 从 1 起连续编号,设备端按它依次试。 */
+    data class Candidate(val kind: String, val url: String, val priority: Int)
 
     /**
-     * 高层:自发配对——enroll → 有界轮询等你批准 → claim 领 token。
+     * 凭短码或链接接纳本机,当场领取令牌。
      *
-     * @param onWaiting 每次仍处 pending 时回调当前状态(供 UI 显示"等待批准…")。
-     * @return 批准并领到 token → ok=true;被拒/过期/超时 → ok=false 且带原因。
+     * @param code 面板上的 6 位短码(大小写不敏感,服务端会归一)。与 [link] 二选一。
+     * @param link 扫码得到的 `galaxy://pair?...` 链接。与 [code] 二选一。
      */
-    suspend fun pairAndClaim(
+    suspend fun claim(
         deviceId: String,
-        deviceType: String?,
-        name: String?,
-        timeoutMs: Long = 300_000L,
-        pollIntervalMs: Long = 3_000L,
-        onWaiting: ((String) -> Unit)? = null,
+        deviceName: String?,
+        deviceType: String = "android",
+        code: String? = null,
+        link: String? = null,
+        capabilities: List<String>? = null,
     ): PairingResult {
-        val rid = enroll(deviceId, deviceType, name)
-            ?: return PairingResult(ok = false, error = "enroll_failed")
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            when (val st = status(rid)) {
-                "approved" -> {
-                    val tok = claim(rid)
-                    return if (tok != null) PairingResult(ok = true, token = tok, status = "approved")
-                    else PairingResult(ok = false, status = st, error = "claim_failed")
-                }
-                "denied" -> return PairingResult(ok = false, status = "denied", error = "denied_by_owner")
-                "expired" -> return PairingResult(ok = false, status = "expired", error = "request_expired")
-                "claimed" ->
-                    // token 已被领走(重试/已消费):终态,别再空轮询到超时给个误导的"超时"。
-                    return PairingResult(ok = false, status = "claimed", error = "already_claimed")
-                else -> {
-                    onWaiting?.invoke(st ?: "pending")
-                    delay(pollIntervalMs)
-                }
-            }
+        if (code.isNullOrBlank() && link.isNullOrBlank()) {
+            return PairingResult(ok = false, error = "need_code_or_link")
         }
-        return PairingResult(ok = false, status = "timeout", error = "approval_timeout")
+        if (deviceId.isBlank()) {
+            return PairingResult(ok = false, error = "missing_device_id")
+        }
+
+        val body = JSONObject().apply {
+            if (!code.isNullOrBlank()) put("code", code.trim().uppercase())
+            if (!link.isNullOrBlank()) put("link", link.trim())
+            put("device_id", deviceId)
+            if (!deviceName.isNullOrBlank()) put("name", deviceName)
+            put("device_type", deviceType)
+            if (capabilities != null) put("capabilities", JSONArray(capabilities))
+        }
+
+        val res = post("${base()}$PATH_CLAIM", body)
+            ?: return PairingResult(ok = false, error = "network_error")
+        val json = res.body
+
+        if (res.code == HTTP_TOO_MANY_REQUESTS) {
+            // 服务端按来源节流猜错次数。这是**可恢复**的,与"码不对"要分开报,
+            // 否则用户看到"码无效"会一直重输,而实际上是要等一会儿。
+            return PairingResult(ok = false, status = "throttled", error = "too_many_attempts")
+        }
+        if (json == null) {
+            return PairingResult(ok = false, error = "bad_response_${res.code}")
+        }
+        if (!json.optBoolean("success", false)) {
+            val why = json.optString("error").takeIf { it.isNotBlank() } ?: "claim_rejected"
+            Log.w(TAG, "[PAIR] claim rejected: $why")
+            return PairingResult(ok = false, error = why)
+        }
+
+        val token = json.optString("capability_token").takeIf { it.isNotBlank() }
+        if (token == null) {
+            // 服务端明确区分了"配对成功"与"令牌签发成功"(token_issued)。
+            // 没令牌就是连不上,不能因为 success=true 就当成配对完成。
+            return PairingResult(ok = false, error = "no_token_issued")
+        }
+
+        return PairingResult(
+            ok = true,
+            token = token,
+            candidates = parseCandidates(json.optJSONArray("candidates")),
+            gatewayDeviceId = json.optString("gateway_device_id").takeIf { it.isNotBlank() },
+            scopes = parseStrings(json.optJSONArray("token_scopes")),
+            status = "paired",
+        )
+    }
+
+    // ── 解析 ─────────────────────────────────────────────────────────────────
+
+    private fun parseCandidates(arr: JSONArray?): List<Candidate> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<Candidate>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val url = o.optString("url")
+            if (url.isBlank()) continue
+            out.add(
+                Candidate(
+                    kind = o.optString("kind").ifBlank { "unknown" },
+                    url = url,
+                    // 缺 priority 时按数组次序兜底,而不是丢掉这一条 ——
+                    // 丢掉等于少一条可达路径,而那正是这个字段存在的理由。
+                    priority = o.optInt("priority", i + 1),
+                )
+            )
+        }
+        return out.sortedBy { it.priority }
+    }
+
+    private fun parseStrings(arr: JSONArray?): List<String> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
     }
 
     // ── HTTP 内部 ─────────────────────────────────────────────────────────────
@@ -117,9 +166,6 @@ class DevicePairingClient(
 
     private suspend fun post(url: String, json: JSONObject): FetchResult? =
         execute(Request.Builder().url(url).post(json.toString().toRequestBody(JSON_MEDIA_TYPE)).build())
-
-    private suspend fun get(url: String): FetchResult? =
-        execute(Request.Builder().url(url).get().build())
 
     private suspend fun execute(request: Request): FetchResult? {
         return try {
@@ -135,8 +181,7 @@ class DevicePairingClient(
                     override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                         response.use { resp ->
                             // body.string() 也可能抛(连接中途断)。OkHttp 已置 signalledCallback,
-                            // 不会再回 onFailure,若不在此兜住,continuation 永不 resume → 挂死
-                            // (pairAndClaim 永不返回、isPairing 卡住)。故读取一并 runCatching。
+                            // 不会再回 onFailure,若不在此兜住,continuation 永不 resume → 挂死。
                             val parsed = runCatching { resp.body?.string() }.getOrNull()?.let {
                                 runCatching { JSONObject(it) }.getOrNull()
                             }
@@ -157,7 +202,10 @@ class DevicePairingClient(
 
     companion object {
         private const val TAG = "DevicePairingClient"
-        const val PATH_ENROLL = "/api/v1/pairing/enroll"
+
+        /** 三仓统一的接纳端点。V2 侧对它**免鉴权** —— 还没配对的设备手里没有任何令牌。 */
+        const val PATH_CLAIM = "/api/v1/pair/claim"
+        private const val HTTP_TOO_MANY_REQUESTS = 429
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

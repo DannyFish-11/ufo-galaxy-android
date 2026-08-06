@@ -19,11 +19,6 @@
     <!-- Protected at runtime by Settings > Apps > Special access > Display over other apps (user-granted). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- C10-FIX: BLUETOOTH/BLUETOOTH_ADMIN for Android <= 11; BLUETOOTH_CONNECT/SCAN for 12+ -->
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.NFC" />
     <!-- BUG-FIX(round2): MainActivity.requestBatteryOptimizationExemption() 发起
          ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,缺此权限时系统静默忽略请求。 -->

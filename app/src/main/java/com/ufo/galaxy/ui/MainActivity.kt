@@ -195,8 +195,7 @@ class MainActivity : ComponentActivity() {
     
     /**
      * 请求必要权限
-     * B1-FIX: Added BLUETOOTH/BLUETOOTH_ADMIN for Android <= 11 and REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-     * to ensure the foreground service can survive Doze mode.
+     * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 用于让前台服务熬过 Doze。
      *
      * ROUND-3-FIX: Only request permissions that are not already granted. This avoids
      * re-prompting the user on every Activity recreation (configuration change, etc.).
@@ -213,14 +212,9 @@ class MainActivity : ComponentActivity() {
             allPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            allPermissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-            allPermissions.add(Manifest.permission.BLUETOOTH_SCAN)
-        } else {
-            // B1-FIX: Pre-Android 12 devices need BLUETOOTH and BLUETOOTH_ADMIN
-            allPermissions.add(Manifest.permission.BLUETOOTH)
-            allPermissions.add(Manifest.permission.BLUETOOTH_ADMIN)
-        }
+        // 蓝牙权限已随 BleGatewayClient 一并摘掉：那是唯一用蓝牙的地方，而它
+        // 从来没有过调用方。向用户要一个自己根本不用的危险权限，代价是真实的 ——
+        // 装机时多一次授权弹窗，还会让人合理地怀疑这个应用要蓝牙干什么。
 
         // ROUND-3-FIX: Filter out already-granted permissions before launching the request.
         for (perm in allPermissions) {
@@ -262,8 +256,6 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.RECORD_AUDIO -> "麦克风"
                 Manifest.permission.CAMERA -> "相机"
                 Manifest.permission.POST_NOTIFICATIONS -> "通知"
-                Manifest.permission.BLUETOOTH_CONNECT -> "蓝牙连接"
-                Manifest.permission.BLUETOOTH_SCAN -> "蓝牙扫描"
                 else -> perm.substringAfterLast(".")
             }
         }.joinToString("、")
@@ -510,7 +502,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             onRunDiagnostics = { viewModel.runNetworkDiagnostics() },
             isPairing = uiState.isPairing,
             pairingStatus = uiState.pairingStatus,
-            onPairDevice = { viewModel.pairThisDevice() },
+            onPairDevice = { code -> viewModel.pairThisDevice(code = code) },
             onClose = { viewModel.closeNetworkSettings() }
         )
         return

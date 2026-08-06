@@ -1005,15 +1005,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 零输入配对本设备:向网关发起入伙请求 → 轮询等你在【已信任设备】(桌面/手机)经
-     * 智能体判断后批准 → 批准后一次性领取本设备【专属 token】并落进加密存储,随即重连。
+     * 凭桌面面板上的**短码或二维码链接**配对本设备:一次 HTTP 换回本机专属令牌 +
+     * 可达路径清单,落进存储,随即重连。
      *
-     * 全程本设备不扫码、不填 token、不手动打 IP —— 只需网关 REST 地址(restBaseUrl,已在
-     * 网络设置里配置或经 Tailscale 一键填入)。被拒/过期/超时都会如实反馈,绝不伪装成功。
+     * 换掉了什么:此前是「本机发起入伙请求 → 轮询等桌面批准 → 领取」的三段式,
+     * 手表那侧又是 OAuth device flow。三种设备三条路,凭证形态与失败模式各不相同,
+     * 而它们要接的是同一台机器。现在三仓统一到 `/api/v1/pair/claim`。
      *
-     * 与既有连接流程解耦:只有用户主动点"配对此设备"才触发,不改动自动连接路径。
+     * 用户要做的:在桌面面板点「出示名片」,把 6 位短码念/输过来,或者扫那个二维码。
+     * 那个码本身就是凭证 —— 一次性、10 分钟过期、用后即焚。
+     *
+     * @param code 6 位短码。与 [link] 二选一。
+     * @param link 扫码得到的 `galaxy://pair?...` 链接。与 [code] 二选一。
      */
-    fun pairThisDevice() {
+    fun pairThisDevice(code: String? = null, link: String? = null) {
         if (_uiState.value.isPairing) return
         val s = UFOGalaxyApplication.appSettings
         val restBase = s.effectiveRestBaseUrl()
@@ -1027,16 +1032,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val deviceId = UFOGalaxyApplication.webSocketClient.currentDeviceId()
         if (s.deviceId != deviceId) s.deviceId = deviceId
         val deviceName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
-        _uiState.update { it.copy(isPairing = true, pairingStatus = "正在发起配对…") }
+        if (code.isNullOrBlank() && link.isNullOrBlank()) {
+            pushError("请先在桌面面板点「出示名片」，再把 6 位短码输进来或扫那个二维码")
+            return
+        }
+        _uiState.update { it.copy(isPairing = true, pairingStatus = "正在接入…") }
         viewModelScope.launch {
             val result = try {
-                DevicePairingClient(restBaseUrl = restBase).pairAndClaim(
+                DevicePairingClient(restBaseUrl = restBase).claim(
                     deviceId = deviceId,
+                    deviceName = deviceName,
                     deviceType = "android",
-                    name = deviceName,
-                    onWaiting = { st ->
-                        _uiState.update { it.copy(pairingStatus = "等待批准…（$st）") }
-                    }
+                    code = code,
+                    link = link,
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "pairThisDevice failed", e)
@@ -1044,11 +1052,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (result.ok && !result.token.isNullOrBlank()) {
                 s.gatewayToken = result.token!!
-                Log.i(TAG, "pairThisDevice: approved, token stored; reconnecting")
+                // 候选路径必须跟令牌一起存下来。只留 gatewayHost 那一个地址的话，
+                // 换个网就连不上，而用户看到的只是"连不上"，没有线索说该换哪条。
+                s.gatewayCandidatesJson = candidatesToJson(result.candidates)
+                // 换了网关就把"上次通的那条"清掉 —— 留着会让下次先去试一条
+                // 属于旧网关的路径，白等一轮超时。
+                s.lastGoodCandidateKind = ""
+                Log.i(
+                    TAG,
+                    "pairThisDevice: paired, token stored, ${result.candidates.size} 条可达路径; reconnecting"
+                )
                 _uiState.update { it.copy(isPairing = false, pairingStatus = "已配对 ✓") }
+                // 刚拿到的候选路径要立刻交给连接层 —— 存进设置但不交出去的话，
+                // 这一整套多路径就要等到下次冷启动才生效，而"配完对连不上"恰恰
+                // 发生在此刻。
+                UFOGalaxyApplication.webSocketClient.setConnectionCandidates(s.effectiveCandidateWsUrls())
                 // 用新 token 刷新 WS 配置并(若已开跨设备)重连,口径与 saveNetworkSettings 一致。
                 UFOGalaxyApplication.webSocketClient.updateRuntimeConnectionConfig(
-                    serverUrl = s.effectiveGatewayWsUrl(),
+                    serverUrl = s.effectiveCandidateWsUrls().firstOrNull() ?: s.effectiveGatewayWsUrl(),
                     gatewayToken = s.gatewayToken,
                     runtimeSessionId = UFOGalaxyApplication.runtimeSessionId,
                     deviceId = deviceId
@@ -1057,13 +1078,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     UFOGalaxyApplication.runtimeController.reconnect()
                 }
             } else {
+                // 失败原因必须分档：可重输的、要等的、要换码的、网络问题的，
+                // 用户下一步该做的事完全不同。糊成一句"配对失败"等于没说。
                 val why = when (result.error) {
-                    "denied_by_owner" -> "配对被拒绝"
-                    "request_expired" -> "配对请求已过期,请重试"
-                    "approval_timeout" -> "等待批准超时,请重试"
-                    "enroll_failed" -> "无法发起配对(检查网关地址/网络)"
-                    "claim_failed" -> "已批准但领取 token 失败,请重试"
-                    else -> "配对失败:${result.error ?: "未知原因"}"
+                    "need_code_or_link" -> "请输入短码或扫二维码"
+                    "missing_device_id" -> "本机标识为空，无法配对（请重启应用）"
+                    "too_many_attempts" -> "短码错太多次，稍等几分钟再试"
+                    "network_error" -> "连不上网关（检查地址/网络）"
+                    "no_token_issued" -> "已接纳但没发到令牌 —— 桌面可能把本机设成了拉黑"
+                    else -> "配对失败：${result.error ?: "未知原因"}"
                 }
                 Log.w(TAG, "pairThisDevice: $why (status=${result.status})")
                 _uiState.update { it.copy(isPairing = false, pairingStatus = null) }
@@ -1358,5 +1381,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // valid numeric/hex/IPv6 address (which never legitimately contains the letter 'x').
         if (host.contains('x', ignoreCase = true) && !host.matches(Regex("[0-9a-fA-F:.]+"))) return false
         return true
+    }
+
+    /**
+     * 把候选路径序列化成存进 [com.ufo.galaxy.data.AppSettings.gatewayCandidatesJson] 的形状。
+     *
+     * 刻意用 org.json 手写而不是引 kotlinx.serialization：这里只有三个平字段，
+     * 为它多拉一个序列化框架进来不划算，而且这份 JSON 的格式必须与 V2 侧
+     * `core/agent_card.build_candidates` 产出的完全一致 —— 手写反而更容易对着看。
+     */
+    private fun candidatesToJson(candidates: List<DevicePairingClient.Candidate>): String {
+        if (candidates.isEmpty()) return ""
+        val arr = org.json.JSONArray()
+        candidates.forEach { c ->
+            arr.put(
+                org.json.JSONObject().apply {
+                    put("kind", c.kind)
+                    put("url", c.url)
+                    put("priority", c.priority)
+                }
+            )
+        }
+        return arr.toString()
     }
 }

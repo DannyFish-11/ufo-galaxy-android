@@ -273,6 +273,11 @@ dependencies {
     // 的返回值撞非空类型 → NPE,连锁把上百个单测带崩。加入 org.json 的【真实】Maven 制品到
     // 测试类路径,单测即用真实实现而非桩,一次性根治所有 org.json 触发的 NPE。
     testImplementation 'org.json:json:20240303'
+    // DevicePairingClientTest 用 MockWebServer 起一个真的本地 HTTP 服务来验配对握手。
+    // mockwebserver 是**独立制品**,不随 com.squareup.okhttp3:okhttp 一起进来 ——
+    // 少了它 :app:compileDebugUnitTestKotlin 直接编不过,而 assembleDebug 是绿的
+    // (它不编测试源集),于是"构建通过"会让人以为没事。版本与上面的 okhttp 对齐。
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')
