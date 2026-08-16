@@ -3384,6 +3384,43 @@ data class DeviceGroundingPayload(
 )
 
 /**
+ * 结构化界面快照的**线材形状**（Stage C，嵌在 [DevicePerceptionEmissionPayload] 里）。
+ *
+ * 无障碍树本来就在设备上被读取、剪枝、拍平成 [com.ufo.galaxy.perception.UiStructuredSnapshot]
+ * 并参与本地 GroundingArbiter 的裁决——但它**从未离开过设备**，于是 V2 侧
+ * `UISource.ANDROID_A11Y` 这个来源声明了却零生产者，服务端看不见手机屏幕上有什么。
+ * 本载荷就是把它送上去的那根线。
+ *
+ * 三条纪律：
+ *  1. **搭既有上行的车。** 挂在 DEVICE_PERCEPTION_EMISSION 上的可选字段，默认为 null ——
+ *     不带它时整条链路与改造前逐字节相同，没有新消息类型、没有协议变更。
+ *  2. **送上去是给服务端「看得见」，不是交出决定权。** Android 的 grounding 归属仍在设备本地
+ *     （V2 侧 core/perception_grounding.py POLICY_1/POLICY_3）：服务端拿它做跨设备编排与
+ *     面板呈现，绝不用它覆盖本地已经做出的裁决——两端看到的是不同瞬间的屏幕。
+ *  3. **字段名与 V2 的投影器逐字对齐**（core/android_ui_snapshot.py）。
+ *     这里改名而那边不改，表现是服务端静默收到一棵空树。
+ */
+data class DeviceUiSnapshotPayload(
+    val contract_kind: String = "android_ui_snapshot",
+    val packageName: String = "",
+    val screenWidth: Int = 0,
+    val screenHeight: Int = 0,
+    val elements: List<DeviceUiElement> = emptyList()
+) {
+    data class DeviceUiElement(
+        val index: Int,
+        val text: String,
+        val contentDescription: String,
+        val className: String,
+        val clickable: Boolean,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int
+    )
+}
+
+/**
  * Structured Android-side local-perception contract nested inside [DevicePerceptionEmissionPayload].
  */
 data class DeviceLocalPerceptionPayload(
@@ -3420,6 +3457,8 @@ data class DevicePerceptionEmissionPayload(
     val vision_payload: DeviceVisionPayload? = null,
     val grounding_payload: DeviceGroundingPayload? = null,
     val local_perception_payload: DeviceLocalPerceptionPayload? = null,
+    /** 结构化界面快照；默认不带 —— 带了服务端才「看得见」这一屏（Stage C）。 */
+    val ui_snapshot_payload: DeviceUiSnapshotPayload? = null,
     val trace_id: String? = null,
     val dispatch_trace_id: String? = null,
     val device_id: String = "",
