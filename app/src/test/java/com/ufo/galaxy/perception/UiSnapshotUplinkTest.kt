@@ -111,4 +111,34 @@ class UiSnapshotUplinkTest {
         val indices = payload.elements.map { it.index }
         assertEquals("序号乱了，模型引用 [n] 会指到别的控件", indices.sorted(), indices)
     }
+
+    /**
+     * 与 V2 侧 core/android_ui_snapshot.py 的 SNAPSHOT_WIRE_FIELDS /
+     * SNAPSHOT_ELEMENT_WIRE_FIELDS 逐字对齐。
+     *
+     * 为什么这条要写在这里：两个仓的 CI 都只检出自己，谁也看不见对方。曾经有一条
+     * 直接读对面源码的比对测试，它在本机能跑、在 CI 上永远 skip —— 提供零保护却
+     * 看起来像有保护。现在两边各自验证自己那一半，指向同一份写下来的字段清单：
+     * 任何一边改名，都会在**自己这边**红。
+     */
+    @Test
+    fun `线材字段名与 V2 投影器约定一致`() {
+        UiSnapshotUplink.setEnabled(true)
+        val payload = UiSnapshotUplink.toPayload(
+            snapshot(element(0, text = "发送", clickable = true, cls = "android.widget.Button"))
+        )!!
+
+        val top = payload.javaClass.declaredFields.map { it.name }.toSet()
+        listOf("packageName", "screenWidth", "screenHeight", "elements").forEach {
+            assertTrue("顶层缺字段 $it —— V2 侧会静默收到一棵空树", top.contains(it))
+        }
+
+        val element = payload.elements.first().javaClass.declaredFields.map { it.name }.toSet()
+        listOf(
+            "index", "text", "contentDescription", "className",
+            "clickable", "left", "top", "right", "bottom"
+        ).forEach {
+            assertTrue("元素缺字段 $it —— V2 侧那一栏会恒为默认值", element.contains(it))
+        }
+    }
 }
