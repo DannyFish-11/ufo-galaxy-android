@@ -263,6 +263,15 @@ class GroundingFallbackLadder(
                 logStage(sessionId, stepId, stage, "skip", fused.result.error)
                 return null
             }
+            // 树救场**不在这一级收下**:那样会让下一级(缩小重试)永远跑不到 —— 用一个刚过
+            // 救场门限(0.55)的树候选,顶掉一次本可能给出高置信度视觉命中的重试。救场属于
+            // 「两级视觉都用尽之后」,由 [tryTreeRescue] 统一做。
+            // agreement / tree_override / vlm_only 三种仍然在本级收下:它们都需要**本级的
+            // 视觉坐标**才成立,推迟没有意义。
+            if (fused.source == com.ufo.galaxy.perception.GroundingArbiter.SOURCE_TREE_RESCUE) {
+                logStage(sessionId, stepId, stage, "skip", "vision_failed_defer_rescue")
+                return null
+            }
             // 裁决来源进 stageUsed,真机日志回流时能直接看出这一步的坐标是谁给的。
             logStage(sessionId, stepId, stage, "ok", "fusion=${fused.source}")
             GroundingResult(
@@ -287,16 +296,19 @@ class GroundingFallbackLadder(
      *
      * 无快照 / 无足够可信候选时返回 null,梯子继续跌到下面的启发式级。
      *
-     * ## 这一级什么时候真的会跑到(离线实跑确认,别当成冗余删掉)
-     * 视觉失败时,救场其实在**第 1 级内部**就发生了 —— 裁决器在那里已经拿到了树,
-     * 越早救越好,所以正常路径的 stageUsed 是 `primary_vlm+tree_rescue`。
+     * ## 这一级是树救场的**唯一**入口
+     * 两级视觉里的裁决只收下 agreement / tree_override / vlm_only —— 那三种都需要本级的
+     * 视觉坐标才成立。判成 tree_rescue 的(即本级视觉没给出可信结果)一律推迟到这里,
+     * 因为在主级就收下树,会让缩小重试那一级永远跑不到:用一个刚过救场门限的树候选,
+     * 顶掉一次本可能给出高置信度视觉命中的重试。
      *
-     * 本级是另外两种情形下树的**唯一入口**:
-     *  1. [groundingService] 的 `isModelLoaded()` 为 false —— 两级视觉被整个跳过,
+     * 所以本级覆盖的是全部"视觉用尽"的形态:
+     *  1. 两级视觉都判 tree_rescue(模型在跑,但这一帧两个尺寸都读不出来);
+     *  2. [groundingService] 的 `isModelLoaded()` 为 false —— 两级视觉被整个跳过,
      *     裁决器根本没被调用过(权重没下完、warmup 没过、服务没起,都是这一种);
-     *  2. 两级视觉都抛异常 —— catch 分支直接返回 null,同样没走到裁决。
+     *  3. 两级视觉都抛异常 —— catch 分支直接返回 null,同样没走到裁决。
      *
-     * 没有这一级,上面两种情形会带着满手的精确 bounds 直接跌到"点屏幕中心"。
+     * 没有这一级,上面三种情形会带着满手的精确 bounds 直接跌到"点屏幕中心"。
      */
     private fun tryTreeRescue(
         sessionId: String,

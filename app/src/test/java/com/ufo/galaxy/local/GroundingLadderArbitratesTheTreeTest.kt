@@ -106,6 +106,23 @@ class GroundingLadderArbitratesTheTreeTest {
     private val weak = { LocalGroundingService.GroundingResult(500, 1850, 0.05f, "?") }
 
     @Test
+    fun `both vision stages are attempted before the tree rescues`() {
+        // 树救场必须发生在**两级视觉都用尽之后**。若在主级内部就收下树，缩小重试那一级
+        // 永远跑不到 —— 等于用一个刚过救场门限(0.55)的树候选，顶掉一次本可能给出高置信度
+        // 视觉命中的重试。这条是按真实路径跑出来才发现的：当时定位只被调用了 1 次。
+        val g = Grounder(produce = failed)
+        val r = run(g)
+        assertEquals(
+            "应当先试主级(720)再试缩小重试(360)，两级都不行才轮到树",
+            2, g.groundCalls,
+        )
+        assertEquals(
+            "救场应由专门的那一级给出，而不是在某一级视觉内部短路掉后续重试",
+            GroundingFallbackLadder.STAGE_TREE_RESCUE, r.stageUsed,
+        )
+    }
+
+    @Test
     fun `vision failure is rescued by the tree instead of tapping the screen centre`() {
         val r = run(Grounder(produce = failed))
         assertTrue("必须仍然产出坐标", r.succeeded)
