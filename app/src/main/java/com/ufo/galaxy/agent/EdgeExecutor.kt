@@ -1,8 +1,10 @@
 package com.ufo.galaxy.agent
 
 import android.util.Log
+import com.ufo.galaxy.inference.LlamaServerController
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
+import com.ufo.galaxy.inference.VisionContextBudget
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.TraceContext
 import com.ufo.galaxy.protocol.CommandResultPayload
@@ -46,6 +48,9 @@ import java.util.Base64
  * @param imageScaler           Optional scaler for grounding input; defaults to [NoOpImageScaler].
  * @param scaledMaxEdge         Maximum longest edge (px) for grounding input image.
  *                              0 = disabled (full-resolution passed to grounding engine).
+ * @param plannerContextSize    规划服务端的上下文窗口(`llama-server -c`)。规划步送图的
+ *                              长边由它反推,见 [VisionContextBudget]。
+ * @param plannerGenerationReserve 规划一次最多生成多少 token(留给回答的预算)。
  */
 class EdgeExecutor(
     private val screenshotProvider: ScreenshotProvider,
@@ -54,6 +59,13 @@ class EdgeExecutor(
     private val accessibilityExecutor: AccessibilityExecutor,
     private val imageScaler: ImageScaler = NoOpImageScaler(),
     private val scaledMaxEdge: Int = 720,
+    /**
+     * 规划服务端的上下文窗口。默认取 [LlamaServerController.DEFAULT_CONTEXT_SIZE] ——
+     * 拉起服务的常量与算预算的常量必须是同一个,否则预算就是对着一个想象中的窗口算的。
+     */
+    private val plannerContextSize: Int = LlamaServerController.DEFAULT_CONTEXT_SIZE,
+    /** 规划一次的生成预算,与 [LocalPlannerService] 实现的 maxTokens 对齐。 */
+    private val plannerGenerationReserve: Int = DEFAULT_PLANNER_GENERATION_RESERVE,
     private var perceptionEmissionSink: DevicePerceptionEmissionSink? = null,
     private val continuousIngressProvider: (() -> AndroidCanonicalContinuousIngressBackbone.Snapshot)? = null,
     /**
@@ -89,6 +101,12 @@ class EdgeExecutor(
         const val STATUS_CANCELLED = "cancelled"
         /** Returned when the task exceeded its configured [GoalExecutionPayload.effectiveTimeoutMs]. */
         const val STATUS_TIMEOUT = "timeout"
+
+        /**
+         * 规划一次的默认生成预算(token)。与 `AppSettings.plannerMaxTokens` 的默认值一致;
+         * 构造方传入实际值时以传入的为准。
+         */
+        const val DEFAULT_PLANNER_GENERATION_RESERVE = 512
     }
 
     fun setPerceptionEmissionSink(sink: DevicePerceptionEmissionSink?) {
@@ -203,14 +221,29 @@ class EdgeExecutor(
             behavior = planningBehavior
         )
 
-        // Initial planning uses the full-resolution screenshot for best context.
         // 双通道:同帧采集无障碍树元素清单注入规划 prompt(采集失败 = null,纯视觉)。
         val planUiSnapshot = uiSnapshotProvider?.capture()
+        val planStructuredContext = planUiSnapshot?.toPromptBlock()
+        // 真 bug 修复(规划输入没有预算):此前这里把**全分辨率**截图的 base64 直接送进
+        // 规划器,而服务端 `-c` 恒 4096。实测(见 VisionContextBudgetTest):1080×2400 原图
+        // = 3230 个视觉 token,而文本按 0 算的视觉预算是 3456 —— 塞得进,但只剩 **226 个
+        // token** 留给目标与无障碍树元素清单,任何真实的元素清单都会超;1440×3200 原图
+        // = 5814,直接装不下。而全链路没有任何一处数过、卡过、截过这个数,溢出表现为
+        // "模型忽然不听话"(prompt 被静默截断)而不是一个明确的失败。
+        // 改为按服务端窗口反推长边(封顶 1536 → 1296 token,给文本留 2160)。
+        val planningInput = scaleForPlanningInput(
+            jpegBytes = initialFullBytes,
+            fullWidth = initW,
+            fullHeight = initH,
+            structuredContext = planStructuredContext,
+            goal = taskAssign.goal,
+            constraints = planningConstraints
+        )
         val planResult = plannerService.plan(
             goal = taskAssign.goal,
             constraints = planningConstraints,
-            screenshotBase64 = initialBase64,
-            structuredContext = planUiSnapshot?.toPromptBlock()
+            screenshotBase64 = planningInput,
+            structuredContext = planStructuredContext
         )
         if (planResult.error != null || planResult.steps.isEmpty()) {
             return buildResult(
@@ -445,13 +478,20 @@ class EdgeExecutor(
             stepsConsumed++
 
             if (!actionSuccess) {
-                // Replan on action failure; use full-resolution screenshot for context.
+                // 重规划与首次规划走同一套预算 —— 此前这里同样送全分辨率原图。
                 val replanResult = plannerService.replan(
                     goal = taskAssign.goal,
                     constraints = taskAssign.constraints,
                     failedStep = step,
                     error = "action returned false",
-                    screenshotBase64 = fullBase64
+                    screenshotBase64 = scaleForPlanningInput(
+                        jpegBytes = fullJpegBytes,
+                        fullWidth = screenW,
+                        fullHeight = screenH,
+                        structuredContext = stepUiSnapshot?.toPromptBlock(),
+                        goal = taskAssign.goal,
+                        constraints = taskAssign.constraints
+                    )
                 )
                 if (replanResult.error != null || replanResult.steps.isEmpty()) {
                     return buildResult(
@@ -515,6 +555,43 @@ class EdgeExecutor(
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * 规划步送图:长边按本次调用的实际预算反推,见 [scaleForPlanning]。
+     * 预算不足以支撑最小可读尺寸时不送图(返回 null),让规划器只凭元素清单工作。
+     */
+    private fun scaleForPlanningInput(
+        jpegBytes: ByteArray,
+        fullWidth: Int,
+        fullHeight: Int,
+        structuredContext: String?,
+        goal: String,
+        constraints: List<String>
+    ): String? {
+        val planned = imageScaler.scaleForPlanning(
+            jpegBytes = jpegBytes,
+            fullWidth = fullWidth,
+            fullHeight = fullHeight,
+            contextSize = plannerContextSize,
+            generationReserve = plannerGenerationReserve,
+            goal,
+            structuredContext,
+            constraints.joinToString(" ")
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to if (planned.hasImage) "planning_image_budgeted" else "planning_image_dropped",
+                "context_size" to plannerContextSize,
+                "generation_reserve" to plannerGenerationReserve,
+                "vision_token_budget" to planned.visionTokenBudget,
+                "max_edge" to planned.maxEdge,
+                "scaled_width" to planned.scaledWidth,
+                "scaled_height" to planned.scaledHeight,
+                "vision_tokens" to planned.visionTokens
+            )
+        )
+        return planned.base64
     }
 
     /**

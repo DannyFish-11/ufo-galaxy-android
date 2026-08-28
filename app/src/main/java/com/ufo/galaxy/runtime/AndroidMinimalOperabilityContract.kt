@@ -364,7 +364,7 @@ object AndroidMinimalOperabilityContract {
         LOCAL_LLM_NOT_LOADED(
             wireValue = "local_llm_not_loaded",
             displayName = "本地 LLM 未加载",
-            description = "NativeInferenceLoader 或 LocalInferenceRuntimeManager 的模型未就绪；需要本地推理的任务降级为失败，但 Accessibility 路径任务可继续。",
+            description = "LocalInferenceRuntimeManager 的推理运行时未就绪（llama.cpp 服务未起或 warmup 未过）；需要本地推理的任务降级为失败，但 Accessibility 路径任务可继续。",
             affectedCapability = "local_model_inference",
             isRecoverable = true
         ),
@@ -451,7 +451,7 @@ object AndroidMinimalOperabilityContract {
             LOCAL_LLM_READY(
                 wireKey = "local_llm_ready",
                 displayName = "本地 LLM 就绪",
-                description = "NativeInferenceLoader 或 LocalInferenceRuntimeManager 已成功加载模型并预热。",
+                description = "LocalInferenceRuntimeManager 已拉起 llama.cpp 服务、权重就位并通过 warmup（/health + dry-run）。",
                 isHardGate = true
             ),
 

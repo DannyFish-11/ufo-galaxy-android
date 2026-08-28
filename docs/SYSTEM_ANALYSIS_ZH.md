@@ -218,7 +218,7 @@ UFO Galaxy Android 是一个 **Android 端 L4 自主 AI 代理客户端**。它�
 | `agent/` | `EdgeExecutor`, `LocalGoalExecutor`, `DelegatedTakeoverExecutor`, `DelegatedRuntimeReceiver`, `TakeoverEligibilityAssessor` | ✅ 完整 |
 | `config/` | `LocalLoopConfig`, `RemoteConfigFetcher` | ✅ 完整 |
 | `data/` | `AppSettings`, `SharedPrefsAppSettings`, `InMemoryAppSettings`, `Models`, `ChatMessage` | ✅ 完整 |
-| `grounding/` | `SeeClickGroundingEngine`, `NcnnGroundingService` | ✅ 客户端完整；服务端需外部 |
+| `grounding/` | `VlmGroundingEngine`（统一 VLM 定位，走 llama.cpp 服务） | ✅ 客户端完整；服务端需外部供给 llama-server |
 | `history/` | `SessionHistoryStore`, `DelegatedFlowContinuityStore` | ✅ 完整 |
 | `inference/` | `LocalPlannerService`, `LocalGroundingService`, `DegradedPlannerService`, `DegradedGroundingService` | ✅ 完整 |
 | `input/` | `InputRouter` | ✅ 完整 |
@@ -226,7 +226,7 @@ UFO Galaxy Android 是一个 **Android 端 L4 自主 AI 代理客户端**。它�
 | `loop/` | `LoopController`, `LocalPlanner`, `ExecutorBridge` | ✅ 完整 |
 | `network/` | `GalaxyWebSocketClient`, `OfflineTaskQueue`, `NetworkDiagnostics`, `TailscaleAdapter` | ✅ 完整 |
 | `observability/` | `GalaxyLogger`, `MetricsRecorder`, `TraceContext`, `SamplingConfig`, `TelemetryExporter` | ✅ 完整 |
-| `planner/` | `MobileVlmPlanner`, `LlamaCppPlannerService` | ✅ 客户端完整；服务端需外部 |
+| `planner/` | `VlmPlanner`（统一 VLM 规划，与定位共用同一服务） | ✅ 客户端完整；服务端需外部供给 llama-server |
 | `protocol/` | `AipModels`, `AndroidSessionLayerContracts`, `UgcpProtocolConsistencyRules` | ✅ 完整 |
 | `runtime/` | `RuntimeController`, `AttachedRuntimeSession`, `RolloutControlSnapshot`, `ReconnectRecoveryState`, `StagedMeshExecutionTarget`, `ExecutionRouteTag`, 等 80+ 个文件 | ✅ 完整 |
 | `service/` | `GalaxyConnectionService`, `EnhancedFloatingService`, `BootReceiver`, `HardwareKeyReceiver`, `HardwareKeyListener`, `ReadinessChecker` | ✅ 完整 |

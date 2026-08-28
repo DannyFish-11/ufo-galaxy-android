@@ -131,17 +131,19 @@ class StateHandler(
             val settings = UFOGalaxyApplication.appSettings
             val snapshotStamp = runtimeStateTruthSequencer.nextSnapshotStamp()
 
+            // 进程内原生库是否 load 上 —— 只是"APK 里带没带 .so"这个事实本身,
+            // 与"本地推理能不能用"无关(规划/定位都走 llama.cpp 服务进程的 HTTP 口)。
+            // 因此它只如实上报,不再被当作能力判据。
             val llamaCppAvailable = NativeInferenceLoader.isLlamaCppAvailable()
             val ncnnAvailable = NativeInferenceLoader.isNcnnAvailable()
 
-            val activeRuntimeType: String = when {
-                llamaCppAvailable && ncnnAvailable -> "HYBRID"
-                llamaCppAvailable -> "LLAMA_CPP"
-                ncnnAvailable -> "NCNN"
-                else -> "CENTER"
-            }
-
             val managerState = UFOGalaxyApplication.localInferenceRuntimeManager.state.value
+            // 真 bug 修复:active_runtime_type 此前由上面两个 .so 标志推导 —— llama-server
+            // 跑得好好的会报 "CENTER",而只要 APK 里带了个 libllama.so 就报 "LLAMA_CPP"。
+            // 改为由推理运行时的实际生命周期状态推导(唯一判据)。
+            val activeRuntimeType: String =
+                com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+                    .from(managerState).activeRuntimeType
             val warmupResult: String = when (managerState) {
                 is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running -> "ok"
                 is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded -> "degraded"
