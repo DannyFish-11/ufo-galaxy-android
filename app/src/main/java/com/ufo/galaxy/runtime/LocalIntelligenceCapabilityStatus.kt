@@ -76,7 +76,37 @@ enum class LocalIntelligenceCapabilityStatus(val wireValue: String) {
      */
     RECOVERING("recovering");
 
+    /**
+     * 本地推理是否真的可以承接派发 —— [ACTIVE] 或 [DEGRADED] 为真。
+     *
+     * 这是"本地大模型能不能用"的唯一判据。历史实现问的是
+     * `NativeInferenceLoader.isLlamaCppAvailable()`(即 `libllama.so` 有没有 load 上),
+     * 那是**错的**:规划与定位都走 llama.cpp **服务进程**的 HTTP 口,进程内一个原生库
+     * 都不需要。于是旧口径在两个方向上都报反了 ——
+     *   · 本地闭环明明跑得好好的(llama-server 在跑、权重齐、warmup 过)却报 false;
+     *   · APK 里恰好带了个 `libllama.so`、llama-server 根本没起,却报 true。
+     */
+    val isLocalInferenceUsable: Boolean
+        get() = this == ACTIVE || this == DEGRADED
+
+    /**
+     * `DeviceStateSnapshot.active_runtime_type` / `capability_report` 的取值。
+     *
+     * 只产出 [RUNTIME_TYPE_LLAMA_CPP] 与 [RUNTIME_TYPE_CENTER] 两种。协议上仍然合法的
+     * `"NCNN"` / `"HYBRID"` 不再产出:NCNN 栈(历史 SeeClick 定位)已整体退役,官方仓
+     * 从不存在 NCNN 端口,该后端在生产上从未真正供给成功过 —— 报它等于报一个不存在的
+     * 能力。
+     */
+    val activeRuntimeType: String
+        get() = if (isLocalInferenceUsable) RUNTIME_TYPE_LLAMA_CPP else RUNTIME_TYPE_CENTER
+
     companion object {
+
+        /** `active_runtime_type`:本地 llama.cpp 服务承担推理。 */
+        const val RUNTIME_TYPE_LLAMA_CPP = "LLAMA_CPP"
+
+        /** `active_runtime_type`:本地推理不可用,推理由中心(V2 网关)承担。 */
+        const val RUNTIME_TYPE_CENTER = "CENTER"
 
         /**
          * Derives a [LocalIntelligenceCapabilityStatus] from the current

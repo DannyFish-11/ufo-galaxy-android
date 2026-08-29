@@ -62,6 +62,19 @@ android {
                 "\"${project.findProperty('galaxy.model.vlm.sha256') ?: ''}\""
         buildConfigField "String", "MODEL_VLM_MMPROJ_SHA256",
                 "\"${project.findProperty('galaxy.model.vlmMmproj.sha256') ?: ''}\""
+        // llama-server 可执行文件的 SHA-256。与上面两个权重摘要同一套供给纪律，但性质
+        // 更重：那两个是**数据**，这个是本 App 亲自 exec 的**可执行文件**，跑在 App 自己
+        // 的 UID 下。二进制不在仓内、也无法在 CI 里构建（见 jniLibs/README.md），只能人工
+        // 供给到 files/bin/llama-server —— 所以"这个文件是不是我以为的那个"必须可校验。
+        //
+        //   sha256sum build-android/bin/llama-server
+        //   # 写进 gradle.properties（或 -P 传参、或 CI secret）：
+        //   galaxy.llamaServer.sha256=<64位十六进制>
+        //
+        // 留空 = 显式承认本次构建不校验该可执行文件；LlamaServerController 会把这个事实
+        // 结构化上报（outcome=Running, integrity=unpinned），而不是假装校验过。
+        buildConfigField "String", "MODEL_LLAMA_SERVER_SHA256",
+                "\"${project.findProperty('galaxy.llamaServer.sha256') ?: ''}\""
         // R3-3-FIX: Certificate pinning hash for release builds. Set to placeholder by default.
         // Before release: generate hash with:
         //   openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \
@@ -295,16 +308,14 @@ dependencies {
     // 这两条坐标【永远无法解析】(JitPack 对 llama.cpp 返回 not-found、对 ncnn 返回
     // 401),会让全新克隆的 gradle 构建卡死在 :app:...MergeDependencyArtifacts 依赖
     // 解析阶段(main 上一直红)。而这两个库在本工程里【只提供运行时 .so】:Kotlin 侧
-    // 走 System.loadLibrary("llama"/"ncnn") + external fun 动态链接(见
-    // runtime/NativeInferenceLoader.kt、planner/LlamaCppPlannerService.kt、
-    // grounding/NcnnGroundingService.kt),编译期不需要它们的任何符号;且
+    // 走 System.loadLibrary("llama"/"ncnn") 动态探测(见
+    // runtime/NativeInferenceLoader.kt;两条进程内 JNI 推理路径均已删除,现在探测
+    // 只为如实上报"APK 里带没带 .so",不是能力判据),编译期不需要它们的任何符号;且
     // NativeInferenceLoader 已在 .so 缺失时捕获 UnsatisfiedLinkError 优雅降级
     // (本地推理关闭,不崩)。故这里去掉这两条无效依赖,让 app 能从克隆直接构建。
     //
-    // 正确的接入方式(需要真机端侧推理时):把预编译 .so 放进
-    //   app/src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/libllama.so、libncnn.so
-    //   · libllama.so:按 llama.cpp docs/android.md 用 NDK/CMake 从源码交叉编译;
-    //   · libncnn.so :从 ncnn Releases 的 ncnn-YYYYMMDD-android-vulkan.zip 解压取用。
-    // 放好后 loadLibrary 即自动加载,无需改本文件(jniLibs 已在 android{} 内配置)。
-    // 详见 app/src/main/jniLibs/README.md。
+    // 需要真机端侧推理时的正确接入方式【不是往 jniLibs 放 .so】:本地推理由独立的
+    // llama-server 进程承担(llama.cpp 官方服务端 + --mmproj 多模态),供给
+    //   files/bin/llama-server  (arm64 可执行文件,SHA-256 由 MODEL_LLAMA_SERVER_SHA256 钉死)
+    // 由 inference/LlamaServerController.kt 拉起。详见 app/src/main/jniLibs/README.md。
 }

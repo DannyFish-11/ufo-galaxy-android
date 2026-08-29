@@ -4898,17 +4898,19 @@ class GalaxyConnectionService : Service() {
             val snapshotStamp = runtimeStateTruthSequencer.nextSnapshotStamp()
 
             // ── Native runtime availability ───────────────────────────────────
+            // 只是"APK 里带没带 .so"这个事实本身,如实上报;它与"本地推理能不能用"
+            // 无关 —— 规划与定位都走 llama.cpp 服务进程的 HTTP 口,进程内不需要原生库。
             val llamaCppAvailable = NativeInferenceLoader.isLlamaCppAvailable()
             val ncnnAvailable = NativeInferenceLoader.isNcnnAvailable()
 
             // ── Local inference runtime state ─────────────────────────────────
             val managerState = UFOGalaxyApplication.localInferenceRuntimeManager.state.value
-            val activeRuntimeType: String = when {
-                llamaCppAvailable && ncnnAvailable -> "HYBRID"
-                llamaCppAvailable -> "LLAMA_CPP"
-                ncnnAvailable -> "NCNN"
-                else -> "CENTER"
-            }
+            // 真 bug 修复:active_runtime_type 此前由上面两个 .so 标志推导 —— llama-server
+            // 跑得好好的会报 "CENTER",而只要 APK 里带了个 libllama.so 就报 "LLAMA_CPP"。
+            // 改为由推理运行时的实际生命周期状态推导(唯一判据)。
+            val activeRuntimeType: String =
+                com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+                    .from(managerState).activeRuntimeType
             val warmupResult: String = when (managerState) {
                 is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Running -> "ok"
                 is com.ufo.galaxy.runtime.LocalInferenceRuntimeManager.ManagerState.Degraded -> "degraded"
@@ -7916,9 +7918,20 @@ class GalaxyConnectionService : Service() {
      * [sendDeviceStateSnapshot] to populate the [GoalResultPayload.local_llm_ready] and
      * [DeviceStateSnapshotPayload.local_llm_ready] fields from a single authoritative source.
      */
-    private fun localLlmReady(): Boolean =
-        UFOGalaxyApplication.appSettings.modelReady == true &&
-            (NativeInferenceLoader.isLlamaCppAvailable() || NativeInferenceLoader.isNcnnAvailable())
+    private fun localLlmReady(): Boolean {
+        // 真 bug 修复:此前的判据是「模型文件就绪 且 (libllama.so 或 libncnn.so load 上了)」。
+        // 两个 .so 标志跟本地推理能不能用毫无关系 —— 规划与定位都走 llama.cpp **服务进程**
+        // 的 HTTP 口。旧口径在两个方向上都报反:本地闭环跑通了却报 false(APK 不带 .so),
+        // 或 llama-server 根本没起却报 true(APK 恰好带了 .so)。V2 侧拿这个字段决定派发,
+        // 报反会把任务派到跑不动的设备、或把跑得动的设备排除在外。
+        //
+        // 改为「权重文件在盘上 且 推理运行时实际可用」——后者由运行时生命周期状态给出,
+        // 即 llama-server 起来了、warmup(/health + dry-run)过了。
+        if (UFOGalaxyApplication.appSettings.modelReady != true) return false
+        return com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
+            .from(UFOGalaxyApplication.localInferenceRuntimeManager.state.value)
+            .isLocalInferenceUsable
+    }
 
     private fun isDistributedParticipationActivePhase(phase: String): Boolean =
         phase !in setOf(

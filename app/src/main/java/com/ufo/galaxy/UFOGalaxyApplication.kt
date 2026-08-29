@@ -37,7 +37,6 @@ import com.ufo.galaxy.network.TailscaleAdapter
 import com.ufo.galaxy.observability.GalaxyLogger
 import com.ufo.galaxy.observability.MetricsRecorder
 import com.ufo.galaxy.planner.VlmPlanner
-import com.ufo.galaxy.planner.LlamaCppPlannerService
 import com.ufo.galaxy.runtime.RuntimeController
 import com.ufo.galaxy.runtime.AndroidCanonicalContinuousIngressSessionManager
 import com.ufo.galaxy.runtime.LocalInferenceRuntimeManager
@@ -622,26 +621,30 @@ class UFOGalaxyApplication : Application() {
      * effective settings authority — rather than from [AppConfig] or [BuildConfig] directly.
      */
     private fun initInferenceServices() {
-        // Select the planner backend: prefer the native llama.cpp runtime when the
-        // library is present (libllama.so packaged in the APK); fall back to the HTTP
-        // client targeting a separate llama.cpp server process.
-        plannerService = if (com.ufo.galaxy.runtime.NativeInferenceLoader.isLlamaCppAvailable()) {
-            Log.i(TAG, "Using LlamaCppPlannerService (native JNI runtime)")
-            com.ufo.galaxy.planner.LlamaCppPlannerService(
-                modelPath = modelAssetManager.vlmModelPath,
-                maxTokens = appSettings.plannerMaxTokens,
-                temperature = appSettings.plannerTemperature.toFloat(),
-                timeoutMs = appSettings.plannerTimeoutMs
-            )
-        } else {
-            Log.i(TAG, "llama.cpp native library unavailable — using VlmPlanner (HTTP fallback)")
-            VlmPlanner(
-                modelPath = modelAssetManager.vlmModelPath,
-                maxTokens = appSettings.plannerMaxTokens,
-                temperature = appSettings.plannerTemperature,
-                timeoutMs = appSettings.plannerTimeoutMs
-            )
-        }
+        // 规划后端唯一:走 llama.cpp 服务进程(mtmd 多模态)的 HTTP 客户端。
+        //
+        // 此前这里按 `NativeInferenceLoader.isLlamaCppAvailable()` 优先选一个 JNI 规划器
+        // (LlamaCppPlannerService),那条路已删除,原因是它结构上不可能看见屏幕:
+        //   · nativeLoadModel(path, threads) 没有 mmproj 入参 —— 视觉投影根本没加载;
+        //   · nativeCompletion(handle, prompt: String, ...) 只吃文本;
+        //   · 于是截图被当作 `<image>BASE64</image>` **字面文本**拼进 prompt ——
+        //     几万个 token 顶爆上下文,却一个像素的视觉信息都传不进去;
+        //   · 它也没覆写四参 plan(...),接口默认实现会静默丢弃无障碍树结构化上下文。
+        // 更糟的是选择条件只看 `System.loadLibrary("llama")` 成没成:把官方 libllama.so
+        // (只导出 C API、没有本仓假定的 JNI 胶水符号)放进 jniLibs 就会命中该分支,
+        // nativeLoadModel 抛 UnsatisfiedLinkError → 规划器永远加载不上,而**本来能工作的
+        // HTTP 路径连试都不会试**。这正是文档里宣称已退役的 MobileVLM"从未看见过屏幕"
+        // 的失效形态,不能在原生路径上再复现一遍。
+        //
+        // 多模态该由 llama.cpp 自己的 mtmd 承担(LlamaServerController 以 --mmproj 拉起),
+        // 不自建一套 JNI 视觉胶水。
+        Log.i(TAG, "Planner backend: VlmPlanner (llama.cpp server, multimodal via --mmproj)")
+        plannerService = VlmPlanner(
+            modelPath = modelAssetManager.vlmModelPath,
+            maxTokens = appSettings.plannerMaxTokens,
+            temperature = appSettings.plannerTemperature,
+            timeoutMs = appSettings.plannerTimeoutMs
+        )
 
         // 定位(grounding)与规划共用同一个 MAI-UI-2B 模型 / 同一个 llama.cpp 服务
         // (单模型双职)。历史 NCNN/SeeClick 栈已退役:SeeClick 官方仓不存在 NCNN 端口,
@@ -660,6 +663,8 @@ class UFOGalaxyApplication : Application() {
             accessibilityExecutor = AccessibilityActionExecutor(),
             imageScaler = AndroidBitmapScaler(),
             scaledMaxEdge = appSettings.scaledMaxEdge,
+            // 规划生成预算与规划器实际用的 maxTokens 同源,否则预算是按一个想象中的数算的。
+            plannerGenerationReserve = appSettings.plannerMaxTokens,
             continuousIngressProvider = { continuousIngressSessionManager.currentSnapshot() },
             uiSnapshotProvider = uiSnapshotProvider
         )
@@ -687,7 +692,10 @@ class UFOGalaxyApplication : Application() {
             ),
             screenshotProvider = AccessibilityScreenshotProvider(),
             modelAssetManager = modelAssetManager,
-            modelDownloader = modelDownloader
+            modelDownloader = modelDownloader,
+            // 规划送图的预算按真机屏幕算,所以缩放器必须是真的那个(默认的 NoOp 只给单测用)。
+            imageScaler = AndroidBitmapScaler(),
+            plannerGenerationReserve = appSettings.plannerMaxTokens
         )
         localLoopReadinessProvider = DefaultLocalLoopReadinessProvider(
             modelAssetManager = modelAssetManager,

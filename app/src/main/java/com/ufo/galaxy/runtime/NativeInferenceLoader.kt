@@ -5,9 +5,20 @@ import android.util.Log
 /**
  * Detects and loads native inference runtime libraries at application startup.
  *
- * Two runtimes are managed:
- * - **llama.cpp** (`libllama.so`) — GGUF-format model execution for the unified VLM (MAI-UI-2B).
+ * Two runtimes are probed:
+ * - **llama.cpp** (`libllama.so`)(无进程内消费方:规划与定位都走 llama.cpp **服务进程**的
+ *   HTTP 口,见 [com.ufo.galaxy.inference.LlamaServerController];探测保留以如实上报).
  * - **NCNN** (`libncnn.so`) — lightweight CNN inference(已退役:历史 SeeClick 栈,库探测保留以兼容能力上报字段).
+ *
+ * ## 这个类回答的**不是**"本地推理能不能用"
+ * [isLlamaCppAvailable] / [isNcnnAvailable] 只回答一件事:**这个 APK 里带没带那个 .so**。
+ * 它跟本地闭环能不能跑毫无关系 —— 本地推理由一个独立的 `llama-server` 进程承担,进程内
+ * 一个原生库都不需要。历史实现拿这两个标志当能力判据,在两个方向上都报反过:本地闭环
+ * 跑通了却报"不可用"(APK 不带 .so),或 llama-server 根本没起却报"可用"(APK 恰好带了)。
+ *
+ * 判断本地推理是否可用,唯一判据是
+ * [LocalIntelligenceCapabilityStatus.isLocalInferenceUsable](由
+ * [LocalInferenceRuntimeManager] 的实际生命周期状态推导)。
  *
  * Both libraries are optional at the source-code level. If a library is absent from the
  * APK (e.g., the dependency was not included in the build), [System.loadLibrary] throws
@@ -107,7 +118,12 @@ object NativeInferenceLoader {
         /** True when at least one runtime is available. */
         val anyAvailable: Boolean get() = llamaCppAvailable || ncnnAvailable
 
-        /** True when both runtimes are available (full local inference capability). */
+        /**
+         * True when both `.so` files are present in the APK.
+         *
+         * 注意:这**不**代表"完整本地推理能力"—— 本地推理能力见
+         * [LocalIntelligenceCapabilityStatus.isLocalInferenceUsable]。
+         */
         val fullyAvailable: Boolean get() = llamaCppAvailable && ncnnAvailable
     }
 }

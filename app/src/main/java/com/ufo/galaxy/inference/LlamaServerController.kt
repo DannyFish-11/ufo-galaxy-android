@@ -1,8 +1,10 @@
 package com.ufo.galaxy.inference
 
 import android.util.Log
+import com.ufo.galaxy.BuildConfig
 import com.ufo.galaxy.observability.GalaxyLogger
 import java.io.File
+import java.security.MessageDigest
 
 /**
  * 本地 llama.cpp 推理服务进程的生命周期控制器 —— 补上"手机本地自己跑下来"的
@@ -24,6 +26,17 @@ import java.io.File
  * 二进制缺失时 [ensureRunning] 返回 [StartOutcome.NotProvisioned],链路保持现有
  * 降级行为(DegradedService / 跨设备路径),不影响 App 其它功能。
  *
+ * ## 完整性校验
+ * 模型权重的 SHA-256 早已构建期钉死([com.ufo.galaxy.model.ModelAssetManager]),而这个
+ * **由本 App 亲自 exec、跑在 App 自己 UID 下的可执行文件**此前没有任何校验就直接启动 ——
+ * 数据比可执行文件管得还严,方向反了。
+ *
+ * 现在 [expectedSha256](默认取 `BuildConfig.MODEL_LLAMA_SERVER_SHA256`)非空时,启动前
+ * 逐字节校验:
+ *  · 摘要不符 → [StartOutcome.IntegrityFailed],**拒绝执行**,不做任何"也许没事"的猜测;
+ *  · 未钉死   → 照常启动,但结构化日志明确记 `integrity=unpinned` —— 承认没校验,
+ *              而不是假装校验过。这与权重那边"留空 = 显式承认走 TOFU"的口径一致。
+ *
  * ## 进程可测性
  * 进程创建经 [ProcessLauncher] 注入点,JVM 单测用 fake 验证参数与生命周期语义,
  * 不真正拉起进程。
@@ -34,15 +47,62 @@ class LlamaServerController(
     private val mmprojPath: String,
     private val port: Int = DEFAULT_PORT,
     private val contextSize: Int = DEFAULT_CONTEXT_SIZE,
-    private val launcher: ProcessLauncher = DefaultProcessLauncher()
+    private val launcher: ProcessLauncher = DefaultProcessLauncher(),
+    /**
+     * 期望的 `llama-server` SHA-256(64 位十六进制,大小写不敏感)。
+     * null/空/格式非法 = 未钉死,启动前不校验(会在日志里明说)。
+     */
+    private val expectedSha256: String? = PINNED_SHA256
 ) {
 
     companion object {
         private const val TAG = "GALAXY:LLAMA:SERVER"
         const val DEFAULT_PORT = 8080
 
-        /** 上下文窗口:2B 模型 + 截图 prefill + 元素清单,4096 足够单步调用。 */
+        /**
+         * 上下文窗口:2B 模型 + 截图 prefill + 元素清单。
+         *
+         * 规划步送图的长边由这个数反推(见
+         * [com.ufo.galaxy.inference.VisionContextBudget] 与
+         * [com.ufo.galaxy.agent.scaleForPlanning])—— 拉起服务用的窗口与算预算用的窗口
+         * 必须是同一个常量,否则预算是对着一个想象中的窗口算的。
+         */
         const val DEFAULT_CONTEXT_SIZE = 4096
+
+        private val HEX64 = Regex("[0-9a-fA-F]{64}")
+
+        /**
+         * 构建期注入的 `llama-server` 摘要(`galaxy.llamaServer.sha256`)。
+         * 空/格式非法一律按"未钉死"处理 —— 编造一个摘要比留空更危险。
+         */
+        val PINNED_SHA256: String? = BuildConfig.MODEL_LLAMA_SERVER_SHA256
+            .trim()
+            .takeIf { it.isNotEmpty() }
+            ?.let { raw ->
+                if (HEX64.matches(raw)) {
+                    raw.lowercase()
+                } else {
+                    Log.e(TAG, "构建期注入的 llama-server SHA-256 格式非法(需 64 位十六进制),按未钉死处理")
+                    null
+                }
+            }
+
+        /** 计算 [file] 的 SHA-256(小写十六进制);读取失败返回 null。 */
+        fun sha256Of(file: File): String? = try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "sha256Of failed for ${file.path}: ${e.message}")
+            null
+        }
     }
 
     /** 进程创建注入点。 */
@@ -70,6 +130,14 @@ class LlamaServerController(
 
         /** 拉起失败(进程创建异常)。 */
         data class Failed(val reason: String) : StartOutcome()
+
+        /**
+         * 二进制摘要与钉死值不符 —— **拒绝执行**。
+         *
+         * 这不是降级,是拒绝:一个不是我们钉死的那份的可执行文件,要跑在 App 自己的
+         * UID 下。宁可本地推理不可用(推理回落到 V2 网关),也不 exec 来路不明的东西。
+         */
+        data class IntegrityFailed(val reason: String) : StartOutcome()
     }
 
     @Volatile
@@ -97,6 +165,9 @@ class LlamaServerController(
         if (!binary.canExecute() && !binary.setExecutable(true)) {
             return logged(StartOutcome.NotProvisioned("llama-server binary not executable: $binaryPath"))
         }
+        // 完整性校验在标记可执行之后、exec 之前 —— 这是最后一道能拦住的地方。
+        val integrity = verifyIntegrity(binary)
+        if (integrity != null) return logged(integrity)
         if (!File(modelPath).isFile) {
             return logged(StartOutcome.ModelsMissing("LLM gguf absent at $modelPath"))
         }
@@ -139,15 +210,41 @@ class LlamaServerController(
         "--no-webui"
     )
 
+    /**
+     * 启动前完整性校验。
+     *
+     * @return 非 null 时表示**不可启动**,该值即为要上报的结果;null 表示放行。
+     */
+    private fun verifyIntegrity(binary: File): StartOutcome? {
+        val expected = expectedSha256?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        if (expected == null) {
+            // 未钉死:照常启动,但把"没校验"这件事记下来,不假装校验过。
+            Log.w(TAG, "llama-server 摘要未钉死(galaxy.llamaServer.sha256 未设置)—— 本次不校验即执行")
+            return null
+        }
+        val actual = sha256Of(binary)
+            ?: return StartOutcome.IntegrityFailed("cannot read llama-server binary for hashing: $binaryPath")
+        if (actual != expected) {
+            // 只记前 12 位:摘要本身不是秘密,但完整摘要写满日志既没用又碍事。
+            return StartOutcome.IntegrityFailed(
+                "llama-server sha256 mismatch: expected ${expected.take(12)}…, got ${actual.take(12)}…"
+            )
+        }
+        return null
+    }
+
     private fun logged(outcome: StartOutcome): StartOutcome {
         GalaxyLogger.log(
             TAG, mapOf(
                 "event" to "llama_server_ensure",
                 "outcome" to outcome::class.simpleName.orEmpty(),
+                // 每次启动都如实报一次校验口径:pinned = 校验过,unpinned = 没校验。
+                "integrity" to if (expectedSha256.isNullOrBlank()) "unpinned" else "pinned",
                 "detail" to when (outcome) {
                     is StartOutcome.NotProvisioned -> outcome.reason
                     is StartOutcome.ModelsMissing -> outcome.reason
                     is StartOutcome.Failed -> outcome.reason
+                    is StartOutcome.IntegrityFailed -> outcome.reason
                     StartOutcome.Running -> ""
                 }
             )

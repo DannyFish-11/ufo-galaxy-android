@@ -2,6 +2,10 @@ package com.ufo.galaxy.loop
 
 import android.os.SystemClock
 import com.ufo.galaxy.agent.EdgeExecutor
+import com.ufo.galaxy.agent.ImageScaler
+import com.ufo.galaxy.agent.NoOpImageScaler
+import com.ufo.galaxy.agent.scaleForPlanning
+import com.ufo.galaxy.inference.LlamaServerController
 import com.ufo.galaxy.local.FailureCode
 import com.ufo.galaxy.local.PostActionObserver
 import com.ufo.galaxy.local.StagnationDetector
@@ -14,7 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
@@ -62,7 +65,19 @@ class LoopController(
     private val stagnationDetector: StagnationDetector = StagnationDetector(),
     private val postActionObserver: PostActionObserver = PostActionObserver(),
     val stepTimeoutMs: Long = DEFAULT_STEP_TIMEOUT_MS,
-    val goalTimeoutMs: Long = DEFAULT_GOAL_TIMEOUT_MS
+    val goalTimeoutMs: Long = DEFAULT_GOAL_TIMEOUT_MS,
+    /**
+     * 规划步送图前的缩放器。默认 [NoOpImageScaler](JVM 单测用),生产由
+     * `UFOGalaxyApplication` 传入 `AndroidBitmapScaler`。
+     */
+    private val imageScaler: ImageScaler = NoOpImageScaler(),
+    /**
+     * 规划服务端的上下文窗口(`llama-server -c`)。与 [EdgeExecutor] 用同一个常量 ——
+     * 拉起服务的数与算预算的数必须是同一个。
+     */
+    private val plannerContextSize: Int = LlamaServerController.DEFAULT_CONTEXT_SIZE,
+    /** 规划一次的生成预算(token)。 */
+    private val plannerGenerationReserve: Int = EdgeExecutor.DEFAULT_PLANNER_GENERATION_RESERVE
 ) {
 
     companion object {
@@ -212,9 +227,14 @@ class LoopController(
                 failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
             )
         val (initialJpeg, initW, initH) = initialCapture
-        val initialBase64 = Base64.getEncoder().encodeToString(initialJpeg)
 
         // ── Phase 2: initial plan ─────────────────────────────────────────────
+        // 真 bug 修复(规划输入没有预算):此前这里把**全分辨率**截图的 base64 直接送进
+        // 规划器,而服务端 `-c` 恒 4096。实测(见 VisionContextBudgetTest):1080×2400 原图
+        // = 3230 个视觉 token,预算 3456 —— 只剩 226 个 token 给指令;1440×3200 = 5814,
+        // 直接装不下。而全链路没有任何一处数过这个数,溢出表现为"模型忽然不听话"
+        // (prompt 被静默截断)而不是一个明确的失败。
+        val initialBase64 = budgetedPlanningImage(sessionId, initialJpeg, initW, initH, instruction)
         val sequence = localPlanner.plan(sessionId, instruction, initialBase64)
         if (sequence.steps.isEmpty()) {
             return@withContext terminateFailed(
@@ -428,7 +448,10 @@ class LoopController(
             val retries = resultStep.retries
             if (retries < maxRetriesPerStep && stepsConsumed < maxSteps) {
                 val replanCapture = captureScreenshot(sessionId)
-                val replanBase64 = replanCapture?.let { Base64.getEncoder().encodeToString(it.first) }
+                // 重规划与首次规划走同一套预算 —— 此前这里同样送全分辨率原图。
+                val replanBase64 = replanCapture?.let { (jpeg, w, h) ->
+                    budgetedPlanningImage(sessionId, jpeg, w, h, instruction)
+                }
 
                 val replanSequence = localPlanner.replan(
                     sessionId = sessionId,
@@ -589,6 +612,43 @@ class LoopController(
      * Captures a screenshot and returns ([jpegBytes], [screenWidth], [screenHeight]),
      * or null if the capture fails. Failure is logged but does not throw.
      */
+    /**
+     * 规划步送图:长边按本次调用的实际预算反推(见 [scaleForPlanning])。
+     *
+     * 预算不足以支撑最小可读尺寸时返回 null —— 不送图,让规划器只凭指令工作。
+     * 送一张糊到读不出图标的图,和送一张会把指令挤掉的图,都是错的。
+     */
+    private fun budgetedPlanningImage(
+        sessionId: String,
+        jpegBytes: ByteArray,
+        fullWidth: Int,
+        fullHeight: Int,
+        instruction: String
+    ): String? {
+        val planned = imageScaler.scaleForPlanning(
+            jpegBytes = jpegBytes,
+            fullWidth = fullWidth,
+            fullHeight = fullHeight,
+            contextSize = plannerContextSize,
+            generationReserve = plannerGenerationReserve,
+            instruction
+        )
+        GalaxyLogger.log(
+            TAG, mapOf(
+                "event" to if (planned.hasImage) "planning_image_budgeted" else "planning_image_dropped",
+                "session_id" to sessionId,
+                "context_size" to plannerContextSize,
+                "generation_reserve" to plannerGenerationReserve,
+                "vision_token_budget" to planned.visionTokenBudget,
+                "max_edge" to planned.maxEdge,
+                "scaled_width" to planned.scaledWidth,
+                "scaled_height" to planned.scaledHeight,
+                "vision_tokens" to planned.visionTokens
+            )
+        )
+        return planned.base64
+    }
+
     private fun captureScreenshot(sessionId: String): Triple<ByteArray, Int, Int>? {
         return try {
             val jpeg = screenshotProvider.captureJpeg()

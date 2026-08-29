@@ -2079,7 +2079,13 @@ data class DeviceAuditReportPayload(
  * Native runtime availability:
  * @param llama_cpp_available   Whether libllama.so loaded successfully ([NativeInferenceLoader.isLlamaCppAvailable]).
  * @param ncnn_available        Whether libncnn.so loaded successfully ([NativeInferenceLoader.isNcnnAvailable]).
- * @param active_runtime_type   Current primary inference runtime (`"LLAMA_CPP"`, `"NCNN"`, `"HYBRID"`, `"CENTER"`).
+ * @param active_runtime_type   Current primary inference runtime. 现产出两种取值:
+ *                              `"LLAMA_CPP"`(本地 llama.cpp 服务在跑且 warmup 过)与 `"CENTER"`
+ *                              (本地推理不可用,推理由 V2 网关承担),由
+ *                              [com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus.activeRuntimeType]
+ *                              从推理运行时的生命周期状态推导 —— **不是**由 [llama_cpp_available]
+ *                              推导(那只是 APK 里带没带 .so)。协议上仍然合法的 `"NCNN"` /
+ *                              `"HYBRID"` 不再产出:NCNN 栈已整体退役。
  *
  * Readiness state (from [AppSettings] and [LocalLoopReadinessProvider]):
  * @param model_ready           Whether local model files are present and verified.
