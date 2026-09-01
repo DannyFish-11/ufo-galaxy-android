@@ -3,6 +3,11 @@ package com.ufo.galaxy.network
 /**
  * 网关地址的可用性判定 —— 纯函数，不碰 Android 框架，可在 JVM 单测里跑。
  *
+ * 放在 `:app` 而不是 `:shared-transport`：后者名字像是共享模块，实际 `:app` **并不依赖它**
+ * （只有手表仓依赖），而且它里面的 `GatewayClient` 与 `:app` 下同名同包的文件逐字节相同 ——
+ * 加上这条依赖会直接撞重复声明。要真正与手表共享得先把那份重复处理掉，
+ * 而且手表 CI 把兄弟仓 checkout 钉在 `ref: main`，本分支上的新类它也看不见。
+ *
  * 为什么需要它
  * ------------
  * `assets/config.properties` 里的出厂默认是：

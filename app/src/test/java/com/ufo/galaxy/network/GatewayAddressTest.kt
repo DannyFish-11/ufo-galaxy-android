@@ -19,12 +19,16 @@ import org.junit.Test
  * 用户看到的是"连接失败，请检查网络"，而实际情况是"你还没告诉我网关在哪"——
  * 提示把人引向了完全无关的排查方向。
  *
- * 测试放在 :app 而不是 :shared-transport
- * --------------------------------------
- * 被测类在 :shared-transport，但 CI 只跑 `:app:testDebugUnitTest`。
- * 放进 :shared-transport 需要给那个模块补 junit 依赖**并且**改 CI 的任务列表，
- * 否则测试写了也不会执行 —— 一条不会执行的测试比没有更糟，它让人以为守住了。
- * :app 依赖 :shared-transport，从这里测是同一个类。
+ * 被测类为什么不在 :shared-transport
+ * ----------------------------------
+ * 那个模块的名字像是共享模块，实际 **:app 并不依赖它**（只有手表仓依赖），而且它里面的
+ * `GatewayClient` 与 :app 下同名同包的文件逐字节相同 —— 给 :app 加上这条依赖会直接撞
+ * 重复声明。我第一版把 GatewayAddress/GatewayDiscovery 放了进去，CI 用
+ * `Unresolved reference` 纠正了这个假设。
+ *
+ * 另外 CI 只跑 `:app:testDebugUnitTest`：即便依赖关系成立，测试放进 :shared-transport
+ * 也要连带改 CI 的任务列表，否则写了也不会执行 —— 一条不会执行的测试比没有更糟，
+ * 它让人以为守住了。
  */
 class GatewayAddressTest {
 

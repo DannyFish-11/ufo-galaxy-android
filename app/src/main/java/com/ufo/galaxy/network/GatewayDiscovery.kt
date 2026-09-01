@@ -26,6 +26,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * mDNS 不猜：网关自己说它在哪。
  *
+ * 为什么在 `:app` 而不是 `:shared-transport`：见 [GatewayAddress] 的同名说明 ——
+ * 那个模块 `:app` 并不依赖，且与 `:app` 存在同名同包的重复文件。
+ *
  * 已知边界
  * --------
  * Android 的 NSD 实现有长期存在的可靠性问题（并发解析、回调丢失），这是平台层面的，
@@ -92,8 +95,11 @@ class GatewayDiscovery(private val context: Context) {
                 // 严格 == 在那些机型上永远不匹配 —— 发现得到却从不解析，
                 // 表现为"明明同一个 Wi-Fi 却发现不了"。两边都去掉尾点再比。
                 if (service.serviceType.trimEnd('.') != SERVICE_TYPE.trimEnd('.')) return
+                // resolveService / NsdServiceInfo.host 在 API 34 起标记为过时（新 API 是
+                // registerServiceInfoCallback），但 minSdk 是 26，两条路都要覆盖时旧 API 仍是
+                // 唯一在全区间可用的那条。过时只是告警，本模块没开 allWarningsAsErrors。
+                @Suppress("DEPRECATION")
                 runCatching {
-                    @Suppress("DEPRECATION")
                     nsd.resolveService(service, object : NsdManager.ResolveListener {
                         override fun onResolveFailed(s: NsdServiceInfo, errorCode: Int) {
                             Log.w(TAG, "解析失败 errorCode=$errorCode")

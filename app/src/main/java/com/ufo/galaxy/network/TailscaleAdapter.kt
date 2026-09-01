@@ -102,8 +102,8 @@ class TailscaleAdapter(
     /**
      * 自动发现网关节点（Node 50）。
      *
-     * 扫描常见 Tailscale IP 段，对每个候选地址发 GET /health 请求。
-     * 若找到可达节点，自动将其写入 [AppSettings.gatewayHost]。
+     * 先验已保存的地址，再走 mDNS（`_galaxy._tcp`）发现，对结果发 GET /health 确认。
+     * 此前是扫一份硬编码的 Tailscale IP 猜测名单，见函数体内的说明。
      *
      * @return 找到的网关 host（IP 字符串），未找到则返回 null。
      */
