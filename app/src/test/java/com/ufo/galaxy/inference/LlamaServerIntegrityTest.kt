@@ -16,9 +16,13 @@ import org.junit.rules.TemporaryFolder
  * （[com.ufo.galaxy.model.ModelAssetManager]），而这个二进制**没有任何校验**就直接
  * `ProcessBuilder(...).start()`。数据管得比可执行文件严。
  *
- * 二进制不在仓内、也无法在 CI 里构建（见 `app/src/main/jniLibs/README.md`），只能人工
- * 供给到 `files/bin/llama-server` —— 正因为如此，"这个文件是不是我以为的那个"才更需要
- * 可校验。
+ * 二进制不在仓内、也无法在 CI 里构建（见 `app/src/main/jniLibs/README.md`），需要人工供给。
+ *
+ * 后续更正：供给位置已从 `files/bin/llama-server` 改为随 APK 发的
+ * `jniLibs/<abi>/libllama-server.so` —— 前者在 targetSdk ≥ 29 上结构性无法 exec
+ * （SELinux `app_data_file` 不含执行权限）。改到 APK 内之后，完整性由 APK 签名在装机时
+ * 覆盖，本类校验的这一层不再是必需品，但语义仍然有效：钉死了就必须相符，没钉死就
+ * 如实记 `integrity=unpinned`，而不是假装校验过。
  */
 class LlamaServerIntegrityTest {
 
