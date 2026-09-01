@@ -32,16 +32,13 @@ class FirstTimeSetupActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FirstTimeSetup"
 
-        // C3-FIX: Auto-discovery candidate hosts in priority order
         private const val DISCOVER_PORT = 9000
         private const val DISCOVER_TIMEOUT_MS = 3000
-        private val AUTO_DISCOVER_HOSTS = listOf(
-            "localhost",
-            "127.0.0.1"
-        )
-        // Common Tailscale IP ranges (100.64.0.0/10 CGNAT space used by Tailscale)
-        private val TAILSCALE_CANDIDATES = (1..20).map { "100.64.0.$it" } +
-            (1..10).map { "100.100.100.$it" }
+
+        // 环回只在"模拟器 + adb reverse tcp:9000"这一种开发场景下有意义：
+        // 真机上 localhost 指向手机自己，网关在 PC 上。所以它排在 mDNS 之后，
+        // 且只试这一个、只花一次超时。
+        private val LOOPBACK_FALLBACK_HOSTS = listOf("127.0.0.1")
     }
 
     private lateinit var etHost: EditText
@@ -180,46 +177,42 @@ class FirstTimeSetupActivity : AppCompatActivity() {
      * C3-FIX: Auto-discovery of gateway server.
      *
      * Attempts to connect to a list of candidate hosts in order:
-     * 1. localhost:9000  (V2 backend on same device via emulator/adb)
-     * 2. 127.0.0.1:9000 (loopback explicit)
-     * 3. Common Tailscale IPs (100.64.x.x range)
+     * 1. mDNS(`_galaxy._tcp`)—— 网关自己广播它在哪；
+     * 2. 环回 —— 仅对"模拟器 + adb reverse"这一种开发场景有意义。
      *
-     * If a reachable host is found, pre-fills the host field and enables the save button.
-     * This runs in a background coroutine tied to the Activity lifecycle.
+     * 改前这里是**猜 IP**：`100.64.0.1..20` 加 `100.100.100.1..10`，共 30 个地址，
+     * 每个 3 秒 TCP 超时逐个试，最坏在首屏卡 90 秒。而 Tailscale 从
+     * 100.64.0.0/10 分配 —— 那是四百多万个地址，猜前 20 个和不猜没有区别；
+     * `100.100.100.100` 更是 MagicDNS 自己的地址，不会有任何节点在那里。
+     *
+     * 网关侧一直在广播 `_galaxy._tcp`（`galaxy_gateway/bootstrap/lifecycle.py`），
+     * 手表侧也一直在听 —— 只有手机端没接这条线，才退化成了猜。
+     *
+     * 找到就填进输入框并放开保存按钮；找不到不是错误，用户手工输入或走配对短码。
      */
     private fun startAutoDiscovery() {
         lifecycleScope.launch {
-            val discovered = withContext(Dispatchers.IO) {
-                // Try localhost and 127.0.0.1 first
-                for (host in AUTO_DISCOVER_HOSTS) {
-                    Log.d(TAG, "Auto-discover: trying $host:$DISCOVER_PORT")
-                    if (testHostConnectivity(host, DISCOVER_PORT)) {
-                        Log.i(TAG, "Auto-discover: found gateway at $host:$DISCOVER_PORT")
-                        return@withContext host
-                    }
+            // 先问 mDNS：网关自己会说它在哪，不需要猜。
+            val found = com.ufo.galaxy.network.GatewayDiscovery(this@FirstTimeSetupActivity).discover()
+            val discovered = found?.host ?: withContext(Dispatchers.IO) {
+                LOOPBACK_FALLBACK_HOSTS.firstOrNull { host ->
+                    Log.d(TAG, "Auto-discover: 回落试环回 $host:$DISCOVER_PORT")
+                    testHostConnectivity(host, DISCOVER_PORT)
                 }
-                // Try common Tailscale IPs
-                for (host in TAILSCALE_CANDIDATES) {
-                    Log.d(TAG, "Auto-discover: trying Tailscale candidate $host:$DISCOVER_PORT")
-                    if (testHostConnectivity(host, DISCOVER_PORT)) {
-                        Log.i(TAG, "Auto-discover: found Tailscale gateway at $host:$DISCOVER_PORT")
-                        return@withContext host
-                    }
-                }
-                null
             }
+            val discoveredPort = found?.port ?: DISCOVER_PORT
 
             if (discovered != null) {
                 etHost.setText(discovered)
-                etPort.setText(DISCOVER_PORT.toString())
+                etPort.setText(discoveredPort.toString())
                 btnSave.isEnabled = true
                 Toast.makeText(
                     this@FirstTimeSetupActivity,
-                    "Auto-discovered gateway at $discovered:$DISCOVER_PORT",
+                    "已自动发现网关 $discovered:$discoveredPort",
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
-                Log.i(TAG, "Auto-discover: no gateway found, waiting for manual input")
+                Log.i(TAG, "Auto-discover: 未发现网关，等待手工输入")
             }
         }
     }

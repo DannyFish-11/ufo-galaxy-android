@@ -18,8 +18,12 @@ import java.util.concurrent.TimeUnit
  * - 将发现的地址一键写入 [AppSettings]
  *
  * @param settings  应用设置，用于读取/写入已保存的网关地址。
+ * @param context    用于 mDNS 发现（NsdManager）。传 applicationContext。
  */
-class TailscaleAdapter(private val settings: AppSettings) {
+class TailscaleAdapter(
+    private val settings: AppSettings,
+    private val context: android.content.Context,
+) {
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -118,27 +122,28 @@ class TailscaleAdapter(private val settings: AppSettings) {
             }
         }
 
-        val port = DEFAULT_GATEWAY_PORT
-        val candidateIPs = listOf(
-            "100.64.0.1",
-            "100.64.0.2",
-            "100.64.0.3",
-            "100.64.0.4",
-            "100.64.0.5",
-            "100.100.100.100",
-            "100.101.102.103"
-        )
-
-        for (ip in candidateIPs) {
-            val url = "http://$ip:$port"
-            Log.d(TAG, "🔍 尝试: ${GalaxyWebSocketClient.sanitizeUrlForLogging(url)}")
+        // 这里曾经是第二份硬编码 IP 猜测名单（100.64.0.1..5、100.100.100.100、
+        // 100.101.102.103）。删掉的理由和 FirstTimeSetupActivity 那份一样：
+        // Tailscale 从 100.64.0.0/10 分配地址，那是四百多万个；名单里的
+        // 100.100.100.100 是 MagicDNS 自己的地址、100.101.102.103 是 Tailscale 的
+        // 内部服务地址 —— 两个都不会有节点在上面。猜中的概率接近零，代价是每次
+        // 调用都要串行等 7 次 HTTP 超时。
+        //
+        // 换成 mDNS：网关（galaxy_gateway/bootstrap/lifecycle.py）一直在广播
+        // _galaxy._tcp，问它比猜它可靠。Tailscale 组网下同一 tailnet 不一定能收到
+        // 组播，此时返回 null，由配对短码（/api/v1/pair/claim 一步换令牌并拿回
+        // 全部可达候选路径）或手工输入承担 —— 那才是跨网段该走的路，而不是猜 IP。
+        val found = GatewayDiscovery(context).discover()
+        if (found != null) {
+            val url = found.restUrl
             if (checkHealth(url)) {
-                Log.i(TAG, "✅ 发现可用网关: ${GalaxyWebSocketClient.sanitizeUrlForLogging(url)}")
-                return@withContext ip
+                Log.i(TAG, "✅ mDNS 发现可用网关: ${GalaxyWebSocketClient.sanitizeUrlForLogging(url)}")
+                return@withContext found.host
             }
+            Log.w(TAG, "mDNS 发现了网关但 /health 不可达，忽略该结果")
         }
 
-        Log.w(TAG, "❌ 未能自动发现 Gateway 节点")
+        Log.w(TAG, "❌ 未能自动发现 Gateway 节点（mDNS 无应答）")
         null
     }
 

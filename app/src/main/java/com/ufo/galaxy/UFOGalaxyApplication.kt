@@ -786,7 +786,7 @@ class UFOGalaxyApplication : Application() {
      * Must be called after [initConfig] (needs [appSettings]).
      */
     private fun initNetworkDiagnosticsModules() {
-        tailscaleAdapter = TailscaleAdapter(appSettings)
+        tailscaleAdapter = TailscaleAdapter(appSettings, applicationContext)
         networkDiagnostics = NetworkDiagnostics(appSettings, DeviceIdProvider.getOrCreateDeviceId(this))
         metricsRecorder = MetricsRecorder(appSettings, CoroutineScope(Dispatchers.IO + SupervisorJob()))
         metricsRecorder.start()
