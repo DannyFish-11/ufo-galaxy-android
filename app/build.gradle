@@ -246,6 +246,10 @@ android {
     testOptions {
         unitTests {
             returnDefaultValues = true
+            // Robolectric 要拿到真实的 res/ 与 AndroidManifest 才能起 Activity、
+            // 解析主题和字符串。不开这一项，createComposeRule() 会在
+            // "Resources$NotFoundException" 上失败,而报错内容看不出是缺了这个开关。
+            includeAndroidResources = true
         }
     }
 }
@@ -333,6 +337,24 @@ dependencies {
     // 少了它 :app:compileDebugUnitTestKotlin 直接编不过,而 assembleDebug 是绿的
     // (它不编测试源集),于是"构建通过"会让人以为没事。版本与上面的 okhttp 对齐。
     testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    // ── Compose 渲染测试(JVM 侧,Robolectric)──────────────────────────────
+    //
+    // 本仓此前 0 个仪器测试、0 个渲染测试:app/src/androidTest/ 根本不存在,
+    // 而下面那几条 androidTestImplementation 早就声明着 —— 依赖备好了,
+    // 一行测试没写。任何 Compose 界面从未被渲染过一次。
+    //
+    // 走 Robolectric 而不是仪器测试,是因为 CI 没有模拟器,加一个会让每次构建多几分钟
+    // 且经常在 runner 上不稳。Robolectric 在 JVM 里提供 Android 运行时,
+    // `:app:testDebugUnitTest` 就能真正跑 createComposeRule() ——
+    // 也就是说界面终于会被**执行**,而不只是被编译。
+    //
+    // 它不能替代真机:图形是模拟的,截图对比、真实字体度量、厂商 ROM 差异都不在覆盖内。
+    // 它能拦住的是"这个控件在这个状态下到底显不显示、能不能点"这一类,
+    // 而那正是目前完全没有任何自动化能回答的问题。
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation platform('androidx.compose:compose-bom:2023.10.01')
+    testImplementation 'androidx.compose.ui:ui-test-junit4'
+
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')
