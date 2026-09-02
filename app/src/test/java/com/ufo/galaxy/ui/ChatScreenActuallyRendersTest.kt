@@ -15,6 +15,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * 第一条**真的把界面渲染出来**的测试。
@@ -48,7 +49,32 @@ import org.robolectric.RobolectricTestRunner
  * 完全没有任何自动化能回答的问题。真机验证仍然必须做，只是不再是**唯一**手段。
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(application = android.app.Application::class)
 class ChatScreenActuallyRendersTest {
+    // ↑ 为什么要把 Application 换掉
+    //
+    // 第一次在 CI 上跑时，这六条全部以同一个异常失败：
+    //
+    //     java.lang.SecurityException at UFOGalaxyApplication.kt:281
+    //
+    // Robolectric 会实例化 manifest 里声明的 Application，于是
+    // UFOGalaxyApplication.onCreate() 的第一件事——APK 签名校验——被执行了。
+    // 测试环境下拿不到签名，PackageInfo.signatures 为空，SignatureVerifier
+    // 失败关闭返回 false，onCreate 抛出 SecurityException。
+    //
+    // 那个失败关闭是**对的**，不该为了让测试变绿去动它：源码注释里明写着
+    // "签名者为空必须【失败关闭】，不能跳过校验后落到末尾 return true"。
+    // （附带发现：那条"debug 构建遇到占位符就放行"的旁路写在遍历签名的循环
+    // 内部，所以签名为空时根本走不到它。真机 debug 包上签名总是存在，这一点
+    // 不影响实际行为，但值得知道。）
+    //
+    // 该改的是这里：一条渲染 ChatScreen 的测试，没有理由去启动整个 App 运行时
+    // ——签名校验、推理服务、WebSocket 客户端、运行时控制器全都会跟着起来。
+    // 换成裸 Application，只保留这条测试真正需要的东西：一个 Android 运行时，
+    // 和一个能承载 Compose 的 Activity。
+    //
+    // 代价说清楚：UFOGalaxyApplication.onCreate 里那一大摊初始化因此**不在**
+    // 本测试的覆盖范围内。将来要测那部分需要另一套装置，并且会先撞上同一堵墙。
 
     @get:Rule
     val compose = createComposeRule()
