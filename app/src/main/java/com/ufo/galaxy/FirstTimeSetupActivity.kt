@@ -8,6 +8,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.ui.MainActivity
@@ -66,6 +67,24 @@ class FirstTimeSetupActivity : AppCompatActivity() {
             }
         }
 
+        // 地址填对了就能保存 —— 不必先去点一次注定失败的「测试」。
+        //
+        // 布局里 btnSave 是 android:enabled="false"，而全仓只有三处会打开它：
+        // 自动发现成功、连通测试成功、连通测试**失败**。于是手上没有网关时，
+        // 用户输完地址会看到一个灰着的保存按钮，屏幕上没有任何东西说明为什么，
+        // 唯一的出路是"先点测试、等它失败五秒"——一个没人猜得到的绕路。
+        //
+        // 而 MainActivity.onCreate 的第一件事就是「没配置就跳来这里并 finish()」，
+        // 所以这个灰按钮实际上把**整个 app** 挡在了外面：没有可达的网关，
+        // 连界面长什么样都看不到。对着手要重做的界面来说，这是最该先拆掉的一道门。
+        //
+        // 连通性不是保存的前提：网关可能只是暂时没开（下面 testConnection 的失败
+        // 分支本来就允许保存，注释里也写着 "Allow saving even if test fails"）。
+        // 保存的前提只是「这串地址在格式上讲得通」。
+        etHost.doAfterTextChanged { refreshSaveEnabled() }
+        etPort.doAfterTextChanged { refreshSaveEnabled() }
+        refreshSaveEnabled()
+
         // C3-FIX: Start auto-discovery in the background when activity is created
         startAutoDiscovery()
 
@@ -96,9 +115,7 @@ class FirstTimeSetupActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             // PR-URL-VALIDATE: reject invalid hostname/IP formats
-            if (!host.matches(Regex("^[a-zA-Z0-9._-]+$") ) &&
-                !host.matches(Regex("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$")) &&
-                !host.matches(Regex("^100\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"))) {
+            if (!isHostFormatValid(host)) {
                 etHost.error = "Invalid hostname or IP format"
                 return@setOnClickListener
             }
@@ -136,6 +153,25 @@ class FirstTimeSetupActivity : AppCompatActivity() {
                 Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    /**
+     * 主机名/IP 的格式是否讲得通。
+     *
+     * 抽出来是因为原本这三条正则内联在保存按钮的点击回调里，而现在实时校验也要用；
+     * 各写一份的话，两处对「什么算合法」的判断迟早会不一致 —— 表现成按钮亮着但
+     * 一点就报错，或者反过来。
+     */
+    private fun isHostFormatValid(host: String): Boolean =
+        host.matches(Regex("^[a-zA-Z0-9._-]+$")) ||
+            host.matches(Regex("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$")) ||
+            host.matches(Regex("^100\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"))
+
+    /** 按当前输入决定保存按钮亮不亮。 */
+    private fun refreshSaveEnabled() {
+        val host = etHost.text?.toString()?.trim().orEmpty()
+        val port = etPort.text?.toString()?.trim()?.toIntOrNull() ?: 0
+        btnSave.isEnabled = host.isNotEmpty() && isHostFormatValid(host) && port in 1..65535
     }
 
     /**
