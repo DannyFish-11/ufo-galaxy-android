@@ -63,17 +63,22 @@ class ChatScreenActuallyRendersTest {
     /**
      * 按给定状态把 [ChatScreen] 摆出来。回调全是空实现 —— 这里只问渲染，不问交互。
      *
-     * @param theme 外层主题。默认套 App 自己的 [UFOGalaxyTheme]；
-     *   下面第一条用例刻意换成裸 `MaterialTheme`，理由见那条注释。
+     * @param useAppTheme 套 App 自己的 [UFOGalaxyTheme]（默认），还是裸
+     *   `MaterialTheme`。下面第一条用例刻意用后者，理由见那条注释。
+     *
+     * 这里用布尔开关而不是把主题作为 `@Composable` lambda 参数传进来：后者更漂亮，
+     * 但"在非 composable 函数上给 composable 函数类型写默认值"这种写法我在本机
+     * 无法编译验证（没有 Android SDK），而这个改动的首跑必然在 CI 上。
+     * 能少一处不确定就少一处。
      */
     private fun render(
         messages: List<ChatMessage> = emptyList(),
         inputText: String = "",
         isLoading: Boolean = false,
-        theme: @Composable (@Composable () -> Unit) -> Unit = { body -> UFOGalaxyTheme { body() } },
+        useAppTheme: Boolean = true,
     ) {
         compose.setContent {
-            theme {
+            val body: @Composable () -> Unit = {
                 ChatScreen(
                     messages = messages,
                     inputText = inputText,
@@ -82,6 +87,11 @@ class ChatScreenActuallyRendersTest {
                     onSend = {},
                     onVoiceInput = {},
                 )
+            }
+            if (useAppTheme) {
+                UFOGalaxyTheme { body() }
+            } else {
+                MaterialTheme { body() }
             }
         }
     }
@@ -99,7 +109,7 @@ class ChatScreenActuallyRendersTest {
         //
         // 本机没有 Android SDK，这套东西第一次运行必然在 CI 上 —— 那时候能不能
         // 一眼看出是哪一层坏了，取决于现在有没有把这两种情况分开。
-        render(theme = { body -> MaterialTheme { body() } })
+        render(useAppTheme = false)
         compose.onNodeWithText("输入消息...").assertExists()
     }
 
