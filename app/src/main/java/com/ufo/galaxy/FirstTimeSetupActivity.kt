@@ -8,6 +8,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.ui.MainActivity
@@ -32,16 +33,13 @@ class FirstTimeSetupActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FirstTimeSetup"
 
-        // C3-FIX: Auto-discovery candidate hosts in priority order
         private const val DISCOVER_PORT = 9000
         private const val DISCOVER_TIMEOUT_MS = 3000
-        private val AUTO_DISCOVER_HOSTS = listOf(
-            "localhost",
-            "127.0.0.1"
-        )
-        // Common Tailscale IP ranges (100.64.0.0/10 CGNAT space used by Tailscale)
-        private val TAILSCALE_CANDIDATES = (1..20).map { "100.64.0.$it" } +
-            (1..10).map { "100.100.100.$it" }
+
+        // 环回只在"模拟器 + adb reverse tcp:9000"这一种开发场景下有意义：
+        // 真机上 localhost 指向手机自己，网关在 PC 上。所以它排在 mDNS 之后，
+        // 且只试这一个、只花一次超时。
+        private val LOOPBACK_FALLBACK_HOSTS = listOf("127.0.0.1")
     }
 
     private lateinit var etHost: EditText
@@ -68,6 +66,24 @@ class FirstTimeSetupActivity : AppCompatActivity() {
                 etHost.hint = getString(R.string.setup_host_hint)
             }
         }
+
+        // 地址填对了就能保存 —— 不必先去点一次注定失败的「测试」。
+        //
+        // 布局里 btnSave 是 android:enabled="false"，而全仓只有三处会打开它：
+        // 自动发现成功、连通测试成功、连通测试**失败**。于是手上没有网关时，
+        // 用户输完地址会看到一个灰着的保存按钮，屏幕上没有任何东西说明为什么，
+        // 唯一的出路是"先点测试、等它失败五秒"——一个没人猜得到的绕路。
+        //
+        // 而 MainActivity.onCreate 的第一件事就是「没配置就跳来这里并 finish()」，
+        // 所以这个灰按钮实际上把**整个 app** 挡在了外面：没有可达的网关，
+        // 连界面长什么样都看不到。对着手要重做的界面来说，这是最该先拆掉的一道门。
+        //
+        // 连通性不是保存的前提：网关可能只是暂时没开（下面 testConnection 的失败
+        // 分支本来就允许保存，注释里也写着 "Allow saving even if test fails"）。
+        // 保存的前提只是「这串地址在格式上讲得通」。
+        etHost.doAfterTextChanged { refreshSaveEnabled() }
+        etPort.doAfterTextChanged { refreshSaveEnabled() }
+        refreshSaveEnabled()
 
         // C3-FIX: Start auto-discovery in the background when activity is created
         startAutoDiscovery()
@@ -99,9 +115,7 @@ class FirstTimeSetupActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             // PR-URL-VALIDATE: reject invalid hostname/IP formats
-            if (!host.matches(Regex("^[a-zA-Z0-9._-]+$") ) &&
-                !host.matches(Regex("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$")) &&
-                !host.matches(Regex("^100\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"))) {
+            if (!isHostFormatValid(host)) {
                 etHost.error = "Invalid hostname or IP format"
                 return@setOnClickListener
             }
@@ -139,6 +153,25 @@ class FirstTimeSetupActivity : AppCompatActivity() {
                 Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    /**
+     * 主机名/IP 的格式是否讲得通。
+     *
+     * 抽出来是因为原本这三条正则内联在保存按钮的点击回调里，而现在实时校验也要用；
+     * 各写一份的话，两处对「什么算合法」的判断迟早会不一致 —— 表现成按钮亮着但
+     * 一点就报错，或者反过来。
+     */
+    private fun isHostFormatValid(host: String): Boolean =
+        host.matches(Regex("^[a-zA-Z0-9._-]+$")) ||
+            host.matches(Regex("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$")) ||
+            host.matches(Regex("^100\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"))
+
+    /** 按当前输入决定保存按钮亮不亮。 */
+    private fun refreshSaveEnabled() {
+        val host = etHost.text?.toString()?.trim().orEmpty()
+        val port = etPort.text?.toString()?.trim()?.toIntOrNull() ?: 0
+        btnSave.isEnabled = host.isNotEmpty() && isHostFormatValid(host) && port in 1..65535
     }
 
     /**
@@ -180,46 +213,42 @@ class FirstTimeSetupActivity : AppCompatActivity() {
      * C3-FIX: Auto-discovery of gateway server.
      *
      * Attempts to connect to a list of candidate hosts in order:
-     * 1. localhost:9000  (V2 backend on same device via emulator/adb)
-     * 2. 127.0.0.1:9000 (loopback explicit)
-     * 3. Common Tailscale IPs (100.64.x.x range)
+     * 1. mDNS(`_galaxy._tcp`)—— 网关自己广播它在哪；
+     * 2. 环回 —— 仅对"模拟器 + adb reverse"这一种开发场景有意义。
      *
-     * If a reachable host is found, pre-fills the host field and enables the save button.
-     * This runs in a background coroutine tied to the Activity lifecycle.
+     * 改前这里是**猜 IP**：`100.64.0.1..20` 加 `100.100.100.1..10`，共 30 个地址，
+     * 每个 3 秒 TCP 超时逐个试，最坏在首屏卡 90 秒。而 Tailscale 从
+     * 100.64.0.0/10 分配 —— 那是四百多万个地址，猜前 20 个和不猜没有区别；
+     * `100.100.100.100` 更是 MagicDNS 自己的地址，不会有任何节点在那里。
+     *
+     * 网关侧一直在广播 `_galaxy._tcp`（`galaxy_gateway/bootstrap/lifecycle.py`），
+     * 手表侧也一直在听 —— 只有手机端没接这条线，才退化成了猜。
+     *
+     * 找到就填进输入框并放开保存按钮；找不到不是错误，用户手工输入或走配对短码。
      */
     private fun startAutoDiscovery() {
         lifecycleScope.launch {
-            val discovered = withContext(Dispatchers.IO) {
-                // Try localhost and 127.0.0.1 first
-                for (host in AUTO_DISCOVER_HOSTS) {
-                    Log.d(TAG, "Auto-discover: trying $host:$DISCOVER_PORT")
-                    if (testHostConnectivity(host, DISCOVER_PORT)) {
-                        Log.i(TAG, "Auto-discover: found gateway at $host:$DISCOVER_PORT")
-                        return@withContext host
-                    }
+            // 先问 mDNS：网关自己会说它在哪，不需要猜。
+            val found = com.ufo.galaxy.network.GatewayDiscovery(this@FirstTimeSetupActivity).discover()
+            val discovered = found?.host ?: withContext(Dispatchers.IO) {
+                LOOPBACK_FALLBACK_HOSTS.firstOrNull { host ->
+                    Log.d(TAG, "Auto-discover: 回落试环回 $host:$DISCOVER_PORT")
+                    testHostConnectivity(host, DISCOVER_PORT)
                 }
-                // Try common Tailscale IPs
-                for (host in TAILSCALE_CANDIDATES) {
-                    Log.d(TAG, "Auto-discover: trying Tailscale candidate $host:$DISCOVER_PORT")
-                    if (testHostConnectivity(host, DISCOVER_PORT)) {
-                        Log.i(TAG, "Auto-discover: found Tailscale gateway at $host:$DISCOVER_PORT")
-                        return@withContext host
-                    }
-                }
-                null
             }
+            val discoveredPort = found?.port ?: DISCOVER_PORT
 
             if (discovered != null) {
                 etHost.setText(discovered)
-                etPort.setText(DISCOVER_PORT.toString())
+                etPort.setText(discoveredPort.toString())
                 btnSave.isEnabled = true
                 Toast.makeText(
                     this@FirstTimeSetupActivity,
-                    "Auto-discovered gateway at $discovered:$DISCOVER_PORT",
+                    "已自动发现网关 $discovered:$discoveredPort",
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
-                Log.i(TAG, "Auto-discover: no gateway found, waiting for manual input")
+                Log.i(TAG, "Auto-discover: 未发现网关，等待手工输入")
             }
         }
     }

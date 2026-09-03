@@ -1363,25 +1363,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Returns true when [url] looks like a real, configured URL (not a placeholder).
      *
-     * A URL is considered a placeholder when it:
-     * - is blank
-     * - contains `x` in the host portion (e.g. "100.x.x.x")
-     * - uses the compile-time fallback scheme + host pattern
+     * 判定移到了 [com.ufo.galaxy.network.GatewayAddress]（纯函数、可在 JVM 单测里跑），
+     * 这里只保留调用。
+     *
+     * 原实现只认 `100.x.x.x` 这类字面占位，**漏了环回**。而出厂默认恰恰是
+     * `wss://localhost:9000`（见 `assets/config.properties`）—— 它在手机上永远连不通，
+     * 却被判成"已配置的真地址"。后果不只是连不上：[toggleCrossDeviceEnabled] 会因此
+     * 走进"已配置"分支，直连、超时、报一个网络错误，把用户引去查网络，
+     * 而真正该发生的是引导他去发现/配对网关。
      */
-    internal fun isRealUrl(url: String): Boolean {
-        if (url.isBlank()) return false
-        // Extract the host portion (between :// and the next : or /)
-        val host = url
-            .substringAfter("://")
-            .substringBefore(":")
-            .substringBefore("/")
-        // Placeholder patterns: contains 'x' (e.g. "100.x.x.x") or is empty
-        if (host.isBlank()) return false
-        // Placeholder like "100.x.x.x": the host contains a literal 'x' octet and is not a
-        // valid numeric/hex/IPv6 address (which never legitimately contains the letter 'x').
-        if (host.contains('x', ignoreCase = true) && !host.matches(Regex("[0-9a-fA-F:.]+"))) return false
-        return true
-    }
+    internal fun isRealUrl(url: String): Boolean =
+        com.ufo.galaxy.network.GatewayAddress.isUsableGatewayUrl(url)
 
     /**
      * 把候选路径序列化成存进 [com.ufo.galaxy.data.AppSettings.gatewayCandidatesJson] 的形状。

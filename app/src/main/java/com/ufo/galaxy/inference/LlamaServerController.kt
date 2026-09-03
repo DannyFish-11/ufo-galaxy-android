@@ -14,28 +14,33 @@ import java.security.MessageDigest
  * JNI 类是空壳(无 cpp/CMake/.so),此前该服务只能靠人手在 Termux 里起 —— 本地闭环
  * 因此从来无法"自启动"。本类让 App 自己拉起并守护 `llama-server` 进程:
  *
- *   binary(arm64 llama-server 可执行文件,置于 [binaryPath])
+ *   binary([binaryPath],随 APK 发的 arm64 llama-server 可执行文件)
  *     + -m [modelPath](MAI-UI-2B Q4_K_M GGUF)
  *     + --mmproj [mmprojPath](视觉投影,多模态必需)
  *     → 127.0.0.1:[port] 的 OpenAI 兼容服务,VlmPlanner/VlmGroundingEngine 直连。
  *
- * ## 二进制供给(诚实边界)
- * 本仓不含、也无法在 CI 里构建 Android 原生二进制。`llama-server` 需一次性供给:
- * 从 llama.cpp 官方 release 取 arm64 静态构建(或 Termux `pkg install llama-cpp` 后
- * 拷贝),推到 [binaryPath](如 `adb push llama-server /data/data/<pkg>/files/bin/`)。
- * 二进制缺失时 [ensureRunning] 返回 [StartOutcome.NotProvisioned],链路保持现有
- * 降级行为(DegradedService / 跨设备路径),不影响 App 其它功能。
+ * ## 二进制供给
+ * [binaryPath] 必须落在 `applicationInfo.nativeLibraryDir` 下,由
+ * [NativeExecutable.llamaServerPath] 给出。**不能是 `filesDir` 之类的可写私有目录**:
+ * targetSdk ≥ 29 的应用不允许对自己数据目录里的文件 execve,这是 SELinux 的强制访问
+ * 控制,权限位改不动。该约束的完整说明见 [NativeExecutable]。
+ *
+ * 供给方式相应地从"每台设备 adb push 一次"变成"构建前把文件放进
+ * `app/src/main/jniLibs/<abi>/libllama-server.so`",装机时随 APK 落地。本仓不含该
+ * 二进制、也无法在 CI 里构建它,所以未供给依然是常态:此时 [ensureRunning] 返回
+ * [StartOutcome.NotProvisioned],链路保持既有降级行为(DegradedService / 跨设备路径),
+ * 不影响 App 其它功能。
  *
  * ## 完整性校验
- * 模型权重的 SHA-256 早已构建期钉死([com.ufo.galaxy.model.ModelAssetManager]),而这个
- * **由本 App 亲自 exec、跑在 App 自己 UID 下的可执行文件**此前没有任何校验就直接启动 ——
- * 数据比可执行文件管得还严,方向反了。
+ * 二进制改由 APK 携带之后,**APK 的 v2/v3 签名已经覆盖了它**,且安装后所在目录只读 ——
+ * 装机时由系统校验,运行时无从篡改。所以 [expectedSha256] 不再是这条路的必需品。
  *
- * 现在 [expectedSha256](默认取 `BuildConfig.MODEL_LLAMA_SERVER_SHA256`)非空时,启动前
- * 逐字节校验:
+ * 它仍然保留,因为供给渠道未必只有一条(例如把二进制换成从可信位置侧载的形态)。
+ * 语义不变:
  *  · 摘要不符 → [StartOutcome.IntegrityFailed],**拒绝执行**,不做任何"也许没事"的猜测;
- *  · 未钉死   → 照常启动,但结构化日志明确记 `integrity=unpinned` —— 承认没校验,
- *              而不是假装校验过。这与权重那边"留空 = 显式承认走 TOFU"的口径一致。
+ *  · 未钉死   → 照常启动,结构化日志记 `integrity=unpinned`。在 jniLibs 供给下这一行
+ *              不再意味着"没人校验过",而是"这一层没再校验一遍" —— 保留它是为了不让
+ *              日志读者误以为多了一道其实不存在的检查。
  *
  * ## 进程可测性
  * 进程创建经 [ProcessLauncher] 注入点,JVM 单测用 fake 验证参数与生命周期语义,
@@ -160,12 +165,27 @@ class LlamaServerController(
 
         val binary = File(binaryPath)
         if (!binary.isFile) {
-            return logged(StartOutcome.NotProvisioned("llama-server binary absent at $binaryPath"))
+            return logged(
+                StartOutcome.NotProvisioned(
+                    "llama-server binary absent at $binaryPath — " +
+                        "把 arm64 可执行文件放进 app/src/main/jniLibs/<abi>/" +
+                        "${NativeExecutable.LLAMA_SERVER_SO} 后重新构建"
+                )
+            )
         }
-        if (!binary.canExecute() && !binary.setExecutable(true)) {
-            return logged(StartOutcome.NotProvisioned("llama-server binary not executable: $binaryPath"))
+        // 这里刻意不再 setExecutable(true):二进制来自只读的 nativeLibraryDir,安装时
+        // 就已是可执行且改不动。此前那句是为 filesDir 供给写的,而在 filesDir 上它既
+        // 改不了 SELinux 标签、也从来没能让 exec 成功 —— 留着只会让人以为权限位是
+        // 可调的。canExecute() 为假在这里是真实故障,直接如实上报。
+        if (!binary.canExecute()) {
+            return logged(
+                StartOutcome.NotProvisioned(
+                    "llama-server binary not executable: $binaryPath — " +
+                        "该路径若不在 applicationInfo.nativeLibraryDir 下,execve 会被 SELinux 拒绝"
+                )
+            )
         }
-        // 完整性校验在标记可执行之后、exec 之前 —— 这是最后一道能拦住的地方。
+        // 完整性校验在 exec 之前 —— 这是最后一道能拦住的地方。
         val integrity = verifyIntegrity(binary)
         if (integrity != null) return logged(integrity)
         if (!File(modelPath).isFile) {

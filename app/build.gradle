@@ -62,17 +62,19 @@ android {
                 "\"${project.findProperty('galaxy.model.vlm.sha256') ?: ''}\""
         buildConfigField "String", "MODEL_VLM_MMPROJ_SHA256",
                 "\"${project.findProperty('galaxy.model.vlmMmproj.sha256') ?: ''}\""
-        // llama-server 可执行文件的 SHA-256。与上面两个权重摘要同一套供给纪律，但性质
-        // 更重：那两个是**数据**，这个是本 App 亲自 exec 的**可执行文件**，跑在 App 自己
-        // 的 UID 下。二进制不在仓内、也无法在 CI 里构建（见 jniLibs/README.md），只能人工
-        // 供给到 files/bin/llama-server —— 所以"这个文件是不是我以为的那个"必须可校验。
+        // llama-server 可执行文件的 SHA-256。
         //
-        //   sha256sum build-android/bin/llama-server
-        //   # 写进 gradle.properties（或 -P 传参、或 CI secret）：
+        // 这一条现在是**可选**的。二进制改为随 APK 发（jniLibs/<abi>/libllama-server.so，
+        // 见 jniLibs/README.md），完整性由 APK 的 v2/v3 签名覆盖、装机时由系统校验，
+        // 比在这里再钉一遍摘要更强，也不需要任何人记得去填一个 gradle 属性。
+        //
+        // 保留它是因为供给渠道未必只有这一条（例如把二进制换成从可信位置侧载的形态）。
+        // 需要时：
+        //   sha256sum app/src/main/jniLibs/arm64-v8a/libllama-server.so
         //   galaxy.llamaServer.sha256=<64位十六进制>
         //
-        // 留空 = 显式承认本次构建不校验该可执行文件；LlamaServerController 会把这个事实
-        // 结构化上报（outcome=Running, integrity=unpinned），而不是假装校验过。
+        // 留空时 LlamaServerController 记 integrity=unpinned —— 在 jniLibs 供给下这行
+        // 不意味着"没人校验过"，而是"这一层没再校验一遍"。
         buildConfigField "String", "MODEL_LLAMA_SERVER_SHA256",
                 "\"${project.findProperty('galaxy.llamaServer.sha256') ?: ''}\""
         // R3-3-FIX: Certificate pinning hash for release builds. Set to placeholder by default.
@@ -141,28 +143,57 @@ android {
     // 错的是钩子太靠前太宽。迁移到只在真正打包分发产物的 assemble<Variant>/
     // bundle<Variant> 任务上触发,按任务名匹配(不依赖不稳定的 variant provider getter,
     // 避免重蹈上一轮"属性不存在"的覆辙);占位符哈希依旧绝对进不了任何可分发产物。
+    //
+    // 第三轮补齐:这道门此前只守 CERT_PIN_HASH,漏了 EXPECTED_CERT_SHA256。
+    // 两个占位符的性质不同 ——
+    //   · CERT_PIN_HASH 占位 → 证书钉扎失效,是"安全强度下降";
+    //   · EXPECTED_CERT_SHA256 占位 → SignatureVerifier 在 release 下必然判不符,
+    //     Application.onCreate() 抛 SecurityException,**装上就起不来**。
+    // 后者是更硬的故障,却反而没人守。凡是"发布前必须替换、否则产物不可用"的占位符,
+    // 都应该在同一处、以同一种方式挡在打包任务前面,而不是各自散着。
+    def releaseSecrets = [
+        [
+            gradleProp : 'certPinHash',
+            field      : 'CERT_PIN_HASH',
+            placeholder: 'sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE',
+            howto      : "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
+                         "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
+                         "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
+                         "  # 结果前面补上 sha256/ 前缀",
+        ],
+        [
+            gradleProp : 'expectedCertSha256',
+            field      : 'EXPECTED_CERT_SHA256',
+            placeholder: 'PLACEHOLDER_SET_BEFORE_RELEASE',
+            howto      : "  keytool -list -v -keystore your-release.keystore \\\n" +
+                         "    | grep 'SHA256:' | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-Z' 'a-z'",
+        ],
+    ]
+
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
-            def pinHashOverride = project.findProperty('certPinHash')
-            if (pinHashOverride) {
-                variant.buildConfigField "String", "CERT_PIN_HASH", "\"${pinHashOverride}\""
+            def unset = []
+            releaseSecrets.each { secret ->
+                def override = project.findProperty(secret.gradleProp)
+                if (override) {
+                    variant.buildConfigField "String", secret.field, "\"${override}\""
+                } else {
+                    unset << secret
+                }
             }
-            def effectivePinHash = pinHashOverride
-                ? "\"${pinHashOverride}\"".toString()
-                : '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"'
             def variantNameCap = variant.name.capitalize()
             tasks.matching {
                 it.name == "assemble${variantNameCap}" || it.name == "bundle${variantNameCap}"
             }.configureEach { packagingTask ->
                 packagingTask.doFirst {
-                    if (effectivePinHash == '"sha256/REPLACE_WITH_ACTUAL_HASH_BEFORE_RELEASE"') {
+                    if (!unset.isEmpty()) {
+                        def detail = unset.collect { secret ->
+                            "  ${secret.field} 仍是占位符 ${secret.placeholder}\n" +
+                            "    生成真实值:\n${secret.howto}\n" +
+                            "    然后 -P${secret.gradleProp}=<值>（或写进 gradle.properties / CI secret）"
+                        }.join("\n")
                         throw new GradleException(
-                            "RELEASE BUILD BLOCKED: CERT_PIN_HASH is not set.\n" +
-                            "Generate the real hash with:\n" +
-                            "  openssl s_client -connect galaxy.ufo.ai:443 </dev/null 2>/dev/null | \\\n" +
-                            "    openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \\\n" +
-                            "    openssl dgst -sha256 -binary | openssl enc -base64\n" +
-                            "Then set it in build.gradle or via -PcertPinHash=sha256/YOUR_HASH"
+                            "RELEASE BUILD BLOCKED — 以下发布前必须替换的值仍是占位符:\n" + detail
                         )
                     }
                 }
@@ -198,12 +229,27 @@ android {
         // CRITICAL-7-FIX: Strip native debug symbols in release builds to reduce reverse engineering surface.
         jniLibs {
             keepDebugSymbols += ''
+            // llama-server 以 jniLibs/<abi>/libllama-server.so 的形态随 APK 发,装机后要
+            // 被 App 自己 exec。exec 的前提是它在磁盘上真实存在。
+            //
+            // AGP 4.2 起 useLegacyPackaging 默认 false：原生库以对齐未压缩的形式留在 APK
+            // 内不再解压，nativeLibraryDir 指向 APK 里的一段偏移而不是一个真实文件路径，
+            // dlopen 走的是特殊路径所以照常，但 execve 无从谈起。
+            //
+            // 打开它 = android:extractNativeLibs="true"，安装时解压到只读且允许执行的
+            // nativeLibraryDir。代价是安装体积变大（库不再共享 APK 的压缩），这是让本地
+            // 推理这条路存在的必要开销。详见 app/src/main/jniLibs/README.md。
+            useLegacyPackaging = true
         }
     }
 
     testOptions {
         unitTests {
             returnDefaultValues = true
+            // Robolectric 要拿到真实的 res/ 与 AndroidManifest 才能起 Activity、
+            // 解析主题和字符串。不开这一项，createComposeRule() 会在
+            // "Resources$NotFoundException" 上失败,而报错内容看不出是缺了这个开关。
+            includeAndroidResources = true
         }
     }
 }
@@ -291,6 +337,24 @@ dependencies {
     // 少了它 :app:compileDebugUnitTestKotlin 直接编不过,而 assembleDebug 是绿的
     // (它不编测试源集),于是"构建通过"会让人以为没事。版本与上面的 okhttp 对齐。
     testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    // ── Compose 渲染测试(JVM 侧,Robolectric)──────────────────────────────
+    //
+    // 本仓此前 0 个仪器测试、0 个渲染测试:app/src/androidTest/ 根本不存在,
+    // 而下面那几条 androidTestImplementation 早就声明着 —— 依赖备好了,
+    // 一行测试没写。任何 Compose 界面从未被渲染过一次。
+    //
+    // 走 Robolectric 而不是仪器测试,是因为 CI 没有模拟器,加一个会让每次构建多几分钟
+    // 且经常在 runner 上不稳。Robolectric 在 JVM 里提供 Android 运行时,
+    // `:app:testDebugUnitTest` 就能真正跑 createComposeRule() ——
+    // 也就是说界面终于会被**执行**,而不只是被编译。
+    //
+    // 它不能替代真机:图形是模拟的,截图对比、真实字体度量、厂商 ROM 差异都不在覆盖内。
+    // 它能拦住的是"这个控件在这个状态下到底显不显示、能不能点"这一类,
+    // 而那正是目前完全没有任何自动化能回答的问题。
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation platform('androidx.compose:compose-bom:2023.10.01')
+    testImplementation 'androidx.compose.ui:ui-test-junit4'
+
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')
@@ -314,8 +378,14 @@ dependencies {
     // NativeInferenceLoader 已在 .so 缺失时捕获 UnsatisfiedLinkError 优雅降级
     // (本地推理关闭,不崩)。故这里去掉这两条无效依赖,让 app 能从克隆直接构建。
     //
-    // 需要真机端侧推理时的正确接入方式【不是往 jniLibs 放 .so】:本地推理由独立的
-    // llama-server 进程承担(llama.cpp 官方服务端 + --mmproj 多模态),供给
-    //   files/bin/llama-server  (arm64 可执行文件,SHA-256 由 MODEL_LLAMA_SERVER_SHA256 钉死)
-    // 由 inference/LlamaServerController.kt 拉起。详见 app/src/main/jniLibs/README.md。
+    // 需要真机端侧推理时的正确接入方式:本地推理由独立的 llama-server 进程承担
+    // (llama.cpp 官方服务端 + --mmproj 多模态)。该可执行文件**就放在 jniLibs 里**:
+    //   app/src/main/jniLibs/arm64-v8a/libllama-server.so
+    // 安装时解压到只读且允许执行的 nativeLibraryDir,由
+    // inference/LlamaServerController.kt 拉起。
+    //
+    // 注意上面那段说的是"不要用 Gradle 依赖引入 llama.cpp/ncnn 这两个 C++ 工程",
+    // 不是"jniLibs 没用"。可执行文件恰恰只能放这里:targetSdk >= 29 的应用不允许对
+    // 自己可写数据目录里的文件 execve,filesDir 那条路结构上走不通。
+    // 详见 app/src/main/jniLibs/README.md。
 }

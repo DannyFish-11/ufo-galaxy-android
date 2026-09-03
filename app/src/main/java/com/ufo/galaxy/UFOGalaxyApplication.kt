@@ -714,10 +714,14 @@ class UFOGalaxyApplication : Application() {
             plannerService = plannerService,
             groundingService = groundingService,
             modelAssetManager = modelAssetManager,
-            // 闭环自启动:llama-server 二进制供给后(files/bin/llama-server),
-            // 推理运行时启动时由 App 自己拉起本地服务,不再依赖外部手工起进程。
+            // 闭环自启动:llama-server 随 APK 以 jniLibs/<abi>/libllama-server.so 发,
+            // 安装时解压到只读的 nativeLibraryDir,App 自己拉起,不依赖外部手工起进程。
+            //
+            // 这里**不能**用 filesDir:targetSdk 35 下私有数据目录带 SELinux 标签
+            // app_data_file,不允许 execve —— 无论文件推没推进去、权限位怎么改。
+            // 详见 inference/NativeExecutable 的说明。
             llamaServerController = com.ufo.galaxy.inference.LlamaServerController(
-                binaryPath = java.io.File(filesDir, "bin/llama-server").absolutePath,
+                binaryPath = com.ufo.galaxy.inference.NativeExecutable.llamaServerPath(this),
                 modelPath = modelAssetManager.vlmModelPath,
                 mmprojPath = modelAssetManager.vlmMmprojPath
             )
@@ -782,7 +786,7 @@ class UFOGalaxyApplication : Application() {
      * Must be called after [initConfig] (needs [appSettings]).
      */
     private fun initNetworkDiagnosticsModules() {
-        tailscaleAdapter = TailscaleAdapter(appSettings)
+        tailscaleAdapter = TailscaleAdapter(appSettings, applicationContext)
         networkDiagnostics = NetworkDiagnostics(appSettings, DeviceIdProvider.getOrCreateDeviceId(this))
         metricsRecorder = MetricsRecorder(appSettings, CoroutineScope(Dispatchers.IO + SupervisorJob()))
         metricsRecorder.start()
