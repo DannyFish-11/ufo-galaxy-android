@@ -38,4 +38,10 @@ dependencies {
 
     // AndroidX Core (for Log)
     implementation 'androidx.core:core-ktx:1.12.0'
+
+    // 单元测试。此前本模块【一个测试都没有,也没有测试源集】—— 而手表端整条网关
+    // 通路都编译的是这里的代码。GatewayAddressTest 随 GatewayAddress 一起搬进来,
+    // 并在 CI 里显式跑 :shared-transport:testDebugUnitTest(既有工作流只跑
+    // :app:testDebugUnitTest,不加这一步等于把一组正在跑的用例悄悄关掉)。
+    testImplementation 'junit:junit:4.13.2'
 }

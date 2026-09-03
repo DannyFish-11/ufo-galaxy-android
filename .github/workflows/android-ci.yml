@@ -365,7 +365,11 @@ jobs:
       # 这是一次**明确的覆盖取舍**,不是顺手优化 —— 若将来有 release-only 的
       # 行为差异需要覆盖,应当单独加一个针对性的 job,而不是把整套再跑一遍。
       - name: Run JVM unit tests (debug variant)
-        run: ./gradlew :app:testDebugUnitTest
+        # :shared-transport 必须显式列出 —— 它是**另一个模块**,:app:testDebugUnitTest
+        # 不会跑到它。而手表端整条网关通路编译的正是这个模块的代码,此前它一个测试
+        # 都没有、也没人跑。GatewayAddressTest 随代码搬进来之后,不加这一行就等于把
+        # 一组本来在跑的用例悄悄关掉,而 CI 照样全绿。
+        run: ./gradlew :app:testDebugUnitTest :shared-transport:testDebugUnitTest
 
       # 把"最慢的测试类"打进**作业日志**,而不只是产物。
       #
