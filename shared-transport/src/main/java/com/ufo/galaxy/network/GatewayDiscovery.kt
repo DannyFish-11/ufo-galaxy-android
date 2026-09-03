@@ -13,7 +13,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 这一步补的是一个明显的缺口：**V2 网关一直在广播，安卓端却从来没人在听。**
  *
  *  - 网关侧 `galaxy_gateway/bootstrap/lifecycle.py` 启动时发布 `_galaxy._tcp`；
- *  - 手表侧 `MdnsDiscovery` 在监听；
+ *  - 手表侧当时自带一份 `MdnsDiscovery` 在监听（同一件事的第二份实现，现已收敛到本类）；
  *  - 安卓侧只有 `transport/LanServiceAnnouncer` —— 那是**反方向**的，
  *    它广播手机自己好让 V2 找到手机，不解决"手机怎么找到网关"。
  *
@@ -26,8 +26,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * mDNS 不猜：网关自己说它在哪。
  *
- * 为什么在 `:app` 而不是 `:shared-transport`：见 [GatewayAddress] 的同名说明 ——
- * 那个模块 `:app` 并不依赖，且与 `:app` 存在同名同包的重复文件。
+ * 放在 `:shared-transport`：手表侧此前自带一份 `MdnsDiscovery`，与本类是同一件事的
+ * 两份实现。手表仓只把 `:shared-transport` 当子项目引进去，落在 `:app` 里的类它看不见 ——
+ * 所以"能共享"的前提是住在这个模块里。历史缘由见 [GatewayAddress]。
  *
  * 已知边界
  * --------

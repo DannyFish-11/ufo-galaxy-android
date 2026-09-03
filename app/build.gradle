@@ -288,6 +288,13 @@ dependencies {
     // ── Shared protocol module (cross-repo unification) ──────────────────────
     implementation project(':shared-protocol')
 
+    // ── Shared transport module ──────────────────────────────────────────────
+    // GatewayClient / AipTransportManager / GatewayAddress / GatewayDiscovery 从这里来。
+    // 此前 :app 不依赖它,于是同包同名的类在两个模块里各存了一份:GatewayClient 逐字
+    // 相同(纯冗余),AipTransportManager 却**已经漂了** —— 断网韧性那段回退逻辑只在
+    // app 那份里有,而手表编译的是 shared-transport 那份。同一个类名,两台设备两种行为。
+    implementation project(':shared-transport')
+
     // Serialization — JSON + MessagePack dual-format
     // Gson is retained for legacy interop; kotlinx.serialization is the default.
     implementation 'com.google.code.gson:gson:2.10.1'

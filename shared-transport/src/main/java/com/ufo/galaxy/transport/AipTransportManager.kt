@@ -114,7 +114,17 @@ class AipTransportManager private constructor() : GatewayClient {
                 return fallbackAdapter.sendJson(jsonToSend)
             }
 
-            Log.w(TAG, "No available transport (tried: $transport, $defaultTransport)")
+            // 断网韧性:指定传输和默认传输都断时,退到任意仍连接的适配器(如 LAN TCP
+            // 直连)。此前这里直接放弃 —— WS 断、TCP 直连活着的场景(阶段 1 的核心
+            // 场景)消息发不出去,LAN 通路等于白接。
+            for ((type, candidate) in adapters) {
+                if (type != transport && type != defaultTransport && candidate.isConnected()) {
+                    Log.i(TAG, "Fallback to connected transport '$type' for $target")
+                    return candidate.sendJson(jsonToSend)
+                }
+            }
+
+            Log.w(TAG, "No available transport (tried: $transport, $defaultTransport, all registered)")
             false
         } catch (e: kotlinx.coroutines.CancellationException) {
             // ROUND-2-FIX: Re-throw CancellationException so callers can respond to
