@@ -301,7 +301,43 @@ enum class MsgType(val value: String) {
 
     @SerialName("unlock")
     @SerializedName("unlock")
-    UNLOCK("unlock");
+    UNLOCK("unlock"),
+
+    // ── 实时语音通话（设备 ↔ AI，像打电话一样）──────────────────────────────
+    //
+    // 分工：**信令与事件走 AIP，音频走 WebRTC 媒体轨**。
+    //
+    // 音频不走 AIP 的理由：AIP WebSocket 建在 TCP 上，丢一个包后面全被堵住，而重传
+    // 回来的是过期音频 —— 实时语音里迟到的音频没有价值，只会把延迟越堆越高。手表
+    // 天线小、贴在手腕上、跟着人移动，本就是最容易落在弱信号下的设备；独立流量
+    // (LTE) 下网络更不可控。所以媒体面必须走能丢包补偿、能抖动缓冲的 WebRTC。
+    //
+    // 信令仍走 AIP 的理由：设备已经连着它，不必为通话再开一条连接；而转写、回复
+    // 增量这些文字事件本来就属于控制面。
+
+    @SerialName("voice_call_start")
+    @SerializedName("voice_call_start")
+    VOICE_CALL_START("voice_call_start"),
+
+    @SerialName("voice_call_accepted")
+    @SerializedName("voice_call_accepted")
+    VOICE_CALL_ACCEPTED("voice_call_accepted"),
+
+    @SerialName("voice_call_end")
+    @SerializedName("voice_call_end")
+    VOICE_CALL_END("voice_call_end"),
+
+    @SerialName("voice_ice")
+    @SerializedName("voice_ice")
+    VOICE_ICE("voice_ice"),
+
+    @SerialName("voice_event")
+    @SerializedName("voice_event")
+    VOICE_EVENT("voice_event"),
+
+    @SerialName("voice_interrupt")
+    @SerializedName("voice_interrupt")
+    VOICE_INTERRUPT("voice_interrupt");
 
     companion object {
         /**
