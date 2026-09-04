@@ -118,7 +118,12 @@ object AndroidV2ContractVersionGate {
     // "count 等于 entries.size" 与 validate()==PASSED 两条断言常红。对齐到真实数量 64。
     // (GATE_SCHEMA_VERSION 按测试要求仍固定 "1";正式 schema bump + V2 android_contract_
     //  version_gate.py 对齐属跨仓协调,单独跟进,不在此处擅自改动破坏 "stable at 1" 断言。)
-    const val EXPECTED_MSG_TYPE_COUNT: Int = 64
+    //
+    // 64 → 70:实时语音通话加了六个类型(voice_call_start / voice_call_accepted /
+    // voice_call_end / voice_ice / voice_event / voice_interrupt)。这个数字不是数出来的,
+    // 是编译 MsgType 之后打印 entries.size 得到的 —— 靠肉眼数枚举正是这个锚点存在的理由。
+    // GATE_SCHEMA_VERSION 依旧不动,理由同上:另有一条断言把它钉在 "1"。
+    const val EXPECTED_MSG_TYPE_COUNT: Int = 70
 
     // ── Per-boundary schema version constants ─────────────────────────────────
 
