@@ -31,7 +31,20 @@ data class MemoryEntry(
     val summary: String,
     val steps: List<String> = emptyList(),
     val route_mode: String = "local",
-    val timestamp_ms: Long = System.currentTimeMillis()
+    val timestamp_ms: Long = System.currentTimeMillis(),
+    /**
+     * 发出这条事件的设备。与 [seq] 一起构成账本的判重依据。
+     *
+     * 默认空串而不是必填:老调用方不传时退化成"服务端照单全收、不去重"——
+     * 宁可暂时不去重,不可误删。
+     */
+    val device_id: String = "",
+    /**
+     * 本设备的单调序号。见 [com.ufo.galaxy.memory.UplinkSequence]。
+     *
+     * 0 表示"没有序号",服务端据此跳过判重。真实序号从 1 起。
+     */
+    val seq: Long = 0L
 )
 
 /**
