@@ -114,6 +114,7 @@ import com.ufo.galaxy.protocol.HybridDegradePayload
 import com.ufo.galaxy.protocol.HybridExecutePayload
 import com.ufo.galaxy.protocol.HybridResultPayload
 import com.ufo.galaxy.protocol.MeshTopologyPayload
+import com.ufo.galaxy.shared.protocol.DeviceIdProvider
 import com.ufo.galaxy.shared.protocol.MsgType
 import com.ufo.galaxy.protocol.MeshSubtaskResult
 import com.ufo.galaxy.protocol.PeerExchangePayload
@@ -141,6 +142,7 @@ import com.ufo.galaxy.runtime.NativeInferenceLoader
 import com.ufo.galaxy.model.ModelDownloader
 import com.ufo.galaxy.memory.MemoryEntry
 import com.ufo.galaxy.memory.OpenClawdMemoryBackflow
+import com.ufo.galaxy.memory.UplinkSequence
 import com.ufo.galaxy.service.handler.TaskHandler
 import com.ufo.galaxy.service.handler.StateHandler
 import com.ufo.galaxy.service.handler.MessageRouter
@@ -7991,13 +7993,18 @@ class GalaxyConnectionService : Service() {
         try {
             val restBaseUrl = UFOGalaxyApplication.appSettings.restBaseUrl
             val backflow = OpenClawdMemoryBackflow(restBaseUrl = restBaseUrl)
+            // device_id + seq 是账本的判重依据:断网缓存、联网补传必然把同一批事件
+            // 再发一遍,没有这两个字段服务端无从识别重复。序号在本设备侧分配而不是
+            // 服务端分配 —— 服务端的号只反映"到达顺序",补传要保住的是"发生顺序"。
             val entry = MemoryEntry(
                 task_id = taskId,
                 goal = goal,
                 status = status,
                 summary = summary,
                 steps = steps,
-                route_mode = routeMode
+                route_mode = routeMode,
+                device_id = DeviceIdProvider.getOrCreateDeviceId(applicationContext),
+                seq = UplinkSequence.forContext(applicationContext).next()
             )
             val ok = backflow.store(entry)
             Log.d(TAG, "[MEMORY] storeMemoryEntry task_id=$taskId status=$status ok=$ok")

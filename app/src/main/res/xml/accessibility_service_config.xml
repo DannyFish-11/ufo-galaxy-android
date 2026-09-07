@@ -1,11 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- UFO Galaxy - 无障碍服务配置 -->
+<!--
+  UFO Galaxy - 无障碍服务配置
+
+  这三个能力位是执行通道的开关，不是可选项
+  ==========================================
+  代码侧早就在用完整的 a11y 运行时 API —— HardwareKeyListener 里有 dispatchGesture、
+  rootInActiveWindow、takeScreenshot，UFOGalaxyApplication 把三个 provider 都注入进了
+  loop。但这份配置里能力位是关着的，于是那些调用在真机上全部是哑的：
+
+    · rootInActiveWindow 需要 canRetrieveWindowContent，缺了返回 null
+    · dispatchGesture    需要 canPerformGestures，缺了不生效
+    · takeScreenshot     需要 canTakeScreenshot（API 30+），缺了抛 SecurityException
+
+  更麻烦的是失败形态是**静默**的：ReadinessChecker 只问 AccessibilityManager
+  「服务启用了吗」，AccessibilityActionExecutor 只问 instance 是否为 null —— 服务一旦
+  绑定，两者都报 OK。真机上看到的会是「模型选了个坏动作」，而不是「这条通道被声明成了哑的」。
+
+  这份文件之前没有任何测试盯着（见 AccessibilityCapabilitiesAreDeclaredTest）。
+
+  canTakeScreenshot 是 API 30 引入的，本模块 minSdk 26。调用侧已按 SDK_INT 分支
+  （HardwareKeyListener 会在低版本直接记日志返回），所以这里声明它是安全的：
+  低版本平台忽略这个属性，高版本才生效。tools:ignore 只是压掉 lint 的
+  UnusedAttribute 提醒 —— 不拆出一份 xml-v30 副本，是因为那等于把同一份配置存两处，
+  而两处配置迟早会漂移，这个仓吃过太多次这个亏。
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:description="@string/accessibility_service_description"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFlags="flagRequestFilterKeyEvents|flagReportViewIds"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="100"
-    android:canRetrieveWindowContent="false"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
+    android:canTakeScreenshot="true"
     android:canRequestFilterKeyEvents="true"
-    android:settingsActivity="com.ufo.galaxy.ui.SettingsActivity" />
+    android:settingsActivity="com.ufo.galaxy.ui.SettingsActivity"
+    tools:ignore="UnusedAttribute" />
