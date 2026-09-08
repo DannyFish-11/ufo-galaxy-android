@@ -158,6 +158,25 @@ class LoopEndsHonestlyTest {
     }
 
     @Test
+    fun `视觉模型压根没加载时，也要如实失败`() {
+        // 与「定位不出来」是两条不同的路:模型没加载时,梯子会把两级视觉整个**跳过**,
+        // 裁决器一次都不会被调用。此前那三级猜屏幕中心正是在这条路上兜的底,
+        // 于是"权重还没下完"这种最常见的状态被包装成了任务完成。
+        val recorder = Recorder()
+
+        val result = runLoop(
+            grounder = FakeGroundingService.notLoaded(),
+            executor = recorder,
+        )
+
+        assertEquals(LoopController.STATUS_FAILED, result.status)
+        assertEquals(
+            "模型没加载、树也没有,那一步只可能是盲点",
+            emptyList<AccessibilityExecutor.AccessibilityAction>(), recorder.dispatched,
+        )
+    }
+
+    @Test
     fun `执行器返回 false 时不算做成`() {
         // 另一半：坐标对了，但动作本身没做成（手势被系统取消就是这个形态）。
         val result = runLoop(

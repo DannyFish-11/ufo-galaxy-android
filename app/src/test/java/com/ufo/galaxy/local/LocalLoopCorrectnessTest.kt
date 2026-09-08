@@ -334,7 +334,14 @@ class LocalLoopCorrectnessTest {
     }
 
     @Test
-    fun `grounding model not loaded falls back to heuristic and execution succeeds`() {
+    fun `视觉模型没加载又没有树时，同样如实失败`() {
+        // 与上面那条同源。这一条原本叫 "grounding model not loaded falls back to
+        // heuristic and execution succeeds" —— 断言的是「模型没加载 → 跌到启发式兜底
+        // → 执行成功」。那个"启发式"就是点屏幕中心。
+        //
+        // 权重没下完 / llama-server 还没起来,在真机上是最常见的一种状态。这时候
+        // 若没有无障碍树,就是**真的不知道该点哪**;点一下屏幕中间再报成功,
+        // 比如实失败糟得多。对照组在上一条:有树时照样做得完。
         val result = runner.run(
             LocalLoopScenario(
                 name = "grounding-not-loaded",
@@ -342,7 +349,12 @@ class LocalLoopCorrectnessTest {
                 planner = FakePlannerService.singleStep("tap", "tap the OK button")
             )
         )
-        assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
+
+        assertEquals(
+            "模型没加载、树也没有,却报成功 —— 那一步只可能是盲点",
+            LocalLoopResult.STATUS_FAILED, result.status
+        )
+        assertNotNull("失败必须带原因", result.error)
     }
 
     @Test
