@@ -66,13 +66,37 @@ class VlmGroundingEngine(
         /** 定位调用生成的 token 很少(单个 JSON 对象),小预算即可,降低尾延迟。 */
         private const val MAX_TOKENS = 96
 
+        /**
+         * 定位提示。**编号优先，像素兜底。**
+         *
+         * 让模型吐像素坐标，是把"认出是哪个控件"和"它在第几个像素"压进同一次生成；
+         * 后一件事模型做不好（图被缩放过、要换算回全分辨率、差十几像素就点到隔壁）。
+         * 所以当我们能提供一份带编号的元素清单时，让它**选编号** —— 坐标由无障碍
+         * 节点自己的 bounds 给出，是精确的，而且答案可验证（编号要么在清单里要么不在）。
+         *
+         * 只有清单里没有对应元素时（自绘控件、Canvas、游戏界面），才退回像素坐标。
+         */
         private const val SYSTEM_PROMPT =
-            "You are a GUI grounding engine. You are given a phone screenshot and a target " +
-            "described in natural language. Reply with ONLY a JSON object, no prose, no " +
-            "markdown fence, in exactly this format: " +
+            "You are a GUI grounding engine. You are given a phone screenshot, a target " +
+            "described in natural language, and sometimes a numbered list of on-screen " +
+            "elements. Reply with ONLY a JSON object, no prose, no markdown fence. " +
+            "If the target is one of the numbered elements, reply " +
+            "{\"index\":<int>,\"confidence\":<float 0..1>,\"element\":\"<short description>\"} " +
+            "using that element's number. Prefer this form whenever it applies: it is " +
+            "resolved to the element's exact bounds. " +
+            "Only when no listed element matches (custom-drawn views, canvas, games), reply " +
             "{\"x\":<int>,\"y\":<int>,\"confidence\":<float 0..1>,\"element\":\"<short description>\"} " +
-            "where (x, y) is the best click point for the target in absolute pixels of the " +
-            "given screenshot."
+            "where (x, y) is the best click point in absolute pixels of the given screenshot."
+
+        /**
+         * 模型给了编号但没给置信度时用的值。
+         *
+         * 不是随手取的高分：编号是从**我们给定的封闭清单**里选的，答案能被直接校验
+         * （在不在清单里）；这比一个自由生成的像素坐标是强得多的证据。所以它应当
+         * 明显高于 [com.ufo.galaxy.local.GroundingFallbackLadder.MIN_PRIMARY_CONFIDENCE]，
+         * 不然一条本来可靠的答案会被门限当噪声丢掉。
+         */
+        private const val INDEX_MATCH_CONFIDENCE = 0.9f
 
         // Minimal 1×1 white JPEG for dry-run grounding validation(继承自旧引擎)。
         private const val DRY_RUN_SCREENSHOT_B64 =
@@ -214,7 +238,11 @@ class VlmGroundingEngine(
         // 结构化通道:无障碍树元素清单与截图同帧注入,模型综合两路证据出坐标。
         val structuredBlock = structuredContext
             ?.takeIf { it.isNotBlank() }
-            ?.let { "\nKnown screen elements (from the accessibility tree, format [i] \"label\" type (cx,cy)):\n$it" }
+            ?.let {
+                "\nKnown screen elements (from the accessibility tree, " +
+                    "format [i] \"label\" type (cx,cy)). If the target is one of these, " +
+                    "answer with its number as \"index\":\n$it"
+            }
             ?: ""
 
         val userContent = JsonArray().apply {
@@ -271,7 +299,8 @@ class VlmGroundingEngine(
      * Parses the chat completion into a [LocalGroundingService.GroundingResult].
      *
      * 解析链:choices[0].message.content → 剥离可能的 ```json 围栏 → JSON 对象 →
-     * x/y 取整并钳位到 [0, width/height)。任何一步失败都返回带 error 的零坐标结果,
+     * **先看 `index`**,有就带着编号返回(坐标由梯子按快照解析);没有再取 x/y,
+     * 取整并钳位到 [0, width/height)。任何一步失败都返回带 error 的零坐标结果,
      * 交由上层 GroundingFallbackLadder 处理 —— 与旧引擎的失败语义保持一致。
      */
     private fun parseResponse(
@@ -311,6 +340,20 @@ class VlmGroundingEngine(
 
         return try {
             val root = gson.fromJson(stripped.substring(start, end + 1), JsonObject::class.java)
+
+            // 编号优先:命中时直接把编号带上去,坐标留给梯子按当帧快照的精确 bounds 解析。
+            // 这里刻意**不**顺手用清单里那个 (cx,cy) —— 那是渲染进 prompt 的缩放图坐标,
+            // 再换算一次就又回到了像素路径上的那些误差。
+            val index = root.get("index")?.takeIf { !it.isJsonNull }?.asInt
+            if (index != null && index >= 0) {
+                return LocalGroundingService.GroundingResult(
+                    x = 0, y = 0,
+                    confidence = root.get("confidence")?.asFloat ?: INDEX_MATCH_CONFIDENCE,
+                    element_description = root.get("element")?.asString ?: "",
+                    elementIndex = index
+                )
+            }
+
             val rawX = root.get("x")?.asDouble
                 ?: return LocalGroundingService.GroundingResult(
                     x = 0, y = 0, confidence = 0f,

@@ -51,7 +51,26 @@ interface LocalGroundingService {
         val y: Int,
         val confidence: Float,
         val element_description: String,
-        val error: String? = null
+        val error: String? = null,
+        /**
+         * 模型选中的**元素编号**（对应注入 prompt 的那份无障碍树元素清单的
+         * `[i]`）；模型只给了像素坐标时为 null。
+         *
+         * ## 为什么要有这一路
+         * 让模型直接吐 (x, y)，是把"认出这是哪个控件"和"这个控件在屏幕上的第几个
+         * 像素"两件事压在一次生成里。第二件事模型做不好：图被缩放过、坐标要换算
+         * 回全分辨率、小屏上差十几像素就点到隔壁。成熟的手机 GUI agent 框架
+         * （AppAgent、android_world 的 T3A 这一类）走的都是另一条路 —— 给模型一份
+         * 带编号的可交互元素清单，让它**选一个编号**，坐标由无障碍节点自己的
+         * bounds 给出。
+         *
+         * 编号这条路的坐标是**精确的**（来自节点 bounds），而且答案可验证：
+         * 编号要么在清单里，要么不在。像素坐标则永远"看起来是个合法答案"。
+         *
+         * 由 [com.ufo.galaxy.local.GroundingFallbackLadder] 拿着当帧快照把编号解析成
+         * 坐标 —— 它持有快照，而本接口的实现只拿到渲染后的文本。
+         */
+        val elementIndex: Int? = null
     )
 
     /**

@@ -612,9 +612,10 @@ class EdgeExecutor(
             grounding.x, grounding.y,
             step.parameters.getOrDefault("direction", "down")
         )
-        "type" -> AccessibilityExecutor.AccessibilityAction.TypeText(
-            step.parameters.getOrDefault("text", "")
-        )
+        // 与本地闭环走同一个解析:同一份计划在两条执行路径上必须做同一件事。
+        // 这里没有 intent 兜底 —— 跨设备路径上 text 缺了就是缺了,填一句意图描述
+        // 进输入框比什么都不填更糟。
+        "type" -> AccessibilityExecutor.AccessibilityAction.TypeText.from(step.parameters)
         "open_app" -> AccessibilityExecutor.AccessibilityAction.OpenApp(
             step.parameters.getOrDefault("package", "")
         )

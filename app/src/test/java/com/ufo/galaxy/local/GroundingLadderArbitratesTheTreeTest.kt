@@ -23,6 +23,11 @@ import org.junit.Test
  * → `LoopController` → `ExecutorBridge`）正是跨设备关闭时的本地主路。
  *
  * 这类缺陷不会让任何行为测试变红：梯子照样"成功"返回坐标，只是点错地方。
+ *
+ * 后续又发现更严重的一层：那三级"猜屏幕中心"的兜底让**这条梯子永远不会失败** ——
+ * `tryAccessibilityNodeHeuristic` 只要屏幕尺寸已知就无条件返回中心点。于是每一次
+ * 真正的定位失败都变成一次盲点，再被 [com.ufo.galaxy.loop.ExecutorBridge] 记成
+ * SUCCESS。三级兜底已删除，本文件因此也钉住「用尽之后必须如实失败」。
  */
 class GroundingLadderArbitratesTheTreeTest {
 
@@ -133,10 +138,8 @@ class GroundingLadderArbitratesTheTreeTest {
         assertEquals("应采用元素的精确 bounds 中心 x", 540, r.x)
         assertEquals("应采用元素的精确 bounds 中心 y", 1850, r.y)
         assertFalse(
-            "又跌回『点屏幕中心』的启发式了 —— 那正是这次修复要消灭的形状",
-            r.stageUsed == GroundingFallbackLadder.STAGE_OCR_TEXT ||
-                r.stageUsed == GroundingFallbackLadder.STAGE_ACCESSIBILITY_NODE ||
-                r.stageUsed == GroundingFallbackLadder.STAGE_HEURISTIC_REGION,
+            "又跌回『点屏幕中心』了 —— 那正是这次修复要消灭的形状",
+            r.stageUsed == GroundingFallbackLadder.STAGE_NO_MATCH,
         )
     }
 
@@ -185,8 +188,16 @@ class GroundingLadderArbitratesTheTreeTest {
         assertTrue("坐标没有换算回全分辨率：(${success.x},${success.y})",
             success.x > 100 && success.y > 200)
 
-        val fallback = run(Grounder(produce = failed), intent = "tap ok", snap = null)
-        assertTrue("无树时仍须有兜底坐标", fallback.succeeded)
+        // 这里原本断言的是「无树时仍须有兜底坐标」—— 那条断言把缺陷本身钉成了契约。
+        // 没有树、视觉也失败，就是**真的不知道该点哪**;此时返回一个屏幕中心坐标
+        // 并报成功，会让上层把一次盲点记成完成。正确形态是如实失败，由
+        // LoopController 去重规划。
+        val exhausted = run(Grounder(produce = failed), intent = "tap ok", snap = null)
+        assertFalse("无树、视觉又失败时必须如实报定位失败", exhausted.succeeded)
+        assertEquals(GroundingFallbackLadder.STAGE_NO_MATCH, exhausted.stageUsed)
+        assertEquals(
+            FailureCode.GROUND_ALL_STAGES_EXHAUSTED, exhausted.failureCode,
+        )
     }
 
     @Test
