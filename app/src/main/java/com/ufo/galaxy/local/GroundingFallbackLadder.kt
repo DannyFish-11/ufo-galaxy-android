@@ -130,14 +130,22 @@ class GroundingFallbackLadder(
         uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot? = null
     ): GroundingResult {
 
+        // 没有截图这一帧就没有视觉证据 —— 直接跳到树救场。
+        //
+        // 截图在三种真实情况下拿不到:设备 API < 30(takeScreenshot 是 API 30 才有的,
+        // 而本模块 minSdk 26)、当前是 FLAG_SECURE 窗口(银行/密码页)、撞上平台节流。
+        // 把一个空字节数组送进缩放器与模型,得到的是垃圾输入下的垃圾坐标 ——
+        // 而那看起来和一次正常定位毫无区别。
+        val hasImage = jpegBytes.isNotEmpty()
+
         // Stage 1: Primary VLM grounding.
-        if (groundingService.isModelLoaded()) {
+        if (hasImage && groundingService.isModelLoaded()) {
             val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, uiSnapshot)
             if (result != null) return result
         }
 
         // Stage 2: Resized screenshot retry (smaller edge).
-        if (groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
+        if (hasImage && groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
             val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, uiSnapshot)
             if (result != null) return result
         }
@@ -355,7 +363,9 @@ class GroundingFallbackLadder(
      *  1. 两级视觉都判 tree_rescue(模型在跑,但这一帧两个尺寸都读不出来);
      *  2. [groundingService] 的 `isModelLoaded()` 为 false —— 两级视觉被整个跳过,
      *     裁决器根本没被调用过(权重没下完、warmup 没过、服务没起,都是这一种);
-     *  3. 两级视觉都抛异常 —— catch 分支直接返回 null,同样没走到裁决。
+     *  3. 两级视觉都抛异常 —— catch 分支直接返回 null,同样没走到裁决;
+     *  4. 这一帧**根本没有截图**(API < 30 / FLAG_SECURE 窗口 / 撞上节流)——
+     *     两级视觉被显式跳过,树是唯一的证据来源。
      *
      * 没有这一级,上面三种情形会带着满手的精确 bounds 直接判定位失败 —— 尤其是
      * 第 2 种(设备上根本没有 VLM 权重),那时树是**唯一**的定位证据来源。

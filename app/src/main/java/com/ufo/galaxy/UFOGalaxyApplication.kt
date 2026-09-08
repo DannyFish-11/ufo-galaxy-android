@@ -695,7 +695,10 @@ class UFOGalaxyApplication : Application() {
             modelDownloader = modelDownloader,
             // 规划送图的预算按真机屏幕算,所以缩放器必须是真的那个(默认的 NoOp 只给单测用)。
             imageScaler = AndroidBitmapScaler(),
-            plannerGenerationReserve = appSettings.plannerMaxTokens
+            plannerGenerationReserve = appSettings.plannerMaxTokens,
+            // 循环自己也要拿树:截图拿不到时(API < 30 / FLAG_SECURE 窗口 / 撞上节流),
+            // 树是唯一的定位与变化检测依据 —— 没有它,那三种情况下整条会话直接终止。
+            uiSnapshotProvider = uiSnapshotProvider
         )
         localLoopReadinessProvider = DefaultLocalLoopReadinessProvider(
             modelAssetManager = modelAssetManager,

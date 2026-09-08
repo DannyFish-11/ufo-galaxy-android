@@ -136,9 +136,34 @@ class LocalLoopCorrectnessTest {
     }
 
     @Test
-    fun `happy path sets stopReason to task_complete`() {
+    fun `计划走完但模型没声明达成，停止原因是 plan_exhausted`() {
+        // 这条原本断言 task_complete —— 那时「步骤列表到头了」和「目标达成了」是同一个
+        // 停止原因。它们是两件事:规划器完全可能给出一份不足以完成任务的计划,每一步都
+        // 执行成功,然后循环报"完成"。默认的 fake 计划里没有终止动作,所以这里应当是
+        // 无依据的那一种。
+        //
+        // 判定没变(见下一条):两者仍都是 STATUS_SUCCESS。
         val result = runner.run(LocalLoopScenario("happy-path-stop-reason"))
+
+        assertEquals(LoopController.STOP_PLAN_EXHAUSTED, result.stopReason)
+        assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
+    }
+
+    @Test
+    fun `模型声明达成时，停止原因才是 task_complete`() {
+        // 上一条的对照组:同一条链路,只是计划末尾多了一个终止动作。
+        val result = runner.run(
+            LocalLoopScenario(
+                name = "happy-path-finish-declared",
+                planner = FakePlannerService.multiStep(
+                    "tap" to "step one",
+                    LoopController.ACTION_FINISH to "目标已达成",
+                ),
+            )
+        )
+
         assertEquals(LoopController.STOP_TASK_COMPLETE, result.stopReason)
+        assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
     }
 
     @Test

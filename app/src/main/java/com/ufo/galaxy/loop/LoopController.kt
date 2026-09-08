@@ -77,7 +77,24 @@ class LoopController(
      */
     private val plannerContextSize: Int = LlamaServerController.DEFAULT_CONTEXT_SIZE,
     /** 规划一次的生成预算(token)。 */
-    private val plannerGenerationReserve: Int = EdgeExecutor.DEFAULT_PLANNER_GENERATION_RESERVE
+    private val plannerGenerationReserve: Int = EdgeExecutor.DEFAULT_PLANNER_GENERATION_RESERVE,
+    /**
+     * 结构化感知通道(无障碍树快照)。
+     *
+     * 它在这里的作用不是"锦上添花",而是**让这条循环在没有截图时仍然能跑**:
+     *
+     *  · 设备 API < 30 —— `takeScreenshot` 是 API 30 才引入的,而本模块 minSdk 26;
+     *  · 当前是 `FLAG_SECURE` 窗口(银行、密码页)—— 截图必然失败;
+     *  · 撞上平台的 333ms 节流。
+     *
+     * 这三种情况下此前整条会话直接以 `screenshot_failed` 终止 —— 哪怕树完全读得到、
+     * 定位与执行都不需要那张图。生产接线里这一路一直是接着的
+     * ([com.ufo.galaxy.UFOGalaxyApplication] 把同一个 provider 注入了 ExecutorBridge),
+     * 只是循环自己没用上。
+     *
+     * null(默认,仅单测用)= 无结构化通道,截图失败即终止,与旧行为一致。
+     */
+    private val uiSnapshotProvider: com.ufo.galaxy.perception.UiSnapshotProvider? = null
 ) {
 
     companion object {
@@ -125,6 +142,11 @@ class LoopController(
         const val ACTION_FINISH = "finish"
         const val STOP_MAX_STEPS = "max_steps_reached"
         const val STOP_MODEL_UNAVAILABLE = "model_unavailable"
+        /**
+         * 截图拿不到,**而且**树也读不到 —— 两条感知通道都没有,这一步无从判断。
+         *
+         * 只有截图失败**不再**是终止条件:见 [uiSnapshotProvider]。
+         */
         const val STOP_SCREENSHOT_FAILED = "screenshot_failed"
         const val STOP_PLAN_FAILED = "plan_failed"
         const val STOP_REPLAN_FAILED = "replan_failed"
@@ -248,15 +270,28 @@ class LoopController(
         ensureModels(sessionId)
 
         // ── Phase 1: initial screenshot ───────────────────────────────────────
+        // 截图拿不到时不再直接终止:只要树读得到,定位与变化检测都还有依据。
         val initialCapture = captureScreenshot(sessionId)
-            ?: return@withContext terminateFailed(
+        var lastTreeSignature = captureTreeSignature()
+        if (initialCapture == null && lastTreeSignature == null) {
+            return@withContext terminateFailed(
                 sessionId, instruction,
                 stopReason = STOP_SCREENSHOT_FAILED,
-                error = withScreenshotReason("首次截图失败"),
+                error = withScreenshotReason("首次截图失败，且无障碍树也读不到（两条感知通道都没有）"),
                 stepIndex = 0,
                 failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
             )
-        val (initialJpeg, initW, initH) = initialCapture
+        }
+        if (initialCapture == null) {
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "screenshot_unavailable_tree_only",
+                "session_id" to sessionId,
+                "reason" to (lastScreenshotError ?: "unknown")
+            ))
+        }
+        val initialJpeg = initialCapture?.first ?: ByteArray(0)
+        val initW = initialCapture?.second ?: 0
+        val initH = initialCapture?.third ?: 0
 
         // ── Phase 2: initial plan ─────────────────────────────────────────────
         // 真 bug 修复(规划输入没有预算):此前这里把**全分辨率**截图的 base64 直接送进
@@ -264,7 +299,8 @@ class LoopController(
         // = 3230 个视觉 token,预算 3456 —— 只剩 226 个 token 给指令;1440×3200 = 5814,
         // 直接装不下。而全链路没有任何一处数过这个数,溢出表现为"模型忽然不听话"
         // (prompt 被静默截断)而不是一个明确的失败。
-        val initialBase64 = budgetedPlanningImage(sessionId, initialJpeg, initW, initH, instruction)
+        val initialBase64 = if (initialJpeg.isEmpty()) null
+            else budgetedPlanningImage(sessionId, initialJpeg, initW, initH, instruction)
         val sequence = localPlanner.plan(sessionId, instruction, initialBase64)
         if (sequence.steps.isEmpty()) {
             return@withContext terminateFailed(
@@ -349,33 +385,38 @@ class LoopController(
 
             // Capture a fresh screenshot for this step.
             val stepCapture = captureScreenshot(sessionId)
-            if (stepCapture == null) {
+            val stepTreeSignature = captureTreeSignature()
+            // 只有**两条感知通道都没有**才算这一步没法做:光是截图失败,树还在,
+            // 定位走树救场、变化检测走树指纹,都还成立。
+            if (stepCapture == null && stepTreeSignature == null) {
                 val obs = StepObservation.failure(
                     stepId = step.id,
                     actionType = step.actionType,
                     intent = step.intent,
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED,
-                    summary = withScreenshotReason("动作前截图失败"),
+                    summary = withScreenshotReason("动作前截图失败，且无障碍树也读不到"),
                     screenshotCaptured = false
                 )
                 observations.add(obs)
                 val failedStep = step.copy(
                     status = StepStatus.FAILED,
-                    failureReason = withScreenshotReason("动作前截图失败"),
+                    failureReason = withScreenshotReason("动作前截图失败，且无障碍树也读不到"),
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
                 )
                 executedSteps.add(failedStep)
                 return@withContext terminateFailed(
                     sessionId, instruction, executedSteps,
                     stopReason = STOP_SCREENSHOT_FAILED,
-                    error = withScreenshotReason("第 $displayIndex 步动作前截图失败"),
+                    error = withScreenshotReason("第 $displayIndex 步：截图与无障碍树都读不到"),
                     stepIndex = displayIndex,
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED,
                     observations = observations
                 )
             }
 
-            val (stepJpeg, screenW, screenH) = stepCapture
+            val stepJpeg = stepCapture?.first ?: ByteArray(0)
+            val screenW = stepCapture?.second ?: 0
+            val screenH = stepCapture?.third ?: 0
             val stepStartMs = SystemClock.elapsedRealtime()
 
             // Execute via ExecutorBridge (grounding fallback ladder + AccessibilityService dispatch).
@@ -410,6 +451,9 @@ class LoopController(
             // Capture post-action screenshot for UI-change detection.
             val postCapture = captureScreenshot(sessionId)
             val postJpeg = postCapture?.first
+            // 动作后的树指纹。它是比像素更准的变化判据(像素会被动画、闪烁的光标、
+            // 跳动的时间戳搅动),也是没有截图时唯一可用的判据。
+            val postTreeSignature = captureTreeSignature()
 
             // Build structured post-action observation.
             val observation = postActionObserver.observe(
@@ -421,12 +465,15 @@ class LoopController(
                 confidence = resultStep.confidence,
                 targetMatched = if (resultStep.confidence > 0f) true else null,
                 beforeJpeg = prevJpeg,
-                afterJpeg = postJpeg
+                afterJpeg = postJpeg,
+                beforeTreeSignature = stepTreeSignature ?: lastTreeSignature,
+                afterTreeSignature = postTreeSignature
             )
             observations.add(observation)
 
             // Update prevJpeg for the next iteration's UI-change comparison.
             if (postJpeg != null) prevJpeg = postJpeg
+            if (postTreeSignature != null) lastTreeSignature = postTreeSignature
 
             executedSteps.add(resultStep)
             stepsConsumed++
@@ -491,7 +538,7 @@ class LoopController(
                 val replanCapture = captureScreenshot(sessionId)
                 // 重规划与首次规划走同一套预算 —— 此前这里同样送全分辨率原图。
                 val replanBase64 = replanCapture?.let { (jpeg, w, h) ->
-                    budgetedPlanningImage(sessionId, jpeg, w, h, instruction)
+                    if (jpeg.isEmpty()) null else budgetedPlanningImage(sessionId, jpeg, w, h, instruction)
                 }
 
                 val replanSequence = localPlanner.replan(
@@ -735,6 +782,24 @@ class LoopController(
             null
         }
     }
+
+    /**
+     * 读一帧无障碍树指纹;没有结构化通道、或这一帧读不到时返回 null。
+     *
+     * 指纹用于两处:判断动作之后界面变了没有(比像素更准,且截图拿不到时是唯一判据),
+     * 以及判断"两条感知通道是不是都没有"。
+     */
+    private fun captureTreeSignature(): String? =
+        try {
+            uiSnapshotProvider?.capture()?.signature()
+        } catch (e: Exception) {
+            // 感知辅助层绝不该把主链路打挂:窗口切换竞态下节点可能已失效。
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "tree_snapshot_error",
+                "error" to (e.message ?: "unknown")
+            ))
+            null
+        }
 
     /** 把截图失败的具体原因接在给人看的错误信息后面。 */
     private fun withScreenshotReason(message: String): String =

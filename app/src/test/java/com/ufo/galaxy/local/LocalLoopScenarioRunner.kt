@@ -73,7 +73,11 @@ class LocalLoopScenarioRunner(private val modelsDir: File) {
             maxRetriesPerStep = scenario.maxRetriesPerStep,
             stagnationDetector = scenario.stagnationDetector,
             stepTimeoutMs = scenario.stepTimeoutMs,
-            goalTimeoutMs = scenario.goalTimeoutMs
+            goalTimeoutMs = scenario.goalTimeoutMs,
+            // 与生产接线一致:循环自己也拿树,否则「截图拿不到但树还在」这条路测不到。
+            uiSnapshotProvider = scenario.uiSnapshot?.let { snap ->
+                com.ufo.galaxy.perception.UiSnapshotProvider { snap }
+            }
         )
         val executor = DefaultLocalLoopExecutor(
             loopController = loopController,
