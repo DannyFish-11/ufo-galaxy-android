@@ -41,6 +41,7 @@ class ScreenshotOutcomeTest {
             ScreenshotOutcome.ERROR_INVALID_DISPLAY,
             ScreenshotOutcome.ERROR_SECURE_WINDOW,
             ScreenshotOutcome.ERROR_UNSUPPORTED_SDK,
+            ScreenshotOutcome.ERROR_MAIN_THREAD,
         )) {
             assertFalse(
                 "errorCode=$code 重试多少次结果都一样，重试只是白付一个节流窗口",
@@ -73,6 +74,7 @@ class ScreenshotOutcomeTest {
             ScreenshotOutcome.ERROR_INVALID_DISPLAY to "invalid_display",
             ScreenshotOutcome.ERROR_INTERNAL to "internal_error",
             ScreenshotOutcome.ERROR_UNSUPPORTED_SDK to "unsupported_sdk",
+            ScreenshotOutcome.ERROR_MAIN_THREAD to "called_on_main_thread",
         )
         for ((code, expected) in reasons) {
             assertEquals(expected, ScreenshotOutcome.failed(code).reason)
@@ -95,6 +97,7 @@ class ScreenshotOutcomeTest {
             ScreenshotOutcome.ERROR_INVALID_DISPLAY,
             ScreenshotOutcome.ERROR_SECURE_WINDOW,
             ScreenshotOutcome.ERROR_UNSUPPORTED_SDK,
+            ScreenshotOutcome.ERROR_MAIN_THREAD,
         )
         assertEquals("错误码有重复", codes.size, codes.toSet().size)
     }
@@ -105,6 +108,10 @@ class ScreenshotOutcomeTest {
         assertTrue(
             "ERROR_UNSUPPORTED_SDK 必须为负，否则平台新增一个码就会撞上",
             ScreenshotOutcome.ERROR_UNSUPPORTED_SDK < 0,
+        )
+        assertTrue(
+            "ERROR_MAIN_THREAD 必须为负，同理",
+            ScreenshotOutcome.ERROR_MAIN_THREAD < 0,
         )
     }
 

@@ -293,6 +293,18 @@ class HardwareKeyListener : AccessibilityService() {
      * @param durationMs 手势本身的时长；等待上限在此基础上加 [GESTURE_RESULT_GRACE_MS]。
      */
     private fun dispatchAndAwait(gesture: GestureDescription, durationMs: Long): Boolean {
+        // 回调派发在主线程。在主线程上等它 = 等一个只有自己让开才会来的东西 = 死锁。
+        //
+        // 这是本次改动**新引入**的一条约束:此前手势是 fire-and-forget,主线程调用只是
+        // 不精确,不会挂住。所以宁可在主线程上退回旧行为(派发出去、不等结果,如实
+        // 记一条日志),也不能把 UI 线程锁死 —— 不精确是可以被上层的停滞检测发现的,
+        // ANR 不是。
+        if (isOnMainThread()) {
+            Log.e(TAG, "executeAction 被在主线程调用 —— 退回不等待结果的派发以免死锁。" +
+                "这条路径应当在工作线程上执行(循环跑在 Dispatchers.IO 上)。")
+            return dispatchGesture(gesture, null, null)
+        }
+
         val latch = CountDownLatch(1)
         val completed = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -427,6 +439,15 @@ class HardwareKeyListener : AccessibilityService() {
     }
 
     /**
+     * 当前是不是主线程。
+     *
+     * 无障碍服务的回调（手势结果、截图结果）都派发在主线程上，所以任何"发起后等结果"
+     * 的调用都**不能**在主线程做 —— 等的正是一个只有主线程让开才会来的东西。
+     */
+    private fun isOnMainThread(): Boolean =
+        android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+
+    /**
      * API < 33 上 [AccessibilityNodeInfo] 持有跨进程资源，必须 recycle，
      * 否则每一步都在漏；API 33+ recycle 是 no-op。窗口切换竞态下节点可能已失效，
      * 回收失败静默忽略。
@@ -524,6 +545,13 @@ class HardwareKeyListener : AccessibilityService() {
      * （见 [ScreenshotOutcome.retryable]）—— 对 FLAG_SECURE 窗口重试是纯浪费。
      */
     fun capture(): ScreenshotOutcome {
+        // 截图要等一个派发在主线程上的回调,还要先等节流窗口。在主线程上做这件事
+        // 等不到结果,只会先卡住 UI 再 ANR。如实返回一个失败,别把 App 卡死。
+        if (isOnMainThread()) {
+            Log.e(TAG, "capture() 被在主线程调用 —— 拒绝执行以免 ANR。" +
+                "截图必须在工作线程上做:它要等一个派发在主线程的回调。")
+            return ScreenshotOutcome.failed(ScreenshotOutcome.ERROR_MAIN_THREAD)
+        }
         // SDK 判断写在这里而不是调 canCaptureScreen()：lint 的版本流分析只认
         // 就地的 SDK_INT 比较，抽成方法它就看不见，@RequiresApi 会报 NewApi。
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {

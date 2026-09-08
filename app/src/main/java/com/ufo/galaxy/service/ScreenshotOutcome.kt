@@ -53,6 +53,7 @@ data class ScreenshotOutcome(
             errorCode == ERROR_INVALID_DISPLAY -> "invalid_display"
             errorCode == ERROR_INTERNAL -> "internal_error"
             errorCode == ERROR_UNSUPPORTED_SDK -> "unsupported_sdk"
+            errorCode == ERROR_MAIN_THREAD -> "called_on_main_thread"
             errorCode != NO_ERROR -> "error_$errorCode"
             else -> "empty_bitmap"
         }
@@ -98,6 +99,15 @@ data class ScreenshotOutcome(
          * 取负值，以免和平台将来新增的码撞上。
          */
         const val ERROR_UNSUPPORTED_SDK = -1
+
+        /**
+         * 也不是平台的码：在主线程上发起了截图。
+         *
+         * 截图要等一个派发在主线程的回调，在主线程等它等不到，只会卡住 UI 直到 ANR。
+         * 单独一个码而不是复用 [ERROR_INTERNAL]：这是**调用方的 bug**，
+         * 修法是把调用挪到工作线程，和其余几种都不一样。
+         */
+        const val ERROR_MAIN_THREAD = -2
 
         /** 成功。 */
         fun ok(bytes: ByteArray) = ScreenshotOutcome(bytes = bytes)
