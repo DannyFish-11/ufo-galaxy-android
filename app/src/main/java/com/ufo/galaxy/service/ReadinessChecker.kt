@@ -79,14 +79,25 @@ object ReadinessChecker {
     /**
      * Checks whether the [HardwareKeyListener] accessibility service is currently enabled.
      *
-     * Fast path: returns true if [HardwareKeyListener.instance] is non-null (service already
-     * bound). The static `instance` var is marked `@Volatile` on the JVM so the read is
-     * thread-safe for a simple null check.
-     * Fallback: queries the system-level enabled accessibility services list.
+     * 服务已绑定时,还要再问一次**能力位齐不齐**([HardwareKeyListener.capabilities]):
+     * 三个能力位任何一个缺了,对应的调用都会静默失当,而服务照样是绑定的 ——
+     * 那时上报「就绪」出去,网关会照常把任务派下来,然后每一步都在空跑。
+     *
+     * 服务未绑定时退回查系统的已启用服务列表(那时读不到能力位)。
+     * 静态 `instance` 是 `@Volatile` 的,简单空判读是线程安全的。
      */
     fun checkAccessibilityReady(context: Context): Boolean {
-        if (HardwareKeyListener.instance != null) {
-            Log.d(TAG, "checkAccessibilityReady=true (instance bound)")
+        val instance = HardwareKeyListener.instance
+        if (instance != null) {
+            // 「绑上了」不等于「能干活」:这条闭环踩在三个各自独立的能力位上,缺任何
+            // 一个,对应的调用都会**静默**失当(树返回 null / 手势不生效 / 截图抛异常),
+            // 而服务照样是绑定的。上报一个「就绪」出去,网关会照常把任务派下来。
+            val caps = instance.capabilities()
+            if (!caps.allReady) {
+                Log.w(TAG, "checkAccessibilityReady=false(服务已绑定但能力不全): ${caps.blockers}")
+                return false
+            }
+            Log.d(TAG, "checkAccessibilityReady=true (instance bound, capabilities complete)")
             return true
         }
         val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager

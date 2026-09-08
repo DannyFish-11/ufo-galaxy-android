@@ -454,6 +454,45 @@ class HardwareKeyListener : AccessibilityService() {
         }
     }
 
+    // ── 能力位自查 ────────────────────────────────────────────────────────────
+
+    /**
+     * 读回系统**实际授予**的能力位。
+     *
+     * 读的是 `serviceInfo.capabilities`，不是我们在 xml 里声明了什么 —— 声明与授予
+     * 可能不一致（厂商 ROM 裁剪、配置写错、合并事故）。而这三位任何一个缺了，
+     * 对应的调用都会**静默**失当：树读不到、手势不生效、截图抛异常。
+     *
+     * 服务未连接或 serviceInfo 读不到时返回 [A11yCapabilities.NOT_BOUND]。
+     *
+     * `@Suppress("NewApi")`:`CAPABILITY_CAN_TAKE_SCREENSHOT` 是 API 30 加的,但它是
+     * **编译期 int 常量**,编出来就是字面量 0x40,运行期不碰任何新 API;低版本上系统
+     * 不会置这一位,结果自然是 false。直接引用平台常量而不是抄一份值 —— 抄一份就要
+     * 再写一条测试去钉它没抄错,而那条测试在纯 JVM 下同样够不到平台常量。
+     */
+    @Suppress("NewApi")
+    fun capabilities(): A11yCapabilities {
+        val info = try {
+            serviceInfo
+        } catch (e: Exception) {
+            // 服务正在断开的竞态里 serviceInfo 会抛。
+            Log.w(TAG, "读取 serviceInfo 失败: ${e.message}")
+            null
+        } ?: return A11yCapabilities.NOT_BOUND
+
+        val caps = info.capabilities
+        return A11yCapabilities(
+            serviceBound = true,
+            canRetrieveWindowContent =
+                caps and AccessibilityServiceInfo.CAPABILITY_CAN_RETRIEVE_WINDOW_CONTENT != 0,
+            canPerformGestures =
+                caps and AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0,
+            canTakeScreenshot =
+                caps and AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOT != 0,
+            sdkInt = Build.VERSION.SDK_INT
+        )
+    }
+
     // ── Screenshot capture ────────────────────────────────────────────────────
 
     /**
@@ -471,10 +510,10 @@ class HardwareKeyListener : AccessibilityService() {
     fun captureJpeg(): ByteArray? = capture().bytes
 
     /**
-     * 截图能力是否具备。给开跑前体检用 —— 不具备时的表现必须是一条明确的原因，
-     * 而不是每一步都拿到一个 null。
+     * 截图能力是否具备（API 版本 + 能力位都算上）。给开跑前体检用 ——
+     * 不具备时的表现必须是一条明确的原因，而不是每一步都拿到一个 null。
      */
-    fun canCaptureScreen(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    fun canCaptureScreen(): Boolean = capabilities().screenshotReady
 
     /**
      * 截图，并把失败原因带回来。

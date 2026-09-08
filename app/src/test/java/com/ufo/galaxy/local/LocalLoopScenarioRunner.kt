@@ -57,7 +57,11 @@ class LocalLoopScenarioRunner(private val modelsDir: File) {
         val bridge = ExecutorBridge(
             groundingService = scenario.grounder,
             accessibilityExecutor = scenario.accessibilityExecutor,
-            imageScaler = NoOpImageScaler()
+            imageScaler = NoOpImageScaler(),
+            // 生产接线里这一路一直在场;场景里给了快照就同样接上,否则保持 null。
+            uiSnapshotProvider = scenario.uiSnapshot?.let { snap ->
+                com.ufo.galaxy.perception.UiSnapshotProvider { snap }
+            }
         )
         val loopController = LoopController(
             localPlanner = planner,

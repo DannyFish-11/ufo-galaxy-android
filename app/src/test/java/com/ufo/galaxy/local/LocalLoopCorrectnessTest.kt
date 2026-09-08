@@ -279,21 +279,56 @@ class LocalLoopCorrectnessTest {
     // ── 4. Grounding fallback ─────────────────────────────────────────────────
 
     @Test
-    fun `grounding fails but fallback ladder produces coordinates and execution succeeds`() {
-        // The GroundingFallbackLadder has heuristic-region and accessibility-node stages
-        // that never fail. Even if the primary VLM grounder is unavailable the
-        // ladder will produce some coordinates and the tap will be dispatched.
+    fun `定位失败又没有树时，整条会话如实失败，不许盲点`() {
+        // 这条原本断言的是相反的东西:「梯子的兜底级永远能给出坐标,所以执行应当成功」。
+        // 那个"兜底"的实现是**返回屏幕正中心**,于是每一次真正的定位失败都变成一次
+        // 盲点,再被记成 SUCCESS,任务最后报完成 —— 而屏幕中间可能正好是一条列表项、
+        // 一个删除、一次付款确认。那条断言把缺陷本身钉成了契约,现在反过来钉正确形态。
+        val executor = FakeAccessibilityExecutor.alwaysSucceed()
         val result = runner.run(
             LocalLoopScenario(
-                name = "grounding-fails-fallback",
+                name = "grounding-fails-no-tree",
                 grounder = FakeGroundingService.alwaysFail("grounding service unavailable"),
-                planner = FakePlannerService.singleStep("tap", "tap the button")
+                planner = FakePlannerService.singleStep("tap", "tap the button"),
+                accessibilityExecutor = executor
             )
         )
-        // The grounding ladder has a fallback that always produces coordinates,
-        // so execution should succeed (accessibility returns true).
+
         assertEquals(
-            "Grounding fallback must allow execution to complete",
+            "定位不出来却报成功 —— 上层会把一次盲点当成任务完成",
+            LocalLoopResult.STATUS_FAILED, result.status
+        )
+        assertNotNull("失败必须带原因", result.error)
+    }
+
+    @Test
+    fun `没有视觉模型时，无障碍树独自把定位做完`() {
+        // 删掉三级猜屏幕中心之后必须仍然成立的那一半:设备上权重没下完 / 服务没起来时,
+        // 树是**唯一**的定位依据。这一路在生产接线里一直是接着的
+        // (UFOGalaxyApplication 把 AccessibilityUiSnapshotProvider 注入了 ExecutorBridge),
+        // 但这个端到端场景运行器此前从不注入,于是从没被端到端测过。
+        val result = runner.run(
+            LocalLoopScenario(
+                name = "tree-only-grounding",
+                grounder = FakeGroundingService.alwaysFail("model not loaded"),
+                planner = FakePlannerService.singleStep("tap", "设置"),
+                uiSnapshot = com.ufo.galaxy.perception.UiStructuredSnapshot(
+                    packageName = "com.android.settings",
+                    screenWidth = 1080,
+                    screenHeight = 2400,
+                    elements = listOf(
+                        com.ufo.galaxy.perception.UiStructuredSnapshot.UiElement(
+                            index = 0, text = "设置", contentDescription = "",
+                            className = "android.widget.TextView", clickable = true,
+                            left = 400, top = 1800, right = 680, bottom = 1900,
+                        )
+                    ),
+                )
+            )
+        )
+
+        assertEquals(
+            "有精确 bounds 在手却没能完成 —— 没有模型的设备上这是唯一的定位路径",
             LocalLoopResult.STATUS_SUCCESS, result.status
         )
     }
