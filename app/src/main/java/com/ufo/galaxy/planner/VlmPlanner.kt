@@ -87,13 +87,18 @@ class VlmPlanner(
          *
          * `submit` 也在这里定义：填完要不要按输入法的确认键，只有规划器知道
          * （搜索框要按，聊天框按下去消息就发出去了）。默认不按。
+         *
+         * `finish` 是终止动作：模型用它声明"目标达成了"。此前循环把"步骤列表到头了"
+         * 直接当成"任务完成"，而这是两件事 —— 规划器完全可能给出一份不足以完成任务的
+         * 计划，每一步都成功，然后报"完成"。有了这个动作，两者在日志里分得开
+         * （见 [com.ufo.galaxy.loop.LoopController.STOP_PLAN_EXHAUSTED]）。
          */
         private const val SYSTEM_PROMPT =
             "You are a mobile GUI agent. " +
             "Given a task goal and optional screen image, " +
             "produce a JSON action plan in this format: " +
             "{\"steps\":[{" +
-            "\"action_type\":\"tap|scroll|type|open_app|back|home\"," +
+            "\"action_type\":\"tap|scroll|type|open_app|back|home|finish\"," +
             "\"intent\":\"<natural language target description>\"," +
             "\"parameters\":{}" +
             "}]}. " +
@@ -103,7 +108,11 @@ class VlmPlanner(
             "type -> {\"text\":\"<exact literal text to type>\"," +
             "\"submit\":\"true|false\"}; " +
             "open_app -> {\"package\":\"<android package name>\"}; " +
-            "back/home -> none. " +
+            "back/home -> none; " +
+            "finish -> none. " +
+            "End the plan with a single {\"action_type\":\"finish\"} step when the " +
+            "goal will be achieved by the preceding steps. Emit it only when you " +
+            "believe the task is actually complete, never as filler. " +
             "For type, \"text\" must be the literal characters to enter, " +
             "never a description of what to enter. " +
             "Set \"submit\":\"true\" only when the field must be committed " +

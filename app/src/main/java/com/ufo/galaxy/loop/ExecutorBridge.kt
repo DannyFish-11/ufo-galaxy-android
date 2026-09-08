@@ -98,6 +98,19 @@ class ExecutorBridge(
             )
         )
 
+        // 终止动作不落地成任何设备动作:不定位、不派发、也**不碰执行器**。
+        // 它表达的是"目标已达成",不是一次操作。放到这里而不是做成一个
+        // AccessibilityAction 成员,是因为 HardwareKeyListener.executeAction 里那个
+        // when 是对密封类穷尽的 —— 多一个成员会要求那里也处理它,而它压根不该走到那儿。
+        if (step.actionType == LoopController.ACTION_FINISH) {
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "finish_declared",
+                "step_id" to step.id,
+                "intent" to step.intent.take(80)
+            ))
+            return step.copy(status = StepStatus.SUCCESS, confidence = 1f)
+        }
+
         return try {
             val (action, confidence, groundingStage) = resolveAction(
                 step, jpegBytes, screenWidth, screenHeight

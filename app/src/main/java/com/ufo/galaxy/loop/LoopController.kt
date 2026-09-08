@@ -92,7 +92,37 @@ class LoopController(
         const val STATUS_FAILED = "failed"
         const val STATUS_CANCELLED = "cancelled"
 
+        /**
+         * 模型明确发了终止动作（[ACTION_FINISH]），也就是它自己声明"目标达成了"。
+         * 这是唯一一种**有依据**的完成。
+         */
         const val STOP_TASK_COMPLETE = "task_complete"
+
+        /**
+         * 计划步走完了，但模型从没说过"办完了"。
+         *
+         * ## 为什么要把它和 [STOP_TASK_COMPLETE] 分开
+         * 此前两者是同一个:只要 `stepIndex` 走到计划末尾就报 `task_complete`。可是
+         * "计划步走完了"与"目标达成了"是两件事 —— 规划器完全可能给出一份不足以完成
+         * 任务的计划,每一步都执行成功,然后循环报"完成"。这是"每步都成功、什么也没
+         * 做成"这一族问题在**最外层**的那一个。
+         *
+         * 现在两者在日志与 [LoopResult.stopReason] 里分得开，但**判定不变**：两者都仍是
+         * [STATUS_SUCCESS]。这是刻意的 —— 规则兜底规划器从不发终止动作，模型也不一定
+         * 每次都发，此刻把它收紧成失败，会让一批任务立刻由成功变失败，而现在还没有
+         * 任何真机数据能说明那个比例有多大。先让它可见，等有了数据再决定要不要收紧。
+         */
+        const val STOP_PLAN_EXHAUSTED = "plan_exhausted"
+
+        /**
+         * 终止动作:模型用它声明"目标已达成,不用再操作了"。
+         *
+         * 不落地成任何设备动作 —— 不定位、不派发,由 [ExecutorBridge] 直接判成功。
+         * 各家成熟的手机 GUI agent 框架都有这么一个动作(叫 FINISH / DONE /
+         * status:complete 不等),作用正是把"我认为办完了"从"我的步骤列表到头了"里
+         * 区分出来。
+         */
+        const val ACTION_FINISH = "finish"
         const val STOP_MAX_STEPS = "max_steps_reached"
         const val STOP_MODEL_UNAVAILABLE = "model_unavailable"
         const val STOP_SCREENSHOT_FAILED = "screenshot_failed"
@@ -259,6 +289,8 @@ class LoopController(
         var stepIndex = 0
         var stepsConsumed = 0
         var prevJpeg: ByteArray? = initialJpeg
+        /** 模型是否发过终止动作。决定收尾时记 task_complete 还是 plan_exhausted。 */
+        var finishDeclared = false
 
         while (stepIndex < planSteps.size && stepsConsumed < maxSteps) {
             // ── Goal timeout check ──────────────────────────────────────────────
@@ -415,6 +447,15 @@ class LoopController(
             )
 
             if (resultStep.status == StepStatus.SUCCESS) {
+                // 终止动作:模型说"办完了"。立刻收尾,不做停滞检查 ——
+                // finish 天然不改变界面,再送进停滞检测会被算成"又一步没有进展",
+                // 有概率把一次**有依据的完成**判成 stagnation 失败。
+                if (step.actionType == ACTION_FINISH) {
+                    finishDeclared = true
+                    stepIndex = planSteps.size
+                    break
+                }
+
                 // ── Stagnation check after successful step ──────────────────────
                 val stagnationCode = stagnationDetector.recordStep(observation)
                 if (stagnationCode != null) {
@@ -514,7 +555,14 @@ class LoopController(
 
         // ── Loop exited normally (all steps done or budget exhausted) ─────────
         val budgetExhausted = stepsConsumed >= maxSteps && stepIndex < planSteps.size
-        val stopReason = if (budgetExhausted) STOP_MAX_STEPS else STOP_TASK_COMPLETE
+        // task_complete 与 plan_exhausted 的区别:前者是模型明确说"办完了"(有依据),
+        // 后者只是步骤列表到头了(无依据)。判定仍然一致 —— 见 STOP_PLAN_EXHAUSTED 的
+        // 文档:此刻收紧会让一批任务立刻由成功变失败,而还没有真机数据能说明比例。
+        val stopReason = when {
+            budgetExhausted -> STOP_MAX_STEPS
+            finishDeclared -> STOP_TASK_COMPLETE
+            else -> STOP_PLAN_EXHAUSTED
+        }
         val finalStatus = if (budgetExhausted) STATUS_FAILED else STATUS_SUCCESS
         val terminalFailureCode = if (budgetExhausted) FailureCode.LOOP_MAX_STEPS_REACHED else null
 
@@ -524,7 +572,10 @@ class LoopController(
                 "session_id" to sessionId,
                 "stop_reason" to stopReason,
                 "steps_executed" to stepsConsumed,
-                "final_status" to finalStatus
+                "final_status" to finalStatus,
+                // 单独一个字段,便于回流后直接统计"多少比例的任务模型真的说了办完了"。
+                // 要不要把 plan_exhausted 收紧成失败,取决于这个数。
+                "goal_declared_complete" to finishDeclared
             )
         )
 
@@ -540,7 +591,11 @@ class LoopController(
         )
 
         _status.value = if (finalStatus == STATUS_SUCCESS) {
-            LoopStatus.Done(sessionId, stepsConsumed, "Task completed in $stepsConsumed step(s)")
+            LoopStatus.Done(
+                sessionId, stepsConsumed,
+                if (finishDeclared) "任务完成（模型声明目标已达成），共 $stepsConsumed 步"
+                else "计划步已执行完，共 $stepsConsumed 步（模型未声明目标达成）"
+            )
         } else {
             LoopStatus.Failed(sessionId, "Max steps reached", stepsConsumed)
         }
