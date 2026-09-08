@@ -222,7 +222,7 @@ class LoopController(
             ?: return@withContext terminateFailed(
                 sessionId, instruction,
                 stopReason = STOP_SCREENSHOT_FAILED,
-                error = "Initial screenshot capture failed",
+                error = withScreenshotReason("首次截图失败"),
                 stepIndex = 0,
                 failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
             )
@@ -323,20 +323,20 @@ class LoopController(
                     actionType = step.actionType,
                     intent = step.intent,
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED,
-                    summary = "Screenshot capture failed before step",
+                    summary = withScreenshotReason("动作前截图失败"),
                     screenshotCaptured = false
                 )
                 observations.add(obs)
                 val failedStep = step.copy(
                     status = StepStatus.FAILED,
-                    failureReason = "Screenshot capture failed before step",
+                    failureReason = withScreenshotReason("动作前截图失败"),
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
                 )
                 executedSteps.add(failedStep)
                 return@withContext terminateFailed(
                     sessionId, instruction, executedSteps,
                     stopReason = STOP_SCREENSHOT_FAILED,
-                    error = "Screenshot capture failed at step $displayIndex",
+                    error = withScreenshotReason("第 $displayIndex 步动作前截图失败"),
                     stepIndex = displayIndex,
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED,
                     observations = observations
@@ -649,21 +649,41 @@ class LoopController(
         return planned.base64
     }
 
+    /**
+     * 最近一次截图失败的原因。截图成功后清空。
+     *
+     * 此前这里只是 `return null` —— provider 抛出的异常信息(节流 / FLAG_SECURE 窗口 /
+     * 能力位被吊销,处置完全不同)在这一层被丢干净,任务最终只报一句
+     * `Screenshot capture failed`。真机日志回流回来时无从判断该修什么。
+     *
+     * 放在实例字段上而不是逐层传参:本类本来就是**单会话**的 —— [_status] 是一条
+     * StateFlow,两个并发会话早就会把状态搅乱,并发从来不在契约里。`@Volatile` 只是
+     * 保证跨线程可见(execute 在 IO 线程,状态可能被别的线程读)。
+     */
+    @Volatile
+    private var lastScreenshotError: String? = null
+
     private fun captureScreenshot(sessionId: String): Triple<ByteArray, Int, Int>? {
         return try {
             val jpeg = screenshotProvider.captureJpeg()
+            lastScreenshotError = null
             Triple(jpeg, screenshotProvider.screenWidth(), screenshotProvider.screenHeight())
         } catch (e: Exception) {
+            lastScreenshotError = e.message ?: e::class.java.simpleName
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "screenshot_error",
                     "session_id" to sessionId,
-                    "error" to (e.message ?: "unknown")
+                    "error" to (lastScreenshotError ?: "unknown")
                 )
             )
             null
         }
     }
+
+    /** 把截图失败的具体原因接在给人看的错误信息后面。 */
+    private fun withScreenshotReason(message: String): String =
+        lastScreenshotError?.let { "$message: $it" } ?: message
 
     /** Builds a failed [LoopResult] and updates [status] to [LoopStatus.Failed]. */
     private fun terminateFailed(
