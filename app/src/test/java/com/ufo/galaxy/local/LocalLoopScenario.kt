@@ -108,5 +108,16 @@ data class LocalLoopScenario(
     val stepTimeoutMs: Long = 0L,
     val goalTimeoutMs: Long = 0L,
     val stagnationDetector: StagnationDetector = StagnationDetector(),
-    val sourceRuntimePosture: String = SourceRuntimePosture.JOIN_RUNTIME
+    val sourceRuntimePosture: String = SourceRuntimePosture.JOIN_RUNTIME,
+    /**
+     * 结构化感知通道(无障碍树快照)。
+     *
+     * 生产接线里这一路一直在场(UFOGalaxyApplication 把 AccessibilityUiSnapshotProvider
+     * 同时注入了 EdgeExecutor 与 ExecutorBridge),而这个场景运行器此前从不注入,
+     * 于是整套端到端场景跑的都是"没有树"的那一半。删掉三级猜屏幕中心的兜底之后,
+     * 树是**没有 VLM 权重时唯一的定位依据** —— 这条路必须能被端到端测到。
+     *
+     * null(默认)= 纯视觉,与旧行为一致。
+     */
+    val uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot? = null
 )

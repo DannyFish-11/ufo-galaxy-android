@@ -167,7 +167,7 @@ class EdgeExecutor(
             ?: return buildResult(
                 taskId = taskAssign.task_id,
                 status = STATUS_ERROR,
-                error = "Screenshot capture failed before planning"
+                error = withScreenshotReason("Screenshot capture failed before planning")
             )
         val (initialFullBytes, initW, initH) = initialCapture
         val initialBase64 = Base64.getEncoder().encodeToString(initialFullBytes)
@@ -286,12 +286,12 @@ class EdgeExecutor(
             if (stepCapture == null) {
                 accumulatedSteps.add(
                     StepResult(step_id = stepId, action = step.action_type, success = false,
-                        error = "Screenshot capture failed")
+                        error = withScreenshotReason("Screenshot capture failed"))
                 )
                 return buildResult(
                     taskId = taskAssign.task_id,
                     status = STATUS_ERROR,
-                    error = "Screenshot capture failed at step $stepId",
+                    error = withScreenshotReason("Screenshot capture failed at step $stepId"),
                     steps = accumulatedSteps,
                     snapshot = makeSnapshot(lastSnapshotBase64, lastW, lastH)
                 )
@@ -548,11 +548,29 @@ class EdgeExecutor(
         snapshot = makeSnapshot(snapshotBase64, screenWidth, screenHeight)
     )
 
+    /**
+     * 最近一次截图失败的原因;成功后清空。
+     *
+     * 与 [com.ufo.galaxy.loop.LoopController] 里那份同源:此前这里 catch 完直接
+     * `null`,provider 抛出的原因(撞节流 / FLAG_SECURE 窗口 / 能力位被吊销,处置完全
+     * 不同)在这一层被丢干净,任务只报一句 `Screenshot capture failed`。
+     *
+     * 本类与 LoopController 一样是**单任务**执行体,`@Volatile` 只保证跨线程可见。
+     */
+    @Volatile
+    private var lastScreenshotError: String? = null
+
+    /** 把截图失败的具体原因接在给人看的错误信息后面。 */
+    private fun withScreenshotReason(message: String): String =
+        lastScreenshotError?.let { "$message: $it" } ?: message
+
     private fun captureScreenshot(): Triple<ByteArray, Int, Int>? {
         return try {
             val jpegBytes = screenshotProvider.captureJpeg()
+            lastScreenshotError = null
             Triple(jpegBytes, screenshotProvider.screenWidth(), screenshotProvider.screenHeight())
         } catch (e: Exception) {
+            lastScreenshotError = e.message ?: e::class.java.simpleName
             null
         }
     }
@@ -612,9 +630,10 @@ class EdgeExecutor(
             grounding.x, grounding.y,
             step.parameters.getOrDefault("direction", "down")
         )
-        "type" -> AccessibilityExecutor.AccessibilityAction.TypeText(
-            step.parameters.getOrDefault("text", "")
-        )
+        // 与本地闭环走同一个解析:同一份计划在两条执行路径上必须做同一件事。
+        // 这里没有 intent 兜底 —— 跨设备路径上 text 缺了就是缺了,填一句意图描述
+        // 进输入框比什么都不填更糟。
+        "type" -> AccessibilityExecutor.AccessibilityAction.TypeText.from(step.parameters)
         "open_app" -> AccessibilityExecutor.AccessibilityAction.OpenApp(
             step.parameters.getOrDefault("package", "")
         )

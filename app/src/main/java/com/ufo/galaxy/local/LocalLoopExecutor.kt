@@ -209,13 +209,21 @@ class DefaultLocalLoopExecutor(
                     "blockers" to blockerList
                 )
             )
+            // 枚举名给程序看,说人话的原因给人看 —— 「无障碍授权被强行停止吊销了,
+            // 回设置里重新勾选」这句话,一个 ACCESSIBILITY_SERVICE_DISABLED 说不出来。
+            val human = readinessProvider.humanBlockers()
             return LocalLoopResult(
                 sessionId = UUID.randomUUID().toString(),
                 instruction = options.instruction,
                 status = LocalLoopResult.STATUS_FAILED,
                 stepCount = 0,
                 stopReason = STOP_READINESS_UNAVAILABLE,
-                error = "Local loop unavailable — blocked by: $blockerList"
+                error = buildString {
+                    append("本地闭环不可用，阻塞项：").append(blockerList)
+                    if (human.isNotEmpty()) {
+                        append("\n").append(human.joinToString("\n") { "· $it" })
+                    }
+                }
             )
         }
 

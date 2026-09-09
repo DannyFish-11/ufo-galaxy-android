@@ -76,15 +76,47 @@ class VlmPlanner(
         /** 重试线性退避基数(毫秒);第 n 次重试前等待 n×该值。 */
         private const val RETRY_BACKOFF_BASE_MS = 250L
 
+        /**
+         * 规划器的系统提示。
+         *
+         * 这里必须把 `parameters` 的**键**逐个写清楚，不能只写一个空对象 `{}`。
+         * 此前正是只写了 `{}`：模型无从知道 `type` 要 `text`、`open_app` 要 `package`，
+         * 于是几乎总是回一个空 parameters。而 [com.ufo.galaxy.loop.ExecutorBridge]
+         * 在 `text` 缺省时会退回用 `intent` —— 真机上的表现就是往输入框里
+         * 填进"输入搜索关键词"这句**意图描述本身**，然后这一步照样记成成功。
+         *
+         * `submit` 也在这里定义：填完要不要按输入法的确认键，只有规划器知道
+         * （搜索框要按，聊天框按下去消息就发出去了）。默认不按。
+         *
+         * `finish` 是终止动作：模型用它声明"目标达成了"。此前循环把"步骤列表到头了"
+         * 直接当成"任务完成"，而这是两件事 —— 规划器完全可能给出一份不足以完成任务的
+         * 计划，每一步都成功，然后报"完成"。有了这个动作，两者在日志里分得开
+         * （见 [com.ufo.galaxy.loop.LoopController.STOP_PLAN_EXHAUSTED]）。
+         */
         private const val SYSTEM_PROMPT =
             "You are a mobile GUI agent. " +
             "Given a task goal and optional screen image, " +
             "produce a JSON action plan in this format: " +
             "{\"steps\":[{" +
-            "\"action_type\":\"tap|scroll|type|open_app|back|home\"," +
+            "\"action_type\":\"tap|scroll|type|open_app|back|home|finish\"," +
             "\"intent\":\"<natural language target description>\"," +
             "\"parameters\":{}" +
             "}]}. " +
+            "Required parameters per action_type: " +
+            "tap -> none (describe the target in intent); " +
+            "scroll -> {\"direction\":\"up|down|left|right\"}; " +
+            "type -> {\"text\":\"<exact literal text to type>\"," +
+            "\"submit\":\"true|false\"}; " +
+            "open_app -> {\"package\":\"<android package name>\"}; " +
+            "back/home -> none; " +
+            "finish -> none. " +
+            "End the plan with a single {\"action_type\":\"finish\"} step when the " +
+            "goal will be achieved by the preceding steps. Emit it only when you " +
+            "believe the task is actually complete, never as filler. " +
+            "For type, \"text\" must be the literal characters to enter, " +
+            "never a description of what to enter. " +
+            "Set \"submit\":\"true\" only when the field must be committed " +
+            "(a search box, a go/enter button); leave it false otherwise. " +
             "Do not include x/y screen coordinates; describe the target intent only."
     }
 

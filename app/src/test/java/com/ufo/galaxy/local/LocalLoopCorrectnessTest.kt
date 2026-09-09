@@ -136,9 +136,34 @@ class LocalLoopCorrectnessTest {
     }
 
     @Test
-    fun `happy path sets stopReason to task_complete`() {
+    fun `计划走完但模型没声明达成，停止原因是 plan_exhausted`() {
+        // 这条原本断言 task_complete —— 那时「步骤列表到头了」和「目标达成了」是同一个
+        // 停止原因。它们是两件事:规划器完全可能给出一份不足以完成任务的计划,每一步都
+        // 执行成功,然后循环报"完成"。默认的 fake 计划里没有终止动作,所以这里应当是
+        // 无依据的那一种。
+        //
+        // 判定没变(见下一条):两者仍都是 STATUS_SUCCESS。
         val result = runner.run(LocalLoopScenario("happy-path-stop-reason"))
+
+        assertEquals(LoopController.STOP_PLAN_EXHAUSTED, result.stopReason)
+        assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
+    }
+
+    @Test
+    fun `模型声明达成时，停止原因才是 task_complete`() {
+        // 上一条的对照组:同一条链路,只是计划末尾多了一个终止动作。
+        val result = runner.run(
+            LocalLoopScenario(
+                name = "happy-path-finish-declared",
+                planner = FakePlannerService.multiStep(
+                    "tap" to "step one",
+                    LoopController.ACTION_FINISH to "目标已达成",
+                ),
+            )
+        )
+
         assertEquals(LoopController.STOP_TASK_COMPLETE, result.stopReason)
+        assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
     }
 
     @Test
@@ -279,27 +304,69 @@ class LocalLoopCorrectnessTest {
     // ── 4. Grounding fallback ─────────────────────────────────────────────────
 
     @Test
-    fun `grounding fails but fallback ladder produces coordinates and execution succeeds`() {
-        // The GroundingFallbackLadder has heuristic-region and accessibility-node stages
-        // that never fail. Even if the primary VLM grounder is unavailable the
-        // ladder will produce some coordinates and the tap will be dispatched.
+    fun `定位失败又没有树时，整条会话如实失败，不许盲点`() {
+        // 这条原本断言的是相反的东西:「梯子的兜底级永远能给出坐标,所以执行应当成功」。
+        // 那个"兜底"的实现是**返回屏幕正中心**,于是每一次真正的定位失败都变成一次
+        // 盲点,再被记成 SUCCESS,任务最后报完成 —— 而屏幕中间可能正好是一条列表项、
+        // 一个删除、一次付款确认。那条断言把缺陷本身钉成了契约,现在反过来钉正确形态。
+        val executor = FakeAccessibilityExecutor.alwaysSucceed()
         val result = runner.run(
             LocalLoopScenario(
-                name = "grounding-fails-fallback",
+                name = "grounding-fails-no-tree",
                 grounder = FakeGroundingService.alwaysFail("grounding service unavailable"),
-                planner = FakePlannerService.singleStep("tap", "tap the button")
+                planner = FakePlannerService.singleStep("tap", "tap the button"),
+                accessibilityExecutor = executor
             )
         )
-        // The grounding ladder has a fallback that always produces coordinates,
-        // so execution should succeed (accessibility returns true).
+
         assertEquals(
-            "Grounding fallback must allow execution to complete",
+            "定位不出来却报成功 —— 上层会把一次盲点当成任务完成",
+            LocalLoopResult.STATUS_FAILED, result.status
+        )
+        assertNotNull("失败必须带原因", result.error)
+    }
+
+    @Test
+    fun `没有视觉模型时，无障碍树独自把定位做完`() {
+        // 删掉三级猜屏幕中心之后必须仍然成立的那一半:设备上权重没下完 / 服务没起来时,
+        // 树是**唯一**的定位依据。这一路在生产接线里一直是接着的
+        // (UFOGalaxyApplication 把 AccessibilityUiSnapshotProvider 注入了 ExecutorBridge),
+        // 但这个端到端场景运行器此前从不注入,于是从没被端到端测过。
+        val result = runner.run(
+            LocalLoopScenario(
+                name = "tree-only-grounding",
+                grounder = FakeGroundingService.alwaysFail("model not loaded"),
+                planner = FakePlannerService.singleStep("tap", "设置"),
+                uiSnapshot = com.ufo.galaxy.perception.UiStructuredSnapshot(
+                    packageName = "com.android.settings",
+                    screenWidth = 1080,
+                    screenHeight = 2400,
+                    elements = listOf(
+                        com.ufo.galaxy.perception.UiStructuredSnapshot.UiElement(
+                            index = 0, text = "设置", contentDescription = "",
+                            className = "android.widget.TextView", clickable = true,
+                            left = 400, top = 1800, right = 680, bottom = 1900,
+                        )
+                    ),
+                )
+            )
+        )
+
+        assertEquals(
+            "有精确 bounds 在手却没能完成 —— 没有模型的设备上这是唯一的定位路径",
             LocalLoopResult.STATUS_SUCCESS, result.status
         )
     }
 
     @Test
-    fun `grounding model not loaded falls back to heuristic and execution succeeds`() {
+    fun `视觉模型没加载又没有树时，同样如实失败`() {
+        // 与上面那条同源。这一条原本叫 "grounding model not loaded falls back to
+        // heuristic and execution succeeds" —— 断言的是「模型没加载 → 跌到启发式兜底
+        // → 执行成功」。那个"启发式"就是点屏幕中心。
+        //
+        // 权重没下完 / llama-server 还没起来,在真机上是最常见的一种状态。这时候
+        // 若没有无障碍树,就是**真的不知道该点哪**;点一下屏幕中间再报成功,
+        // 比如实失败糟得多。对照组在上一条:有树时照样做得完。
         val result = runner.run(
             LocalLoopScenario(
                 name = "grounding-not-loaded",
@@ -307,7 +374,12 @@ class LocalLoopCorrectnessTest {
                 planner = FakePlannerService.singleStep("tap", "tap the OK button")
             )
         )
-        assertEquals(LocalLoopResult.STATUS_SUCCESS, result.status)
+
+        assertEquals(
+            "模型没加载、树也没有,却报成功 —— 那一步只可能是盲点",
+            LocalLoopResult.STATUS_FAILED, result.status
+        )
+        assertNotNull("失败必须带原因", result.error)
     }
 
     @Test

@@ -6,41 +6,48 @@ import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.observability.GalaxyLogger
 
 /**
- * Implements a multi-stage grounding fallback chain so that if primary VLM grounding
- * fails, the system attempts lower-cost alternatives before returning a structured failure.
+ * 意图 → 屏幕坐标的多级定位链。按顺序尝试，先给出可信坐标的那一级胜出：
  *
- * The ladder is attempted in order until valid coordinates are produced:
+ * 1. **主视觉定位** —— 截图缩到 [primaryMaxEdge] 送 [LocalGroundingService]，
+ *    结果与结构化树快照一起交给 [com.ufo.galaxy.perception.GroundingArbiter] 裁决。
+ * 2. **缩小重试** —— 再缩一半边长重来一次，降低压缩噪声的影响。同样经过裁决。
+ * 3. **树救场** —— 两级视觉都没给出可信坐标时，若树里存在足够可信的匹配元素
+ *    （[com.ufo.galaxy.perception.GroundingArbiter.RESCUE_MATCH_THRESHOLD]），
+ *    采用该元素的中心点：**来自无障碍节点的精确 bounds，不是猜的**。
+ * 4. **结构化失败** —— 以上都不成立，返回 [FailureCode.GROUND_ALL_STAGES_EXHAUSTED]。
  *
- * 1. **Primary VLM grounding** — screenshot downscaled to [primaryMaxEdge], passed to the
- *    loaded [LocalGroundingService], **然后与结构化树快照一起交给
- *    [com.ufo.galaxy.perception.GroundingArbiter] 综合裁决**。
- * 2. **Resized retry** — screenshot re-scaled to a smaller edge (50 % of the primary
- *    edge) before grounding; reduces encoding noise from compression artefacts. 同样经过裁决。
- * 3. **Tree rescue** — 两级视觉都没给出可信坐标时,若树里存在足够可信的匹配元素
- *    ([com.ufo.galaxy.perception.GroundingArbiter.RESCUE_MATCH_THRESHOLD]),
- *    直接采用该元素的中心点(**精确 bounds,不是猜的**)。
- * 4. **OCR text matching** — 意图看起来像一个短 UI 标签时的粗略近似:屏幕中心 + 极低置信度。
- * 5. **Accessibility node heuristic** — 屏幕中心兜底,低置信度标签,交调用方决定要不要用。
- * 6. **Heuristic screen-region fallback** — maps intent keywords to coarse screen
- *    regions (top/bottom/centre) and returns region-centre coordinates.
- * 7. **Structured no-match failure** — all stages exhausted; returns an error result
- *    with [FailureCode.GROUND_ALL_STAGES_EXHAUSTED].
+ * ## 为什么第 4 级是"失败"，而不是再兜一层
  *
- * ## 为什么加第 1/2 级的裁决与第 3 级(读码实证的真缺陷)
- * 结构化树快照此前**只被注入两级视觉的 prompt,然后就被丢掉了** —— 梯子里一次都没有调用
- * [com.ufo.galaxy.perception.GroundingArbiter]。于是视觉失手时,梯子明明手里攥着带精确
- * bounds 的树候选,却直接跌到第 4/5 级去**点屏幕中心**(名字叫 accessibility_node,实现里
- * 根本不碰快照)。同一份快照在 [com.ufo.galaxy.agent.EdgeExecutor] 那条路径上是全程参与
- * 裁决的 —— 两条执行路径对同一份证据的处置不一致,而这条正是跨设备关闭时的本地主路。
+ * 这里曾经还有三级兜底，名字分别叫 `ocr_text_match` / `accessibility_node` /
+ * `heuristic_region`。三者的实现是同一件事：**返回屏幕正中心**，置信度 0.1。
+ * （它们的文档注释里写着"a real implementation would…" —— 从来没有被实现过。）
  *
- * 另外,低于 [MIN_PRIMARY_CONFIDENCE] 的视觉坐标在这里被当作「视觉没有给出可信结果」
- * (而不是一个弱坐标)交给裁决器 —— 这样裁决器走的是 tree_rescue,而不是拿一个噪声坐标
- * 去和树比对。
+ * 后果不是"定位差一点"，而是**这条梯子永远不会失败**：
+ * `tryAccessibilityNodeHeuristic` 只要屏幕尺寸已知就无条件返回中心点，于是它后面
+ * 两级是死代码，而每一次真正的定位失败都变成"点一下屏幕中间"。再往上一层，
+ * [com.ufo.galaxy.loop.ExecutorBridge] 只看 `dispatchGesture` 是否派发成功，
+ * 于是这一步被记成 **SUCCESS**，整个任务最后被报成"完成"。
  *
- * @param groundingService The primary [LocalGroundingService] (unified VLM).
- * @param imageScaler      Scaler used for stages 1 and 2.
- * @param primaryMaxEdge   Max longest edge (px) for the primary grounding call.
- * @param resizedMaxEdge   Max longest edge (px) for the resized-retry stage.
+ * 真机上的表现就是：智能体一本正经地点了几下屏幕中间，然后告诉你办好了。
+ *
+ * 盲点屏幕中心也不是"无害的猜测"：中心位置上可能正好是一条列表项、一个"删除"、
+ * 一次付款确认。一个不知道自己该点哪的智能体，正确动作是**承认不知道**，
+ * 让上层去重规划（[com.ufo.galaxy.loop.LoopController] 本来就有这条重规划路径），
+ * 而不是随便点一下再报成功。
+ *
+ * 唯一真正不需要精确坐标的动作是滚动 —— 从屏幕中心起手滑本来就是合理默认。
+ * 那属于**动作语义**，由 [com.ufo.galaxy.loop.ExecutorBridge] 显式决定并如实记录，
+ * 不该伪装成一次"定位成功"藏在这条梯子里。
+ *
+ * ## 低于门限 = 视觉没给出结果
+ * 置信度低于 [MIN_PRIMARY_CONFIDENCE] 的坐标不是"一个弱坐标"，而是噪声。把它当作
+ * 视觉失败交给裁决器，裁决器才会走 tree_rescue；否则会拿噪声坐标去和树比对，
+ * 有概率落进某个不相干的元素里被判成 agreement。
+ *
+ * @param groundingService 主视觉定位引擎（统一 VLM）。
+ * @param imageScaler      第 1/2 级用的缩放器。
+ * @param primaryMaxEdge   主级送模型时的最长边（px）。
+ * @param resizedMaxEdge   缩小重试级的最长边（px）。
  */
 class GroundingFallbackLadder(
     private val groundingService: LocalGroundingService,
@@ -59,16 +66,17 @@ class GroundingFallbackLadder(
         /** 两级视觉都没给出可信坐标,但树里有足够可信的匹配元素 —— 用它的精确中心点。 */
         const val STAGE_TREE_RESCUE = "tree_rescue"
 
-        const val STAGE_OCR_TEXT = "ocr_text_match"
-        const val STAGE_ACCESSIBILITY_NODE = "accessibility_node"
-        const val STAGE_HEURISTIC_REGION = "heuristic_region"
         const val STAGE_NO_MATCH = "no_match"
+
+        /**
+         * 坐标来源标签:模型选了一个元素编号,坐标取自该无障碍节点的精确 bounds。
+         * 与裁决器的那几个 `SOURCE_*` 并列出现在 `stageUsed` 里,真机日志回流时
+         * 能直接看出这一步的坐标是谁给的。
+         */
+        const val SOURCE_ELEMENT_INDEX = "element_index"
 
         const val DEFAULT_PRIMARY_MAX_EDGE = 720
         const val DEFAULT_RESIZED_MAX_EDGE = 360
-
-        /** Confidence assigned to accessibility-node fallback coordinates. */
-        const val FALLBACK_CONFIDENCE = 0.1f
 
         /** Minimum confidence required to accept a primary grounding result. */
         const val MIN_PRIMARY_CONFIDENCE = 0.2f
@@ -122,37 +130,34 @@ class GroundingFallbackLadder(
         uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot? = null
     ): GroundingResult {
 
+        // 没有截图这一帧就没有视觉证据 —— 直接跳到树救场。
+        //
+        // 截图在三种真实情况下拿不到:设备 API < 30(takeScreenshot 是 API 30 才有的,
+        // 而本模块 minSdk 26)、当前是 FLAG_SECURE 窗口(银行/密码页)、撞上平台节流。
+        // 把一个空字节数组送进缩放器与模型,得到的是垃圾输入下的垃圾坐标 ——
+        // 而那看起来和一次正常定位毫无区别。
+        val hasImage = jpegBytes.isNotEmpty()
+
         // Stage 1: Primary VLM grounding.
-        if (groundingService.isModelLoaded()) {
+        if (hasImage && groundingService.isModelLoaded()) {
             val result = tryPrimaryGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, uiSnapshot)
             if (result != null) return result
         }
 
         // Stage 2: Resized screenshot retry (smaller edge).
-        if (groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
+        if (hasImage && groundingService.isModelLoaded() && resizedMaxEdge < primaryMaxEdge) {
             val result = tryResizedGrounding(sessionId, stepId, intent, jpegBytes, screenWidth, screenHeight, uiSnapshot)
             if (result != null) return result
         }
 
         // Stage 3: 树救场 —— 两级视觉都没给出可信坐标,但树里有足够可信的匹配元素。
-        // 这一级必须排在下面三个启发式之前:那三个返回的是**猜的**屏幕中心,
-        // 而这一级返回的是无障碍树里那个元素的**精确 bounds 中心**。
+        // 这是最后一级,也是唯一不依赖模型的一级:没有 VLM 权重的设备上,整条定位
+        // 链能不能工作全靠它。
         val rescued = tryTreeRescue(sessionId, stepId, intent, uiSnapshot)
         if (rescued != null) return rescued
 
-        // Stage 4: OCR text matching — heuristic centre if intent is a short UI label.
-        val ocrResult = tryOcrHeuristic(sessionId, stepId, intent, screenWidth, screenHeight)
-        if (ocrResult != null) return ocrResult
-
-        // Stage 5: Accessibility node text/description heuristic — screen centre.
-        val nodeResult = tryAccessibilityNodeHeuristic(sessionId, stepId, screenWidth, screenHeight)
-        if (nodeResult != null) return nodeResult
-
-        // Stage 6: Heuristic screen-region fallback — intent keyword → region.
-        val regionResult = tryHeuristicRegion(sessionId, stepId, intent, screenWidth, screenHeight)
-        if (regionResult != null) return regionResult
-
-        // Stage 7: Structured no-match failure.
+        // 到这里就是真的不知道该点哪：两级视觉没结果，树里也没有足够可信的候选。
+        // 不再往下兜 —— 见类文档「为什么第 4 级是失败」。
         GalaxyLogger.log(STAGE_TAG, mapOf(
             "event" to "ladder_stage",
             "session_id" to sessionId,
@@ -242,10 +247,29 @@ class GroundingFallbackLadder(
                     ?.toPromptBlock()
             )
 
-            val visionAtFullRes = if (raw.error != null || raw.confidence < MIN_PRIMARY_CONFIDENCE) {
+            // 编号命中优先:模型从我们给的封闭清单里挑了一个元素,坐标直接取那个
+            // 无障碍节点的**精确 bounds 中心**(全分辨率空间)。
+            //
+            // 这条路刻意绕开了缩放换算与坐标裁决:
+            //  · 没有 remap —— 坐标从来没进过缩放图空间,也就没有换算误差;
+            //  · 不用裁决 —— 裁决器的活儿是"视觉坐标和树对不对得上",而这里视觉
+            //    给的本来就是树里的一个元素,没有两方可对。
+            resolveByIndex(sessionId, stepId, stage, raw, uiSnapshot)?.let { return it }
+
+            // 模型给了编号但解析不出来(编号越界 / 这一帧没有快照)。此时它带回来的
+            // x/y 是引擎填的 0 —— 一个**不是坐标的坐标**。若照常往下走,(0,0) 会带着
+            // 模型给编号时的那个高置信度进裁决器,把屏幕左上角当成一次可信定位。
+            // 所以这一级按"视觉没给出结果"处理,让裁决走树救场。
+            val indexUnresolvable = raw.error == null && raw.elementIndex != null
+
+            val visionAtFullRes = if (
+                raw.error != null || indexUnresolvable || raw.confidence < MIN_PRIMARY_CONFIDENCE
+            ) {
                 LocalGroundingService.GroundingResult(
                     x = 0, y = 0, confidence = 0f, element_description = "",
-                    error = raw.error ?: "confidence_below_gate:${raw.confidence}"
+                    error = raw.error
+                        ?: if (indexUnresolvable) "element_index_unresolvable:${raw.elementIndex}"
+                        else "confidence_below_gate:${raw.confidence}"
                 )
             } else {
                 raw.copy(
@@ -287,6 +311,39 @@ class GroundingFallbackLadder(
     }
 
     /**
+     * 把模型给的元素编号解析成坐标。
+     *
+     * 只在编号**确实落在当帧快照里**时才成立 —— 编号越界说明模型在编,那和一个
+     * 编出来的像素坐标一样不可信,如实返回 null 让它继续走后面的路。这正是编号这条
+     * 路比像素强的地方:答案能被校验,而像素坐标永远"看起来合法"。
+     *
+     * @return 命中时的结果;模型没给编号、没有快照、或编号越界时返回 null。
+     */
+    private fun resolveByIndex(
+        sessionId: String,
+        stepId: String,
+        stage: String,
+        raw: LocalGroundingService.GroundingResult,
+        uiSnapshot: com.ufo.galaxy.perception.UiStructuredSnapshot?
+    ): GroundingResult? {
+        val index = raw.elementIndex ?: return null
+        if (raw.error != null) return null
+        val element = uiSnapshot?.elements?.firstOrNull { it.index == index }
+        if (element == null) {
+            // 越界/无快照:记一笔再放行。真机日志里这一条能直接说明"模型在编编号"。
+            logStage(sessionId, stepId, stage, "skip", "element_index_out_of_range:$index")
+            return null
+        }
+        logStage(sessionId, stepId, stage, "ok", "element_index=$index")
+        return GroundingResult(
+            x = element.centerX,
+            y = element.centerY,
+            confidence = raw.confidence,
+            stageUsed = "$stage+$SOURCE_ELEMENT_INDEX"
+        )
+    }
+
+    /**
      * 两级视觉都没给出可信坐标后的树救场。
      *
      * 交给同一个裁决器处理(视觉侧传一个显式失败结果),只接受它判定为
@@ -294,7 +351,7 @@ class GroundingFallbackLadder(
      * 救场门限 [com.ufo.galaxy.perception.GroundingArbiter.RESCUE_MATCH_THRESHOLD]
      * 低于推翻门限,因为此时视觉已经失败,树只需要"可信"而不需要"强到能推翻证据"。
      *
-     * 无快照 / 无足够可信候选时返回 null,梯子继续跌到下面的启发式级。
+     * 无快照 / 无足够可信候选时返回 null —— 梯子到此为止,如实返回定位失败。
      *
      * ## 这一级是树救场的**唯一**入口
      * 两级视觉里的裁决只收下 agreement / tree_override / vlm_only —— 那三种都需要本级的
@@ -306,9 +363,12 @@ class GroundingFallbackLadder(
      *  1. 两级视觉都判 tree_rescue(模型在跑,但这一帧两个尺寸都读不出来);
      *  2. [groundingService] 的 `isModelLoaded()` 为 false —— 两级视觉被整个跳过,
      *     裁决器根本没被调用过(权重没下完、warmup 没过、服务没起,都是这一种);
-     *  3. 两级视觉都抛异常 —— catch 分支直接返回 null,同样没走到裁决。
+     *  3. 两级视觉都抛异常 —— catch 分支直接返回 null,同样没走到裁决;
+     *  4. 这一帧**根本没有截图**(API < 30 / FLAG_SECURE 窗口 / 撞上节流)——
+     *     两级视觉被显式跳过,树是唯一的证据来源。
      *
-     * 没有这一级,上面三种情形会带着满手的精确 bounds 直接跌到"点屏幕中心"。
+     * 没有这一级,上面三种情形会带着满手的精确 bounds 直接判定位失败 —— 尤其是
+     * 第 2 种(设备上根本没有 VLM 权重),那时树是**唯一**的定位证据来源。
      */
     private fun tryTreeRescue(
         sessionId: String,
@@ -335,87 +395,6 @@ class GroundingFallbackLadder(
             y = fused.result.y,
             confidence = fused.result.confidence,
             stageUsed = STAGE_TREE_RESCUE
-        )
-    }
-
-    /**
-     * OCR text match heuristic: if the intent is short and looks like a UI label,
-     * return the screen centre with low confidence as a coarse approximation.
-     * A real implementation would query the accessibility tree for matching text nodes.
-     */
-    private fun tryOcrHeuristic(
-        sessionId: String,
-        stepId: String,
-        intent: String,
-        screenWidth: Int,
-        screenHeight: Int
-    ): GroundingResult? {
-        // Only apply when intent looks like a short UI label (no spaces or few words).
-        val trimmed = intent.trim()
-        val wordCount = trimmed.split("\\s+".toRegex()).size
-        if (trimmed.length > 30 || wordCount > 4) return null
-        if (screenWidth <= 0 || screenHeight <= 0) return null
-
-        logStage(sessionId, stepId, STAGE_OCR_TEXT, "ok")
-        return GroundingResult(
-            x = screenWidth / 2,
-            y = screenHeight / 2,
-            confidence = FALLBACK_CONFIDENCE,
-            stageUsed = STAGE_OCR_TEXT
-        )
-    }
-
-    /**
-     * Accessibility node heuristic: returns the screen centre as the best-guess target
-     * when no other grounding is available. A real implementation would walk the
-     * accessibility node tree searching for nodes matching the intent text.
-     */
-    private fun tryAccessibilityNodeHeuristic(
-        sessionId: String,
-        stepId: String,
-        screenWidth: Int,
-        screenHeight: Int
-    ): GroundingResult? {
-        if (screenWidth <= 0 || screenHeight <= 0) return null
-
-        logStage(sessionId, stepId, STAGE_ACCESSIBILITY_NODE, "ok")
-        return GroundingResult(
-            x = screenWidth / 2,
-            y = screenHeight / 2,
-            confidence = FALLBACK_CONFIDENCE,
-            stageUsed = STAGE_ACCESSIBILITY_NODE
-        )
-    }
-
-    /**
-     * Heuristic screen-region fallback: maps intent keywords to coarse screen regions
-     * (top third, bottom third, or centre) and returns the region's centre coordinate.
-     */
-    private fun tryHeuristicRegion(
-        sessionId: String,
-        stepId: String,
-        intent: String,
-        screenWidth: Int,
-        screenHeight: Int
-    ): GroundingResult? {
-        if (screenWidth <= 0 || screenHeight <= 0) return null
-
-        val lower = intent.lowercase()
-        val centreX = screenWidth / 2
-        val y = when {
-            lower.contains("top") || lower.contains("status") || lower.contains("notification") ->
-                screenHeight / 6
-            lower.contains("bottom") || lower.contains("nav") || lower.contains("toolbar") ->
-                screenHeight * 5 / 6
-            else -> screenHeight / 2
-        }
-
-        logStage(sessionId, stepId, STAGE_HEURISTIC_REGION, "ok")
-        return GroundingResult(
-            x = centreX,
-            y = y,
-            confidence = FALLBACK_CONFIDENCE,
-            stageUsed = STAGE_HEURISTIC_REGION
         )
     }
 

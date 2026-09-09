@@ -77,7 +77,24 @@ class LoopController(
      */
     private val plannerContextSize: Int = LlamaServerController.DEFAULT_CONTEXT_SIZE,
     /** 规划一次的生成预算(token)。 */
-    private val plannerGenerationReserve: Int = EdgeExecutor.DEFAULT_PLANNER_GENERATION_RESERVE
+    private val plannerGenerationReserve: Int = EdgeExecutor.DEFAULT_PLANNER_GENERATION_RESERVE,
+    /**
+     * 结构化感知通道(无障碍树快照)。
+     *
+     * 它在这里的作用不是"锦上添花",而是**让这条循环在没有截图时仍然能跑**:
+     *
+     *  · 设备 API < 30 —— `takeScreenshot` 是 API 30 才引入的,而本模块 minSdk 26;
+     *  · 当前是 `FLAG_SECURE` 窗口(银行、密码页)—— 截图必然失败;
+     *  · 撞上平台的 333ms 节流。
+     *
+     * 这三种情况下此前整条会话直接以 `screenshot_failed` 终止 —— 哪怕树完全读得到、
+     * 定位与执行都不需要那张图。生产接线里这一路一直是接着的
+     * ([com.ufo.galaxy.UFOGalaxyApplication] 把同一个 provider 注入了 ExecutorBridge),
+     * 只是循环自己没用上。
+     *
+     * null(默认,仅单测用)= 无结构化通道,截图失败即终止,与旧行为一致。
+     */
+    private val uiSnapshotProvider: com.ufo.galaxy.perception.UiSnapshotProvider? = null
 ) {
 
     companion object {
@@ -92,9 +109,44 @@ class LoopController(
         const val STATUS_FAILED = "failed"
         const val STATUS_CANCELLED = "cancelled"
 
+        /**
+         * 模型明确发了终止动作（[ACTION_FINISH]），也就是它自己声明"目标达成了"。
+         * 这是唯一一种**有依据**的完成。
+         */
         const val STOP_TASK_COMPLETE = "task_complete"
+
+        /**
+         * 计划步走完了，但模型从没说过"办完了"。
+         *
+         * ## 为什么要把它和 [STOP_TASK_COMPLETE] 分开
+         * 此前两者是同一个:只要 `stepIndex` 走到计划末尾就报 `task_complete`。可是
+         * "计划步走完了"与"目标达成了"是两件事 —— 规划器完全可能给出一份不足以完成
+         * 任务的计划,每一步都执行成功,然后循环报"完成"。这是"每步都成功、什么也没
+         * 做成"这一族问题在**最外层**的那一个。
+         *
+         * 现在两者在日志与 [LoopResult.stopReason] 里分得开，但**判定不变**：两者都仍是
+         * [STATUS_SUCCESS]。这是刻意的 —— 规则兜底规划器从不发终止动作，模型也不一定
+         * 每次都发，此刻把它收紧成失败，会让一批任务立刻由成功变失败，而现在还没有
+         * 任何真机数据能说明那个比例有多大。先让它可见，等有了数据再决定要不要收紧。
+         */
+        const val STOP_PLAN_EXHAUSTED = "plan_exhausted"
+
+        /**
+         * 终止动作:模型用它声明"目标已达成,不用再操作了"。
+         *
+         * 不落地成任何设备动作 —— 不定位、不派发,由 [ExecutorBridge] 直接判成功。
+         * 各家成熟的手机 GUI agent 框架都有这么一个动作(叫 FINISH / DONE /
+         * status:complete 不等),作用正是把"我认为办完了"从"我的步骤列表到头了"里
+         * 区分出来。
+         */
+        const val ACTION_FINISH = "finish"
         const val STOP_MAX_STEPS = "max_steps_reached"
         const val STOP_MODEL_UNAVAILABLE = "model_unavailable"
+        /**
+         * 截图拿不到,**而且**树也读不到 —— 两条感知通道都没有,这一步无从判断。
+         *
+         * 只有截图失败**不再**是终止条件:见 [uiSnapshotProvider]。
+         */
         const val STOP_SCREENSHOT_FAILED = "screenshot_failed"
         const val STOP_PLAN_FAILED = "plan_failed"
         const val STOP_REPLAN_FAILED = "replan_failed"
@@ -218,15 +270,28 @@ class LoopController(
         ensureModels(sessionId)
 
         // ── Phase 1: initial screenshot ───────────────────────────────────────
+        // 截图拿不到时不再直接终止:只要树读得到,定位与变化检测都还有依据。
         val initialCapture = captureScreenshot(sessionId)
-            ?: return@withContext terminateFailed(
+        var lastTreeSignature = captureTreeSignature()
+        if (initialCapture == null && lastTreeSignature == null) {
+            return@withContext terminateFailed(
                 sessionId, instruction,
                 stopReason = STOP_SCREENSHOT_FAILED,
-                error = "Initial screenshot capture failed",
+                error = withScreenshotReason("首次截图失败，且无障碍树也读不到（两条感知通道都没有）"),
                 stepIndex = 0,
                 failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
             )
-        val (initialJpeg, initW, initH) = initialCapture
+        }
+        if (initialCapture == null) {
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "screenshot_unavailable_tree_only",
+                "session_id" to sessionId,
+                "reason" to (lastScreenshotError ?: "unknown")
+            ))
+        }
+        val initialJpeg = initialCapture?.first ?: ByteArray(0)
+        val initW = initialCapture?.second ?: 0
+        val initH = initialCapture?.third ?: 0
 
         // ── Phase 2: initial plan ─────────────────────────────────────────────
         // 真 bug 修复(规划输入没有预算):此前这里把**全分辨率**截图的 base64 直接送进
@@ -234,7 +299,8 @@ class LoopController(
         // = 3230 个视觉 token,预算 3456 —— 只剩 226 个 token 给指令;1440×3200 = 5814,
         // 直接装不下。而全链路没有任何一处数过这个数,溢出表现为"模型忽然不听话"
         // (prompt 被静默截断)而不是一个明确的失败。
-        val initialBase64 = budgetedPlanningImage(sessionId, initialJpeg, initW, initH, instruction)
+        val initialBase64 = if (initialJpeg.isEmpty()) null
+            else budgetedPlanningImage(sessionId, initialJpeg, initW, initH, instruction)
         val sequence = localPlanner.plan(sessionId, instruction, initialBase64)
         if (sequence.steps.isEmpty()) {
             return@withContext terminateFailed(
@@ -259,6 +325,8 @@ class LoopController(
         var stepIndex = 0
         var stepsConsumed = 0
         var prevJpeg: ByteArray? = initialJpeg
+        /** 模型是否发过终止动作。决定收尾时记 task_complete 还是 plan_exhausted。 */
+        var finishDeclared = false
 
         while (stepIndex < planSteps.size && stepsConsumed < maxSteps) {
             // ── Goal timeout check ──────────────────────────────────────────────
@@ -317,33 +385,38 @@ class LoopController(
 
             // Capture a fresh screenshot for this step.
             val stepCapture = captureScreenshot(sessionId)
-            if (stepCapture == null) {
+            val stepTreeSignature = captureTreeSignature()
+            // 只有**两条感知通道都没有**才算这一步没法做:光是截图失败,树还在,
+            // 定位走树救场、变化检测走树指纹,都还成立。
+            if (stepCapture == null && stepTreeSignature == null) {
                 val obs = StepObservation.failure(
                     stepId = step.id,
                     actionType = step.actionType,
                     intent = step.intent,
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED,
-                    summary = "Screenshot capture failed before step",
+                    summary = withScreenshotReason("动作前截图失败，且无障碍树也读不到"),
                     screenshotCaptured = false
                 )
                 observations.add(obs)
                 val failedStep = step.copy(
                     status = StepStatus.FAILED,
-                    failureReason = "Screenshot capture failed before step",
+                    failureReason = withScreenshotReason("动作前截图失败，且无障碍树也读不到"),
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED
                 )
                 executedSteps.add(failedStep)
                 return@withContext terminateFailed(
                     sessionId, instruction, executedSteps,
                     stopReason = STOP_SCREENSHOT_FAILED,
-                    error = "Screenshot capture failed at step $displayIndex",
+                    error = withScreenshotReason("第 $displayIndex 步：截图与无障碍树都读不到"),
                     stepIndex = displayIndex,
                     failureCode = FailureCode.SCREENSHOT_CAPTURE_FAILED,
                     observations = observations
                 )
             }
 
-            val (stepJpeg, screenW, screenH) = stepCapture
+            val stepJpeg = stepCapture?.first ?: ByteArray(0)
+            val screenW = stepCapture?.second ?: 0
+            val screenH = stepCapture?.third ?: 0
             val stepStartMs = SystemClock.elapsedRealtime()
 
             // Execute via ExecutorBridge (grounding fallback ladder + AccessibilityService dispatch).
@@ -378,6 +451,9 @@ class LoopController(
             // Capture post-action screenshot for UI-change detection.
             val postCapture = captureScreenshot(sessionId)
             val postJpeg = postCapture?.first
+            // 动作后的树指纹。它是比像素更准的变化判据(像素会被动画、闪烁的光标、
+            // 跳动的时间戳搅动),也是没有截图时唯一可用的判据。
+            val postTreeSignature = captureTreeSignature()
 
             // Build structured post-action observation.
             val observation = postActionObserver.observe(
@@ -389,12 +465,15 @@ class LoopController(
                 confidence = resultStep.confidence,
                 targetMatched = if (resultStep.confidence > 0f) true else null,
                 beforeJpeg = prevJpeg,
-                afterJpeg = postJpeg
+                afterJpeg = postJpeg,
+                beforeTreeSignature = stepTreeSignature ?: lastTreeSignature,
+                afterTreeSignature = postTreeSignature
             )
             observations.add(observation)
 
             // Update prevJpeg for the next iteration's UI-change comparison.
             if (postJpeg != null) prevJpeg = postJpeg
+            if (postTreeSignature != null) lastTreeSignature = postTreeSignature
 
             executedSteps.add(resultStep)
             stepsConsumed++
@@ -415,6 +494,15 @@ class LoopController(
             )
 
             if (resultStep.status == StepStatus.SUCCESS) {
+                // 终止动作:模型说"办完了"。立刻收尾,不做停滞检查 ——
+                // finish 天然不改变界面,再送进停滞检测会被算成"又一步没有进展",
+                // 有概率把一次**有依据的完成**判成 stagnation 失败。
+                if (step.actionType == ACTION_FINISH) {
+                    finishDeclared = true
+                    stepIndex = planSteps.size
+                    break
+                }
+
                 // ── Stagnation check after successful step ──────────────────────
                 val stagnationCode = stagnationDetector.recordStep(observation)
                 if (stagnationCode != null) {
@@ -450,7 +538,7 @@ class LoopController(
                 val replanCapture = captureScreenshot(sessionId)
                 // 重规划与首次规划走同一套预算 —— 此前这里同样送全分辨率原图。
                 val replanBase64 = replanCapture?.let { (jpeg, w, h) ->
-                    budgetedPlanningImage(sessionId, jpeg, w, h, instruction)
+                    if (jpeg.isEmpty()) null else budgetedPlanningImage(sessionId, jpeg, w, h, instruction)
                 }
 
                 val replanSequence = localPlanner.replan(
@@ -514,7 +602,14 @@ class LoopController(
 
         // ── Loop exited normally (all steps done or budget exhausted) ─────────
         val budgetExhausted = stepsConsumed >= maxSteps && stepIndex < planSteps.size
-        val stopReason = if (budgetExhausted) STOP_MAX_STEPS else STOP_TASK_COMPLETE
+        // task_complete 与 plan_exhausted 的区别:前者是模型明确说"办完了"(有依据),
+        // 后者只是步骤列表到头了(无依据)。判定仍然一致 —— 见 STOP_PLAN_EXHAUSTED 的
+        // 文档:此刻收紧会让一批任务立刻由成功变失败,而还没有真机数据能说明比例。
+        val stopReason = when {
+            budgetExhausted -> STOP_MAX_STEPS
+            finishDeclared -> STOP_TASK_COMPLETE
+            else -> STOP_PLAN_EXHAUSTED
+        }
         val finalStatus = if (budgetExhausted) STATUS_FAILED else STATUS_SUCCESS
         val terminalFailureCode = if (budgetExhausted) FailureCode.LOOP_MAX_STEPS_REACHED else null
 
@@ -524,7 +619,10 @@ class LoopController(
                 "session_id" to sessionId,
                 "stop_reason" to stopReason,
                 "steps_executed" to stepsConsumed,
-                "final_status" to finalStatus
+                "final_status" to finalStatus,
+                // 单独一个字段,便于回流后直接统计"多少比例的任务模型真的说了办完了"。
+                // 要不要把 plan_exhausted 收紧成失败,取决于这个数。
+                "goal_declared_complete" to finishDeclared
             )
         )
 
@@ -540,7 +638,11 @@ class LoopController(
         )
 
         _status.value = if (finalStatus == STATUS_SUCCESS) {
-            LoopStatus.Done(sessionId, stepsConsumed, "Task completed in $stepsConsumed step(s)")
+            LoopStatus.Done(
+                sessionId, stepsConsumed,
+                if (finishDeclared) "任务完成（模型声明目标已达成），共 $stepsConsumed 步"
+                else "计划步已执行完，共 $stepsConsumed 步（模型未声明目标达成）"
+            )
         } else {
             LoopStatus.Failed(sessionId, "Max steps reached", stepsConsumed)
         }
@@ -649,21 +751,59 @@ class LoopController(
         return planned.base64
     }
 
+    /**
+     * 最近一次截图失败的原因。截图成功后清空。
+     *
+     * 此前这里只是 `return null` —— provider 抛出的异常信息(节流 / FLAG_SECURE 窗口 /
+     * 能力位被吊销,处置完全不同)在这一层被丢干净,任务最终只报一句
+     * `Screenshot capture failed`。真机日志回流回来时无从判断该修什么。
+     *
+     * 放在实例字段上而不是逐层传参:本类本来就是**单会话**的 —— [_status] 是一条
+     * StateFlow,两个并发会话早就会把状态搅乱,并发从来不在契约里。`@Volatile` 只是
+     * 保证跨线程可见(execute 在 IO 线程,状态可能被别的线程读)。
+     */
+    @Volatile
+    private var lastScreenshotError: String? = null
+
     private fun captureScreenshot(sessionId: String): Triple<ByteArray, Int, Int>? {
         return try {
             val jpeg = screenshotProvider.captureJpeg()
+            lastScreenshotError = null
             Triple(jpeg, screenshotProvider.screenWidth(), screenshotProvider.screenHeight())
         } catch (e: Exception) {
+            lastScreenshotError = e.message ?: e::class.java.simpleName
             GalaxyLogger.log(
                 TAG, mapOf(
                     "event" to "screenshot_error",
                     "session_id" to sessionId,
-                    "error" to (e.message ?: "unknown")
+                    "error" to (lastScreenshotError ?: "unknown")
                 )
             )
             null
         }
     }
+
+    /**
+     * 读一帧无障碍树指纹;没有结构化通道、或这一帧读不到时返回 null。
+     *
+     * 指纹用于两处:判断动作之后界面变了没有(比像素更准,且截图拿不到时是唯一判据),
+     * 以及判断"两条感知通道是不是都没有"。
+     */
+    private fun captureTreeSignature(): String? =
+        try {
+            uiSnapshotProvider?.capture()?.signature()
+        } catch (e: Exception) {
+            // 感知辅助层绝不该把主链路打挂:窗口切换竞态下节点可能已失效。
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "tree_snapshot_error",
+                "error" to (e.message ?: "unknown")
+            ))
+            null
+        }
+
+    /** 把截图失败的具体原因接在给人看的错误信息后面。 */
+    private fun withScreenshotReason(message: String): String =
+        lastScreenshotError?.let { "$message: $it" } ?: message
 
     /** Builds a failed [LoopResult] and updates [status] to [LoopStatus.Failed]. */
     private fun terminateFailed(

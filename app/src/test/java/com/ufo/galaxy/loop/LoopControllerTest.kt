@@ -163,9 +163,31 @@ class LoopControllerTest {
 
         assertEquals(LoopController.STATUS_SUCCESS, result.status)
         assertNull(result.error)
-        assertEquals(LoopController.STOP_TASK_COMPLETE, result.stopReason)
+        // 这一条原本断言 STOP_TASK_COMPLETE。「步骤列表到头了」与「目标达成了」现在
+        // 分成了两个停止原因:这个假计划里没有终止动作,所以是无依据的那一种。
+        // 判定没变 —— 两者仍都是 STATUS_SUCCESS(上一行已经钉住)。
+        assertEquals(LoopController.STOP_PLAN_EXHAUSTED, result.stopReason)
         assertEquals(1, result.steps.size)
         assertEquals(StepStatus.SUCCESS, result.steps[0].status)
+    }
+
+    @Test
+    fun `模型声明目标达成时，停止原因是 task_complete`() = runBlocking {
+        // 上一条的对照组:同一条链路,只是计划末尾多了一个终止动作。
+        // 没有它,「分成两个停止原因」这件事就只被钉住了一半。
+        val ctrl = buildController(
+            plannerService = MultiStepPlannerService(
+                steps = listOf(
+                    "tap" to "点开设置",
+                    LoopController.ACTION_FINISH to "目标已达成",
+                )
+            )
+        )
+
+        val result = ctrl.execute("打开设置")
+
+        assertEquals(LoopController.STATUS_SUCCESS, result.status)
+        assertEquals(LoopController.STOP_TASK_COMPLETE, result.stopReason)
     }
 
     @Test

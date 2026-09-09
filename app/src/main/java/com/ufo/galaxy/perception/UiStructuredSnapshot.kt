@@ -111,6 +111,33 @@ data class UiStructuredSnapshot(
     }
 
     /**
+     * 这一屏的**指纹**：包名 + 元素标签与位置。用来判断"动作之后界面变了没有"。
+     *
+     * ## 为什么需要一个不靠像素的变化信号
+     * [com.ufo.galaxy.local.PostActionObserver] 原本只比较两张截图的字节。可截图在
+     * 三种真实情况下拿不到：设备是 API 30 以下（本模块 minSdk 26，而 `takeScreenshot`
+     * 是 API 30 才有的）、当前是 `FLAG_SECURE` 窗口（银行、密码页）、或者撞上平台的
+     * 333ms 节流。这些时候"界面变了没有"就完全没有答案，而那是循环判断有没有进展的
+     * 唯一依据。
+     *
+     * 树指纹补上这条：只要读得到无障碍树，就有变化信号。它其实比像素**更准** ——
+     * 像素会被动画、闪烁的光标、跳动的时间戳搅动，而这些都不代表界面真的变了。
+     * 各家成熟的手机 GUI agent 框架用的也是这一类程序化判据，而不是让模型自评。
+     *
+     * 刻意**不含** clickable/className：那两项在同一屏内几乎恒定，加进来只会稀释差异。
+     * 也刻意含 bounds：列表滚动时标签可能一模一样，位置变了才是"翻页了"的证据。
+     */
+    fun signature(): String = buildString {
+        append(packageName).append('|')
+        append(elements.size).append('|')
+        for (e in elements) {
+            append(e.label.take(MAX_LABEL_LENGTH)).append(':')
+            append(e.left).append(',').append(e.top).append(',')
+            append(e.right).append(',').append(e.bottom).append(';')
+        }
+    }
+
+    /**
      * 按意图文本给每个元素打匹配分(0.0~1.0),返回按分降序的候选。
      *
      * 评分:标签与意图的归一化 token 重叠率;完整包含(标签是意图子串或反之)

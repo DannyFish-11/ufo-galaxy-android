@@ -11,10 +11,12 @@ import com.ufo.galaxy.observability.GalaxyLogger
 /**
  * Maps [ActionStep]s to concrete [AccessibilityExecutor] actions and dispatches them.
  *
- * For actions that require screen-coordinate grounding (tap, scroll), a
- * [GroundingFallbackLadder] resolves intent → (x, y) through up to six stages before
- * returning a structured failure. Actions that do not need coordinates (type, back,
- * home, open_app) are dispatched directly without a grounding call.
+ * 需要屏幕坐标的动作(tap / scroll)由 [GroundingFallbackLadder] 把意图解析成 (x, y);
+ * 不需要坐标的动作(type / back / home / open_app)直接派发。
+ *
+ * 定位失败时**只有滚动**会退到屏幕中心锚点(见 [STAGE_SCROLL_CENTRE_ANCHOR]),
+ * 点击一律判失败并交给 [LoopController] 重规划 —— 不知道该点哪的时候点屏幕中间,
+ * 落点可能是一条列表项、一个「删除」或一次付款确认。
  *
  * @param groundingService      Unified VLM grounding engine.
  * @param accessibilityExecutor Dispatches device actions via AccessibilityService.
@@ -29,8 +31,10 @@ class ExecutorBridge(
     private val scaledMaxEdge: Int = 720,
     /**
      * 结构化感知通道(无障碍树快照)。非 null 时每步与截图同帧采集,元素清单注入
-     * 梯子的主/缩放视觉定位 prompt(双通道同时在场;梯子 3/4 级本就是 a11y 启发式,
-     * 树证据在本路径天然参与)。null(默认)= 纯视觉,行为不变。
+     * 梯子的主/缩放视觉定位 prompt,并作为最后一级「树救场」的证据来源。
+     *
+     * 这一路**不是可选的锦上添花**:设备上没有 VLM 权重时,树是唯一的定位依据。
+     * null(默认,仅单测用)= 纯视觉,没有模型就没有任何定位能力。
      */
     private val uiSnapshotProvider: com.ufo.galaxy.perception.UiSnapshotProvider? = null
 ) {
@@ -43,6 +47,21 @@ class ExecutorBridge(
          * All others (tap, scroll) go through [GroundingFallbackLadder].
          */
         private val NO_GROUNDING_ACTIONS = setOf("type", "back", "home", "open_app")
+
+        /**
+         * 定位失败但动作是滚动时用的 stage 标签。
+         *
+         * 单独起名字,是为了让真机日志能一眼分出「模型定位到了一个滚动锚点」和
+         * 「定位失败、我们退到了屏幕中心」—— 这两者此前在梯子里被混成同一件事。
+         */
+        const val STAGE_SCROLL_CENTRE_ANCHOR = "scroll_centre_anchor"
+
+        /**
+         * 屏幕中心锚点的置信度。刻意不是 0:动作本身是正确执行的(滚动确实滚了),
+         * 只是锚点不是定位出来的。也刻意不高:上层若要按置信度筛,这一步应当排在
+         * 任何真实定位结果之后。
+         */
+        const val SCROLL_ANCHOR_CONFIDENCE = 0.1f
     }
 
     private val groundingLadder = GroundingFallbackLadder(
@@ -55,9 +74,8 @@ class ExecutorBridge(
     /**
      * Executes [step] against the device and returns an updated [ActionStep] with the result.
      *
-     * Grounding now uses [GroundingFallbackLadder] so transient grounding failures are
-     * retried at a smaller resolution before falling back to accessibility-node or heuristic
-     * region coordinates, rather than immediately failing the step.
+     * 定位走 [GroundingFallbackLadder]:主视觉 → 缩小重试 → 无障碍树救场。三级都拿不到
+     * 可信坐标时,点击类动作抛出并被记为失败(交给上层重规划),滚动退到屏幕中心锚点。
      *
      * @param step         Action to execute.
      * @param jpegBytes    Full-resolution JPEG bytes of the current screen (used for grounding).
@@ -79,6 +97,19 @@ class ExecutorBridge(
                 "intent" to step.intent.take(80)
             )
         )
+
+        // 终止动作不落地成任何设备动作:不定位、不派发、也**不碰执行器**。
+        // 它表达的是"目标已达成",不是一次操作。放到这里而不是做成一个
+        // AccessibilityAction 成员,是因为 HardwareKeyListener.executeAction 里那个
+        // when 是对密封类穷尽的 —— 多一个成员会要求那里也处理它,而它压根不该走到那儿。
+        if (step.actionType == LoopController.ACTION_FINISH) {
+            GalaxyLogger.log(TAG, mapOf(
+                "event" to "finish_declared",
+                "step_id" to step.id,
+                "intent" to step.intent.take(80)
+            ))
+            return step.copy(status = StepStatus.SUCCESS, confidence = 1f)
+        }
 
         return try {
             val (action, confidence, groundingStage) = resolveAction(
@@ -156,6 +187,28 @@ class ExecutorBridge(
         )
 
         if (!grounding.succeeded) {
+            // 滚动是唯一一个「不知道确切位置也能正确执行」的动作:从屏幕中心起手滑,
+            // 本来就是各家框架的默认锚点。所以这里显式降级,并把 stage 记成
+            // scroll_centre_anchor —— 是一个**有名字的、如实记录的**决定。
+            //
+            // 点击不适用:不知道该点哪时点屏幕中间,可能正好落在一条列表项、
+            // 一个「删除」、一次付款确认上。那种情况下唯一正确的动作是承认定位失败,
+            // 交给 LoopController 去重规划。
+            if (step.actionType == "scroll" && screenWidth > 0 && screenHeight > 0) {
+                GalaxyLogger.log(TAG, mapOf(
+                    "event" to "scroll_centre_anchor",
+                    "step_id" to step.id,
+                    "reason" to (grounding.error ?: "grounding_failed")
+                ))
+                return Triple(
+                    AccessibilityExecutor.AccessibilityAction.Scroll(
+                        screenWidth / 2, screenHeight / 2,
+                        step.parameters.getOrDefault("direction", "down")
+                    ),
+                    SCROLL_ANCHOR_CONFIDENCE,
+                    STAGE_SCROLL_CENTRE_ANCHOR
+                )
+            }
             throw IllegalStateException(
                 grounding.error ?: FailureCode.GROUND_ALL_STAGES_EXHAUSTED.description
             )
@@ -176,8 +229,8 @@ class ExecutorBridge(
     private fun buildDirectAction(
         step: ActionStep
     ): AccessibilityExecutor.AccessibilityAction = when (step.actionType) {
-        "type" -> AccessibilityExecutor.AccessibilityAction.TypeText(
-            step.parameters.getOrDefault("text", step.intent)
+        "type" -> AccessibilityExecutor.AccessibilityAction.TypeText.from(
+            step.parameters, fallbackText = step.intent
         )
         "back" -> AccessibilityExecutor.AccessibilityAction.Back
         "home" -> AccessibilityExecutor.AccessibilityAction.Home
