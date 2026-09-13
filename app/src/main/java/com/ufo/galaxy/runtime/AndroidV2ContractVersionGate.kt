@@ -128,7 +128,7 @@ object AndroidV2ContractVersionGate {
     // 任何一条类型能表达它(decision_request 是「请你做个决定」,voice_query 的回复
     // 是请求/响应形状、只在用户先问了才存在),于是手表上「推送」与「上下文」两件事
     // 都无从谈起。同样,这个 71 是编译 MsgType 之后打印 entries.size 得到的。
-    const val EXPECTED_MSG_TYPE_COUNT: Int = 71
+    const val EXPECTED_MSG_TYPE_COUNT: Int = 72
 
     // ── Per-boundary schema version constants ─────────────────────────────────
 

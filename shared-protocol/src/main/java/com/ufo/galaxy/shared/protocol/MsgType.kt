@@ -220,6 +220,22 @@ enum class MsgType(val value: String) {
     @SerializedName("decision_request")
     DECISION_REQUEST("decision_request"),
 
+    /** DECISION_WITHDRAW: 这条决策不用管了,把通知收起来。
+     *
+     * 一条 decision_request 会被**并行分叉**给所有连着的手表与手机。服务端处理了
+     * 重复回答(first reply wins),但此前没有任何东西告诉其余设备撤回通知 ——
+     * 于是在手表上答完之后,手机上那条还挂着。点它服务端是 no-op,可手机本地会把
+     * 通知消掉,用户以为自己答了,实际什么都没发生;更糟的是他可能在那边给了个
+     * **不同**的答案。
+     *
+     * 这是 SIP 分叉的 CANCEL(RFC 3261 §16.7)那一步。
+     *
+     * payload: `decision_id` + `reason`(封闭枚举:answered_elsewhere / timed_out /
+     * cancelled / superseded)。**不带答案** —— 设备只需要把这条收起来,不需要
+     * 知道别人选了什么。
+     */
+    DECISION_WITHDRAW("decision_withdraw"),
+
     // ── Advanced / low-priority capability channels ──────────────────────────────────────
     // These types receive minimal-compat handling (log + optional ack) except where promoted.
 
