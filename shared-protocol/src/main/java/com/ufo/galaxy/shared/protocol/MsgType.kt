@@ -236,6 +236,34 @@ enum class MsgType(val value: String) {
      */
     DECISION_WITHDRAW("decision_withdraw"),
 
+    /** EXECUTION_PROPOSAL: 中心问一句「这件事你能不能、愿不愿意做」。
+     *
+     * **只说做什么,不说怎么做。** 怎么做是本机 Agent 自己的事 —— 它有自己的降级链
+     * 和就位自检。中心替它决定,就是第二份实现,而且中心手里那份状态是几百毫秒前的。
+     *
+     * payload: `proposal_id` · `intent` · `deadline_ms` · `risk_level`。
+     */
+    EXECUTION_PROPOSAL("execution_proposal"),
+
+    /** EXECUTION_COMMITMENT: 本机判断之后的回答。
+     *
+     * `valid_until_ms` **不是可选的**:设备说"我能做"时看到的那一屏,几秒之后可能
+     * 已经不在了。没有有效期的承诺等于让中心去赌"从收到承诺到真正派发之间什么都
+     * 没变"。过期的承诺一律作废重来。
+     *
+     * `decline_reason` 是封闭枚举(busy / not_ready / policy_declined /
+     * no_permission / unsupported),不是自由文本 —— 中心要据此换策略:忙就换一台,
+     * 不就绪就等一会儿再问同一台,权限不足就去问人。
+     */
+    EXECUTION_COMMITMENT("execution_commitment"),
+
+    /** EXECUTION_COMMIT: 选定了,就是你(或者:这次不是你)。
+     *
+     * 落选的设备**也要收到**。否则它会一直占着为这次提议留的资源,而且不知道自己
+     * 已经出局 —— 和决策分叉不撤回是同一个形状的问题。
+     */
+    EXECUTION_COMMIT("execution_commit"),
+
     // ── Advanced / low-priority capability channels ──────────────────────────────────────
     // These types receive minimal-compat handling (log + optional ack) except where promoted.
 
