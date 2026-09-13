@@ -337,7 +337,23 @@ enum class MsgType(val value: String) {
 
     @SerialName("voice_interrupt")
     @SerializedName("voice_interrupt")
-    VOICE_INTERRUPT("voice_interrupt");
+    VOICE_INTERRUPT("voice_interrupt"),
+
+    /**
+     * 智能体**主动**发给设备的一句话。
+     *
+     * 协议里此前没有任何一条类型能表达这件事:[DECISION_REQUEST] 是「请你做个决定」
+     * (带选项、等你选,语义是阻塞的);[VOICE_QUERY] 只有设备→网关一个方向,它的回复
+     * 以 [COMMAND_RESULT] + correlation_id 回来,是**请求/响应**形状 —— 只在用户
+     * 先问了的前提下存在。
+     *
+     * 手表上这个缺口同时让两件事说不通:通知路径没有可推的东西(只接得住
+     * decision_request),会话存储没有可存的东西。
+     *
+     * v2 侧定义见 `galaxy_gateway/protocol/aip_v3.MessageType.AGENT_MESSAGE`
+     * 与 `core/schemas/aip_v3.AgentMessageMsg`。
+     */
+    AGENT_MESSAGE("agent_message");
 
     companion object {
         /**
