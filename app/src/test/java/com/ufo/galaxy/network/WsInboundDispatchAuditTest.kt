@@ -500,6 +500,34 @@ class WsInboundDispatchAuditTest {
         processMessageMethod.invoke(client, rawJson)
     }
 
+    // ── execution_proposal:必须当场作答,不能掉进 else ───────────────────────
+    @Test
+    fun `execution_proposal is answered on the spot instead of falling through as unknown`() {
+        // 中心在派发前发这一轮,并只等一个很短的超时。掉进 else 分支意味着我们被记成
+        // no_response —— 中心据此判定"这批设备不认识协商",接下来一分钟都不再问,
+        // 而我们其实是能做的。整个机制静默失效,没有任何报错。
+        dispatch(
+            """
+                {"type":"execution_proposal","message_id":"m-1",
+                 "payload":{"proposal_id":"prop-1","command":"打开浏览器","ttl_ms":5000}}
+            """.trimIndent()
+        )
+
+        assertEquals("execution_proposal 不该被当成未知类型", 0, captured.unknownMessageCalls)
+        assertEquals("execution_proposal 不该掉进 onMessage 兜底", 0, captured.messageCalls)
+        assertEquals("execution_proposal 不该走 advanced 通道", 0, captured.advancedMessageCalls)
+    }
+
+    @Test
+    fun `an execution_proposal without a proposal_id is dropped rather than answered blindly`() {
+        // 没有 proposal_id 就对不上号,回了也白回 —— 但同样不该掉进 else:
+        // 那会让中心以为我们根本不认识这条消息。
+        dispatch("""{"type":"execution_proposal","payload":{"command":"x"}}""")
+
+        assertEquals(0, captured.unknownMessageCalls)
+        assertEquals(0, captured.messageCalls)
+    }
+
     /**
      * Listener that records all callback invocations for assertion.
      *
