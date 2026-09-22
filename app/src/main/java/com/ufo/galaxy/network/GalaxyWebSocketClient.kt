@@ -30,6 +30,7 @@ import com.ufo.galaxy.runtime.AndroidResultUplinkBoundaryContract
 import com.ufo.galaxy.runtime.AndroidRuntimeEmissionTruthSemantics
 import com.ufo.galaxy.runtime.AndroidUplinkLineageMetadataContract
 import com.ufo.galaxy.runtime.AndroidContinuityRecoveryStateModel
+import com.ufo.galaxy.runtime.ExecutionCommitmentEvaluator
 import com.ufo.galaxy.runtime.LocalExecutionModeGate
 import com.ufo.galaxy.runtime.LocalIntelligenceCapabilityStatus
 import com.ufo.galaxy.runtime.ReconciliationSignal
@@ -1575,6 +1576,18 @@ class GalaxyWebSocketClient(
                     val actionId = payload?.get("action_id")?.asString ?: ""
                     listeners.forEach { it.onOperatorAction(actionId, payload?.toString() ?: "{}", traceId) }
                 }
+                com.ufo.galaxy.shared.protocol.MsgType.EXECUTION_PROPOSAL -> {
+                    // 中心在派发前问一句「这件事你能不能、愿不愿意做」。答不答得上来
+                    // 决定了它会不会派给我们 —— 沉默会被中心记成 no_response。
+                    val payload = root.getAsJsonObject("payload")
+                    val proposalId = payload?.get("proposal_id")?.asString ?: ""
+                    if (proposalId.isBlank()) {
+                        // 没有 proposal_id 就无从对上号,回了也白回。
+                        Log.w(TAG, "[CONSENSUS] execution_proposal 缺 proposal_id,忽略")
+                    } else {
+                        replyToExecutionProposal(proposalId)
+                    }
+                }
                 com.ufo.galaxy.shared.protocol.MsgType.HEARTBEAT_ACK -> {
                     onPongReceived()
                 }
@@ -2861,6 +2874,62 @@ class GalaxyWebSocketClient(
      * @return `true` if the message was sent immediately; `false` if blocked, disconnected,
      *         or an exception occurred.
      */
+    /**
+     * 对一次 `execution_proposal` 作答。
+     *
+     * 判定本身在 [ExecutionCommitmentEvaluator] 里(纯函数,可单测);这里只负责
+     * **取本机此刻的真实处境**,再把回答发回去。两件事分开,是因为前者是需要被测到
+     * 的逻辑,后者需要一个真设备。
+     *
+     * 模式状态用 [normalizedCapabilityMetadata] 现算,而不是读上次上报的缓存值:
+     * 那份缓存是"上一次上报时的样子",而这一轮问的恰恰是"此刻"。现算会带上实时的
+     * [isConnected] 与 [crossDeviceEnabled],同时保留 model/accessibility/overlay 的就位标志。
+     *
+     * **已知限制:跨设备开关关掉时,这条回答本身也发不出去。** [sendJson] 会拦下所有
+     * 出站消息,于是中心看到的是沉默而不是 `policy_declined`。两者在中心侧的后果不同
+     * (沉默会触发"这批设备不认识协商"的退避),但影响有限:开关关掉的设备本来就不该
+     * 出现在跨设备候选里。这里写明,是因为它看起来像 bug 而实际是上游那条硬约束的结果。
+     */
+    private fun replyToExecutionProposal(proposalId: String): Boolean {
+        val live = normalizedCapabilityMetadata(deviceMetadata)
+        val modeState = LocalExecutionModeGate.ExecutionModeState.fromWireValue(
+            live[LocalExecutionModeGate.KEY_EXECUTION_MODE_STATE] as? String
+        ) ?: LocalExecutionModeGate.ExecutionModeState.INACTIVE
+
+        val commitment = ExecutionCommitmentEvaluator.evaluate(
+            situation = ExecutionCommitmentEvaluator.DeviceSituation(
+                modeState = modeState,
+                // 无障碍服务没开就执行不了 GUI 动作 —— 那是 no_permission,不是 busy,
+                // 中心据此去问人要授权,而不是傻等这台闲下来。
+                hasRequiredPermissions = (live["accessibility_ready"] as? Boolean) ?: false
+            ),
+            nowMs = System.currentTimeMillis()
+        )
+
+        val deviceId = getDeviceId()
+        val envelope = mapOf(
+            "version" to "3.0",
+            "message_id" to java.util.UUID.randomUUID().toString(),
+            "type" to com.ufo.galaxy.shared.protocol.MsgType.COMMAND.value,
+            "device_id" to deviceId,
+            "payload" to mapOf(
+                // V2 的 handle_command 按 payload.command 分派,回答装在 payload.payload 里。
+                "command" to com.ufo.galaxy.shared.protocol.MsgType.EXECUTION_COMMITMENT.value,
+                "payload" to commitment.toPayload(deviceId, proposalId)
+            )
+        )
+        GalaxyLogger.log(
+            TAG,
+            mapOf(
+                "event" to "execution_commitment_sent",
+                "proposal_id" to proposalId,
+                "accepted" to commitment.accepted,
+                "decline_reason" to (commitment.declineReason?.wireValue ?: "")
+            )
+        )
+        return sendJson(gson.toJson(envelope))
+    }
+
     fun sendDeviceExecutionEvent(payload: DeviceExecutionEventPayload): Boolean {
         return try {
             val deviceId = getDeviceId()

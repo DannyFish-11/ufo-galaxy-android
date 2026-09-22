@@ -220,6 +220,50 @@ enum class MsgType(val value: String) {
     @SerializedName("decision_request")
     DECISION_REQUEST("decision_request"),
 
+    /** DECISION_WITHDRAW: 这条决策不用管了,把通知收起来。
+     *
+     * 一条 decision_request 会被**并行分叉**给所有连着的手表与手机。服务端处理了
+     * 重复回答(first reply wins),但此前没有任何东西告诉其余设备撤回通知 ——
+     * 于是在手表上答完之后,手机上那条还挂着。点它服务端是 no-op,可手机本地会把
+     * 通知消掉,用户以为自己答了,实际什么都没发生;更糟的是他可能在那边给了个
+     * **不同**的答案。
+     *
+     * 这是 SIP 分叉的 CANCEL(RFC 3261 §16.7)那一步。
+     *
+     * payload: `decision_id` + `reason`(封闭枚举:answered_elsewhere / timed_out /
+     * cancelled / superseded)。**不带答案** —— 设备只需要把这条收起来,不需要
+     * 知道别人选了什么。
+     */
+    DECISION_WITHDRAW("decision_withdraw"),
+
+    /** EXECUTION_PROPOSAL: 中心问一句「这件事你能不能、愿不愿意做」。
+     *
+     * **只说做什么,不说怎么做。** 怎么做是本机 Agent 自己的事 —— 它有自己的降级链
+     * 和就位自检。中心替它决定,就是第二份实现,而且中心手里那份状态是几百毫秒前的。
+     *
+     * payload: `proposal_id` · `intent` · `deadline_ms` · `risk_level`。
+     */
+    EXECUTION_PROPOSAL("execution_proposal"),
+
+    /** EXECUTION_COMMITMENT: 本机判断之后的回答。
+     *
+     * `valid_until_ms` **不是可选的**:设备说"我能做"时看到的那一屏,几秒之后可能
+     * 已经不在了。没有有效期的承诺等于让中心去赌"从收到承诺到真正派发之间什么都
+     * 没变"。过期的承诺一律作废重来。
+     *
+     * `decline_reason` 是封闭枚举(busy / not_ready / policy_declined /
+     * no_permission / unsupported),不是自由文本 —— 中心要据此换策略:忙就换一台,
+     * 不就绪就等一会儿再问同一台,权限不足就去问人。
+     */
+    EXECUTION_COMMITMENT("execution_commitment"),
+
+    /** EXECUTION_COMMIT: 选定了,就是你(或者:这次不是你)。
+     *
+     * 落选的设备**也要收到**。否则它会一直占着为这次提议留的资源,而且不知道自己
+     * 已经出局 —— 和决策分叉不撤回是同一个形状的问题。
+     */
+    EXECUTION_COMMIT("execution_commit"),
+
     // ── Advanced / low-priority capability channels ──────────────────────────────────────
     // These types receive minimal-compat handling (log + optional ack) except where promoted.
 
@@ -337,7 +381,23 @@ enum class MsgType(val value: String) {
 
     @SerialName("voice_interrupt")
     @SerializedName("voice_interrupt")
-    VOICE_INTERRUPT("voice_interrupt");
+    VOICE_INTERRUPT("voice_interrupt"),
+
+    /**
+     * 智能体**主动**发给设备的一句话。
+     *
+     * 协议里此前没有任何一条类型能表达这件事:[DECISION_REQUEST] 是「请你做个决定」
+     * (带选项、等你选,语义是阻塞的);[VOICE_QUERY] 只有设备→网关一个方向,它的回复
+     * 以 [COMMAND_RESULT] + correlation_id 回来,是**请求/响应**形状 —— 只在用户
+     * 先问了的前提下存在。
+     *
+     * 手表上这个缺口同时让两件事说不通:通知路径没有可推的东西(只接得住
+     * decision_request),会话存储没有可存的东西。
+     *
+     * v2 侧定义见 `galaxy_gateway/protocol/aip_v3.MessageType.AGENT_MESSAGE`
+     * 与 `core/schemas/aip_v3.AgentMessageMsg`。
+     */
+    AGENT_MESSAGE("agent_message");
 
     companion object {
         /**

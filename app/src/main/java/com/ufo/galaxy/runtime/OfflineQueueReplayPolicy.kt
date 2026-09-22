@@ -1,5 +1,7 @@
 package com.ufo.galaxy.runtime
 
+import com.ufo.galaxy.network.OfflineTaskQueue
+
 /**
  * PR-71 (Android) — Formal policy/evidence model for offline queue replay ordering and
  * authority semantics.
@@ -72,6 +74,24 @@ package com.ufo.galaxy.runtime
  * @see AndroidRecoveryParticipationOwner
  */
 object OfflineQueueReplayPolicy {
+
+    /**
+     * 队列上限,**直接取自实现**而不是手写一个数。
+     *
+     * 起因:这份文件里四处把上限写成了五十条,而 [OfflineTaskQueue.MAX_QUEUE_SIZE]
+     * 早已是一千(C12-FIX 提上去的时候,策略描述留在了原地)。差二十倍。
+     *
+     * 这里刻意不写出那串旧字面量 —— 下面的守卫是靠"源文件里不许出现手写上限"
+     * 来防漂的,连这段说明里的例子也会被它抓住。钝,但正因为钝才没有例外。
+     *
+     * 这份文件存在的全部意义,就是给下游一份**关于队列语义的权威描述**,让人不必回去
+     * 读实现。一份权威描述里的数字错 20 倍,比没有这份描述更糟 —— 没有的时候人还会去
+     * 读实现,有的时候人就信了它。
+     *
+     * 写成 const:它在编译期被内联到每一处引用点,所以既不依赖 object 的初始化顺序,
+     * 也不会在纯 JVM 单测里去加载带 Android 依赖的 OfflineTaskQueue。
+     */
+    private const val QUEUE_CAP: Int = OfflineTaskQueue.MAX_QUEUE_SIZE
 
     // ── PR identifier ─────────────────────────────────────────────────────────
 
@@ -148,7 +168,7 @@ object OfflineQueueReplayPolicy {
         /**
          * Whether eventual recovery (all queued work reaching V2) is unconditionally guaranteed.
          *
-         * Queue size limits (max 50 messages), 24-hour TTL eviction, and V2 authority over
+         * Queue size limits (see [OfflineTaskQueue.MAX_QUEUE_SIZE]), 24-hour TTL eviction, and V2 authority over
          * replay processing mean that unconditional delivery cannot be guaranteed.  This is
          * an accepted limitation of the current bounded-queue design.
          *
@@ -313,7 +333,7 @@ object OfflineQueueReplayPolicy {
             evidenceReference = "OfflineTaskQueue.enqueue / drainAll; " +
                 "OfflineQueueTest: drainAll returns messages in FIFO order; " +
                 "Pr66ContinuityRecoveryDurabilityTest: queue drain on reconnect",
-            limitations = "Queue is capped at 50 messages (oldest dropped when full).  " +
+            limitations = "Queue is capped at $QUEUE_CAP messages (oldest dropped when full).  " +
                 "Messages older than 24 hours are evicted on load.  These are known, accepted " +
                 "bounds on replay existence, not failures of the mechanism itself.",
             v2ConsumptionPath = "V2 receives replayed task_result / goal_result messages via " +
@@ -403,10 +423,10 @@ object OfflineQueueReplayPolicy {
                 "This constitutes a reasonable eventual recovery mechanism for most practical " +
                 "scenarios.  However, 'eventual' is bounded by queue drop policy and V2 " +
                 "authority, so unconditional delivery cannot be guaranteed.",
-            evidenceReference = "OfflineTaskQueue: max 50 messages, 24 h TTL, FIFO drain; " +
+            evidenceReference = "OfflineTaskQueue: max $QUEUE_CAP messages, 24 h TTL, FIFO drain; " +
                 "GalaxyConnectionService reconnect path → discardForDifferentSession → drainAll; " +
                 "Pr66ContinuityRecoveryDurabilityTest: queue drain on reconnect",
-            limitations = "Queue overflow causes oldest-message drop: at most 50 messages survive " +
+            limitations = "Queue overflow causes oldest-message drop: at most $QUEUE_CAP messages survive " +
                 "a prolonged outage.  Messages older than 24 hours are evicted on load.  V2 may " +
                 "reject, re-order, or discard replayed messages at its discretion.  These are " +
                 "accepted design trade-offs, not unaddressed bugs.",
