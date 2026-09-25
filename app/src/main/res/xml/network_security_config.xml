@@ -2,35 +2,41 @@
 <!--
   Network Security Configuration for UFO Galaxy Android.
 
-  SECURITY FIX: base-config now prohibits cleartext by default.
-  Only specific debug/local domains are whitelisted for cleartext.
-  All remote (internet) traffic must use TLS (https/wss).
+  明文放行的规则**不在这里**，在 shared-protocol 的 CleartextPolicy。
+  ================================================================
+  本系统设备间只走内网：同一个 Wi-Fi 直连，或者 tailnet。这两条路上网关默认说的是
+  明文 ws://（局域网是家里的信任边界；tailnet 由 WireGuard 加密；wss 到裸 IP 拿不到
+  可信证书）。
+
+  但这份 XML 只能按域名 / 单个 IP 放行明文，**不认网段**。这里原先是"禁明文 + 写死
+  10.0.2.2 / 10.0.0.1 / 100.64.0.1 / localhost 放行"，还特意注明"192.168.* removed for
+  release safety"。结果：
+    · 家里真实的局域网地址（192.168.1.23 之类）—— 被拦，局域网直连在 release 版上不通；
+    · tailnet 里按加入顺序分配的 100.x.y.z —— 除非恰好是 .1，否则被拦。
+  也就是说"走内网"在 release 版上从来没通过。（注释里提到的
+  network_security_config_debug.xml 也并不存在。）
+
+  所以：这里放开明文；"只许对内网地址说明文"改由 CleartextPolicy 按网段判
+  （10/8、172.16/12、192.168/16、100.64/10、169.254/16、127/8、fc00::/7、fe80::/10、
+  *.local、localhost），并由 ConnectionPathPlanner.planAttempts 在排序前统一过滤 ——
+  要拿明文去连公网地址的候选根本不会被试。手机和手表共用这一份判定。
+
+  局限：那条规则只管本系统拨网关的路。App 里其他 HTTP 调用不经过它，所以下面对
+  已知公网域名显式禁明文的条目保留；连公网的调用本来就应该是 https。
 -->
 <network-security-config>
-    <!-- Base: deny cleartext for all traffic by default -->
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system"/>
         </trust-anchors>
     </base-config>
 
-    <!-- Domain-specific: stricter for known remote endpoints -->
+    <!-- 已知公网端点：显式禁明文（比 base-config 更具体，优先生效） -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">huggingface.co</domain>
         <domain includeSubdomains="true">github.com</domain>
         <trust-anchors>
             <certificates src="system"/>
         </trust-anchors>
-    </domain-config>
-
-    <!-- Debug/Local network only: permissive for development environments -->
-    <!-- B4-FIX: Restricted to essential local addresses. 192.168.* removed for release safety.
-         Full debug config kept in network_security_config_debug.xml. -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.2.2</domain>   <!-- Android emulator localhost -->
-        <domain includeSubdomains="true">10.0.0.1</domain>   <!-- Local network gateway -->
-        <domain includeSubdomains="true">100.64.0.1</domain> <!-- Tailscale/WireGuard CGNAT -->
-        <domain includeSubdomains="true">localhost</domain>  <!-- Local dev server -->
-        <domain includeSubdomains="true">127.0.0.1</domain>  <!-- IPv4 loopback (B3-FIX) -->
     </domain-config>
 </network-security-config>
