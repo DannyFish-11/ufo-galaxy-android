@@ -111,11 +111,12 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // B4-FIX: 严格的 release 网络安全配置（禁用明文）由 release 源集覆盖提供
-            // (app/src/release/res/xml/network_security_config.xml)。
-            // 旧写法用 resValue 生成同名 xml/network_security_config，与 main 源集已有的
-            // res/xml/network_security_config.xml 文件冲突 → release 构建 duplicate resources 失败。
-            // manifest 仍引用 @xml/network_security_config：debug 用 main 版、release 自动用 release 版。
+            // 网络安全配置 debug / release **同一份**（app/src/main/res/xml/network_security_config.xml）。
+            // 这里原先有一个 release 源集覆盖（src/release/res/xml/…），把明文**完全**禁掉 ——
+            // 而网关默认说明文 ws://（局域网 / tailnet 内不需要、也拿不到 IP 的可信证书），
+            // 所以 release 版的手机连不上任何默认配置的网关，内网直连从来没通过。
+            // "只许对内网地址说明文"现在由 shared-protocol 的 CleartextPolicy 按网段判，
+            // 见那份 XML 的文件头。两份配置 = 两套规则，删掉覆盖，只留一份。
             buildConfigField "String", "GALAXY_SERVER_URL", '"wss://galaxy.ufo.ai:9000"'
         }
         debug {

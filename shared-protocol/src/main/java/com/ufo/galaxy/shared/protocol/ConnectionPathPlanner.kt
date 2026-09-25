@@ -72,7 +72,7 @@ object ConnectionPathPlanner {
     /**
      * 决定试连顺序。
      *
-     * 规则只有两条，但顺序要紧：
+     * 先剔除明文连公网的候选（[CleartextPolicy]），然后规则只有两条，但顺序要紧：
      *
      * 1. **上次通的那条排最前**。绝大多数情况下网络环境没变，先试它能把整轮试探
      *    省掉。注意它只是**提前**，不是独占 —— 环境真变了时后面几条还在。
@@ -83,8 +83,13 @@ object ConnectionPathPlanner {
      */
     @JvmStatic
     fun planAttempts(candidates: List<Candidate>, lastGoodKind: String? = null): List<Candidate> {
-        if (candidates.isEmpty()) return emptyList()
-        val byPriority = candidates.sortedBy { it.priority }
+        // 先过明文规则：要拿 ws:// 去连公网地址的候选，根本不试 —— 那等于把令牌
+        // 明文发到公网上。内网地址（私网段 / CGNAT / .local）的 ws:// 照常。
+        // 规则本身见 [CleartextPolicy]；放在这里而不是各平台的拨号处，是为了手机和
+        // 手表只有一处判定。
+        val permitted = candidates.filter { CleartextPolicy.isPermitted(it.url) }
+        if (permitted.isEmpty()) return emptyList()
+        val byPriority = permitted.sortedBy { it.priority }
         if (lastGoodKind.isNullOrBlank()) return byPriority
 
         val preferred = byPriority.filter { it.kind == lastGoodKind }
