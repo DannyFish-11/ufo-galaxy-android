@@ -69,6 +69,11 @@ import java.util.concurrent.TimeUnit
  * @param onDisconnected   Callback invoked when the WebSocket connection is lost.
  * @param onError          Callback invoked for gateway error messages or WebSocket failures.
  *                         The error string always includes the [traceId] prefix.
+ * @param authToken        This device's pairing token (or the owner's API token). The gateway's
+ *                         signaling path is members-only: without a valid token it closes the
+ *                         socket with 4401. Sent as `Authorization: Bearer`, never in the URL
+ *                         (URLs end up in logs). It used to be gated by the desktop's 「跨设备」
+ *                         switch instead, which shut joined phones out whenever that was off.
  */
 class WebRTCSignalingClient(
     private val url: String,
@@ -80,7 +85,8 @@ class WebRTCSignalingClient(
     private val onMessage: (SignalingMessage) -> Unit = {},
     private val onConnected: () -> Unit = {},
     private val onDisconnected: () -> Unit = {},
-    private val onError: (String) -> Unit = {}
+    private val onError: (String) -> Unit = {},
+    private val authToken: String = "",
 ) {
     private val TAG = "WebRTCSignalingClient"
 
@@ -280,7 +286,7 @@ class WebRTCSignalingClient(
     fun connect() {
         connectStartMs = System.currentTimeMillis()
         Log.i(TAG, "[trace=$effectiveTraceId] Connecting to WebRTC signaling endpoint: $url")
-        val request = Request.Builder().url(url).build()
+        val request = buildRequest(url, authToken)
         // 真 bug 修复:此前丢弃了 newWebSocket() 的返回值,仅靠 onOpen 回调再赋值
         // webSocket。触发场景:握手完成前调用 disconnect() 时 webSocket 仍为 null,
         // 无法关闭正在建立的连接;随后 onOpen 到达又把 webSocket/isConnected 置回
@@ -347,5 +353,17 @@ class WebRTCSignalingClient(
         webSocket = null
         isConnected = false
         candidateManager.reset()
+    }
+
+    companion object {
+        /**
+         * The signaling handshake request. The gateway only lets members signal: the pairing token
+         * goes in an `Authorization: Bearer` header (not the URL — URLs get logged).
+         */
+        fun buildRequest(url: String, authToken: String): Request {
+            val builder = Request.Builder().url(url)
+            if (authToken.isNotBlank()) builder.header("Authorization", "Bearer ${authToken.trim()}")
+            return builder.build()
+        }
     }
 }
