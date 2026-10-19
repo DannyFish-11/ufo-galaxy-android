@@ -2531,6 +2531,8 @@ class GalaxyWebSocketClient(
             }
             addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
+            // 每个动作的一句话说明 —— V2 原样交给中心智能体(设备整体卡),模型据此决定让谁做什么
+            add("action_descriptions", gson.toJsonTree(PhoneActionDescriptions.forActions(report.supported_actions)))
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(handshakeMetadata))
             // PR-B2: registration posture — carried in capability_report for consistency with
