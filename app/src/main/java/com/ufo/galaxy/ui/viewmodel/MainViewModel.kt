@@ -285,8 +285,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "InputRouter error: $reason")
                 pushError(reason)
                 _uiState.update { it.copy(error = reason, isLoading = false) }
-            }
+            },
+            conversationBridge = { text -> com.ufo.galaxy.bridge.BridgeAgent.say(text) }
         )
+    }
+
+    /**
+     * 跨设备整体方案阶段 3:中心派来的桥接 Agent 装上之后,人说的话进中心智能体的同一个会话,
+     * 回答从这里回到对话列表;关跨设备时中心交还的摘要也落在这里。
+     */
+    private val bridgeListener = object : com.ufo.galaxy.bridge.BridgeAgent.Listener {
+        override fun onReply(text: String, success: Boolean) {
+            val reply = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.ASSISTANT,
+                content = text,
+                timestamp = System.currentTimeMillis()
+            )
+            _uiState.update { state ->
+                state.copy(
+                    messages = state.messages + reply,
+                    isLoading = false,
+                    lastExecutionRoute = ExecutionRouteTag.CROSS_DEVICE,
+                    executionRouteCounts = incrementRouteCount(state.executionRouteCounts, ExecutionRouteTag.CROSS_DEVICE)
+                )
+            }
+            maybeSpeakResponse(text)
+        }
+
+        override fun onReturned(summary: String, openItems: List<String>) {
+            if (summary.isBlank() && openItems.isEmpty()) return
+            val note = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.SYSTEM,
+                content = buildString {
+                    append("中心交还了上下文")
+                    if (summary.isNotBlank()) append(":").append(summary)
+                    if (openItems.isNotEmpty()) append("(还有 ${openItems.size} 件没做完)")
+                },
+                timestamp = System.currentTimeMillis()
+            )
+            _uiState.update { it.copy(messages = it.messages + note) }
+        }
     }
     
     // 语音输入管理器
@@ -503,6 +543,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun setupWebSocketListener() {
         webSocketClient.addListener(wsListener)
+        com.ufo.galaxy.bridge.BridgeAgent.addListener(bridgeListener)
+        com.ufo.galaxy.bridge.BridgeAgent.dialogProvider = {
+            _uiState.value.messages
+                .filter { it.role != MessageRole.SYSTEM }
+                .map { (if (it.role == MessageRole.USER) "user" else "assistant") to it.content }
+        }
     }
     
     /**
@@ -813,9 +859,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } else {
-            // Delegate entirely to RuntimeController — it resets settings.crossDeviceEnabled
-            // and disconnects the WS client.
-            UFOGalaxyApplication.runtimeController.stop()
+            // 经应用层关:桥接 Agent 装着时先请中心交还上下文再断开(阶段 3);否则直接
+            // RuntimeController.stop()(重置 settings.crossDeviceEnabled、断开 WS)。
+            UFOGalaxyApplication.instance?.setCrossDeviceEnabled(false) ?: UFOGalaxyApplication.runtimeController.stop()
         }
     }
 
@@ -1147,6 +1193,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         Log.d(TAG, "MainViewModel 销毁")
         webSocketClient.removeListener(wsListener)
+        com.ufo.galaxy.bridge.BridgeAgent.removeListener(bridgeListener)
+        com.ufo.galaxy.bridge.BridgeAgent.dialogProvider = null
         speechManager.release()
         speechOutputManager.release()
     }

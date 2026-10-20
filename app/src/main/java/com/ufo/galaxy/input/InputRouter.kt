@@ -91,6 +91,9 @@ sealed class RouteDecision {
  *                           Use to update UI or log results. Optional.
  * @param onError            Called with a human-readable reason when cross-device routing fails
  *                           (WS unavailable or send error). Callers must surface this in the UI.
+ * @param conversationBridge 跨设备整体方案阶段 3:中心派来的桥接 Agent 装上之后,人说的话作为对话交给
+ *                           中心智能体(同一个会话),返回 true;没装上返回 false,照旧走 task_submit。
+ *                           生产传 [com.ufo.galaxy.bridge.BridgeAgent.say]。
  */
 class InputRouter(
     private val settings: AppSettings,
@@ -98,7 +101,8 @@ class InputRouter(
     private val localLoopExecutor: LocalLoopExecutor,
     private val coroutineScope: CoroutineScope,
     private val onLocalResult: ((LocalLoopResult) -> Unit)? = null,
-    private val onError: ((reason: String) -> Unit)? = null
+    private val onError: ((reason: String) -> Unit)? = null,
+    private val conversationBridge: ((String) -> Boolean)? = null
 ) {
     private val gson = Gson()
 
@@ -260,6 +264,11 @@ class InputRouter(
                 // supply JOIN_RUNTIME")。上面的日志/route 元数据仍如实记录原始 posture。
                 launchLocal(trimmed, SourceRuntimePosture.JOIN_RUNTIME)
                 RouteMode.LOCAL
+            }
+            wsConnected && conversationBridge?.invoke(trimmed) == true -> {
+                Log.i(TAG, "[ROUTE] route_mode=cross_device via=bridge_agent task_id=$taskId device_id=$deviceId")
+                GalaxyLogger.log(TAG, mapOf("event" to "route_bridge_agent", "task_id" to taskId))
+                RouteMode.CROSS_DEVICE
             }
             wsConnected -> {
                 sendViaWebSocket(trimmed, deviceId, taskId, posture, crossDevice)

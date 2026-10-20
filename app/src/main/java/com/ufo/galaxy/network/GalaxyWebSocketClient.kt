@@ -491,6 +491,13 @@ class GalaxyWebSocketClient(
         fun onUnknownMessage(rawType: String?, rawJson: String) = Unit
 
         /**
+         * Called when an [com.ufo.galaxy.shared.protocol.MsgType.A2A] frame arrives: the
+         * center agent talking to the bridge agent on this phone (cross-device plan phase 3).
+         * [frameJson] is the whole frame; [com.ufo.galaxy.bridge.BridgeAgent] handles it.
+         */
+        fun onA2AFrame(frameJson: String) = Unit
+
+        /**
          * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
@@ -1590,6 +1597,10 @@ class GalaxyWebSocketClient(
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.HEARTBEAT_ACK -> {
                     onPongReceived()
+                }
+                com.ufo.galaxy.shared.protocol.MsgType.A2A -> {
+                    // 中心智能体 ↔ 手机上的桥接 Agent(对外 A2A,信封在 payload 里)
+                    listeners.forEach { it.onA2AFrame(text) }
                 }
                 in com.ufo.galaxy.shared.protocol.MsgType.ADVANCED_TYPES -> {
                     val messageId = root.get("message_id")?.asString
