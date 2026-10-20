@@ -128,7 +128,10 @@ object AndroidV2ContractVersionGate {
     // 任何一条类型能表达它(decision_request 是「请你做个决定」,voice_query 的回复
     // 是请求/响应形状、只在用户先问了才存在),于是手表上「推送」与「上下文」两件事
     // 都无从谈起。同样,这个 71 是编译 MsgType 之后打印 entries.size 得到的。
-    const val EXPECTED_MSG_TYPE_COUNT: Int = 75
+    //
+    // 75 → 76:加了 a2a —— 对外 A2A(中心智能体 ↔ 派出去的 Agent)的承载帧,信封在 payload 里
+    // (shared-protocol/.../A2A.kt;V2 core/a2a_link.py)。76 同样是编译后打印 entries.size 得到的。
+    const val EXPECTED_MSG_TYPE_COUNT: Int = 76
 
     // ── Per-boundary schema version constants ─────────────────────────────────
 
