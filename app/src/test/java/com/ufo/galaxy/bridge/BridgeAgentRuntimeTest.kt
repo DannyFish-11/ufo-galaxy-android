@@ -72,6 +72,11 @@ class BridgeAgentRuntimeTest {
     private fun str(o: JsonObject, k: String) = (o[k] as? JsonPrimitive)?.contentOrNull
 
     @Test
+    fun `the declared bridge version is the one v2 dispatches to`() {
+        assertEquals("bridge/1", BridgeAgentRuntime.BRIDGE_VERSION)
+    }
+
+    @Test
     fun `before an agent is dispatched what the person says takes the old path`() {
         assertFalse(bridge.say("你好"))
         assertFalse(bridge.installed)

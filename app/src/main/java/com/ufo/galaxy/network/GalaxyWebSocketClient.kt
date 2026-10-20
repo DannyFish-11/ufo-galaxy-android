@@ -2544,6 +2544,8 @@ class GalaxyWebSocketClient(
             add("supported_actions", gson.toJsonTree(report.supported_actions))
             // 每个动作的一句话说明 —— V2 原样交给中心智能体(设备整体卡),模型据此决定让谁做什么
             add("action_descriptions", gson.toJsonTree(PhoneActionDescriptions.forActions(report.supported_actions)))
+            // 跨设备整体方案阶段 3:声明这台手机能装中心派来的桥接 Agent;不声明 V2 就不派(旧版 App 不会回确认)
+            addProperty("bridge_agent", com.ufo.galaxy.bridge.BridgeAgentRuntime.BRIDGE_VERSION)
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(handshakeMetadata))
             // PR-B2: registration posture — carried in capability_report for consistency with

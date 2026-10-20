@@ -166,5 +166,8 @@ class BridgeAgentRuntime(
     companion object {
         /** 中心智能体在 A2A 里的名字(V2 `core/a2a_link.CENTER_AGENT`)。 */
         const val A2A_CENTER = "center"
+
+        /** 报能力时声明的桥接 Agent 版本(V2 `core/phone_bridge.BRIDGE_VERSION`);V2 只给声明了的设备派。 */
+        const val BRIDGE_VERSION = "bridge/1"
     }
 }
