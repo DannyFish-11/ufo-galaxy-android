@@ -206,7 +206,7 @@ data class MainUiState(
         InflightContinuityDisposition.RESUMED_CLEANLY,
     /** Task id referenced by [inflightContinuityState], when Android has one. */
     val inflightContinuityTaskId: String? = null,
-    // C9-FIX: Current three-phase state (SILENT / LIMINAL / MANIFEST) for UI visualization.
+    // 智能体处理这台手机那件请求的进度(SILENT = 手上没有这台手机的事)。不是电脑的三态。
     // Updated by observing PhaseStateMachine.currentPhase in MainViewModel.
     val currentPhase: PhaseStateMachine.Phase = PhaseStateMachine.Phase.SILENT,
     // ── 设备配对(零输入·别处批准)──────────────────────────────────────────────

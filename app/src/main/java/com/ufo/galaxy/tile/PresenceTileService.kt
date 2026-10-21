@@ -54,7 +54,7 @@ class PresenceTileService : TileService() {
                 !s.connected -> "未连接"
                 s.isStale -> "状态未更新"
                 s.statusText.isNotBlank() -> s.statusText
-                s.phase == PresenceState.PHASE_MANIFEST -> "执行中"
+                s.phase == PresenceState.PHASE_MANIFEST -> "在做"
                 s.phase == PresenceState.PHASE_LIMINAL -> "在想"
                 else -> "在听"
             }

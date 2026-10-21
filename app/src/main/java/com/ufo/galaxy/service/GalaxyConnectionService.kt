@@ -83,6 +83,7 @@ import com.ufo.galaxy.runtime.DelegatedRuntimeStrategySnapshot
 import com.ufo.galaxy.runtime.FlowAwareResultConvergenceDecision
 import com.ufo.galaxy.runtime.PersistentEmittedSignalLedgerStore
 import com.ufo.galaxy.runtime.PhaseStateMachine
+import com.ufo.galaxy.runtime.RequestProgress
 import com.ufo.galaxy.runtime.PolicyRoutingContext
 import com.ufo.galaxy.runtime.ReconciliationSignal
 import com.ufo.galaxy.runtime.TakeoverFallbackEvent
@@ -1274,6 +1275,8 @@ class GalaxyConnectionService : Service() {
                 com.ufo.galaxy.surface.PresenceStateStore.update(
                     this@GalaxyConnectionService, connected = false
                 )
+                // 断线后这台手机那件请求的进度就不知道了:不留着「在做你这件事」,连回来后由下一帧进度更新
+                phaseStateMachine.transitionTo(PhaseStateMachine.Phase.SILENT)
                 updateMeshDirectRuntimeSnapshot(deriveMeshDirectRuntimeSnapshot())
                 updateNotification("已断开")
                 crossRepoRegressionHooks.recordConnection(
@@ -2885,16 +2888,19 @@ class GalaxyConnectionService : Service() {
      * Handles an inbound [MsgType.STATE_EVENT] message from V2.
      *
      * Parses the state event payload and dispatches by [eventCategory]:
-     * - `"phase"`: Updates the Android presence projection layer to reflect
-     *   V2's DesktopPresenceRuntime tristate (SILENT → LIMINAL → MANIFEST).
-     *   This enables the Android UI to visually mirror the desktop phase.
+     * - `"phase"`: only when it is **this phone's own request's progress** (marked
+     *   `payload.sync_type = "request_progress"`, see [RequestProgress]): drives the
+     *   phase state machine, which the main screen / widget / tile show as
+     *   "智能体在想 / 在做你这件事". The desktop's own tri-state is never shown on the
+     *   phone — devices talk to the agent directly; an unmarked phase frame (an old V2
+     *   broadcasting the desktop phase) is ignored.
      * - Other categories: logged for observability; no UI action yet.
      *
      * Sends an [MsgType.ACK] reply to confirm receipt.
      */
     /**
-     * Current V2 phase projection layer, observable by UI components.
-     * Updated whenever a phase-category STATE_EVENT is received.
+     * Projection layer of the agent's progress on this phone's own request.
+     * Updated whenever a request-progress phase STATE_EVENT is received.
      */
     @Volatile
     var currentV2PhaseLayer: AndroidPresenceProjectionLayer = AndroidPresenceProjectionLayer.STATIC
@@ -2920,23 +2926,25 @@ class GalaxyConnectionService : Service() {
 
         when (eventCategory) {
             "phase" -> {
-                Log.i(TAG, "[STATE_EVENT] Phase transition: ${payload?.from_phase} → $eventAction")
-                val projectionLayer = when (eventAction.uppercase()) {
-                    "SILENT" -> AndroidPresenceProjectionLayer.STATIC
-                    "LIMINAL" -> AndroidPresenceProjectionLayer.LIMINAL
-                    "MANIFEST" -> AndroidPresenceProjectionLayer.MANIFEST
-                    else -> null
-                }
-                projectionLayer?.let { layer ->
+                val phase = RequestProgress.phaseOf(eventCategory, eventAction, payload?.sync_type)
+                if (phase == null) {
+                    // 电脑的三态不显示在手机上(设备直接对智能体);只认这台手机自己那件请求的进度
+                    Log.d(TAG, "[STATE_EVENT] phase=$eventAction sync_type=${payload?.sync_type} ignored (not request progress)")
+                } else {
+                    Log.i(TAG, "[STATE_EVENT] Request progress: ${payload?.from_phase} → $eventAction")
+                    val layer = when (phase) {
+                        PhaseStateMachine.Phase.SILENT -> AndroidPresenceProjectionLayer.STATIC
+                        PhaseStateMachine.Phase.LIMINAL -> AndroidPresenceProjectionLayer.LIMINAL
+                        PhaseStateMachine.Phase.MANIFEST -> AndroidPresenceProjectionLayer.MANIFEST
+                    }
                     currentV2PhaseLayer = layer
                     // B7-FIX: Drive the canonical PhaseStateMachine for UI consumption
-                    val phase = PhaseStateMachine.Phase.fromWire(eventAction)
-                    phase?.let { phaseStateMachine.transitionTo(it) }
+                    phaseStateMachine.transitionTo(phase)
                     GalaxyLogger.log(
                         TAG, mapOf(
                             "event" to "phase_projection_updated",
                             "layer" to layer.wireValue,
-                            "source" to (payload?.source ?: "v2_desktop"),
+                            "source" to (payload?.source ?: ""),
                             "trace_id" to (traceId ?: "")
                         )
                     )
@@ -2990,7 +2998,7 @@ class GalaxyConnectionService : Service() {
      * cross-device message routing).
      *
      * Dispatches by [msgType]:
-     * - `"phase_change"`: Updates currentV2PhaseLayer (same as STATE_EVENT)
+     * - `"phase_change"`: ignored — the desktop tri-state is not shown on the phone
      * - `"task_done"`: Triggers haptic feedback + capsule expansion
      * - `"task_progress"`: Updates multi-device progress indicator
      * - `"text_result"`: Displays text result in floating capsule
@@ -3010,19 +3018,8 @@ class GalaxyConnectionService : Service() {
 
         when (msgType) {
             "phase_change" -> {
-                val toPhase = content?.get("to_phase") as? String ?: ""
-                Log.i(TAG, "[LIQUID] Phase change: → $toPhase (route=$route)")
-                val projectionLayer = when (toPhase.uppercase()) {
-                    "SILENT" -> AndroidPresenceProjectionLayer.STATIC
-                    "LIMINAL" -> AndroidPresenceProjectionLayer.LIMINAL
-                    "MANIFEST" -> AndroidPresenceProjectionLayer.MANIFEST
-                    else -> null
-                }
-                projectionLayer?.let { layer ->
-                    currentV2PhaseLayer = layer
-                    // LIQUID-ISLAND: trigger capsule animation on phase change
-                    eventBus.post(CapsulePhaseChangeEvent(layer, toPhase))
-                }
+                // 电脑的三态不显示在手机上(设备直接对智能体)。这台手机自己那件请求的进度走 state_event。
+                Log.d(TAG, "[LIQUID] phase_change ignored (route=$route)")
             }
             "task_done" -> {
                 val deviceName = content?.get("device_name") as? String ?: "设备"
@@ -3061,7 +3058,6 @@ class GalaxyConnectionService : Service() {
     //     DisposableEffect(Unit) {
     //         val bus = EventBus.getDefault()
     //         val subscriber = object {
-    //             @Subscribe fun onPhase(e: CapsulePhaseChangeEvent) { ... }
     //             @Subscribe fun onTaskDone(e: CapsuleTaskDoneEvent) { ... }
     //             @Subscribe fun onProgress(e: CapsuleProgressEvent) { ... }
     //             @Subscribe fun onText(e: CapsuleTextResultEvent) { capsuleState = ... }
@@ -3086,7 +3082,6 @@ class GalaxyConnectionService : Service() {
     //     }
     // }
     //
-    data class CapsulePhaseChangeEvent(val layer: AndroidPresenceProjectionLayer, val phase: String)
     data class CapsuleTaskDoneEvent(val deviceName: String)
     data class CapsuleProgressEvent(val completed: Int, val total: Int)
     data class CapsuleTextResultEvent(val text: String)

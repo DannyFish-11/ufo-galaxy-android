@@ -9,12 +9,13 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * B7-FIX: Canonical three-phase state machine (Silent / Liminal / Manifest).
  *
- * V2 Desktop sends phase transitions via `state_event` (category=phase) and
- * `liquid_event` (msg_type=phase_change).  This state machine:
+ * 它表示的是**智能体处理这台手机那件请求的进度**(SILENT = 手上没有这台手机的事,LIMINAL = 在想,
+ * MANIFEST = 在做),不是电脑的三态:电脑的三态不推给设备,手机也不显示(设备直接对智能体)。
+ * V2 只在回这台手机自己那件请求时发 `state_event`(category=phase,`payload.sync_type = "request_progress"`),
+ * 只有这种帧驱动它(见 [RequestProgress])。This state machine:
  *  1. Validates every transition against the allowed directed graph.
- *  2. Keeps the current phase in memory only — the phase is driven by the
- *     remote desktop peer, which re-sends the authoritative phase on
- *     (re)connect, so nothing is persisted across process restarts.
+ *  2. Keeps the current phase in memory only — nothing is persisted across process
+ *     restarts (a request in flight is not resumed across a restart either).
  *  3. Exposes a [StateFlow] that UI components (MainActivity, floating island)
  *     can collect to visualise the current phase.
  *

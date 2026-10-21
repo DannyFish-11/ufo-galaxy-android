@@ -66,8 +66,8 @@ class PresenceWidget : AppWidgetProvider() {
         }
         val text = s.statusText.ifBlank {
             when (s.phase) {
-                PresenceState.PHASE_MANIFEST -> "执行中…"
-                PresenceState.PHASE_LIMINAL -> "在想…"
+                PresenceState.PHASE_MANIFEST -> "在做你这件事…"
+                PresenceState.PHASE_LIMINAL -> "在想你这件事…"
                 else -> "在听"
             }
         }
