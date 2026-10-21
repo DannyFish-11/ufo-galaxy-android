@@ -397,7 +397,16 @@ enum class MsgType(val value: String) {
      * v2 侧定义见 `galaxy_gateway/protocol/aip_v3.MessageType.AGENT_MESSAGE`
      * 与 `core/schemas/aip_v3.AgentMessageMsg`。
      */
-    AGENT_MESSAGE("agent_message");
+    AGENT_MESSAGE("agent_message"),
+
+    /**
+     * 对外 A2A:中心智能体与派出去的 Agent(手机上的桥接 Agent、载体上的 Agent)之间的一条消息。
+     * 信封在 payload 里([A2AEnvelope]),带确认、去重、补发、按序号排序的「必达」语义,见 [A2ALink]。
+     * v2 侧定义见 `core/a2a_link.py`。
+     */
+    @SerialName("a2a")
+    @SerializedName("a2a")
+    A2A("a2a");
 
     companion object {
         /**

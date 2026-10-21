@@ -119,15 +119,16 @@ fun AipMessage.toWireJson(): String =
     com.ufo.galaxy.shared.protocol.AipMessage.toJson(toShared())
 
 /**
- * PR-CROSS-SYNC: State event payload — V2 pushes phase transitions and state changes
- * to Android via this payload.
+ * PR-CROSS-SYNC: State event payload. For the phase category V2 only sends the progress of
+ * this phone's own request (the desktop's tri-state is never pushed to devices).
  *
  * @param event_category  Event category: "phase" | "task" | "skill" | "device" | "mesh".
  * @param event_action    Event action: e.g. "silent", "liminal", "manifest" for phase category.
  * @param from_phase      Previous phase (for phase transition events).
  * @param to_phase        New phase (for phase transition events).
- * @param source          Source of the event, e.g. "desktop_presence_runtime".
- * @param sync_type       Sync type: "cross_device_broadcast" | "direct_push".
+ * @param source          Where the request came in (troubleshooting only).
+ * @param sync_type       `"request_progress"` for this phone's own request's progress
+ *                        ([com.ufo.galaxy.runtime.RequestProgress]); anything else is not shown.
  * @param payload         Extra event-specific data as key-value map.
  */
 data class StateEventPayload(
@@ -136,7 +137,7 @@ data class StateEventPayload(
     val from_phase: String = "",
     val to_phase: String = "",
     val source: String = "",
-    val sync_type: String = "cross_device_broadcast",
+    val sync_type: String = "",
     val payload: Map<String, Any> = emptyMap()
 )
 

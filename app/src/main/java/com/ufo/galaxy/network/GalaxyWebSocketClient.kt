@@ -491,6 +491,13 @@ class GalaxyWebSocketClient(
         fun onUnknownMessage(rawType: String?, rawJson: String) = Unit
 
         /**
+         * Called when an [com.ufo.galaxy.shared.protocol.MsgType.A2A] frame arrives: the
+         * center agent talking to the bridge agent on this phone (cross-device plan phase 3).
+         * [frameJson] is the whole frame; [com.ufo.galaxy.bridge.BridgeAgent] handles it.
+         */
+        fun onA2AFrame(frameJson: String) = Unit
+
+        /**
          * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
@@ -541,8 +548,8 @@ class GalaxyWebSocketClient(
          *灵动岛-style state and message delivery. Messages are routed
          * to the active conversation device first, then broadcast.
          *
-         * [msgType] is the liquid event type: "phase_change", "task_done",
-         * "task_progress", "text_result", etc.
+         * [msgType] is the liquid event type: "task_done", "task_progress", "text_result",
+         * etc. ("phase_change" is ignored: the desktop tri-state is not shown on the phone).
          * [contentJson] is the raw JSON of the liquid content object.
          * [route] indicates how the message was routed: "active_conversation"
          * or "broadcast".
@@ -1543,20 +1550,20 @@ class GalaxyWebSocketClient(
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT -> {
                     val payload = root.getAsJsonObject("payload")
-                    // 相变字段在【报文顶层】，不在 payload 里。V2 两个发送点
-                    // （galaxy_gateway/android_bridge.py、android/handlers/registration.py）
-                    // 发的都是：
+                    // 相变字段在【报文顶层】，不在 payload 里。V2 唯一的发送点
+                    // （core/cross_device_sync.tell_origin_device：这台手机自己那件请求的进度，
+                    // 电脑的三态不推给设备）发的是：
                     //
                     //     {"type":"state_event",
                     //      "event_category":"phase", "event_action":"liminal",   ← 顶层
-                    //      "payload":{"from_phase":..,"to_phase":..,"source":..}} ← 另外四个字段
+                    //      "payload":{"from_phase":..,"to_phase":..,"source":..,
+                    //                 "sync_type":"request_progress"}}            ← 手机只认这个标记
                     //
                     // 而这里原本读的是 payload 里的 "category"/"action" —— 位置和名字
                     // 双错。两个 ?: "" 兜底把它完全吞掉：不抛异常、不打日志，监听者
                     // 只是永远收到空串，于是三态在手机端从来没有真正生效过。
                     //
-                    // 另注：走 AIPTransport 的那条路径连 payload 都不带，所以顶层取值
-                    // 是唯一可靠的读法。
+                    // 顶层取值是这里唯一的读法；payload 原样交给监听者（要看 sync_type）。
                     val eventCategory = root.get("event_category")?.asString ?: ""
                     val eventAction = root.get("event_action")?.asString ?: ""
                     listeners.forEach {
@@ -1590,6 +1597,10 @@ class GalaxyWebSocketClient(
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.HEARTBEAT_ACK -> {
                     onPongReceived()
+                }
+                com.ufo.galaxy.shared.protocol.MsgType.A2A -> {
+                    // 中心智能体 ↔ 手机上的桥接 Agent(对外 A2A,信封在 payload 里)
+                    listeners.forEach { it.onA2AFrame(text) }
                 }
                 in com.ufo.galaxy.shared.protocol.MsgType.ADVANCED_TYPES -> {
                     val messageId = root.get("message_id")?.asString
@@ -2531,6 +2542,10 @@ class GalaxyWebSocketClient(
             }
             addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
+            // 每个动作的一句话说明 —— V2 原样交给中心智能体(设备整体卡),模型据此决定让谁做什么
+            add("action_descriptions", gson.toJsonTree(PhoneActionDescriptions.forActions(report.supported_actions)))
+            // 跨设备整体方案阶段 3:声明这台手机能装中心派来的桥接 Agent;不声明 V2 就不派(旧版 App 不会回确认)
+            addProperty("bridge_agent", com.ufo.galaxy.bridge.BridgeAgentRuntime.BRIDGE_VERSION)
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(handshakeMetadata))
             // PR-B2: registration posture — carried in capability_report for consistency with

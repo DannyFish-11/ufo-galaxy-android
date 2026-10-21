@@ -64,6 +64,9 @@ class UFOGalaxyApplication : Application() {
     
     companion object {
         private const val TAG = "UFOGalaxyApp"
+
+        /** 关跨设备时等中心交还上下文的最长时间(阶段 3 桥接 Agent)。 */
+        private const val BRIDGE_RETURN_GRACE_MS = 2_000L
         
         // 通知渠道 ID
         const val CHANNEL_SERVICE = "ufo_galaxy_service"
@@ -346,6 +349,15 @@ class UFOGalaxyApplication : Application() {
         // Initialise persistent session history store (PR-H).
         initSessionHistoryStore()
 
+        // 跨设备整体方案阶段 3:手机上的桥接 Agent(收中心派来的 Agent、交接上下文、对话桥接、委派、交还)。
+        com.ufo.galaxy.bridge.BridgeAgent.install(
+            client = webSocketClient,
+            scope = applicationScope,
+            loopExecutor = { runCatching { localLoopExecutor }.getOrNull() },
+            loopStatus = { runCatching { loopController.status }.getOrNull() },
+            history = { sessionHistoryStore.recent(5) }
+        )
+
         // Ensure model files are present at startup so that local loop and cross-device
         // runtime are both ready regardless of whether GalaxyConnectionService has started.
         // SECURITY-FIX: Use applicationScope instead of throwaway CoroutineScope for lifecycle-bound coroutines.
@@ -601,6 +613,18 @@ class UFOGalaxyApplication : Application() {
     fun setCrossDeviceEnabled(enabled: Boolean) {
         Log.i(TAG, "setCrossDeviceEnabled $enabled")
         if (!enabled) {
+            // 跨设备整体方案阶段 3:桥接 Agent 装着时先请中心交还上下文,等它回来(最多
+            // BRIDGE_RETURN_GRACE_MS)再断开;人接下来说的话立刻回到手机本地。没等到也照样断开 ——
+            // 中心那边已经记下了,下次连上时链路会补发。
+            if (com.ufo.galaxy.bridge.BridgeAgent.requestReturn()) {
+                appSettings.crossDeviceEnabled = false
+                applicationScope.launch {
+                    com.ufo.galaxy.bridge.BridgeAgent.awaitReturned(BRIDGE_RETURN_GRACE_MS)
+                    // 等的这一会儿里人又把跨设备打开了:别把新连接断掉
+                    if (!appSettings.crossDeviceEnabled) runtimeController.stop()
+                }
+                return
+            }
             // RuntimeController.stop() handles WS disconnect, settings update, and state transition.
             runtimeController.stop()
         } else {

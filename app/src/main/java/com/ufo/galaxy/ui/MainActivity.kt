@@ -42,6 +42,7 @@ import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
 import com.ufo.galaxy.ui.theme.UFOGalaxyTheme
 import com.ufo.galaxy.runtime.PhaseStateMachine
+import com.ufo.galaxy.runtime.RequestProgress
 import com.ufo.galaxy.ui.viewmodel.MainViewModel
 
 /**
@@ -365,7 +366,7 @@ private fun ConnectionStatusBar(
     crossDeviceEnabled: Boolean,
     queueSize: Int,
     reconnectAttempt: Int,
-    // C9-FIX: Current phase from PhaseStateMachine for UI visualization.
+    // 智能体处理这台手机那件请求的进度(不是电脑的三态,电脑的三态不显示在手机上)。
     currentPhase: PhaseStateMachine.Phase = PhaseStateMachine.Phase.SILENT
 ) {
     if (!crossDeviceEnabled) return
@@ -389,22 +390,18 @@ private fun ConnectionStatusBar(
                 style = MaterialTheme.typography.labelSmall,
                 color = tint
             )
-            // C9-FIX: Display current three-phase state with colour coding
-            val phaseLabel = when (currentPhase) {
-                PhaseStateMachine.Phase.SILENT -> "Silent"
-                PhaseStateMachine.Phase.LIMINAL -> "Liminal"
-                PhaseStateMachine.Phase.MANIFEST -> "Manifest"
+            // 智能体手上有这台手机的事时说一句它在想 / 在做;没有就不显示
+            RequestProgress.label(currentPhase)?.let { progress ->
+                Text(
+                    text = progress,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (currentPhase == PhaseStateMachine.Phase.MANIFEST) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.tertiary
+                    }
+                )
             }
-            val phaseColor = when (currentPhase) {
-                PhaseStateMachine.Phase.SILENT -> MaterialTheme.colorScheme.outline
-                PhaseStateMachine.Phase.LIMINAL -> MaterialTheme.colorScheme.tertiary
-                PhaseStateMachine.Phase.MANIFEST -> MaterialTheme.colorScheme.primary
-            }
-            Text(
-                text = "[$phaseLabel]",
-                style = MaterialTheme.typography.labelSmall,
-                color = phaseColor
-            )
             if (queueSize > 0) {
                 Text(
                     text = "队列: $queueSize",
@@ -634,7 +631,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                 }
 
                 // Read-only connection state + offline queue status bar (PR14).
-                // C9-FIX: Pass currentPhase to display three-phase state (SILENT/LIMINAL/MANIFEST).
+                // currentPhase:智能体处理这台手机那件请求的进度(电脑的三态不显示在手机上)。
                 ConnectionStatusBar(
                     isConnected = uiState.isConnected,
                     crossDeviceEnabled = uiState.crossDeviceEnabled,

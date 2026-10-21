@@ -7,7 +7,8 @@ package com.ufo.galaxy.surface
  * 状态由运行时(连接服务/相位状态机/灵动岛)写入 [PresenceStateStore],
  * 各表面只读取渲染。这保证"AI 在干嘛"在所有系统表面上口径一致。
  *
- * @param phase      三态相位 wire 值:silent / liminal / manifest
+ * @param phase      智能体处理这台手机那件请求的进度(wire 值 silent / liminal / manifest);
+ *                   不是电脑的三态 —— 电脑的三态不显示在手机上
  * @param connected  与 V2 主脑的 WebSocket 是否已连接(诚实值,不含乐观态)
  * @param statusText 一句话在场状态(如"在听""执行中:打开微信"),空串=无
  * @param updatedAtMs 最近一次写入时间(用于表面侧判断陈旧)

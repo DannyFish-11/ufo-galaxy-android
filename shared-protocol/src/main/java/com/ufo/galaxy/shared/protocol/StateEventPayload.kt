@@ -15,8 +15,10 @@ import kotlinx.serialization.Serializable
  * @param eventAction    Event action: e.g. `"silent"`, `"liminal"`, `"manifest"` for phase category.
  * @param fromPhase      Previous phase (for phase transition events).
  * @param toPhase        New phase (for phase transition events).
- * @param source         Source of the event, e.g. `"desktop_presence_runtime"`.
- * @param syncType       Sync type: `"cross_device_broadcast"` | `"direct_push"`.
+ * @param source         Where the request came in (troubleshooting only).
+ * @param syncType       For the phase category, `"request_progress"`: the progress of this device's own
+ *                       request. The desktop's tri-state is never pushed to devices (devices talk to the
+ *                       agent directly), so a phase frame without this marker is not shown.
  * @param payload        Extra event-specific data as key-value map.
  *
  * **Both annotation families are required.**  `@SerialName` covers
@@ -35,6 +37,6 @@ data class StateEventPayload(
     @SerialName("from_phase") @SerializedName("from_phase") val fromPhase: String = "",
     @SerialName("to_phase") @SerializedName("to_phase") val toPhase: String = "",
     val source: String = "",
-    @SerialName("sync_type") @SerializedName("sync_type") val syncType: String = "cross_device_broadcast",
+    @SerialName("sync_type") @SerializedName("sync_type") val syncType: String = "",
     val payload: Map<String, String> = emptyMap()
 )

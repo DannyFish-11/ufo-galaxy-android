@@ -76,7 +76,8 @@ class FloatingIslandActivity : ComponentActivity() {
                     }
                 } else {
                     try {
-                        runtimeController.stop()
+                        // 经应用层关:桥接 Agent 装着时先请中心交还上下文再断开(阶段 3)
+                        UFOGalaxyApplication.instance?.setCrossDeviceEnabled(false) ?: runtimeController.stop()
                         Toast.makeText(this@FloatingIslandActivity, "本地模式", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to stop runtime controller: ${e.message}", e)

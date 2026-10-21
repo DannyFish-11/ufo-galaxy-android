@@ -160,8 +160,18 @@ class EnhancedFloatingService : Service() {
                 taskStatus = STATUS_ERROR
                 updateStatusLabel()
                 loadingIndicator?.post { loadingIndicator?.visibility = android.view.View.GONE }
-            }
+            },
+            conversationBridge = { text -> com.ufo.galaxy.bridge.BridgeAgent.say(text) }
         )
+    }
+
+    /** 桥接 Agent 的回答到了:收起加载,状态标成功或失败(正文在主界面的对话里)。 */
+    private val bridgeListener = object : com.ufo.galaxy.bridge.BridgeAgent.Listener {
+        override fun onReply(text: String, success: Boolean) {
+            taskStatus = if (success) STATUS_SUCCESS else STATUS_ERROR
+            statusText?.post { updateStatusLabel() }
+            loadingIndicator?.post { loadingIndicator?.visibility = View.GONE }
+        }
     }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener
@@ -272,6 +282,7 @@ class EnhancedFloatingService : Service() {
             Log.w(TAG, "Exception unregistering receiver: ${e.message}")
         }
         edgeTrigger?.stop()
+        com.ufo.galaxy.bridge.BridgeAgent.removeListener(bridgeListener)
         try {
             if (::wsListener.isInitialized) {
                 webSocketClient.removeListener(wsListener)
@@ -401,7 +412,8 @@ class EnhancedFloatingService : Service() {
                                 }
                             }
                         } else {
-                            UFOGalaxyApplication.runtimeController.stop()
+                            // 经应用层关:桥接 Agent 装着时先请中心交还上下文再断开(阶段 3)
+                            UFOGalaxyApplication.instance?.setCrossDeviceEnabled(false) ?: UFOGalaxyApplication.runtimeController.stop()
                         }
                     }
                 }
@@ -661,6 +673,7 @@ class EnhancedFloatingService : Service() {
             }
         }
         webSocketClient.addListener(wsListener)
+        com.ufo.galaxy.bridge.BridgeAgent.addListener(bridgeListener)
     }
 
     /**
