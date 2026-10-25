@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.all { it.value }
+        requestAgentPermissions()
         if (allGranted) {
             Log.d(TAG, "所有权限已授予")
             startServices()
@@ -88,6 +89,12 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    // 让智能体能用手机的位置、通讯录、日历(手机的直接动作,见 com.ufo.galaxy.phone)。可选:不给照常用,
+    // 只是这几项不报给智能体。和上面那组分开要 —— 上面那组没全给就不起服务,这几项不该挡住它。
+    private val agentPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { refreshPhoneActions() }
+
     // 悬浮窗权限请求
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -187,6 +194,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         mainViewModel.onResume()
+        // 人可能刚在系统设置里给了 / 收回了权限,或开了无障碍:做得了的动作变了就重报
+        refreshPhoneActions()
     }
     
     override fun onPause() {
@@ -229,6 +238,7 @@ class MainActivity : ComponentActivity() {
         } else {
             Log.d(TAG, "All permissions already granted — skipping request")
             startServices()
+            requestAgentPermissions()
         }
 
         // B1-FIX: Request battery optimization exemption for long-running foreground service
@@ -244,6 +254,23 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    /** 要智能体用得上的那几项权限(位置、通讯录、日历);只要还没给的。 */
+    private fun requestAgentPermissions() {
+        val wanted = listOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.READ_CALENDAR,
+        ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) agentPermissionLauncher.launch(wanted.toTypedArray())
+    }
+
+    private fun refreshPhoneActions() {
+        runCatching {
+            com.ufo.galaxy.phone.PhoneCommands.refreshIfChanged(com.ufo.galaxy.UFOGalaxyApplication.webSocketClient)
+        }.onFailure { Log.w(TAG, "能力重报失败: ${it.message}") }
+    }
+
     /**
      * CRITICAL: Shows a dialog guiding the user to the app settings when one or more
      * permissions have been permanently denied ("Don't ask again").

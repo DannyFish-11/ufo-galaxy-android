@@ -498,6 +498,12 @@ class GalaxyWebSocketClient(
         fun onA2AFrame(frameJson: String) = Unit
 
         /**
+         * 中心经 `devices__invoke` 让手机直接做一件事(`command` 帧,顶层带 `command_id` 和 `command`)。
+         * 接的一方做完要回 `command_result`(见 [com.ufo.galaxy.phone.PhoneCommands]);中心按 command_id 等结果。
+         */
+        fun onDeviceCommand(commandId: String, action: String, paramsJson: String) = Unit
+
+        /**
          * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
@@ -895,6 +901,13 @@ class GalaxyWebSocketClient(
      * Update via [setModelCapabilities] when planner/grounding services become ready.
      */
     private var modelCapabilities: List<String> = emptyList()
+
+    /**
+     * 手机做得了的直接动作(能力上报的 `supported_actions`)。由 [com.ufo.galaxy.phone.PhoneCommands] 设:
+     * 只报实现了、人也给了权限的。没装上时一个都不报 —— 报了没人接,中心只会干等。
+     */
+    @Volatile
+    var phoneActions: () -> List<String> = { emptyList() }
 
     /**
      * High-level autonomous capability names included in the capability_report.
@@ -1503,6 +1516,18 @@ class GalaxyWebSocketClient(
             if (msgTypeStr == "response") {
                 val responsePayload = root.getAsJsonObject("payload")
                 listeners.forEach { it.onMessage(responsePayload?.get("content")?.asString ?: text) }
+                return
+            }
+
+            // 中心让手机直接做一件事(V2 send_command_and_wait:顶层 command_id + command + params)。
+            // 必须在下面那层 legacy 归一之前认出来:那层把 `command` 一律改成 task_assign,当成一个「目标」
+            // 交给本地循环 —— 目标是空的,也不回 command_result,中心干等 30 秒报超时。旧式 `command`
+            // (payload 里带目标、没有 command_id)不是这个,照旧走归一。
+            if (com.ufo.galaxy.phone.DeviceCommandFrames.isDeviceCommand(root)) {
+                val commandId = com.ufo.galaxy.phone.DeviceCommandFrames.commandId(root)
+                val action = com.ufo.galaxy.phone.DeviceCommandFrames.action(root)
+                val params = com.ufo.galaxy.phone.DeviceCommandFrames.params(root).toString()
+                listeners.forEach { it.onDeviceCommand(commandId, action, params) }
                 return
             }
 
@@ -2378,8 +2403,8 @@ class GalaxyWebSocketClient(
      *  - `platform` / `device_id` / `version` — stable device identity fields.
      *  - `device_type` — always `"Android_Agent"`.
      *  - `trace_id` / `route_mode` — per-session observability fields.
-     *  - `supported_actions` — merged low-level action list from [baseActions] and
-     *    [modelCapabilities] (set via [setModelCapabilities]).
+     *  - `supported_actions` — the phone's direct actions from [phoneActions] (only what is implemented
+     *    and permitted) merged with [modelCapabilities] (set via [setModelCapabilities]).
      *  - `capabilities` — high-level autonomous capability names from [highLevelCapabilities]
      *    (set via [setHighLevelCapabilities]), defaulting to the standard 5-capability set.
      *  - `metadata` — the full 8-field canonical runtime identity map (see
@@ -2463,12 +2488,39 @@ class GalaxyWebSocketClient(
                     "formation_role=${hostDescriptor.formationRole.wireValue} " +
                     "participation_state=${hostDescriptor.participationState.wireValue}" else "")
 
-        val baseActions = listOf(
-            "location", "camera", "sensor_data", "automation",
-            "notification", "sms", "phone_call", "contacts",
-            "calendar", "voice_input", "screen_capture", "app_control"
+        sendCapabilityReport(
+            deviceId, hostDescriptor, hostMeta, attachmentSessionId, durableId, continuityEpoch, registrationPosture
         )
-        val allActions = (baseActions + modelCapabilities).distinct()
+    }
+
+    /**
+     * 只重发能力上报(不重发登记)。手机做得了的直接动作变了时用 —— 人刚在设置里给了或收回了权限
+     * (见 [com.ufo.galaxy.phone.PhoneCommands.refreshIfChanged])。没连着就不发,下次连上的握手会带上新的。
+     */
+    fun refreshCapabilityReport() {
+        if (!isConnected) return
+        val hostDescriptor = runtimeHostDescriptor
+        sendCapabilityReport(
+            deviceId = getDeviceId(),
+            hostDescriptor = hostDescriptor,
+            hostMeta = hostDescriptor?.toMetadataMap() ?: emptyMap(),
+            attachmentSessionId = runtimeAttachmentSessionId,
+            durableId = durableSessionId,
+            continuityEpoch = sessionContinuityEpoch,
+            registrationPosture = currentRegistrationPosture(),
+        )
+    }
+
+    private fun sendCapabilityReport(
+        deviceId: String,
+        hostDescriptor: RuntimeHostDescriptor?,
+        hostMeta: Map<String, Any>,
+        attachmentSessionId: String?,
+        durableId: String?,
+        continuityEpoch: Int?,
+        registrationPosture: String,
+    ) {
+        val allActions = (phoneActions() + modelCapabilities).distinct()
 
         // PR-5: merge runtime-host identity metadata into the capability_report so the
         // gateway session-truth layer has complete host representation on the first report.

@@ -12,22 +12,15 @@ package com.ufo.galaxy.network
  */
 object PhoneActionDescriptions {
 
-    val DESCRIPTIONS: Map<String, String> = mapOf(
-        "location" to "读手机当前位置",
-        "camera" to "用手机摄像头拍照",
-        "sensor_data" to "读手机传感器(加速度、光线等)",
-        "automation" to "在手机上跑一段自动化操作",
-        "notification" to "在手机上弹一条通知",
-        "sms" to "发一条短信(要人确认)",
-        "phone_call" to "拨打电话(要人确认)",
-        "contacts" to "查手机通讯录",
-        "calendar" to "查或加手机日程",
-        "voice_input" to "用手机麦克风听一段话",
-        "screen_capture" to "截一张手机当前屏幕",
-        "app_control" to "打开、切换或操作手机上的应用",
-        "goal_execution" to "把一个完整目标交给手机自己规划完成(本地视觉模型 + 无障碍执行)",
-        "local_model_inference" to "用手机本地模型推理",
-    )
+    /**
+     * 直接动作的说明来自 [com.ufo.galaxy.phone.PhoneActionCatalog](带参数,手机真做得了的才报);
+     * 另外两项是模型就绪后才报的能力。
+     */
+    val DESCRIPTIONS: Map<String, String> =
+        com.ufo.galaxy.phone.PhoneActionCatalog.ACTIONS.associate { it.name to it.description } + mapOf(
+            "goal_execution" to "把一个完整目标交给手机自己规划完成(本地视觉模型 + 无障碍执行);整段目标用 devices__delegate 交",
+            "local_model_inference" to "用手机本地模型推理",
+        )
 
     /** 只给真正上报了的动作配说明。 */
     fun forActions(actions: List<String>): Map<String, String> =
