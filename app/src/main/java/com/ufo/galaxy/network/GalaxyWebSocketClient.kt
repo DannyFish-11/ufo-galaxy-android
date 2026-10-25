@@ -504,6 +504,12 @@ class GalaxyWebSocketClient(
         fun onDeviceCommand(commandId: String, action: String, paramsJson: String) = Unit
 
         /**
+         * 网关下行的通话信令(`voice_call_accepted` / `voice_call_end` / `voice_event` / `voice_ice`),整帧原文。
+         * 通话期间由 [com.ufo.galaxy.call.PhoneCallService] 接(见 [com.ufo.galaxy.call.CallFrames])。
+         */
+        fun onVoiceCallFrame(frameJson: String) = Unit
+
+        /**
          * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
@@ -1626,6 +1632,13 @@ class GalaxyWebSocketClient(
                 com.ufo.galaxy.shared.protocol.MsgType.A2A -> {
                     // 中心智能体 ↔ 手机上的桥接 Agent(对外 A2A,信封在 payload 里)
                     listeners.forEach { it.onA2AFrame(text) }
+                }
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_CALL_ACCEPTED,
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_CALL_END,
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_EVENT,
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_ICE -> {
+                    // 和智能体通话的信令(网关 voice_call_route);通话期间 PhoneCallService 在听
+                    listeners.forEach { it.onVoiceCallFrame(text) }
                 }
                 in com.ufo.galaxy.shared.protocol.MsgType.ADVANCED_TYPES -> {
                     val messageId = root.get("message_id")?.asString

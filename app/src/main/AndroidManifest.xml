@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 和智能体通话(com.ufo.galaxy.call.PhoneCallService):Android 14 起后台用麦克风要麦克风型前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- CRITICAL-4-FIX: SYSTEM_ALERT_WINDOW is required for FloatingIslandActivity & FloatingWindowService overlay UI. -->
     <!-- Protected at runtime by Settings > Apps > Special access > Display over other apps (user-granted). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -259,6 +261,12 @@
                 android:name="android.speech"
                 android:resource="@xml/recognition_service" />
         </service>
+
+        <!-- 和智能体通话期间的前台服务(麦克风型):挂断就停 -->
+        <service
+            android:name=".call.PhoneCallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
     </application>
 

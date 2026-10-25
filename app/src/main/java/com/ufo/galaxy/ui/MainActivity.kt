@@ -16,6 +16,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -32,11 +33,13 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
+import com.ufo.galaxy.call.PhoneCallService
 import com.ufo.galaxy.service.EnhancedFloatingService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
 import com.ufo.galaxy.ui.components.DiagnosticsScreen
 import com.ufo.galaxy.ui.components.LocalLoopDebugPanel
+import com.ufo.galaxy.ui.components.PhoneCallScreen
 import com.ufo.galaxy.ui.components.ScrollPaperContainer
 import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
@@ -532,6 +535,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
         return
     }
 
+    // 和智能体通话中:整屏是通话界面(通话本体在 PhoneCallService 里,界面只看它的状态)
+    val call by PhoneCallService.controller.collectAsState()
+    call?.let { c ->
+        PhoneCallScreen(controller = c, onHangup = { PhoneCallService.hangup(context) })
+        return
+    }
+    // 上一通没打成 / 断了:说清楚为什么(正常挂断不说)
+    PhoneCallService.lastFailure.collectAsState().value?.let { why ->
+        AlertDialog(
+            onDismissRequest = { PhoneCallService.clearFailure() },
+            title = { Text("通话没接通") },
+            text = { Text(why) },
+            confirmButton = { TextButton(onClick = { PhoneCallService.clearFailure() }) { Text("知道了") } },
+        )
+    }
+
     // Show registration failure dialog when cross-device registration fails.
     uiState.registrationFailure?.let { reason ->
         AlertDialog(
@@ -613,6 +632,21 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
+                        // 和智能体通话:连着网关才能打(信令走同一条连接)
+                        IconButton(
+                            onClick = {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                                    PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    PhoneCallService.start(context)
+                                } else {
+                                    Toast.makeText(context, "通话要麦克风权限", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = uiState.isConnected,
+                        ) {
+                            Icon(Icons.Default.Call, contentDescription = "和智能体通话")
+                        }
                         // Diagnostics button (PR15)
                         IconButton(onClick = { viewModel.toggleDiagnostics() }) {
                             Icon(Icons.Default.Info, contentDescription = "Diagnostics")
