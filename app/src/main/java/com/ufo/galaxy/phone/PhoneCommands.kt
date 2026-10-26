@@ -40,6 +40,8 @@ object PhoneCommands {
                 hostsAgent = com.ufo.galaxy.bridge.BridgeAgentRuntime.BRIDGE_VERSION,
             )
         }
+        val appContext = context.applicationContext
+        client.deviceState = { PhoneState.build(AndroidPhoneState.read(appContext)).toJson() }
         client.addListener(object : GalaxyWebSocketClient.Listener {
             override fun onConnected() = Unit
             override fun onDisconnected() = Unit

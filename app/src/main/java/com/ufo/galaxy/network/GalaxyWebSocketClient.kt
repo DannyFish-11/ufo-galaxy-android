@@ -930,6 +930,13 @@ class GalaxyWebSocketClient(
     var selfDescription: () -> kotlinx.serialization.json.JsonObject? = { null }
 
     /**
+     * 这台手机此刻的状态(心跳帧的 `payload.state`,见 [com.ufo.galaxy.phone.PhoneState]),也由
+     * [com.ufo.galaxy.phone.PhoneCommands] 设。每一拍心跳都带上此刻的全部状态,V2 `core/device_state.py` 整份替换上一份。
+     */
+    @Volatile
+    var deviceState: () -> kotlinx.serialization.json.JsonObject? = { null }
+
+    /**
      * High-level autonomous capability names included in the capability_report.
      * Updated via [setHighLevelCapabilities] when the device role is determined.
      */
@@ -3236,6 +3243,12 @@ class GalaxyWebSocketClient(
             addProperty("reconnect_attempts", reconnectAttempts)
             if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
             addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = "heartbeat"))
+            // 手机此刻的状态(电量、屏幕、通话、勿扰):读不到就不带,心跳照发
+            runCatching { deviceState() }.getOrNull()?.let { state ->
+                add("payload", JsonObject().apply {
+                    add(com.ufo.galaxy.shared.protocol.DeviceState.KEY, JsonParser.parseString(state.toString()))
+                })
+            }
         }
         val json = gson.toJson(heartbeat)
         val sent = webSocket?.send(json) ?: false

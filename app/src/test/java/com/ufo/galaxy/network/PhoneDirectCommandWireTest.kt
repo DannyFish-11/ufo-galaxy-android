@@ -138,6 +138,34 @@ class PhoneDirectCommandWireTest {
     }
 
     @Test
+    fun `each heartbeat carries the phone's state when one is installed`() {
+        val c = client()
+        val socket = RecordingWebSocket()
+        c.installWebSocketForTest(socket)
+        val sendHeartbeat = GalaxyWebSocketClient::class.java.getDeclaredMethod("sendHeartbeat").also { it.isAccessible = true }
+        sendHeartbeat.invoke(c)
+        assertFalse("没装上就不带状态,心跳照发", frames(socket, "heartbeat").single().has("payload"))
+
+        c.deviceState = {
+            com.ufo.galaxy.phone.PhoneState.build(
+                com.ufo.galaxy.phone.PhoneState.Readings(battery = 0.62f, charging = false, screenOn = true, inCall = false, dnd = true),
+            ).toJson()
+        }
+        socket.sent.clear()
+        sendHeartbeat.invoke(c)
+        val state = frames(socket, "heartbeat").single().getAsJsonObject("payload").getAsJsonObject("state")
+        assertEquals(0.62, state["battery"].asDouble, 0.001)
+        assertTrue(state["screen_on"].asBoolean)
+        assertEquals("blocked", state["interruptible"].asString)
+        assertFalse("手机不知道戴没戴着,不报", state.has("worn"))
+
+        c.deviceState = { throw IllegalStateException("读不到") }
+        socket.sent.clear()
+        sendHeartbeat.invoke(c)
+        assertFalse("读状态出错也不耽误心跳", frames(socket, "heartbeat").single().has("payload"))
+    }
+
+    @Test
     fun `a permission change resends only the capability report`() {
         val c = client()
         var actions = listOf("sensor_data")
