@@ -511,6 +511,12 @@ class GalaxyWebSocketClient(
         fun onVoiceCallFrame(frameJson: String) = Unit
 
         /**
+         * 中心智能体问人一件事(`decision_request`)或撤回一件(`decision_withdraw`),整帧原文。
+         * 由 [com.ufo.galaxy.phone.PhoneDecisions] 接:弹通知、把人点的选项以 `human_input` 回去。
+         */
+        fun onDecisionFrame(frameJson: String) = Unit
+
+        /**
          * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
@@ -1640,6 +1646,11 @@ class GalaxyWebSocketClient(
                 com.ufo.galaxy.shared.protocol.MsgType.A2A -> {
                     // 中心智能体 ↔ 手机上的桥接 Agent(对外 A2A,信封在 payload 里)
                     listeners.forEach { it.onA2AFrame(text) }
+                }
+                com.ufo.galaxy.shared.protocol.MsgType.DECISION_REQUEST,
+                com.ufo.galaxy.shared.protocol.MsgType.DECISION_WITHDRAW -> {
+                    // 中心智能体问人 / 撤回(手机声明了能回答提问才会收到,见 phone/PhoneSelfDescription)
+                    listeners.forEach { it.onDecisionFrame(text) }
                 }
                 com.ufo.galaxy.shared.protocol.MsgType.VOICE_CALL_ACCEPTED,
                 com.ufo.galaxy.shared.protocol.MsgType.VOICE_CALL_END,

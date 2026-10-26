@@ -177,6 +177,17 @@
                 android:resource="@xml/file_provider_paths" />
         </provider>
 
+        <!-- 中心智能体问人:通知上的选项按钮、点开通知的选项对话框(phone/PhoneDecisions.kt)。 -->
+        <receiver
+            android:name=".phone.DecisionReplyReceiver"
+            android:exported="false" />
+        <activity
+            android:name=".phone.DecisionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- 原生表面①:主屏小组件(AI 常驻桌面,对标 Friends 一体感)。 -->
         <receiver
             android:name=".widget.PresenceWidget"

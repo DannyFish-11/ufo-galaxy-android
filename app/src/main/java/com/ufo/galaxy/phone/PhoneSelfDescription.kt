@@ -34,8 +34,8 @@ object PhoneSelfDescription {
                 DeviceSelfDescription.Unavailable(name, reason)
             },
             declares = Declares(
-                // 手机上还没有显示提问的界面,不声明;加上之后再声明(V2 设计文档第 8 节第 2 步)
-                answersDecisions = false,
+                // 提问弹成通知(PhoneDecisions):通知打得开才能回答,打不开就不声明 —— 免得中心白等
+                answersDecisions = available(PhoneActionCatalog.Need.NOTIFICATIONS),
                 // 手机会显示自己发起的那件请求做到哪了(runtime/RequestProgress.kt)
                 showsRequestProgress = true,
                 hostsAgent = hostsAgent,

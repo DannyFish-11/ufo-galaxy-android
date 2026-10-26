@@ -68,8 +68,11 @@ class PhoneSelfDescriptionTest {
     @Test
     fun `the four declarations are what this phone really does`() {
         val d = PhoneSelfDescription.build(all, "Pixel 9", "Pixel 9", "bridge/1")["declares"]!!.jsonObject
-        // 还没有显示提问的界面
-        assertFalse(d["answers_decisions"]!!.jsonPrimitive.boolean)
+        // 提问弹成通知(PhoneDecisions):通知打得开就能回答
+        assertTrue(d["answers_decisions"]!!.jsonPrimitive.boolean)
+        val noNotifications: (PhoneActionCatalog.Need) -> Boolean = { it != PhoneActionCatalog.Need.NOTIFICATIONS }
+        val blocked = PhoneSelfDescription.build(noNotifications, "Pixel 9", "Pixel 9", "bridge/1")["declares"]!!.jsonObject
+        assertFalse("通知打不开就不声明,免得中心白等", blocked["answers_decisions"]!!.jsonPrimitive.boolean)
         assertTrue(d["shows_request_progress"]!!.jsonPrimitive.boolean)
         assertEquals("bridge/1", d["hosts_agent"]!!.jsonPrimitive.content)
         assertEquals("none", d["tailnet"]!!.jsonPrimitive.content)
