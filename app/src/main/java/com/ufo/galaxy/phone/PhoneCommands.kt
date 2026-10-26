@@ -32,6 +32,14 @@ object PhoneCommands {
         effects = fx
         val executor = PhoneCommandExecutor(fx)
         client.phoneActions = { reportable().also { lastReported = it } }
+        client.selfDescription = {
+            PhoneSelfDescription.build(
+                available = fx::available,
+                deviceName = android.os.Build.MODEL.orEmpty(),
+                model = android.os.Build.MODEL.orEmpty(),
+                hostsAgent = com.ufo.galaxy.bridge.BridgeAgentRuntime.BRIDGE_VERSION,
+            )
+        }
         client.addListener(object : GalaxyWebSocketClient.Listener {
             override fun onConnected() = Unit
             override fun onDisconnected() = Unit

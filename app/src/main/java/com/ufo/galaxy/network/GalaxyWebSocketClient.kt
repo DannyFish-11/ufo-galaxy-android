@@ -9,6 +9,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.ufo.galaxy.BuildConfig
 import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
@@ -914,6 +915,13 @@ class GalaxyWebSocketClient(
      */
     @Volatile
     var phoneActions: () -> List<String> = { emptyList() }
+
+    /**
+     * 这台手机的设备自述(`self_description`,见 [com.ufo.galaxy.phone.PhoneSelfDescription]),也由
+     * [com.ufo.galaxy.phone.PhoneCommands] 设。没装上时不带 —— V2 照旧从下面那些散字段读。
+     */
+    @Volatile
+    var selfDescription: () -> kotlinx.serialization.json.JsonObject? = { null }
 
     /**
      * High-level autonomous capability names included in the capability_report.
@@ -2607,6 +2615,10 @@ class GalaxyWebSocketClient(
             }
             addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
+            // 设备自述(V2 core/device_self.py):带了就以它为准;下面的散字段过渡期照发,给还没升级的中心读
+            selfDescription()?.let {
+                add(com.ufo.galaxy.shared.protocol.DeviceSelfDescription.KEY, JsonParser.parseString(it.toString()))
+            }
             // 每个动作的一句话说明 —— V2 原样交给中心智能体(设备整体卡),模型据此决定让谁做什么
             add("action_descriptions", gson.toJsonTree(PhoneActionDescriptions.forActions(report.supported_actions)))
             // 跨设备整体方案阶段 3:声明这台手机能装中心派来的桥接 Agent;不声明 V2 就不派(旧版 App 不会回确认)

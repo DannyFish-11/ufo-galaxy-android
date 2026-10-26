@@ -114,6 +114,30 @@ class PhoneDirectCommandWireTest {
     }
 
     @Test
+    fun `the report carries the phone's self description when one is installed`() {
+        val c = client()
+        c.phoneActions = { listOf("location") }
+        val socket = RecordingWebSocket()
+        c.installWebSocketForTest(socket)
+        c.simulateCanonicalReconnectOpenForTest()
+        assertFalse("没装上就不带自述,中心照旧读散字段", frames(socket, "capability_report").single().has("self_description"))
+
+        c.selfDescription = {
+            com.ufo.galaxy.phone.PhoneSelfDescription.build(
+                { it == PhoneActionCatalog.Need.LOCATION }, "Pixel 9", "Pixel 9", "bridge/1",
+            )
+        }
+        socket.sent.clear()
+        c.refreshCapabilityReport()
+        val self = frames(socket, "capability_report").single().getAsJsonObject("self_description")
+        assertEquals("device_self/1", self["schema"].asString)
+        val actions = self.getAsJsonArray("actions").map { it.asJsonObject }
+        assertTrue(actions.any { it["name"].asString == "location" && it["effect"].asString == "read" })
+        assertTrue("没给权限的进 unavailable", self.getAsJsonArray("unavailable").any { it.asJsonObject["name"].asString == "contacts" })
+        assertEquals("bridge/1", self.getAsJsonObject("declares")["hosts_agent"].asString)
+    }
+
+    @Test
     fun `a permission change resends only the capability report`() {
         val c = client()
         var actions = listOf("sensor_data")
