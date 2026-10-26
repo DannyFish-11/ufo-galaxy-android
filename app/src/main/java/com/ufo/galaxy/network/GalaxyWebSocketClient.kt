@@ -2611,6 +2611,9 @@ class GalaxyWebSocketClient(
             add("action_descriptions", gson.toJsonTree(PhoneActionDescriptions.forActions(report.supported_actions)))
             // 跨设备整体方案阶段 3:声明这台手机能装中心派来的桥接 Agent;不声明 V2 就不派(旧版 App 不会回确认)
             addProperty("bridge_agent", com.ufo.galaxy.bridge.BridgeAgentRuntime.BRIDGE_VERSION)
+            // 手机会显示自己发起的那件请求做到哪了(state_event 的 request_progress,见 runtime/RequestProgress.kt);
+            // 中心按这一项决定推不推进度,不按设备类型(V2 core/device_declarations.py)
+            addProperty("shows_request_progress", true)
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(handshakeMetadata))
             // PR-B2: registration posture — carried in capability_report for consistency with

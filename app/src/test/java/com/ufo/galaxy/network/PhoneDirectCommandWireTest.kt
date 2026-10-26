@@ -108,6 +108,9 @@ class PhoneDirectCommandWireTest {
         assertEquals(listOf("location", "sms"), report.getAsJsonArray("supported_actions").map { it.asString })
         val said = report.getAsJsonObject("action_descriptions")
         assertEquals(PhoneActionCatalog.BY_NAME.getValue("sms").description, said["sms"].asString)
+        // 中心按设备自己的声明决定推不推请求进度,不看设备类型
+        assertTrue("手机会显示自己那件请求的进度", report["shows_request_progress"].asBoolean)
+        assertFalse("手机没有显示提问的界面,不声明能回答提问", report.has("answers_decisions"))
     }
 
     @Test
