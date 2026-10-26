@@ -199,6 +199,8 @@ class MainActivity : ComponentActivity() {
         mainViewModel.onResume()
         // 人可能刚在系统设置里给了 / 收回了权限,或开了无障碍:做得了的动作变了就重报
         refreshPhoneActions()
+        // 位置权限是服务起来之后才给的:从界面再起一次,把 location 类型补上
+        GalaxyConnectionService.upgradeIfNeeded(this)
     }
     
     override fun onPause() {
@@ -349,7 +351,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun startServices() {
         // 启动 Galaxy 连接服务
-        val connectionIntent = GalaxyConnectionService.createMainEntryIntent(this)
+        // 从界面拉起:给了位置权限就带上 location 类型,手机在兜里时智能体也读得到位置
+        val connectionIntent = GalaxyConnectionService.createVisibleEntryIntent(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(connectionIntent)
         } else {

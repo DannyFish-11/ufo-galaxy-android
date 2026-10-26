@@ -23,6 +23,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 和智能体通话(com.ufo.galaxy.call.PhoneCallService):Android 14 起后台用麦克风要麦克风型前台服务 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 常驻连接服务在应用可见时带上 location 类型起,手机在兜里时智能体也读得到位置(service/ForegroundTypes.kt) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- CRITICAL-4-FIX: SYSTEM_ALERT_WINDOW is required for FloatingIslandActivity & FloatingWindowService overlay UI. -->
     <!-- Protected at runtime by Settings > Apps > Special access > Display over other apps (user-granted). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -90,7 +92,7 @@
             android:name=".service.GalaxyConnectionService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|location">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="ai_assistant" />
