@@ -358,6 +358,12 @@ class UFOGalaxyApplication : Application() {
             history = { sessionHistoryStore.recent(5) }
         )
 
+        // 手机的直接动作:中心经 devices__invoke 让手机做一件事(通知、定位、传感器、查通讯录 / 日程、
+        // 备好短信 / 拨号 / 日程让人点、打开应用、截屏),做完回 command_result。只报做得了的。
+        com.ufo.galaxy.phone.PhoneCommands.install(webSocketClient, this, applicationScope)
+        // 中心智能体问人:弹通知、把人点的选项回给中心(手机声明了能回答提问,见 PhoneSelfDescription)
+        com.ufo.galaxy.phone.PhoneDecisions.install(webSocketClient, this)
+
         // Ensure model files are present at startup so that local loop and cross-device
         // runtime are both ready regardless of whether GalaxyConnectionService has started.
         // SECURITY-FIX: Use applicationScope instead of throwaway CoroutineScope for lifecycle-bound coroutines.
@@ -702,8 +708,7 @@ class UFOGalaxyApplication : Application() {
             settings = appSettings,
             goalExecutor = localGoalExecutor,
             collaborationAgent = localCollaborationAgent,
-            deviceId = deviceId,
-            deviceRole = appSettings.deviceRole
+            deviceId = deviceId
         )
         loopController = LoopController(
             localPlanner = LocalPlanner(plannerService = plannerService),

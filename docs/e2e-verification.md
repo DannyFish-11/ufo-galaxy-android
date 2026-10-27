@@ -152,7 +152,6 @@ The device sends back a `goal_result` envelope. Required fields:
 | `payload.status` | `"success"` or `"error"` |
 | `payload.latency_ms` | non-negative integer |
 | `payload.device_id` | non-empty string |
-| `payload.device_role` | e.g. `"phone"` |
 | `payload.group_id` | `null` (standalone goal) |
 | `payload.subtask_index` | `null` (standalone goal) |
 

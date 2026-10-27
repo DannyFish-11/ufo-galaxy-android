@@ -217,7 +217,6 @@ data class AndroidParticipantRuntimeTruth(
     val capabilityTruthLevel: RuntimeNodeCapabilityTruthLevel
         get() = runtimeNodeIdentity?.capabilityTruthLevel
             ?: deriveFallbackCapabilityTruthLevel(
-                deviceRole = deviceRole,
                 participationState = participationState,
                 sourceRuntimePosture = sourceRuntimePosture,
                 readinessState = readinessState,
@@ -230,7 +229,6 @@ data class AndroidParticipantRuntimeTruth(
     val autonomyTruthLevel: RuntimeNodeAutonomyTruthLevel
         get() = runtimeNodeIdentity?.autonomyTruthLevel
             ?: deriveFallbackAutonomyTruthLevel(
-                deviceRole = deviceRole,
                 sourceRuntimePosture = sourceRuntimePosture,
                 readinessState = readinessState,
                 healthState = healthState
@@ -241,7 +239,6 @@ data class AndroidParticipantRuntimeTruth(
      */
     val featureReadinessTruthState: FeatureReadinessTruthState
         get() = deriveFeatureReadinessTruthState(
-            deviceRole = deviceRole,
             participationState = participationState,
             readinessState = readinessState,
             healthState = healthState,
@@ -278,7 +275,6 @@ data class AndroidParticipantRuntimeTruth(
         put(KEY_PARTICIPANT_ID, participantId)
         put(KEY_DEVICE_ID, deviceId)
         put(KEY_HOST_ID, hostId)
-        put(KEY_DEVICE_ROLE, deviceRole)
         put(KEY_PARTICIPATION_STATE, participationState.wireValue)
         put(KEY_COORDINATION_ROLE, coordinationRole.wireValue)
         put(KEY_SOURCE_RUNTIME_POSTURE, sourceRuntimePosture)
@@ -340,9 +336,6 @@ data class AndroidParticipantRuntimeTruth(
 
         /** Wire key for [hostId]. */
         const val KEY_HOST_ID = "host_id"
-
-        /** Wire key for [deviceRole]. */
-        const val KEY_DEVICE_ROLE = "device_role"
 
         /** Wire key for [participationState] ([RuntimeHostDescriptor.HostParticipationState.wireValue]). */
         const val KEY_PARTICIPATION_STATE = "participation_state"
@@ -733,26 +726,18 @@ private fun deriveTaskExecutionVisibilityState(
     }
 }
 
+// 这几处派生不看设备角色名:这台设备能做什么由设备自述与它真实的就绪 / 健康状态说,不由一个角色名决定。
 private fun deriveFallbackCapabilityTruthLevel(
-    deviceRole: String,
     participationState: RuntimeHostDescriptor.HostParticipationState,
     sourceRuntimePosture: String,
     readinessState: ParticipantReadinessState,
     healthState: ParticipantHealthState
 ): RuntimeNodeCapabilityTruthLevel {
-    val supportTruth = AndroidOperationalDeviceSupport.classify(deviceRole)
     if (participationState == RuntimeHostDescriptor.HostParticipationState.INACTIVE) {
         return RuntimeNodeCapabilityTruthLevel.UNAVAILABLE
     }
     if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME) {
         return RuntimeNodeCapabilityTruthLevel.CONNECTED_OBSERVABILITY_ONLY
-    }
-    if (!supportTruth.supportsCrossDeviceExecutionNearPeer) {
-        return if (supportTruth.supportsControlPlaneParticipation) {
-            RuntimeNodeCapabilityTruthLevel.PARTICIPANT_RUNTIME_CAPABLE
-        } else {
-            RuntimeNodeCapabilityTruthLevel.CONNECTED_OBSERVABILITY_ONLY
-        }
     }
     return if (readinessState == ParticipantReadinessState.READY &&
         healthState == ParticipantHealthState.HEALTHY
@@ -764,39 +749,27 @@ private fun deriveFallbackCapabilityTruthLevel(
 }
 
 private fun deriveFallbackAutonomyTruthLevel(
-    deviceRole: String,
     sourceRuntimePosture: String,
     readinessState: ParticipantReadinessState,
     healthState: ParticipantHealthState
 ): RuntimeNodeAutonomyTruthLevel {
-    if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME ||
-        !AndroidOperationalDeviceSupport.classify(deviceRole).supportsCrossDeviceExecutionNearPeer
-    ) {
+    if (sourceRuntimePosture != SourceRuntimePosture.JOIN_RUNTIME) {
         return RuntimeNodeAutonomyTruthLevel.OBSERVATION_ONLY
     }
     return RuntimeNodeAutonomyTruthLevel.ASSISTED_PARTICIPANT
 }
 
 private fun deriveFeatureReadinessTruthState(
-    deviceRole: String,
     participationState: RuntimeHostDescriptor.HostParticipationState,
     readinessState: ParticipantReadinessState,
     healthState: ParticipantHealthState,
     runtimeAvailabilityTruthState: RuntimeAvailabilityTruthState
 ): FeatureReadinessTruthState {
-    val supportTruth = AndroidOperationalDeviceSupport.classify(deviceRole)
     if (participationState == RuntimeHostDescriptor.HostParticipationState.INACTIVE ||
         runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.RECOVERY_FAILED_UNAVAILABLE ||
         runtimeAvailabilityTruthState == RuntimeAvailabilityTruthState.OFFLINE_OR_UNATTACHED
     ) {
         return FeatureReadinessTruthState.UNAVAILABLE
-    }
-    if (!supportTruth.supportsCrossDeviceExecutionNearPeer) {
-        return if (supportTruth.supportsControlPlaneParticipation) {
-            FeatureReadinessTruthState.PARTIALLY_READY_DEGRADED
-        } else {
-            FeatureReadinessTruthState.UNAVAILABLE
-        }
     }
     return when {
         readinessState == ParticipantReadinessState.READY &&

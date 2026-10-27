@@ -20,9 +20,9 @@ import org.json.JSONObject
  * Extracted as an interface so that unit tests can inject an [InMemoryAppSettings]
  * without requiring a real Android [Context].
  *
- * All eight keys required by the [CapabilityReport.REQUIRED_METADATA_KEYS] contract are covered:
+ * All seven keys required by the [CapabilityReport.REQUIRED_METADATA_KEYS] contract are covered:
  * [goalExecutionEnabled], [localModelEnabled], [crossDeviceEnabled], [parallelExecutionEnabled],
- * [deviceRole], [modelReady], [accessibilityReady], and [overlayReady].
+ * [modelReady], [accessibilityReady], and [overlayReady].
  *
  * Runtime connection URLs ([galaxyGatewayUrl], [restBaseUrl]) default to the values in
  * `assets/config.properties` so that the gateway address can be changed at runtime
@@ -92,8 +92,9 @@ interface AppSettings {
     var parallelExecutionEnabled: Boolean
 
     /**
-     * Logical role of this device in the cluster.
-     * Typical values: "phone", "tablet", "hub".
+     * 本机运行时描述([com.ufo.galaxy.runtime.RuntimeHostDescriptor])里的一个标签,只留作本地观测。
+     * 不进上报:这台设备能做什么由设备自述说(V2 `docs/DEVICE_SELF_DESCRIPTION_DESIGN.md`),
+     * 中心和本机都不按它做任何判断。
      */
     var deviceRole: String
 
@@ -475,7 +476,6 @@ interface AppSettings {
             "local_model_enabled" to localModelEnabled,
             "cross_device_enabled" to crossDeviceEnabled,
             "parallel_execution_enabled" to parallelExecutionEnabled,
-            "device_role" to deviceRole,
             "model_ready" to modelReady,
             "accessibility_ready" to accessibilityReady,
             "overlay_ready" to overlayReady,

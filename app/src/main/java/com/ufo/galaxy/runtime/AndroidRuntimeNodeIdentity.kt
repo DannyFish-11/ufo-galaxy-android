@@ -270,10 +270,6 @@ data class AndroidRuntimeNodeIdentity(
             healthState: ParticipantHealthState,
             readinessState: ParticipantReadinessState
         ): RuntimeNodeExecutionParticipationState {
-            val supportTruth = AndroidOperationalDeviceSupport.classify(descriptor.deviceRole)
-            if (!supportTruth.supportsCrossDeviceExecutionNearPeer) {
-                return RuntimeNodeExecutionParticipationState.BLOCKED
-            }
             if (descriptor.participationState != RuntimeHostDescriptor.HostParticipationState.ACTIVE ||
                 sessionSnapshot?.attachmentState != AttachedRuntimeSession.State.ATTACHED.wireValue
             ) {

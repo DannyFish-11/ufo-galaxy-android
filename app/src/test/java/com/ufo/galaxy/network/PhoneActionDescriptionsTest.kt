@@ -1,5 +1,6 @@
 package com.ufo.galaxy.network
 
+import com.ufo.galaxy.phone.PhoneActionCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,30 +11,33 @@ import org.junit.Test
  */
 class PhoneActionDescriptionsTest {
 
-    private val baseActions = listOf(
-        "location", "camera", "sensor_data", "automation",
-        "notification", "sms", "phone_call", "contacts",
-        "calendar", "voice_input", "screen_capture", "app_control",
-    )
+    private val directActions = PhoneActionCatalog.ACTIONS.map { it.name }
 
     @Test
-    fun `every base action the phone always reports has a description`() {
-        val d = PhoneActionDescriptions.forActions(baseActions)
-        assertEquals(baseActions.toSet(), d.keys)
+    fun `every direct action the phone can report has a description`() {
+        val d = PhoneActionDescriptions.forActions(directActions)
+        assertEquals(directActions.toSet(), d.keys)
         assertTrue(d.values.all { it.isNotBlank() })
     }
 
     @Test
     fun `only reported actions get a description and unknown ones are not made up`() {
-        val d = PhoneActionDescriptions.forActions(listOf("camera", "made_up_action"))
-        assertEquals(setOf("camera"), d.keys)
+        val d = PhoneActionDescriptions.forActions(listOf("location", "made_up_action"))
+        assertEquals(setOf("location"), d.keys)
         assertFalse(d.containsKey("made_up_action"))
     }
 
     @Test
-    fun `actions that reach other people say they need confirmation`() {
+    fun `actions that reach other people say a person confirms them on the phone`() {
         val d = PhoneActionDescriptions.DESCRIPTIONS
-        assertTrue(d.getValue("sms").contains("确认"))
-        assertTrue(d.getValue("phone_call").contains("确认"))
+        listOf("sms", "phone_call", "calendar_add").forEach { assertTrue(it, d.getValue(it).contains("确认")) }
+    }
+
+    @Test
+    fun `descriptions say which parameters to pass`() {
+        val d = PhoneActionDescriptions.DESCRIPTIONS
+        assertTrue(d.getValue("sms").contains("to") && d.getValue("sms").contains("text"))
+        assertTrue(d.getValue("contacts").contains("query"))
+        assertTrue(d.getValue("app_control").contains("app"))
     }
 }

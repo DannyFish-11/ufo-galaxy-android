@@ -16,6 +16,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -32,11 +33,13 @@ import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.data.AppSettings
 import com.ufo.galaxy.data.SharedPrefsAppSettings
+import com.ufo.galaxy.call.PhoneCallService
 import com.ufo.galaxy.service.EnhancedFloatingService
 import com.ufo.galaxy.service.GalaxyConnectionService
 import com.ufo.galaxy.ui.components.ChatScreen
 import com.ufo.galaxy.ui.components.DiagnosticsScreen
 import com.ufo.galaxy.ui.components.LocalLoopDebugPanel
+import com.ufo.galaxy.ui.components.PhoneCallScreen
 import com.ufo.galaxy.ui.components.ScrollPaperContainer
 import com.ufo.galaxy.ui.components.copyDiagnostics
 import com.ufo.galaxy.ui.components.shareLogs
@@ -69,6 +72,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.all { it.value }
+        requestAgentPermissions()
         if (allGranted) {
             Log.d(TAG, "所有权限已授予")
             startServices()
@@ -88,6 +92,12 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    // 让智能体能用手机的位置、通讯录、日历(手机的直接动作,见 com.ufo.galaxy.phone)。可选:不给照常用,
+    // 只是这几项不报给智能体。和上面那组分开要 —— 上面那组没全给就不起服务,这几项不该挡住它。
+    private val agentPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { refreshPhoneActions() }
+
     // 悬浮窗权限请求
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -187,6 +197,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         mainViewModel.onResume()
+        // 人可能刚在系统设置里给了 / 收回了权限,或开了无障碍:做得了的动作变了就重报
+        refreshPhoneActions()
+        // 位置权限是服务起来之后才给的:从界面再起一次,把 location 类型补上
+        GalaxyConnectionService.upgradeIfNeeded(this)
     }
     
     override fun onPause() {
@@ -229,6 +243,7 @@ class MainActivity : ComponentActivity() {
         } else {
             Log.d(TAG, "All permissions already granted — skipping request")
             startServices()
+            requestAgentPermissions()
         }
 
         // B1-FIX: Request battery optimization exemption for long-running foreground service
@@ -244,6 +259,23 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    /** 要智能体用得上的那几项权限(位置、通讯录、日历);只要还没给的。 */
+    private fun requestAgentPermissions() {
+        val wanted = listOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.READ_CALENDAR,
+        ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) agentPermissionLauncher.launch(wanted.toTypedArray())
+    }
+
+    private fun refreshPhoneActions() {
+        runCatching {
+            com.ufo.galaxy.phone.PhoneCommands.refreshIfChanged(com.ufo.galaxy.UFOGalaxyApplication.webSocketClient)
+        }.onFailure { Log.w(TAG, "能力重报失败: ${it.message}") }
+    }
+
     /**
      * CRITICAL: Shows a dialog guiding the user to the app settings when one or more
      * permissions have been permanently denied ("Don't ask again").
@@ -319,7 +351,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun startServices() {
         // 启动 Galaxy 连接服务
-        val connectionIntent = GalaxyConnectionService.createMainEntryIntent(this)
+        // 从界面拉起:给了位置权限就带上 location 类型,手机在兜里时智能体也读得到位置
+        val connectionIntent = GalaxyConnectionService.createVisibleEntryIntent(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(connectionIntent)
         } else {
@@ -505,6 +538,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
         return
     }
 
+    // 和智能体通话中:整屏是通话界面(通话本体在 PhoneCallService 里,界面只看它的状态)
+    val call by PhoneCallService.controller.collectAsState()
+    call?.let { c ->
+        PhoneCallScreen(controller = c, onHangup = { PhoneCallService.hangup(context) })
+        return
+    }
+    // 上一通没打成 / 断了:说清楚为什么(正常挂断不说)
+    PhoneCallService.lastFailure.collectAsState().value?.let { why ->
+        AlertDialog(
+            onDismissRequest = { PhoneCallService.clearFailure() },
+            title = { Text("通话没接通") },
+            text = { Text(why) },
+            confirmButton = { TextButton(onClick = { PhoneCallService.clearFailure() }) { Text("知道了") } },
+        )
+    }
+
     // Show registration failure dialog when cross-device registration fails.
     uiState.registrationFailure?.let { reason ->
         AlertDialog(
@@ -586,6 +635,21 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
+                        // 和智能体通话:连着网关才能打(信令走同一条连接)
+                        IconButton(
+                            onClick = {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                                    PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    PhoneCallService.start(context)
+                                } else {
+                                    Toast.makeText(context, "通话要麦克风权限", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = uiState.isConnected,
+                        ) {
+                            Icon(Icons.Default.Call, contentDescription = "和智能体通话")
+                        }
                         // Diagnostics button (PR15)
                         IconButton(onClick = { viewModel.toggleDiagnostics() }) {
                             Icon(Icons.Default.Info, contentDescription = "Diagnostics")

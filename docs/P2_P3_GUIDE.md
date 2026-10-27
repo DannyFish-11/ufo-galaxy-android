@@ -109,8 +109,10 @@ The foreground notification content reflects the active mode
 [WS:DOWNLINK] type=<msg_type>  task_id=<id>  correlation_id=<id>  device_id=<id>
 ```
 
-Heartbeat messages include device metadata (`device_id`, `device_role`, `capabilities`).
-Capability reports are enriched with all eight `AppSettings.toMetadataMap()` fields.
+Heartbeat messages carry the device's current state (`payload.state`, V2 `device_state/1`).
+Capability reports are enriched with the `AppSettings.toMetadataMap()` fields and carry the
+device self-description (`self_description`, V2 `device_self/1`). No device role is reported:
+what a device can do comes from its self-description.
 
 ---
 

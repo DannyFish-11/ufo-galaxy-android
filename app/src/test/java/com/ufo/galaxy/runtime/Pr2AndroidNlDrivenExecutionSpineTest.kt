@@ -700,8 +700,7 @@ class Pr2AndroidNlDrivenExecutionSpineTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = "test-device",
-            deviceRole = "phone"
+            deviceId = "test-device"
         )
     }
 

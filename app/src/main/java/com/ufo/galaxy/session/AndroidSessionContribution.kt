@@ -135,11 +135,13 @@ data class AndroidSessionContribution(
          * @param result    The [GoalResultPayload] to wrap.
          * @param traceId   End-to-end trace identifier from the inbound envelope.
          * @param routeMode Routing path used for this task.
+         * @param deviceRole 本机运行时描述里的标签(结果帧不再带它,见 [GoalResultPayload])。
          */
         fun fromGoalResult(
             result: GoalResultPayload,
             traceId: String? = null,
-            routeMode: String? = null
+            routeMode: String? = null,
+            deviceRole: String = ""
         ): AndroidSessionContribution {
             val normalizedStatus = UgcpSharedSchemaAlignment.normalizeLifecycleStatus(result.status)
             val kind = when (normalizedStatus) {
@@ -162,7 +164,7 @@ data class AndroidSessionContribution(
                 latencyMs = result.latency_ms,
                 error = result.error,
                 deviceId = result.device_id,
-                deviceRole = result.device_role
+                deviceRole = deviceRole
             )
         }
 

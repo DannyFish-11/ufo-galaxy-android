@@ -11,10 +11,20 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 手机的直接动作(com.ufo.galaxy.phone):智能体读位置、查通讯录 / 日程。可选,不给就不报这几项。
+         发短信、打电话、加日程用系统界面让人点,不申请 SEND_SMS / CALL_PHONE / WRITE_CALENDAR。 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 和智能体通话(com.ufo.galaxy.call.PhoneCallService):Android 14 起后台用麦克风要麦克风型前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 常驻连接服务在应用可见时带上 location 类型起,手机在兜里时智能体也读得到位置(service/ForegroundTypes.kt) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- CRITICAL-4-FIX: SYSTEM_ALERT_WINDOW is required for FloatingIslandActivity & FloatingWindowService overlay UI. -->
     <!-- Protected at runtime by Settings > Apps > Special access > Display over other apps (user-granted). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -29,6 +39,14 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+    <!-- Android 11 起看得见哪些应用要声明:智能体「打开某个应用」(app_control)按名字在可启动的应用里找 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".UFOGalaxyApplication"
@@ -74,7 +92,7 @@
             android:name=".service.GalaxyConnectionService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|location">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="ai_assistant" />
@@ -158,6 +176,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_provider_paths" />
         </provider>
+
+        <!-- 中心智能体问人:通知上的选项按钮、点开通知的选项对话框(phone/PhoneDecisions.kt)。 -->
+        <receiver
+            android:name=".phone.DecisionReplyReceiver"
+            android:exported="false" />
+        <activity
+            android:name=".phone.DecisionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- 原生表面①:主屏小组件(AI 常驻桌面,对标 Friends 一体感)。 -->
         <receiver
@@ -245,6 +274,12 @@
                 android:name="android.speech"
                 android:resource="@xml/recognition_service" />
         </service>
+
+        <!-- 和智能体通话期间的前台服务(麦克风型):挂断就停 -->
+        <service
+            android:name=".call.PhoneCallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
     </application>
 

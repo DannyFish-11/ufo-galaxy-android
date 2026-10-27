@@ -1856,11 +1856,11 @@ object StabilizationBaseline {
                 "machine-verifiable contract object. Introduces CONTRACT_SCHEMA_VERSION (emitted as " +
                 "'contract_schema_version' in capability_report metadata) so V2's capability_registry.py " +
                 "can detect Android-side schema drift without diffing individual field lists. Provides " +
-                "TOP_LEVEL_FIELD_DESCRIPTORS (11 required fields), METADATA_FIELD_DESCRIPTORS (29 required " +
-                "fields: 8 core readiness + 4 scheduling basis + 16 canonical gate + 1 contract version), " +
+                "TOP_LEVEL_FIELD_DESCRIPTORS (11 required fields), METADATA_FIELD_DESCRIPTORS (28 required " +
+                "fields: 7 core readiness + 4 scheduling basis + 16 canonical gate + 1 contract version), " +
                 "validate() and validateMetadata() producing ValidationResult, and regression-anchor " +
                 "constants EXPECTED_REQUIRED_TOP_LEVEL_FIELD_COUNT / EXPECTED_REQUIRED_METADATA_FIELD_COUNT. " +
-                "GalaxyWebSocketClient.normalizedCapabilityMetadata() emits contract_schema_version = '1' " +
+                "GalaxyWebSocketClient.normalizedCapabilityMetadata() emits contract_schema_version = '2' " +
                 "in every capability_report metadata map. Pr3AndroidCapabilityExportContractTest provides " +
                 "the blocking CI gate protecting schema stability.",
             introducedPr = 82

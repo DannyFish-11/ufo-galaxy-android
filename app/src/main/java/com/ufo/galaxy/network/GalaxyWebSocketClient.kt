@@ -9,6 +9,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.ufo.galaxy.BuildConfig
 import com.ufo.galaxy.data.AIPMessage
 import com.ufo.galaxy.data.AIPMessageType
@@ -498,6 +499,24 @@ class GalaxyWebSocketClient(
         fun onA2AFrame(frameJson: String) = Unit
 
         /**
+         * 中心经 `devices__invoke` 让手机直接做一件事(`command` 帧,顶层带 `command_id` 和 `command`)。
+         * 接的一方做完要回 `command_result`(见 [com.ufo.galaxy.phone.PhoneCommands]);中心按 command_id 等结果。
+         */
+        fun onDeviceCommand(commandId: String, action: String, paramsJson: String) = Unit
+
+        /**
+         * 网关下行的通话信令(`voice_call_accepted` / `voice_call_end` / `voice_event` / `voice_ice`),整帧原文。
+         * 通话期间由 [com.ufo.galaxy.call.PhoneCallService] 接(见 [com.ufo.galaxy.call.CallFrames])。
+         */
+        fun onVoiceCallFrame(frameJson: String) = Unit
+
+        /**
+         * 中心智能体问人一件事(`decision_request`)或撤回一件(`decision_withdraw`),整帧原文。
+         * 由 [com.ufo.galaxy.phone.PhoneDecisions] 接:弹通知、把人点的选项以 `human_input` 回去。
+         */
+        fun onDecisionFrame(frameJson: String) = Unit
+
+        /**
          * Called when a [com.ufo.galaxy.shared.protocol.MsgType.STATE_EVENT] message is
          * received from V2 (cross-device phase/state sync).
          *
@@ -897,6 +916,27 @@ class GalaxyWebSocketClient(
     private var modelCapabilities: List<String> = emptyList()
 
     /**
+     * 手机做得了的直接动作(能力上报的 `supported_actions`)。由 [com.ufo.galaxy.phone.PhoneCommands] 设:
+     * 只报实现了、人也给了权限的。没装上时一个都不报 —— 报了没人接,中心只会干等。
+     */
+    @Volatile
+    var phoneActions: () -> List<String> = { emptyList() }
+
+    /**
+     * 这台手机的设备自述(`self_description`,见 [com.ufo.galaxy.phone.PhoneSelfDescription]),也由
+     * [com.ufo.galaxy.phone.PhoneCommands] 设。没装上时不带 —— V2 照旧从下面那些散字段读。
+     */
+    @Volatile
+    var selfDescription: () -> kotlinx.serialization.json.JsonObject? = { null }
+
+    /**
+     * 这台手机此刻的状态(心跳帧的 `payload.state`,见 [com.ufo.galaxy.phone.PhoneState]),也由
+     * [com.ufo.galaxy.phone.PhoneCommands] 设。每一拍心跳都带上此刻的全部状态,V2 `core/device_state.py` 整份替换上一份。
+     */
+    @Volatile
+    var deviceState: () -> kotlinx.serialization.json.JsonObject? = { null }
+
+    /**
      * High-level autonomous capability names included in the capability_report.
      * Updated via [setHighLevelCapabilities] when the device role is determined.
      */
@@ -969,7 +1009,6 @@ class GalaxyWebSocketClient(
      *   - `local_model_enabled`        (Boolean)
      *   - `cross_device_enabled`       (Boolean) — overwritten at send-time from the live flag
      *   - `parallel_execution_enabled` (Boolean)
-     *   - `device_role`                (String)
      *   - `model_ready`                (Boolean)
      *   - `accessibility_ready`        (Boolean)
      *   - `overlay_ready`              (Boolean)
@@ -990,7 +1029,6 @@ class GalaxyWebSocketClient(
             "local_model_enabled" to false,
             "cross_device_enabled" to crossDeviceEnabled,
             "parallel_execution_enabled" to false,
-            "device_role" to "phone",
             "model_ready" to false,
             "accessibility_ready" to false,
             "overlay_ready" to false,
@@ -1506,6 +1544,18 @@ class GalaxyWebSocketClient(
                 return
             }
 
+            // 中心让手机直接做一件事(V2 send_command_and_wait:顶层 command_id + command + params)。
+            // 必须在下面那层 legacy 归一之前认出来:那层把 `command` 一律改成 task_assign,当成一个「目标」
+            // 交给本地循环 —— 目标是空的,也不回 command_result,中心干等 30 秒报超时。旧式 `command`
+            // (payload 里带目标、没有 command_id)不是这个,照旧走归一。
+            if (com.ufo.galaxy.phone.DeviceCommandFrames.isDeviceCommand(root)) {
+                val commandId = com.ufo.galaxy.phone.DeviceCommandFrames.commandId(root)
+                val action = com.ufo.galaxy.phone.DeviceCommandFrames.action(root)
+                val params = com.ufo.galaxy.phone.DeviceCommandFrames.params(root).toString()
+                listeners.forEach { it.onDeviceCommand(commandId, action, params) }
+                return
+            }
+
             // 真 bug 修复:入站路由器丢失了合约明文要求的 legacy 类型重映射
             // (CanonicalDispatchChain.kt / AndroidAuthoritativePathAlignmentAudit.kt:
             // task_execute / task_status_query / command 必须经 MsgType.toV3Type 归一到
@@ -1601,6 +1651,18 @@ class GalaxyWebSocketClient(
                 com.ufo.galaxy.shared.protocol.MsgType.A2A -> {
                     // 中心智能体 ↔ 手机上的桥接 Agent(对外 A2A,信封在 payload 里)
                     listeners.forEach { it.onA2AFrame(text) }
+                }
+                com.ufo.galaxy.shared.protocol.MsgType.DECISION_REQUEST,
+                com.ufo.galaxy.shared.protocol.MsgType.DECISION_WITHDRAW -> {
+                    // 中心智能体问人 / 撤回(手机声明了能回答提问才会收到,见 phone/PhoneSelfDescription)
+                    listeners.forEach { it.onDecisionFrame(text) }
+                }
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_CALL_ACCEPTED,
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_CALL_END,
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_EVENT,
+                com.ufo.galaxy.shared.protocol.MsgType.VOICE_ICE -> {
+                    // 和智能体通话的信令(网关 voice_call_route);通话期间 PhoneCallService 在听
+                    listeners.forEach { it.onVoiceCallFrame(text) }
                 }
                 in com.ufo.galaxy.shared.protocol.MsgType.ADVANCED_TYPES -> {
                     val messageId = root.get("message_id")?.asString
@@ -2378,13 +2440,13 @@ class GalaxyWebSocketClient(
      *  - `platform` / `device_id` / `version` — stable device identity fields.
      *  - `device_type` — always `"Android_Agent"`.
      *  - `trace_id` / `route_mode` — per-session observability fields.
-     *  - `supported_actions` — merged low-level action list from [baseActions] and
-     *    [modelCapabilities] (set via [setModelCapabilities]).
+     *  - `supported_actions` — the phone's direct actions from [phoneActions] (only what is implemented
+     *    and permitted) merged with [modelCapabilities] (set via [setModelCapabilities]).
      *  - `capabilities` — high-level autonomous capability names from [highLevelCapabilities]
      *    (set via [setHighLevelCapabilities]), defaulting to the standard 5-capability set.
-     *  - `metadata` — the full 8-field canonical runtime identity map (see
+     *  - `metadata` — the full 7-field canonical runtime identity map (see
      *    [CapabilityReport.REQUIRED_METADATA_KEYS]): `goal_execution_enabled`,
-     *    `local_model_enabled`, `parallel_execution_enabled`, `device_role`,
+     *    `local_model_enabled`, `parallel_execution_enabled`,
      *    `model_ready`, `accessibility_ready`, `overlay_ready`, and `cross_device_enabled`
      *    (always overwritten from the live [crossDeviceEnabled] flag at send-time).
      *
@@ -2463,12 +2525,39 @@ class GalaxyWebSocketClient(
                     "formation_role=${hostDescriptor.formationRole.wireValue} " +
                     "participation_state=${hostDescriptor.participationState.wireValue}" else "")
 
-        val baseActions = listOf(
-            "location", "camera", "sensor_data", "automation",
-            "notification", "sms", "phone_call", "contacts",
-            "calendar", "voice_input", "screen_capture", "app_control"
+        sendCapabilityReport(
+            deviceId, hostDescriptor, hostMeta, attachmentSessionId, durableId, continuityEpoch, registrationPosture
         )
-        val allActions = (baseActions + modelCapabilities).distinct()
+    }
+
+    /**
+     * 只重发能力上报(不重发登记)。手机做得了的直接动作变了时用 —— 人刚在设置里给了或收回了权限
+     * (见 [com.ufo.galaxy.phone.PhoneCommands.refreshIfChanged])。没连着就不发,下次连上的握手会带上新的。
+     */
+    fun refreshCapabilityReport() {
+        if (!isConnected) return
+        val hostDescriptor = runtimeHostDescriptor
+        sendCapabilityReport(
+            deviceId = getDeviceId(),
+            hostDescriptor = hostDescriptor,
+            hostMeta = hostDescriptor?.toMetadataMap() ?: emptyMap(),
+            attachmentSessionId = runtimeAttachmentSessionId,
+            durableId = durableSessionId,
+            continuityEpoch = sessionContinuityEpoch,
+            registrationPosture = currentRegistrationPosture(),
+        )
+    }
+
+    private fun sendCapabilityReport(
+        deviceId: String,
+        hostDescriptor: RuntimeHostDescriptor?,
+        hostMeta: Map<String, Any>,
+        attachmentSessionId: String?,
+        durableId: String?,
+        continuityEpoch: Int?,
+        registrationPosture: String,
+    ) {
+        val allActions = (phoneActions() + modelCapabilities).distinct()
 
         // PR-5: merge runtime-host identity metadata into the capability_report so the
         // gateway session-truth layer has complete host representation on the first report.
@@ -2542,10 +2631,17 @@ class GalaxyWebSocketClient(
             }
             addProperty("idempotency_key", buildIdempotencyKey(taskId = report.device_id, type = MsgType.CAPABILITY_REPORT.value))
             add("supported_actions", gson.toJsonTree(report.supported_actions))
+            // 设备自述(V2 core/device_self.py):带了就以它为准;下面的散字段过渡期照发,给还没升级的中心读
+            selfDescription()?.let {
+                add(com.ufo.galaxy.shared.protocol.DeviceSelfDescription.KEY, JsonParser.parseString(it.toString()))
+            }
             // 每个动作的一句话说明 —— V2 原样交给中心智能体(设备整体卡),模型据此决定让谁做什么
             add("action_descriptions", gson.toJsonTree(PhoneActionDescriptions.forActions(report.supported_actions)))
             // 跨设备整体方案阶段 3:声明这台手机能装中心派来的桥接 Agent;不声明 V2 就不派(旧版 App 不会回确认)
             addProperty("bridge_agent", com.ufo.galaxy.bridge.BridgeAgentRuntime.BRIDGE_VERSION)
+            // 手机会显示自己发起的那件请求做到哪了(state_event 的 request_progress,见 runtime/RequestProgress.kt);
+            // 中心按这一项决定推不推进度,不按设备类型(V2 core/device_declarations.py)
+            addProperty("shows_request_progress", true)
             add("capabilities", gson.toJsonTree(report.capabilities))
             add("metadata", gson.toJsonTree(handshakeMetadata))
             // PR-B2: registration posture — carried in capability_report for consistency with
@@ -3145,6 +3241,12 @@ class GalaxyWebSocketClient(
             addProperty("reconnect_attempts", reconnectAttempts)
             if (!runtimeSessionId.isNullOrBlank()) addProperty("runtime_session_id", runtimeSessionId)
             addProperty("idempotency_key", buildIdempotencyKey(taskId = deviceId, type = "heartbeat"))
+            // 手机此刻的状态(电量、屏幕、通话、勿扰):读不到就不带,心跳照发
+            runCatching { deviceState() }.getOrNull()?.let { state ->
+                add("payload", JsonObject().apply {
+                    add(com.ufo.galaxy.shared.protocol.DeviceState.KEY, JsonParser.parseString(state.toString()))
+                })
+            }
         }
         val json = gson.toJson(heartbeat)
         val sent = webSocket?.send(json) ?: false
