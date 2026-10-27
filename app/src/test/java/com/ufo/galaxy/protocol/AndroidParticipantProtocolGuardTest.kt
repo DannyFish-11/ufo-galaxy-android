@@ -125,10 +125,10 @@ class AndroidParticipantProtocolGuardTest {
     }
 
     @Test
-    fun `capability_report required metadata key set contains exactly 8 keys`() {
+    fun `capability_report required metadata key set contains exactly 7 keys`() {
         assertEquals(
-            "V2 gateway expects exactly 8 required metadata keys",
-            8,
+            "V2 gateway expects exactly 7 required metadata keys (device_role is not reported)",
+            7,
             CapabilityReport.REQUIRED_METADATA_KEYS.size
         )
     }
@@ -155,7 +155,7 @@ class AndroidParticipantProtocolGuardTest {
     fun `capability_report validate returns true when all required keys present`() {
         val report = buildFullCapabilityReport("guard-device-02")
         assertTrue(
-            "validate() must return true when all 8 required metadata keys are present",
+            "validate() must return true when all 7 required metadata keys are present",
             report.validate()
         )
     }

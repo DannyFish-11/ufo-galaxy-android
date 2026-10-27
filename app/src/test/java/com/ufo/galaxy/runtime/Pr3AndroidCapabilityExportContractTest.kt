@@ -223,7 +223,7 @@ class Pr3AndroidCapabilityExportContractTest {
      * pipeline consumes.
      */
     @Test
-    fun `required metadata field names include all 8 core readiness keys`() {
+    fun `required metadata field names include all 7 core readiness keys`() {
         val coreKeys = CapabilityReport.REQUIRED_METADATA_KEYS
         val contractKeys = AndroidCapabilityExportContract.REQUIRED_METADATA_KEYS
         val missing = coreKeys - contractKeys

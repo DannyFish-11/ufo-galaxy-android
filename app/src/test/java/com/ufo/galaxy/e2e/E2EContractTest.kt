@@ -20,7 +20,7 @@ import org.junit.Test
  * E2E contract tests verifying key invariants across the Android ↔ v2 gateway flow.
  *
  * These pure-JVM tests cover:
- *  - [AppSettings.toMetadataMap] returns all 8 required capability_report metadata keys
+ *  - [AppSettings.toMetadataMap] returns all 7 required capability_report metadata keys
  *  - [GoalResultPayload] from goal_execution contains required result schema fields
  *  - parallel_subtask result includes group_id and subtask_index (gateway aggregation contract)
  *  - cross_device_enabled=false keeps client local (no capability fields advertised as remote)
@@ -139,11 +139,11 @@ class E2EContractTest {
         assertTrue("metadata must contain local_inference_available",
             meta.containsKey("local_inference_available"))
 
-        // toMetadataMap() 组合了首层 12 个能力键 + modeState 的模式/治理元数据(含一个条件键
+        // toMetadataMap() 组合了首层 11 个能力键 + modeState 的模式/治理元数据(含一个条件键
         // transitioning_to),总数随模式状态浮动。精确 == 断言脆弱且非本测试真实意图 —— 意图是
-        // "必需的能力键都在"(上面 12 条 containsKey 已验证)。改为断言至少携带这 12 个必需键。
-        assertTrue("capability metadata must carry at least the 12 required capability keys",
-            meta.size >= 12)
+        // "必需的能力键都在"(上面 11 条 containsKey 已验证;device_role 不再上报)。改为断言至少携带这 11 个必需键。
+        assertTrue("capability metadata must carry at least the 11 required capability keys",
+            meta.size >= 11)
     }
 
     @Test
@@ -323,7 +323,7 @@ class E2EContractTest {
         assertEquals("android", report.platform)
         assertFalse("device_id must not be blank", report.device_id.isBlank())
         assertEquals("3.0", report.version)
-        assertEquals(8, report.metadata.size)
+        assertEquals(7, report.metadata.size)
     }
 
     // ── MsgType coverage ─────────────────────────────────────────────────────
