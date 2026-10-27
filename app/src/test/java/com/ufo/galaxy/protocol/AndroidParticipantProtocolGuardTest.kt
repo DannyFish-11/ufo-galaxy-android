@@ -140,7 +140,6 @@ class AndroidParticipantProtocolGuardTest {
             "local_model_enabled",
             "cross_device_enabled",
             "parallel_execution_enabled",
-            "device_role",
             "model_ready",
             "accessibility_ready",
             "overlay_ready"
@@ -719,7 +718,6 @@ class AndroidParticipantProtocolGuardTest {
         "local_model_enabled" to true,
         "cross_device_enabled" to true,
         "parallel_execution_enabled" to true,
-        "device_role" to "phone",
         "model_ready" to true,
         "accessibility_ready" to true,
         "overlay_ready" to true

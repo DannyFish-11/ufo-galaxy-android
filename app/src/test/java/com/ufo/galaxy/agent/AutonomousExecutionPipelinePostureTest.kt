@@ -73,14 +73,12 @@ class AutonomousExecutionPipelinePostureTest {
         goalExecutionEnabled: Boolean = true,
         parallelExecutionEnabled: Boolean = true,
         crossDeviceEnabled: Boolean = true,
-        deviceId: String = "test-device",
-        deviceRole: String = "phone"
+        deviceId: String = "test-device"
     ): AutonomousExecutionPipeline {
         val settings = InMemoryAppSettings(
             goalExecutionEnabled = goalExecutionEnabled,
             parallelExecutionEnabled = parallelExecutionEnabled,
-            crossDeviceEnabled = crossDeviceEnabled,
-            deviceRole = deviceRole
+            crossDeviceEnabled = crossDeviceEnabled
         )
         val edge = EdgeExecutor(
             screenshotProvider = FakeScreenshot(),
@@ -94,8 +92,7 @@ class AutonomousExecutionPipelinePostureTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = deviceId,
-            deviceRole = deviceRole
+            deviceId = deviceId
         )
     }
 
@@ -182,13 +179,12 @@ class AutonomousExecutionPipelinePostureTest {
     }
 
     @Test
-    fun `goal_execution with control_only posture blocked result includes device_id and device_role`() {
-        val pipeline = buildPipeline(deviceId = "dev-posture", deviceRole = "tablet")
+    fun `goal_execution with control_only posture blocked result includes device_id`() {
+        val pipeline = buildPipeline(deviceId = "dev-posture")
         val result = pipeline.handleGoalExecution(
             goalPayload(posture = SourceRuntimePosture.CONTROL_ONLY)
         )
         assertEquals("dev-posture", result.device_id)
-        assertEquals("tablet", result.device_role)
     }
 
     // ── handleGoalExecution: JOIN_RUNTIME posture allows execution ────────────

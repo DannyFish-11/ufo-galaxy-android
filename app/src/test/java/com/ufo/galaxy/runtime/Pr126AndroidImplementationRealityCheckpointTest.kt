@@ -1,6 +1,7 @@
 package com.ufo.galaxy.runtime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -112,9 +113,8 @@ class Pr126AndroidImplementationRealityCheckpointTest {
         assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.HYBRID_EXECUTE.wireValue))
         assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.RAG_QUERY.wireValue))
         assertTrue(unsupported.contains(HybridParticipantCapabilityBoundary.HybridCapability.CODE_EXECUTE.wireValue))
-        @Suppress("UNCHECKED_CAST")
-        val operationalSupport = supportTruth["operational_device_support"] as Map<String, Any?>
-        assertEquals("execution_near_peer", operationalSupport["support_class"])
+        // 不再按设备角色名给支持档(V2 设计文档第 6 步)
+        assertFalse(supportTruth.containsKey("operational_device_support"))
     }
 
     @Test

@@ -150,10 +150,7 @@ object AndroidImplementationRealityCheckpoint {
                 .contractFirstCapabilities
                 .map { it.wireValue },
             "current_capability_truth_level" to truth.capabilityTruthLevel.wireValue,
-            "feature_readiness_truth_state" to truth.featureReadinessTruthState.wireValue,
-            "operational_device_support" to AndroidOperationalDeviceSupport
-                .classify(truth.deviceRole)
-                .toMap()
+            "feature_readiness_truth_state" to truth.featureReadinessTruthState.wireValue
         )
 
     private fun buildAutonomyTruth(truth: AndroidParticipantRuntimeTruth): Map<String, Any?> {

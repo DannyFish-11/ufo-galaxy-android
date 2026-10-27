@@ -66,6 +66,10 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # runtime/ 契约层冻结(V2 设计文档第 7 节):文件数只许减不许增,少了要把基线一起改小。
+      - name: runtime/ 契约层只许减不许增
+        run: bash tools/check_runtime_freeze.sh
+
       - name: Compile sources
         run: ./gradlew :app:compileDebugKotlin
 

@@ -26,7 +26,7 @@ import org.junit.Test
  *  - stepCount derived from GoalResultPayload.steps.size.
  *  - latencyMs propagated from GoalResultPayload.latency_ms.
  *  - error propagated from GoalResultPayload.error.
- *  - deviceId / deviceRole propagated from GoalResultPayload.
+ *  - deviceId propagated from GoalResultPayload; the local deviceRole label comes from the caller.
  *  - source_runtime_posture propagated from GoalResultPayload.
  *  - traceId / routeMode taken from the factory call parameters.
  *
@@ -62,7 +62,6 @@ class AndroidSessionContributionTest {
         latencyMs: Long = 0L,
         error: String? = null,
         deviceId: String = "dev-1",
-        deviceRole: String = "phone",
         sourceRuntimePosture: String? = null
     ) = GoalResultPayload(
         task_id = taskId,
@@ -74,7 +73,6 @@ class AndroidSessionContributionTest {
         latency_ms = latencyMs,
         error = error,
         device_id = deviceId,
-        device_role = deviceRole,
         source_runtime_posture = sourceRuntimePosture
     )
 
@@ -202,9 +200,10 @@ class AndroidSessionContributionTest {
     }
 
     @Test
-    fun `fromGoalResult propagates deviceId and deviceRole`() {
+    fun `fromGoalResult propagates deviceId and takes the local role label from the caller`() {
         val contrib = AndroidSessionContribution.fromGoalResult(
-            goalResult(deviceId = "phone-001", deviceRole = "tablet")
+            goalResult(deviceId = "phone-001"),
+            deviceRole = "tablet"
         )
         assertEquals("phone-001", contrib.deviceId)
         assertEquals("tablet", contrib.deviceRole)

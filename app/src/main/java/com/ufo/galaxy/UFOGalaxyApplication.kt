@@ -708,8 +708,7 @@ class UFOGalaxyApplication : Application() {
             settings = appSettings,
             goalExecutor = localGoalExecutor,
             collaborationAgent = localCollaborationAgent,
-            deviceId = deviceId,
-            deviceRole = appSettings.deviceRole
+            deviceId = deviceId
         )
         loopController = LoopController(
             localPlanner = LocalPlanner(plannerService = plannerService),

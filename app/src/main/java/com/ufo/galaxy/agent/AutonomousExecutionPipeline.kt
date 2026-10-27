@@ -45,14 +45,12 @@ import kotlinx.coroutines.Dispatchers
  * @param goalExecutor        Handles single goal_execution pipelines locally.
  * @param collaborationAgent  Coordinates parallel_subtask execution via [goalExecutor].
  * @param deviceId            Stable device identifier included in every result payload.
- * @param deviceRole          Logical device role (e.g., "phone", "tablet") from settings.
  */
 class AutonomousExecutionPipeline(
     private val settings: AppSettings,
     private val goalExecutor: LocalGoalExecutor,
     private val collaborationAgent: LocalCollaborationAgent,
-    private val deviceId: String,
-    private val deviceRole: String
+    private val deviceId: String
 ) {
 
     companion object {
@@ -156,7 +154,7 @@ class AutonomousExecutionPipeline(
      *    V2 should retry); tolerates `null` / absent values (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalGoalExecutor.executeGoal] and enriches
-     * the result with [device_role], the echoed [GoalExecutionPayload.executor_target_type],
+     * the result with the echoed [GoalExecutionPayload.executor_target_type],
      * the echoed [GoalExecutionPayload.continuity_token] / [GoalExecutionPayload.is_resumable],
      * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
      * the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation,
@@ -275,7 +273,6 @@ class AutonomousExecutionPipeline(
         )
         return baseResult
             .copy(
-                device_role = deviceRole,
                 execution_runtime_kind = payload.execution_runtime_kind,
                 dispatch_intent = payload.dispatch_intent,
                 dispatch_origin = payload.dispatch_origin,
@@ -328,7 +325,7 @@ class AutonomousExecutionPipeline(
      *    absent values (legacy senders) without failure.
      *
      * When all gates pass, delegates to [LocalCollaborationAgent.handleParallelSubtask]
-     * and enriches the result with [device_role], the echoed
+     * and enriches the result with the echoed
      * [GoalExecutionPayload.executor_target_type], the echoed continuity/recovery fields,
      * the echoed [GoalExecutionPayload.dispatch_trace_id] for full-chain V2 observability,
      * the echoed [GoalExecutionPayload.dispatch_plan_id] for dispatch plan correlation,
@@ -421,7 +418,6 @@ class AutonomousExecutionPipeline(
         )
         return baseResult
             .copy(
-                device_role = deviceRole,
                 execution_runtime_kind = payload.execution_runtime_kind,
                 dispatch_intent = payload.dispatch_intent,
                 dispatch_origin = payload.dispatch_origin,
@@ -550,7 +546,6 @@ class AutonomousExecutionPipeline(
         subtask_index = payload.subtask_index,
         latency_ms = 0L,
         device_id = deviceId,
-        device_role = deviceRole,
         execution_runtime_kind = payload.execution_runtime_kind,
         dispatch_intent = payload.dispatch_intent,
         dispatch_origin = payload.dispatch_origin,
@@ -586,7 +581,6 @@ class AutonomousExecutionPipeline(
         subtask_index = payload.subtask_index,
         latency_ms = GOAL_EXECUTION_TIMEOUT_MS,
         device_id = deviceId,
-        device_role = deviceRole,
         execution_runtime_kind = payload.execution_runtime_kind,
         dispatch_intent = payload.dispatch_intent,
         dispatch_origin = payload.dispatch_origin,
@@ -624,7 +618,6 @@ class AutonomousExecutionPipeline(
         subtask_index = payload.subtask_index,
         latency_ms = 0L,
         device_id = deviceId,
-        device_role = deviceRole,
         execution_runtime_kind = payload.execution_runtime_kind,
         dispatch_intent = payload.dispatch_intent,
         dispatch_origin = payload.dispatch_origin,

@@ -125,7 +125,6 @@ class AndroidRuntimeHostRepresentationTest {
             "local_model_enabled",
             "cross_device_enabled",
             "parallel_execution_enabled",
-            "device_role",
             "model_ready",
             "accessibility_ready",
             "overlay_ready"
@@ -144,7 +143,6 @@ class AndroidRuntimeHostRepresentationTest {
             "local_model_enabled" to false,
             "cross_device_enabled" to true,
             "parallel_execution_enabled" to false,
-            "device_role" to "phone",
             "model_ready" to true,
             "accessibility_ready" to true,
             "overlay_ready" to true
@@ -155,15 +153,12 @@ class AndroidRuntimeHostRepresentationTest {
         assertTrue(capMeta.containsKey("goal_execution_enabled"))
         assertTrue(capMeta.containsKey("local_model_enabled"))
         assertTrue(capMeta.containsKey("cross_device_enabled"))
-        assertTrue(capMeta.containsKey("device_role"))
         assertTrue(capMeta.containsKey("model_ready"))
     }
 
     @Test
     fun `merged metadata contains host keys with correct values`() {
-        val capMeta: MutableMap<String, Any> = mutableMapOf(
-            "device_role" to "phone"
-        )
+        val capMeta: MutableMap<String, Any> = mutableMapOf()
         val descriptor = activeHostDescriptor(hostId = "h-specific")
         capMeta.putAll(descriptor.toMetadataMap())
 

@@ -61,7 +61,7 @@ class Pr3AndroidCapabilityExportContractTest {
     }
 
     /**
-     * Builds a complete, valid metadata map with all 29 required fields present and correct.
+     * Builds a complete, valid metadata map with all 28 required fields present and correct.
      */
     private fun completeMetadata(): Map<String, Any> = mapOf(
         // Core readiness signals
@@ -69,7 +69,6 @@ class Pr3AndroidCapabilityExportContractTest {
         "local_model_enabled"           to false,
         "cross_device_enabled"          to false,
         "parallel_execution_enabled"    to false,
-        "device_role"                   to "phone",
         "model_ready"                   to false,
         "accessibility_ready"           to false,
         "overlay_ready"                 to false,
@@ -103,17 +102,19 @@ class Pr3AndroidCapabilityExportContractTest {
     // ── 1. Schema version stability ───────────────────────────────────────────
 
     /**
-     * CONTRACT_SCHEMA_VERSION must remain "1" until an intentional breaking change.
+     * CONTRACT_SCHEMA_VERSION must remain "2" until an intentional breaking change.
+     * ("1" → "2": `device_role` left the required metadata — the center never read it, and what a
+     * device can do now comes from its self-description.)
      *
      * If you are seeing this failure because you added/removed a required field, changed a type
      * constraint, or changed a vocabulary value, increment CONTRACT_SCHEMA_VERSION to "2" (or the
      * next appropriate value) and update the V2-side expected version accordingly.
      */
     @Test
-    fun `CONTRACT_SCHEMA_VERSION is stable at 1`() {
+    fun `CONTRACT_SCHEMA_VERSION is stable at 2`() {
         assertEquals(
             "CONTRACT_SCHEMA_VERSION drift detected — increment it and update V2-side schema expectation",
-            "1",
+            "2",
             AndroidCapabilityExportContract.CONTRACT_SCHEMA_VERSION
         )
     }
@@ -184,10 +185,10 @@ class Pr3AndroidCapabilityExportContractTest {
     }
 
     @Test
-    fun `EXPECTED_REQUIRED_METADATA_FIELD_COUNT is 29`() {
+    fun `EXPECTED_REQUIRED_METADATA_FIELD_COUNT is 28`() {
         assertEquals(
             "EXPECTED_REQUIRED_METADATA_FIELD_COUNT drift detected",
-            29,
+            28,
             AndroidCapabilityExportContract.EXPECTED_REQUIRED_METADATA_FIELD_COUNT
         )
     }

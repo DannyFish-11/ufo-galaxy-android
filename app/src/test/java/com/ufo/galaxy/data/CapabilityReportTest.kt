@@ -59,15 +59,16 @@ class CapabilityReportTest {
     // ── Canonical runtime identity contract ──────────────────────────────────
 
     @Test
-    fun `REQUIRED_METADATA_KEYS contains exactly the eight canonical fields`() {
+    fun `REQUIRED_METADATA_KEYS contains exactly the seven canonical fields`() {
         val keys = CapabilityReport.REQUIRED_METADATA_KEYS
 
-        assertEquals("must have exactly 8 canonical keys", 8, keys.size)
+        assertEquals("must have exactly 7 canonical keys", 7, keys.size)
         assertTrue(keys.contains("goal_execution_enabled"))
         assertTrue(keys.contains("local_model_enabled"))
         assertTrue(keys.contains("cross_device_enabled"))
         assertTrue(keys.contains("parallel_execution_enabled"))
-        assertTrue(keys.contains("device_role"))
+        // 设备角色不上报:中心不读,这台设备能做什么由设备自述说
+        assertFalse(keys.contains("device_role"))
         assertTrue(keys.contains("model_ready"))
         assertTrue(keys.contains("accessibility_ready"))
         assertTrue(keys.contains("overlay_ready"))
@@ -84,7 +85,6 @@ class CapabilityReportTest {
                 "local_model_enabled" to true,
                 "cross_device_enabled" to true,
                 "parallel_execution_enabled" to false,
-                "device_role" to "phone",
                 "model_ready" to true,
                 "accessibility_ready" to true,
                 "overlay_ready" to true
@@ -121,8 +121,7 @@ class CapabilityReportTest {
                 "goal_execution_enabled" to true,
                 "local_model_enabled" to true,
                 "cross_device_enabled" to true,
-                "parallel_execution_enabled" to false,
-                "device_role" to "phone"
+                "parallel_execution_enabled" to false
             )
         )
 
@@ -212,7 +211,6 @@ class CapabilityReportTest {
                 "local_model_enabled" to true,
                 "cross_device_enabled" to true,
                 "parallel_execution_enabled" to true,
-                "device_role" to "phone",
                 "model_ready" to true,
                 "accessibility_ready" to true,
                 "overlay_ready" to true,
@@ -293,7 +291,6 @@ class CapabilityReportTest {
                     "local_model_enabled" to true,
                     "cross_device_enabled" to true,
                     "parallel_execution_enabled" to true,
-                    "device_role" to "phone",
                     "model_ready" to true,
                     "accessibility_ready" to true,
                     "overlay_ready" to true,

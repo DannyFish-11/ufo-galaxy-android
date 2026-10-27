@@ -1009,7 +1009,6 @@ class GalaxyWebSocketClient(
      *   - `local_model_enabled`        (Boolean)
      *   - `cross_device_enabled`       (Boolean) — overwritten at send-time from the live flag
      *   - `parallel_execution_enabled` (Boolean)
-     *   - `device_role`                (String)
      *   - `model_ready`                (Boolean)
      *   - `accessibility_ready`        (Boolean)
      *   - `overlay_ready`              (Boolean)
@@ -1030,7 +1029,6 @@ class GalaxyWebSocketClient(
             "local_model_enabled" to false,
             "cross_device_enabled" to crossDeviceEnabled,
             "parallel_execution_enabled" to false,
-            "device_role" to "phone",
             "model_ready" to false,
             "accessibility_ready" to false,
             "overlay_ready" to false,
@@ -2446,9 +2444,9 @@ class GalaxyWebSocketClient(
      *    and permitted) merged with [modelCapabilities] (set via [setModelCapabilities]).
      *  - `capabilities` — high-level autonomous capability names from [highLevelCapabilities]
      *    (set via [setHighLevelCapabilities]), defaulting to the standard 5-capability set.
-     *  - `metadata` — the full 8-field canonical runtime identity map (see
+     *  - `metadata` — the full 7-field canonical runtime identity map (see
      *    [CapabilityReport.REQUIRED_METADATA_KEYS]): `goal_execution_enabled`,
-     *    `local_model_enabled`, `parallel_execution_enabled`, `device_role`,
+     *    `local_model_enabled`, `parallel_execution_enabled`,
      *    `model_ready`, `accessibility_ready`, `overlay_ready`, and `cross_device_enabled`
      *    (always overwritten from the live [crossDeviceEnabled] flag at send-time).
      *

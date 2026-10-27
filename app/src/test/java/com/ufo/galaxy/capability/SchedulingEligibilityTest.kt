@@ -75,9 +75,9 @@ class SchedulingEligibilityTest {
         deviceRole = "phone"
     ).withState(RuntimeHostDescriptor.HostParticipationState.DRAINING)
 
-    private fun hubDescriptor() = RuntimeHostDescriptor.of(
-        deviceId = "pixel-hub",
-        deviceRole = "hub"
+    private fun descriptorNamed(role: String) = RuntimeHostDescriptor.of(
+        deviceId = "pixel-$role",
+        deviceRole = role
     ).withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
 
     // ── PlacementPreference derivation ────────────────────────────────────────
@@ -137,15 +137,21 @@ class SchedulingEligibilityTest {
         )
     }
 
+    /** 设备角色名不改调度资格(V2 设计文档第 6 步):换个名字,放置偏好和能接的任务都一样。 */
     @Test
-    fun `LOCAL_PREFERRED when device role is hub and cross device near peer execution is demoted`() {
-        val settings = allReadySettings().also { it.deviceRole = "hub" }
-        val vector = AndroidCapabilityVector.from(settings, hubDescriptor())
-        val eligibility = SchedulingEligibility.from(vector)
-
-        assertEquals(SchedulingEligibility.PlacementPreference.LOCAL_PREFERRED, eligibility.placementPreference)
-        assertFalse(eligibility.canAcceptCrossDeviceTasks)
-        assertFalse(eligibility.canAcceptParallelSubtasks)
+    fun `device role name does not change scheduling eligibility`() {
+        fun eligibilityAs(role: String): SchedulingEligibility {
+            val settings = allReadySettings().also { it.deviceRole = role }
+            return SchedulingEligibility.from(AndroidCapabilityVector.from(settings, descriptorNamed(role)))
+        }
+        val phone = eligibilityAs("phone")
+        for (role in listOf("hub", "tablet", "")) {
+            val other = eligibilityAs(role)
+            assertEquals(phone.placementPreference, other.placementPreference)
+            assertEquals(phone.canAcceptCrossDeviceTasks, other.canAcceptCrossDeviceTasks)
+            assertEquals(phone.canAcceptParallelSubtasks, other.canAcceptParallelSubtasks)
+        }
+        assertTrue(eligibilityAs("hub").canAcceptCrossDeviceTasks)
     }
 
     // ── Individual eligibility flags ──────────────────────────────────────────

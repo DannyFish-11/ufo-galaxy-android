@@ -118,7 +118,7 @@ class E2EContractTest {
             meta.containsKey("cross_device_enabled"))
         assertTrue("metadata must contain parallel_execution_enabled",
             meta.containsKey("parallel_execution_enabled"))
-        assertTrue("metadata must contain device_role",
+        assertFalse("metadata must not report device_role",
             meta.containsKey("device_role"))
         assertTrue("metadata must contain model_ready",
             meta.containsKey("model_ready"))
@@ -313,7 +313,6 @@ class E2EContractTest {
                 "goal_execution_enabled" to true,
                 "local_model_enabled" to true,
                 "parallel_execution_enabled" to true,
-                "device_role" to "phone",
                 "model_ready" to true,
                 "accessibility_ready" to true,
                 "overlay_ready" to true

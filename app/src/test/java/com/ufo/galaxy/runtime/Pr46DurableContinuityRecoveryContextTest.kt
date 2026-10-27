@@ -178,8 +178,7 @@ class Pr46DurableContinuityRecoveryContextTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = deviceId,
-            deviceRole = deviceRole
+            deviceId = deviceId
         )
     }
 

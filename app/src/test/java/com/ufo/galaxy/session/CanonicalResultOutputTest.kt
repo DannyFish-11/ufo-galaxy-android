@@ -149,11 +149,10 @@ class CanonicalResultOutputTest {
             subtask_index = 1,
             latency_ms = 500L,
             device_id = "dev-rt",
-            device_role = "phone",
             source_runtime_posture = SourceRuntimePosture.JOIN_RUNTIME
         )
         val contrib = AndroidSessionContribution.fromGoalResult(
-            result, traceId = "tr-rt-1", routeMode = "cross_device"
+            result, traceId = "tr-rt-1", routeMode = "cross_device", deviceRole = "phone"
         )
 
         assertEquals(AndroidSessionContribution.Kind.FINAL_COMPLETION, contrib.kind)

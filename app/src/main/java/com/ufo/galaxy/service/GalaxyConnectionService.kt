@@ -2187,7 +2187,6 @@ class GalaxyConnectionService : Service() {
             goalResult = rawResult.copy(
                 correlation_id = taskId,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 latency_ms = rawResult.latency_ms ?: 0L,
                 source_runtime_posture = payload.source_runtime_posture
             )
@@ -2229,7 +2228,6 @@ class GalaxyConnectionService : Service() {
                 subtask_index = null,
                 latency_ms = 0L,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 // Carry source_runtime_posture from the inbound payload so the error result
                 // has the same context fields as a normal execution result.
                 source_runtime_posture = payload.source_runtime_posture
@@ -3396,7 +3394,6 @@ class GalaxyConnectionService : Service() {
             goalResult = rawResult.copy(
                 correlation_id = taskId,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 latency_ms = rawResult.latency_ms ?: 0L,
                 source_runtime_posture = envelope.source_runtime_posture,
                 executor_target_type = envelope.executor_target_type,
