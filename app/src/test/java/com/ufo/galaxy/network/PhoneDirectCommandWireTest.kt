@@ -110,7 +110,8 @@ class PhoneDirectCommandWireTest {
         assertEquals(PhoneActionCatalog.BY_NAME.getValue("sms").description, said["sms"].asString)
         // 中心按设备自己的声明决定推不推请求进度,不看设备类型
         assertTrue("手机会显示自己那件请求的进度", report["shows_request_progress"].asBoolean)
-        assertFalse("手机没有显示提问的界面,不声明能回答提问", report.has("answers_decisions"))
+        assertFalse("能不能回答提问只在自述里说,不发散字段", report.has("answers_decisions"))
+        assertFalse("没装上自述就不说能不能回答批准,中心不问它", report.has("approvals"))
     }
 
     @Test
@@ -135,6 +136,31 @@ class PhoneDirectCommandWireTest {
         assertTrue(actions.any { it["name"].asString == "location" && it["effect"].asString == "read" })
         assertTrue("没给权限的进 unavailable", self.getAsJsonArray("unavailable").any { it.asJsonObject["name"].asString == "contacts" })
         assertEquals("bridge/1", self.getAsJsonObject("declares")["hosts_agent"].asString)
+    }
+
+    /** V2 `docs/DEVICE_CLIENT_REQUIREMENTS.md` A2:能力上报带 `approvals`,和自述的 `declares.answers_decisions` 说同一句话。 */
+    @Test
+    fun `the report says whether the phone can answer approvals, the same as its self description`() {
+        val c = client()
+        val socket = RecordingWebSocket()
+        c.installWebSocketForTest(socket)
+        c.selfDescription = {
+            com.ufo.galaxy.phone.PhoneSelfDescription.build(
+                { it == PhoneActionCatalog.Need.NOTIFICATIONS }, "Pixel 9", "Pixel 9", "bridge/1",
+            )
+        }
+        c.simulateCanonicalReconnectOpenForTest()
+        val report = frames(socket, "capability_report").single()
+        assertTrue("通知打得开:能把提问摆到人面前", report.getAsJsonObject("self_description").getAsJsonObject("declares")["answers_decisions"].asBoolean)
+        assertTrue("所以声明能回答批准", report["approvals"].asBoolean)
+
+        c.selfDescription = {
+            com.ufo.galaxy.phone.PhoneSelfDescription.build({ false }, "Pixel 9", "Pixel 9", "bridge/1")
+        }
+        socket.sent.clear()
+        c.refreshCapabilityReport()
+        val denied = frames(socket, "capability_report").single()
+        assertFalse("通知被关了:弹不出来的提问只会让人白等", denied["approvals"].asBoolean)
     }
 
     @Test

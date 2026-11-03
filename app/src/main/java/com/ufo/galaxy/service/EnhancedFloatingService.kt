@@ -172,6 +172,12 @@ class EnhancedFloatingService : Service() {
             statusText?.post { updateStatusLabel() }
             loadingIndicator?.post { loadingIndicator?.visibility = View.GONE }
         }
+
+        /** 中心说的一句进度:还在做,加载不收(正文在主界面的对话里)。 */
+        override fun onProgress(text: String) {
+            taskStatus = STATUS_RUNNING
+            statusText?.post { updateStatusLabel() }
+        }
     }
 
     private lateinit var wsListener: GalaxyWebSocketClient.Listener

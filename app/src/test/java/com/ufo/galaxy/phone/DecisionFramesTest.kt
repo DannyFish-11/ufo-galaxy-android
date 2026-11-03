@@ -26,6 +26,8 @@ class DecisionFramesTest {
         assertTrue(d.title.contains("app_control"))
         assertEquals(listOf("deny", "once", "session", "always"), d.options.map { it.id })
         assertEquals("永久允许", d.options.last().label)
+        assertEquals(90000L, d.timeoutMs)
+        assertNull("没给 timeout_ms 就是 null", DecisionFrames.parseRequest("""{"type":"decision_request","payload":{"decision_id":"d-9"}}""")!!.timeoutMs)
     }
 
     @Test
@@ -47,26 +49,38 @@ class DecisionFramesTest {
         assertNull(DecisionFrames.parseWithdraw(request))
     }
 
+    /** V2 `docs/DEVICE_CLIENT_REQUIREMENTS.md` A1 给的样子,一个字段不多、不少。 */
     @Test
-    fun `the answer goes back as the same human_input the watch sends`() {
-        val f = DecisionFrames.humanInputFrame("phone-1", "d-1", "always", null, 7, 1000L)
-        assertEquals("command", f["type"].asString)
-        assertEquals("3.0", f["version"].asString)
-        assertEquals("phone-1", f["device_id"].asString)
-        val outer = f.getAsJsonObject("payload")
-        assertEquals("human_input", outer["command"].asString)
-        val inner = outer.getAsJsonObject("payload")
-        assertEquals("d-1", inner["decision_id"].asString)
-        assertEquals("always", inner["selected_option"].asString)
-        assertFalse(inner.has("voice_input"))
+    fun `approve and deny go back exactly as the center reads them`() {
+        for (option in listOf("approve", "deny")) {
+            val f = DecisionFrames.humanInputFrame("phone-1", "d-1", option, null, 1000L)
+            assertEquals(setOf("type", "version", "device_id", "correlation_id", "timestamp", "payload"), f.keySet())
+            assertEquals("command", f["type"].asString)
+            assertEquals("3.0", f["version"].asString)
+            assertEquals("phone-1", f["device_id"].asString)
+            assertTrue(f["correlation_id"].asString.matches(Regex("hi_[0-9a-f-]{36}")))
+            assertEquals(1000L, f["timestamp"].asLong)
+            val outer = f.getAsJsonObject("payload")
+            assertEquals(setOf("command", "payload"), outer.keySet())
+            assertEquals("human_input", outer["command"].asString)
+            val inner = outer.getAsJsonObject("payload")
+            assertEquals(setOf("decision_id", "selected_option", "device", "timestamp"), inner.keySet())
+            assertEquals("d-1", inner["decision_id"].asString)
+            assertEquals(option, inner["selected_option"].asString)
+            assertEquals("android", inner["device"].asString)
+            assertEquals(1000L, inner["timestamp"].asLong)
+        }
+        val a = DecisionFrames.humanInputFrame("p", "d-1", "approve", null, 1L)["correlation_id"].asString
+        val b = DecisionFrames.humanInputFrame("p", "d-1", "approve", null, 1L)["correlation_id"].asString
+        assertFalse("每次回答一个新的 correlation_id", a == b)
     }
 
     @Test
-    fun `a question without options is answered in words`() {
-        val inner = DecisionFrames.humanInputFrame("p", "d-3", null, "  明天上午  ", 1, 1L)
+    fun `a question without options is answered in words, and words alone carry no option`() {
+        val inner = DecisionFrames.humanInputFrame("p", "d-3", null, "  明天上午  ", 1L)
             .getAsJsonObject("payload").getAsJsonObject("payload")
         assertEquals("明天上午", inner["voice_input"].asString)
-        assertFalse(inner.has("selected_option"))
+        assertFalse("批准只能经按钮,说一句话不带选项", inner.has("selected_option"))
     }
 
     @Test

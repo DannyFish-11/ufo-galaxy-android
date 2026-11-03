@@ -42,6 +42,12 @@ class BridgeAgentRuntime(
         /** 中心智能体的回答到了,显示给人。 */
         fun onReply(text: String, success: Boolean)
 
+        /**
+         * 中心说的一句进度(对话下行带 `progress: true`,如「这一步要你点头才做:…已在电脑面板上问你」):
+         * 显示成状态,不结束「正在处理」、不当最终回答(V2 `docs/DEVICE_CLIENT_REQUIREMENTS.md` A3)。
+         */
+        fun onProgress(text: String)
+
         /** 中心交来一整段目标,用手机本地循环去做;[progress] 可多次调,[done] 调一次。 */
         fun runGoal(taskId: String, goal: String, constraints: List<String>, progress: (JsonObject) -> Unit, done: (JsonObject) -> Unit)
 
@@ -124,7 +130,12 @@ class BridgeAgentRuntime(
             }
             A2A.Kind.CONVERSATION -> {
                 val text = str(env.body, "text")
-                if (text.isNotEmpty()) host.onReply(text, (env.body["success"] as? JsonPrimitive)?.booleanOrNull ?: true)
+                val progress = (env.body["progress"] as? JsonPrimitive)?.booleanOrNull == true
+                when {
+                    text.isEmpty() -> Unit
+                    progress -> host.onProgress(text)
+                    else -> host.onReply(text, (env.body["success"] as? JsonPrimitive)?.booleanOrNull ?: true)
+                }
             }
             A2A.Kind.DELEGATE_GOAL -> {
                 val goal = str(env.body, "goal")

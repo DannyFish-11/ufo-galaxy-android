@@ -16,13 +16,14 @@ import androidx.core.app.NotificationCompat
 import com.ufo.galaxy.R
 import com.ufo.galaxy.UFOGalaxyApplication
 import com.ufo.galaxy.network.GalaxyWebSocketClient
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 手机上回答中心智能体的提问(V2 设计文档第 8 节第 2 步):`decision_request` 弹成一条通知,
  * 选项不多于三个时直接放成按钮,点开通知是一个小对话框列出全部选项;人点哪个就把哪个回给中心
  * ([DecisionFrames.humanInputFrame]),通知收起。别处先答了、超时了,中心发 `decision_withdraw`,这里收起通知。
+ *
+ * 一条提问只答一次([DecisionBook]):撤回了、过了 `timeout_ms`、已经答过的,再点也不发 ——
+ * 决定结束后才到的回答,中心会当成人说的一句话交给智能体。通知到期自己收起(`setTimeoutAfter`)。
  *
  * 只有通知打得开时手机才声明能回答提问([PhoneSelfDescription])—— 弹不出来的提问只会让中心白等。
  */
@@ -30,13 +31,14 @@ object PhoneDecisions {
     private const val TAG = "PhoneDecisions"
     internal const val EXTRA_DECISION = "decision_id"
     internal const val EXTRA_OPTION = "option_id"
+    /** 按钮里带着这条提问的到期时刻:进程重启后账是空的,靠它判断还算不算数。 */
+    internal const val EXTRA_DEADLINE = "deadline_ms"
 
     @Volatile
     private var client: GalaxyWebSocketClient? = null
 
-    /** 还没答的提问(点开通知时要用)。 */
-    private val open = ConcurrentHashMap<String, DecisionFrames.Decision>()
-    private val seq = AtomicLong(0)
+    /** 摆着的提问各自还算不算数。 */
+    private val book = DecisionBook()
 
     fun install(client: GalaxyWebSocketClient, context: Context) {
         this.client = client
@@ -49,29 +51,43 @@ object PhoneDecisions {
 
             override fun onDecisionFrame(frameJson: String) {
                 DecisionFrames.parseRequest(frameJson)?.let { show(app, it) }
-                DecisionFrames.parseWithdraw(frameJson)?.let { dismiss(app, it) }
+                DecisionFrames.parseWithdraw(frameJson)?.let { withdraw(app, it) }
             }
         })
     }
 
-    internal fun pending(decisionId: String): DecisionFrames.Decision? = open[decisionId]
+    internal fun pending(decisionId: String): DecisionFrames.Decision? = book.peek(decisionId, System.currentTimeMillis())
 
-    /** 人点了一个选项:回给中心,收起通知。 */
-    internal fun answer(context: Context, decisionId: String, optionId: String?, text: String? = null) {
+    /**
+     * 人点了一个选项:回给中心,收起通知。撤回了、过期了、答过了就只收起通知、不发。
+     * [deadlineHintMs] 是按钮里带的到期时刻(进程重启后账是空的时候用)。
+     */
+    internal fun answer(
+        context: Context,
+        decisionId: String,
+        optionId: String?,
+        text: String? = null,
+        deadlineHintMs: Long? = null,
+    ) {
         val c = client
         if (c == null) {
             Log.w(TAG, "answer before install; dropped $decisionId")
+            dismiss(context, decisionId)
             return
         }
-        val frame = DecisionFrames.humanInputFrame(
-            c.currentDeviceId(), decisionId, optionId, text, seq.incrementAndGet(), System.currentTimeMillis(),
-        )
+        if (!book.claim(decisionId, System.currentTimeMillis(), deadlineHintMs)) {
+            Log.i(TAG, "decision $decisionId already closed (answered, withdrawn or timed out); reply not sent")
+            dismiss(context, decisionId)
+            return
+        }
+        val frame = DecisionFrames.humanInputFrame(c.currentDeviceId(), decisionId, optionId, text, System.currentTimeMillis())
         if (!c.sendJson(frame.toString())) Log.w(TAG, "human_input for $decisionId was not sent (not connected)")
         dismiss(context, decisionId)
     }
 
     private fun show(context: Context, d: DecisionFrames.Decision) {
-        open[d.decisionId] = d
+        if (!book.open(d, System.currentTimeMillis())) return
+        val deadline = book.deadlineOf(d.decisionId) ?: 0L
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
             context,
@@ -90,13 +106,15 @@ object PhoneDecisions {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setContentIntent(tap)
             .setAutoCancel(false)
+        d.timeoutMs?.let { builder.setTimeoutAfter(it) }
         for (option in DecisionFrames.buttons(d)) {
             val reply = PendingIntent.getBroadcast(
                 context,
                 requestCode(d.decisionId, option.id),
                 Intent(context, DecisionReplyReceiver::class.java)
                     .putExtra(EXTRA_DECISION, d.decisionId)
-                    .putExtra(EXTRA_OPTION, option.id),
+                    .putExtra(EXTRA_OPTION, option.id)
+                    .putExtra(EXTRA_DEADLINE, deadline),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             builder.addAction(0, option.label, reply)
@@ -105,8 +123,13 @@ object PhoneDecisions {
             .onFailure { Log.w(TAG, "decision notification not shown: ${it.message}") }
     }
 
+    /** 中心撤回了(别处答了、超时、取消、被顶掉):记成结过,收起通知(进程重启过、账里没有也收)。 */
+    private fun withdraw(context: Context, decisionId: String) {
+        book.withdraw(decisionId)
+        dismiss(context, decisionId)
+    }
+
     private fun dismiss(context: Context, decisionId: String) {
-        open.remove(decisionId)
         context.getSystemService(NotificationManager::class.java)?.cancel(notificationId(decisionId))
     }
 
@@ -120,7 +143,8 @@ class DecisionReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val decisionId = intent.getStringExtra(PhoneDecisions.EXTRA_DECISION).orEmpty()
         val option = intent.getStringExtra(PhoneDecisions.EXTRA_OPTION).orEmpty()
-        if (decisionId.isNotBlank() && option.isNotBlank()) PhoneDecisions.answer(context, decisionId, option)
+        val deadline = intent.getLongExtra(PhoneDecisions.EXTRA_DEADLINE, 0L).takeIf { it > 0 }
+        if (decisionId.isNotBlank() && option.isNotBlank()) PhoneDecisions.answer(context, decisionId, option, null, deadline)
     }
 }
 

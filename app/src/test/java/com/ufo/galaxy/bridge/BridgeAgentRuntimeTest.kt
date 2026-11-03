@@ -28,6 +28,7 @@ class BridgeAgentRuntimeTest {
     private val wire = mutableListOf<JsonObject>()
     private var online = true
     private val replies = mutableListOf<Pair<String, Boolean>>()
+    private val progressLines = mutableListOf<String>()
     private val goals = mutableListOf<Triple<String, String, List<String>>>()
     private var goalProgress: ((JsonObject) -> Unit)? = null
     private var goalDone: ((JsonObject) -> Unit)? = null
@@ -39,6 +40,7 @@ class BridgeAgentRuntimeTest {
             put("goal", "订车")
         }
         override fun onReply(text: String, success: Boolean) { replies += text to success }
+        override fun onProgress(text: String) { progressLines += text }
         override fun runGoal(taskId: String, goal: String, constraints: List<String>, progress: (JsonObject) -> Unit, done: (JsonObject) -> Unit) {
             goals += Triple(taskId, goal, constraints); goalProgress = progress; goalDone = done
         }
@@ -110,6 +112,27 @@ class BridgeAgentRuntimeTest {
         assertEquals("明早七点的车", str(up.single().body, "text"))
         fromCenter(A2A.Kind.CONVERSATION, buildJsonObject { put("text", "订好了,七点在楼下"); put("success", true) })
         assertEquals(listOf("订好了,七点在楼下" to true), replies)
+    }
+
+    /** V2 `docs/DEVICE_CLIENT_REQUIREMENTS.md` A3:`progress: true` 的那句是进度,不是回答。 */
+    @Test
+    fun `a progress line from the center is shown as progress, not as the answer`() {
+        fromCenter(A2A.Kind.AGENT_DISPATCH)
+        bridge.say("帮我删掉电脑上的 a.txt")
+        drain()
+        fromCenter(
+            A2A.Kind.CONVERSATION,
+            buildJsonObject {
+                put("role", "assistant"); put("text", "这一步要你点头才做:已在电脑面板上问你。"); put("progress", true); put("success", true)
+            },
+        )
+        assertEquals(listOf("这一步要你点头才做:已在电脑面板上问你。"), progressLines)
+        assertTrue("进度不当回答", replies.isEmpty())
+        fromCenter(A2A.Kind.CONVERSATION, buildJsonObject { put("role", "assistant"); put("text", "删好了。"); put("success", true) })
+        assertEquals(listOf("删好了。" to true), replies)
+        fromCenter(A2A.Kind.CONVERSATION, buildJsonObject { put("text", "没删成。"); put("progress", false); put("success", false) })
+        assertEquals("progress 为 false 也是回答", "没删成。" to false, replies.last())
+        assertEquals(1, progressLines.size)
     }
 
     @Test
