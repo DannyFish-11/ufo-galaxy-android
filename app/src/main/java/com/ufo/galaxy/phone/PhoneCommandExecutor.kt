@@ -330,7 +330,13 @@ object DeviceCommandFrames {
 
     fun action(root: JsonObject): String = text(root.get("command"))
 
-    fun params(root: JsonObject): JsonObject = root.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+    /**
+     * 这一件事的参数。主路径(V2 `send_command_and_wait`)放在顶层 `params`;V2 两条最后兜底的下发路径
+     * (`core/command_router.py`、`core/openclawd.py` 的 WebSocket 兜底)把同样的参数平铺在 `payload` 里 ——
+     * 没有 `params` 时就读它,免得走到兜底时手机拿到空参数。两个都有以 `params` 为准。
+     */
+    fun params(root: JsonObject): JsonObject =
+        (root.get("params") ?: root.get("payload"))?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
 
     fun resultFrame(deviceId: String, commandId: String, outcome: CommandOutcome, nowMs: Long): JsonObject =
         JsonObject().apply {

@@ -205,6 +205,19 @@ class PhoneCommandExecutorTest {
         assertTrue(DeviceCommandFrames.params(params("""{"type":"command","command_id":"c","command":"x"}""")).size() == 0)
     }
 
+    /** V2 两条兜底下发路径把参数平铺在 `payload` 里(`core/command_router.py`、`core/openclawd.py`)。 */
+    @Test
+    fun `parameters sent in payload by the center's fallback paths are read too`() {
+        val fallback = params("""{"type":"command","command":"contacts","payload":{"query":"张三","limit":3},"command_id":"cmd_7","task_id":"t"}""")
+        assertTrue(DeviceCommandFrames.isDeviceCommand(fallback))
+        assertEquals("张三", DeviceCommandFrames.params(fallback)["query"].asString)
+        assertEquals(3, DeviceCommandFrames.params(fallback)["limit"].asInt)
+        val both = params("""{"type":"command","command_id":"c","command":"x","params":{"a":1},"payload":{"a":2}}""")
+        assertEquals("两个都有以 params 为准", 1, DeviceCommandFrames.params(both)["a"].asInt)
+        val notObject = params("""{"type":"command","command_id":"c","command":"x","payload":"text"}""")
+        assertEquals(0, DeviceCommandFrames.params(notObject).size())
+    }
+
     @Test
     fun `the result frame has the shape the center claims by command_id`() {
         val ok = DeviceCommandFrames.resultFrame(
