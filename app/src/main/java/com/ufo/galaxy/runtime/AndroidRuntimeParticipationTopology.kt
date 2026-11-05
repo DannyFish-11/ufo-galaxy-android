@@ -90,7 +90,6 @@ data class AndroidRuntimeParticipationTopology(
                         kind = RuntimeTopologyNodeKind.DEVICE,
                         attributes = mapOf(
                             "device_id" to truth.deviceId,
-                            "device_role" to truth.deviceRole,
                             "feature_readiness_truth_state" to truth.featureReadinessTruthState.wireValue
                         )
                     )

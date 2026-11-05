@@ -101,14 +101,15 @@ class Pr128AndroidPresenceParticipationProjectionTest {
     }
 
     private fun descriptor(
-        deviceRole: String = "phone",
-        role: RuntimeHostDescriptor.FormationRole = RuntimeHostDescriptor.FormationRole.PRIMARY
+        role: RuntimeHostDescriptor.FormationRole = RuntimeHostDescriptor.FormationRole.PRIMARY,
+        participationState: RuntimeHostDescriptor.HostParticipationState =
+            RuntimeHostDescriptor.HostParticipationState.ACTIVE
     ): RuntimeHostDescriptor = RuntimeHostDescriptor(
         hostId = "host-128",
         deviceId = "Pixel-128",
-        deviceRole = deviceRole,
+        deviceRole = "phone",
         formationRole = role,
-        participationState = RuntimeHostDescriptor.HostParticipationState.ACTIVE
+        participationState = participationState
     )
 
     private fun sessionSnapshot(
@@ -126,12 +127,13 @@ class Pr128AndroidPresenceParticipationProjectionTest {
     )
 
     private fun buildTruth(
-        deviceRole: String = "phone",
+        participationState: RuntimeHostDescriptor.HostParticipationState =
+            RuntimeHostDescriptor.HostParticipationState.ACTIVE,
         carrierForegroundVisible: Boolean,
         interactionSurfaceReady: Boolean,
         readinessState: ParticipantReadinessState = ParticipantReadinessState.READY
     ): AndroidParticipantRuntimeTruth = AndroidParticipantRuntimeTruth.from(
-        descriptor = descriptor(deviceRole = deviceRole),
+        descriptor = descriptor(participationState = participationState),
         sessionSnapshot = sessionSnapshot(),
         healthState = ParticipantHealthState.HEALTHY,
         readinessState = readinessState,
@@ -221,12 +223,12 @@ class Pr128AndroidPresenceParticipationProjectionTest {
     @Test
     fun `execution participant and presence participant stay distinct in canonical projection`() {
         val executionAndPresence = buildTruth(
-            deviceRole = "phone",
             carrierForegroundVisible = true,
             interactionSurfaceReady = true
         )
+        // 宿主待机:界面还在前台(在场),但这台此刻不接执行
         val presenceOnly = buildTruth(
-            deviceRole = "hub",
+            participationState = RuntimeHostDescriptor.HostParticipationState.STANDBY,
             carrierForegroundVisible = true,
             interactionSurfaceReady = true
         )

@@ -137,8 +137,7 @@ class Pr45ExecutorTargetTypingTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = deviceId,
-            deviceRole = deviceRole
+            deviceId = deviceId
         )
     }
 

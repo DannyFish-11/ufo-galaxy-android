@@ -63,7 +63,7 @@ import org.junit.Test
  *  - TEMPORARILY_UNAVAILABLE result error is null (not a failure)
  *  - TEMPORARILY_UNAVAILABLE result echoes task_id
  *  - TEMPORARILY_UNAVAILABLE result echoes group_id and subtask_index
- *  - TEMPORARILY_UNAVAILABLE result echoes device_id and device_role
+ *  - TEMPORARILY_UNAVAILABLE result echoes device_id
  *  - TEMPORARILY_UNAVAILABLE result echoes policy_routing_outcome
  *  - TEMPORARILY_UNAVAILABLE result echoes continuity_token and is_resumable
  *  - TEMPORARILY_UNAVAILABLE result is_continuation is null (not a continuation)
@@ -154,8 +154,7 @@ class Pr5bPolicyOutcomeBehaviorTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = deviceId,
-            deviceRole = deviceRole
+            deviceId = deviceId
         )
     }
 

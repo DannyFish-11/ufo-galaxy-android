@@ -1,7 +1,6 @@
 package com.ufo.galaxy.capability
 
 import com.ufo.galaxy.data.AppSettings
-import com.ufo.galaxy.runtime.AndroidOperationalDeviceSupport
 import com.ufo.galaxy.runtime.RuntimeHostDescriptor
 
 /**
@@ -133,9 +132,7 @@ data class AndroidCapabilityVector(
      */
     val isEligibleForCrossDeviceParticipation: Boolean
         get() = participationState == RuntimeHostDescriptor.HostParticipationState.ACTIVE &&
-                ExecutionDimension.CROSS_DEVICE_COORDINATION in executionDimensions &&
-                AndroidOperationalDeviceSupport.classify(deviceRole)
-                    .supportsCrossDeviceExecutionNearPeer
+                ExecutionDimension.CROSS_DEVICE_COORDINATION in executionDimensions
 
     /**
      * Returns `true` when this device is eligible to receive parallel subtask assignments.
@@ -145,9 +142,7 @@ data class AndroidCapabilityVector(
      */
     val isEligibleForParallelSubtask: Boolean
         get() = participationState == RuntimeHostDescriptor.HostParticipationState.ACTIVE &&
-                ExecutionDimension.PARALLEL_SUBTASK in executionDimensions &&
-                AndroidOperationalDeviceSupport.classify(deviceRole)
-                    .supportsCrossDeviceExecutionNearPeer
+                ExecutionDimension.PARALLEL_SUBTASK in executionDimensions
 
     /**
      * Returns `true` when the device holds the [RuntimeHostDescriptor.FormationRole.PRIMARY]

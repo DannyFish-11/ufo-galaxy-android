@@ -35,9 +35,11 @@ object BridgeAgent {
     private const val MAX_DIALOG = 20
     private const val MAX_TRAJECTORY = 5
 
-    /** 界面上的事:回答到了、上下文交还了。 */
+    /** 界面上的事:回答到了、中心说了一句进度、上下文交还了。 */
     interface Listener {
         fun onReply(text: String, success: Boolean)
+        /** 进度不是回答:不结束「正在处理」、不朗读。 */
+        fun onProgress(text: String) = Unit
         fun onReturned(summary: String, openItems: List<String>) = Unit
     }
 
@@ -110,6 +112,10 @@ object BridgeAgent {
             override fun onReply(text: String, success: Boolean) {
                 if (listeners.isEmpty()) Log.i(TAG, "reply arrived with no screen listening: ${text.take(60)}")
                 listeners.forEach { it.onReply(text, success) }
+            }
+
+            override fun onProgress(text: String) {
+                listeners.forEach { it.onProgress(text) }
             }
 
             override fun runGoal(

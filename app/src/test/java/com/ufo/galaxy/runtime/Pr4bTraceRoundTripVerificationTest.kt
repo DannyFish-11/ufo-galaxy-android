@@ -142,8 +142,7 @@ class Pr4bTraceRoundTripVerificationTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = deviceId,
-            deviceRole = "phone"
+            deviceId = deviceId
         )
     }
 

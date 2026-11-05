@@ -1,5 +1,6 @@
 package com.ufo.galaxy.agent
 
+import com.google.gson.Gson
 import com.ufo.galaxy.data.InMemoryAppSettings
 import com.ufo.galaxy.inference.LocalGroundingService
 import com.ufo.galaxy.inference.LocalPlannerService
@@ -17,9 +18,9 @@ import org.junit.Test
  *  - parallel_subtask returns STATUS_DISABLED when parallelExecutionEnabled=false
  *  - parallel_subtask executes and returns success when parallelExecutionEnabled=true
  *  - disabled result echoes task_id, group_id, subtask_index for gateway aggregation
- *  - disabled result includes device_id and device_role
- *  - enabled result includes device_role from settings
- *  - error from inner executor is propagated with device_role attached
+ *  - disabled result includes device_id
+ *  - results never report a device role (the center does not read one; a device says what it
+ *    can do in its self-description)
  *
  * All fakes mirror the shape of those in [LocalGoalExecutorTest] to keep tests
  * self-contained.
@@ -82,8 +83,7 @@ class AutonomousExecutionPipelineTest {
     private fun buildPipeline(
         goalExecutionEnabled: Boolean = true,
         parallelExecutionEnabled: Boolean = true,
-        deviceId: String = "test-device",
-        deviceRole: String = "phone"
+        deviceId: String = "test-device"
     ): AutonomousExecutionPipeline {
         val settings = InMemoryAppSettings(
             // 测试修复:生产新增的跨设备"运行时门"排在 goalExecutionEnabled/
@@ -92,8 +92,7 @@ class AutonomousExecutionPipelineTest {
             // feature-flag/成功路径。
             crossDeviceEnabled = true,
             goalExecutionEnabled = goalExecutionEnabled,
-            parallelExecutionEnabled = parallelExecutionEnabled,
-            deviceRole = deviceRole
+            parallelExecutionEnabled = parallelExecutionEnabled
         )
         val edge = buildEdgeExecutor()
         val goalExec = LocalGoalExecutor(edge, deviceId)
@@ -102,8 +101,7 @@ class AutonomousExecutionPipelineTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = collab,
-            deviceId = deviceId,
-            deviceRole = deviceRole
+            deviceId = deviceId
         )
     }
 
@@ -165,15 +163,13 @@ class AutonomousExecutionPipelineTest {
     }
 
     @Test
-    fun `goal_execution disabled result includes device_id and device_role`() {
+    fun `goal_execution disabled result includes device_id`() {
         val pipeline = buildPipeline(
             goalExecutionEnabled = false,
-            deviceId = "dev-abc",
-            deviceRole = "tablet"
+            deviceId = "dev-abc"
         )
         val result = pipeline.handleGoalExecution(buildGoalPayload())
         assertEquals("dev-abc", result.device_id)
-        assertEquals("tablet", result.device_role)
     }
 
     @Test
@@ -201,10 +197,18 @@ class AutonomousExecutionPipelineTest {
     }
 
     @Test
-    fun `goal_execution enabled result includes device_role`() {
-        val pipeline = buildPipeline(goalExecutionEnabled = true, deviceRole = "hub")
-        val result = pipeline.handleGoalExecution(buildGoalPayload())
-        assertEquals("hub", result.device_role)
+    fun `goal results do not report a device role`() {
+        val gson = Gson()
+        val enabled = buildPipeline(goalExecutionEnabled = true, parallelExecutionEnabled = true)
+        val disabled = buildPipeline(goalExecutionEnabled = false, parallelExecutionEnabled = false)
+        for (result in listOf(
+            enabled.handleGoalExecution(buildGoalPayload()),
+            enabled.handleParallelSubtask(buildGoalPayload()),
+            disabled.handleGoalExecution(buildGoalPayload()),
+            disabled.handleParallelSubtask(buildGoalPayload()),
+        )) {
+            assertFalse(gson.toJson(result).contains("device_role"))
+        }
     }
 
     @Test
@@ -237,15 +241,13 @@ class AutonomousExecutionPipelineTest {
     }
 
     @Test
-    fun `parallel_subtask disabled result includes device_id and device_role`() {
+    fun `parallel_subtask disabled result includes device_id`() {
         val pipeline = buildPipeline(
             parallelExecutionEnabled = false,
-            deviceId = "phone-001",
-            deviceRole = "phone"
+            deviceId = "phone-001"
         )
         val result = pipeline.handleParallelSubtask(buildGoalPayload())
         assertEquals("phone-001", result.device_id)
-        assertEquals("phone", result.device_role)
     }
 
     @Test
@@ -267,13 +269,6 @@ class AutonomousExecutionPipelineTest {
         assertEquals(EdgeExecutor.STATUS_SUCCESS, result.status)
         assertEquals("grp-active", result.group_id)
         assertEquals(1, result.subtask_index)
-    }
-
-    @Test
-    fun `parallel_subtask enabled result includes device_role`() {
-        val pipeline = buildPipeline(parallelExecutionEnabled = true, deviceRole = "tablet")
-        val result = pipeline.handleParallelSubtask(buildGoalPayload())
-        assertEquals("tablet", result.device_role)
     }
 
     // ── mixed flag states ─────────────────────────────────────────────────────
@@ -307,20 +302,10 @@ class AutonomousExecutionPipelineTest {
     // ── GoalResultPayload schema fields ───────────────────────────────────────
 
     @Test
-    fun `GoalResultPayload has device_role field`() {
-        val pipeline = buildPipeline(goalExecutionEnabled = true, deviceRole = "phone")
-        val result = pipeline.handleGoalExecution(buildGoalPayload())
-        // Verifies that the device_role field exists and is populated
-        assertNotNull(result.device_role)
-        assertEquals("phone", result.device_role)
-    }
-
-    @Test
     fun `GoalResultPayload disabled result carries all aggregation fields`() {
         val pipeline = buildPipeline(
             goalExecutionEnabled = false,
-            deviceId = "agg-device",
-            deviceRole = "tablet"
+            deviceId = "agg-device"
         )
         val result = pipeline.handleGoalExecution(
             buildGoalPayload(taskId = "agg-001", groupId = "grp-agg", subtaskIndex = 4)
@@ -332,7 +317,6 @@ class AutonomousExecutionPipelineTest {
         assertEquals(4, result.subtask_index)
         assertEquals(0L, result.latency_ms)
         assertEquals("agg-device", result.device_id)
-        assertEquals("tablet", result.device_role)
     }
 
     @Test

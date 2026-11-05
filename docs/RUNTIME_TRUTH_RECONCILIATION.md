@@ -103,7 +103,6 @@ map via `toMap()`.
 | `participantId` | `participant_id` | String | Stable `deviceId:hostId` participant identity |
 | `deviceId` | `device_id` | String | Hardware device identifier |
 | `hostId` | `host_id` | String | Per-process runtime host instance UUID |
-| `deviceRole` | `device_role` | String | Logical device role ("phone", "tablet") |
 | `participationState` | `participation_state` | String | ACTIVE / STANDBY / DRAINING / INACTIVE |
 | `coordinationRole` | `coordination_role` | String | "coordinator" or "participant" |
 | `sourceRuntimePosture` | `source_runtime_posture` | String | "join_runtime" or "control_only" |

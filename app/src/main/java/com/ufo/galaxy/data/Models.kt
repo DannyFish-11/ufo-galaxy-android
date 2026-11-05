@@ -85,11 +85,10 @@ data class AIPMessage(
  *                           "autonomous_goal_execution", "local_task_planning").
  *                           Empty list when not applicable.
  * @param metadata           Canonical runtime identity flags reported to the gateway.
- *                           Must contain all 8 keys defined in [REQUIRED_METADATA_KEYS]:
+ *                           Must contain all 7 keys defined in [REQUIRED_METADATA_KEYS]:
  *                           `goal_execution_enabled`, `local_model_enabled`,
  *                           `cross_device_enabled`, `parallel_execution_enabled`,
- *                           `device_role`, `model_ready`, `accessibility_ready`,
- *                           `overlay_ready`. Use [AppSettings.toMetadataMap] to build
+ *                           `model_ready`, `accessibility_ready`, `overlay_ready`. Use [AppSettings.toMetadataMap] to build
  *                           a conforming map. Use [validate] to check completeness.
  */
 data class CapabilityReport(
@@ -320,7 +319,6 @@ data class CapabilityReport(
          * | `local_model_enabled`     | Boolean | On-device inference models are loaded and ready. |
          * | `cross_device_enabled`    | Boolean | Cross-device collaboration switch is ON. |
          * | `parallel_execution_enabled` | Boolean | Parallel subtask execution is active. |
-         * | `device_role`             | String  | Logical cluster role: "phone", "tablet", "hub". |
          * | `model_ready`             | Boolean | Model files are present and verified on disk. |
          * | `accessibility_ready`     | Boolean | HardwareKeyListener accessibility service is enabled. |
          * | `overlay_ready`           | Boolean | SYSTEM_ALERT_WINDOW (overlay) permission is granted. |
@@ -332,7 +330,6 @@ data class CapabilityReport(
             "local_model_enabled",
             "cross_device_enabled",
             "parallel_execution_enabled",
-            "device_role",
             "model_ready",
             "accessibility_ready",
             "overlay_ready"

@@ -315,10 +315,14 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
         )
     }
 
+    /**
+     * 设备角色名不决定这台设备能不能参与执行(V2 docs/DEVICE_SELF_DESCRIPTION_DESIGN.md 第 6 步):
+     * 同一台设备换个角色名,执行参与、能力档、就绪都一样;能做什么看设备自述和它真实的就绪 / 健康状态。
+     */
     @Test
-    fun `hub role is demoted from execution near peer support`() {
-        val truth = AndroidParticipantRuntimeTruth.from(
-            descriptor = descriptor().copy(deviceRole = "hub"),
+    fun `device role name does not change execution participation`() {
+        fun truthAs(role: String) = AndroidParticipantRuntimeTruth.from(
+            descriptor = descriptor().copy(deviceRole = role),
             sessionSnapshot = sessionSnapshot(),
             healthState = ParticipantHealthState.HEALTHY,
             readinessState = ParticipantReadinessState.READY,
@@ -326,17 +330,23 @@ class Pr02AndroidRuntimeNodeIdentityClosureTest {
             reconciliationEpoch = 10
         )
 
+        val phone = truthAs("phone")
+        for (role in listOf("hub", "tablet", "", "something_new")) {
+            val other = truthAs(role)
+            assertEquals(
+                phone.runtimeNodeIdentity?.executionParticipationState,
+                other.runtimeNodeIdentity?.executionParticipationState
+            )
+            assertEquals(
+                phone.runtimeNodeIdentity?.capabilityTruthLevel,
+                other.runtimeNodeIdentity?.capabilityTruthLevel
+            )
+            assertEquals(phone.featureReadinessTruthState, other.featureReadinessTruthState)
+        }
         assertEquals(
-            RuntimeNodeExecutionParticipationState.BLOCKED,
-            truth.runtimeNodeIdentity?.executionParticipationState
+            RuntimeNodeExecutionParticipationState.ELIGIBLE,
+            truthAs("hub").runtimeNodeIdentity?.executionParticipationState
         )
-        assertEquals(
-            RuntimeNodeCapabilityTruthLevel.PARTICIPANT_RUNTIME_CAPABLE,
-            truth.runtimeNodeIdentity?.capabilityTruthLevel
-        )
-        assertEquals(
-            FeatureReadinessTruthState.PARTIALLY_READY_DEGRADED,
-            truth.featureReadinessTruthState
-        )
+        assertTrue("runtime truth does not report a device role", "device_role" !in truthAs("hub").toMap())
     }
 }

@@ -81,7 +81,7 @@ object AndroidCapabilityExportContract {
      * map so that V2's `capability_registry.py` can detect Android-side schema changes without
      * having to diff individual field lists across releases.
      */
-    const val CONTRACT_SCHEMA_VERSION: String = "1"
+    const val CONTRACT_SCHEMA_VERSION: String = "2"
 
     /**
      * The wire metadata key under which [CONTRACT_SCHEMA_VERSION] is emitted.
@@ -279,13 +279,6 @@ object AndroidCapabilityExportContract {
             description = "Parallel subtask execution is active"
         ),
         FieldDescriptor(
-            key = "device_role",
-            type = FieldType.STRING,
-            required = true,
-            vocabularyValues = setOf("phone", "tablet", "hub"),
-            description = "Logical cluster role for V2 routing"
-        ),
-        FieldDescriptor(
             key = "model_ready",
             type = FieldType.BOOLEAN,
             required = true,
@@ -477,7 +470,7 @@ object AndroidCapabilityExportContract {
      * deliberate [CONTRACT_SCHEMA_VERSION] bump and documentation update before the change
      * can land.
      */
-    const val EXPECTED_REQUIRED_METADATA_FIELD_COUNT: Int = 29
+    const val EXPECTED_REQUIRED_METADATA_FIELD_COUNT: Int = 28
 
     // ── Validation ────────────────────────────────────────────────────────────
 

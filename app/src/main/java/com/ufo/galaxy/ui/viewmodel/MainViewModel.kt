@@ -313,6 +313,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             maybeSpeakResponse(text)
         }
 
+        /** 中心说的一句进度:作为一条状态放进对话,还在处理(不收加载、不朗读)。 */
+        override fun onProgress(text: String) {
+            val note = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.SYSTEM,
+                content = text,
+                timestamp = System.currentTimeMillis()
+            )
+            _uiState.update { it.copy(messages = it.messages + note) }
+        }
+
         override fun onReturned(summary: String, openItems: List<String>) {
             if (summary.isBlank() && openItems.isEmpty()) return
             val note = ChatMessage(

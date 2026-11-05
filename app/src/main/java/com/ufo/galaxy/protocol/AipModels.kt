@@ -630,7 +630,6 @@ data class GoalExecutionPayload(
  * @param subtask_index  Echoed from [GoalExecutionPayload.subtask_index].
  * @param latency_ms     Wall-clock execution time in milliseconds.
  * @param device_id      Reporting device identifier.
- * @param device_role    Logical device role (e.g., "phone", "tablet", "hub") from [AppSettings].
  * @param steps          Step-level results accumulated during execution.
  * @param outputs        High-level string outputs collected during execution (gateway aggregation).
  * @param error          Human-readable error when status is "error" or "disabled".
@@ -723,7 +722,6 @@ data class GoalResultPayload(
     val subtask_index: Int? = null,
     val latency_ms: Long = 0L,
     val device_id: String = "",
-    val device_role: String = "",
     val steps: List<StepResult> = emptyList(),
     val outputs: List<String> = emptyList(),
     val error: String? = null,

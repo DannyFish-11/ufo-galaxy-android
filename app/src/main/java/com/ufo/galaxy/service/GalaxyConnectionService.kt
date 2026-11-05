@@ -239,6 +239,31 @@ class GalaxyConnectionService : Service() {
 
         fun createMainEntryIntent(context: Context): Intent =
             Intent(context, GalaxyConnectionService::class.java)
+
+        /** 起服务的是应用自己可见的界面:可以带上 location 类型(见 [ForegroundTypes])。 */
+        const val EXTRA_FROM_VISIBLE_UI = "com.ufo.galaxy.FROM_VISIBLE_UI"
+
+        /** 应用自己的界面拉起服务时用这个;开机自启、粘性重启是后台,不用。 */
+        fun createVisibleEntryIntent(context: Context): Intent =
+            createMainEntryIntent(context).putExtra(EXTRA_FROM_VISIBLE_UI, true)
+
+        /** 服务此刻以哪些类型在前台(Android 14+);没在跑是 null。 */
+        @Volatile
+        var runningTypes: Set<ForegroundTypes.Kind>? = null
+            private set
+
+        /** 回到界面时调:位置权限是服务起来之后才给的(或服务是在后台重启的),从界面再起一次把 location 补上。 */
+        fun upgradeIfNeeded(context: Context) {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+            if (!ForegroundTypes.needsUpgrade(locationGranted(context), runningTypes)) return
+            runCatching { androidx.core.content.ContextCompat.startForegroundService(context, createVisibleEntryIntent(context)) }
+                .onFailure { Log.w(TAG, "补 location 类型没起来: ${it.message}") }
+        }
+
+        private fun locationGranted(context: Context): Boolean =
+            listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION).any {
+                androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
     }
     
     private val binder = LocalBinder()
@@ -1725,9 +1750,10 @@ class GalaxyConnectionService : Service() {
         Log.i(TAG, "服务启动：通过 RuntimeController 恢复跨设备状态 crossDeviceEnabled=$savedCrossDevice")
 
         // 启动前台服务（常驻通知，防止后台进程被系统回收）
-        startForeground(NOTIFICATION_ID, createNotification(
-            if (savedCrossDevice) "跨设备模式已启用" else "本地模式"
-        ))
+        startForegroundWithTypes(
+            createNotification(if (savedCrossDevice) "跨设备模式已启用" else "本地模式"),
+            fromVisibleUi = intent?.getBooleanExtra(EXTRA_FROM_VISIBLE_UI, false) == true,
+        )
 
         // ROUND-3-FIX: 以下均为"每服务实例一次性"的启动工作（常驻 collector 协程、
         // 模型加载、基线报告）。onStartCommand 可重复触发，必须只执行一次。
@@ -1825,9 +1851,39 @@ class GalaxyConnectionService : Service() {
         return binder
     }
     
+    /**
+     * 起前台。Android 14+ 显式给类型(见 [ForegroundTypes]):带 location 起不来(系统认为应用不在前台)就退回
+     * specialUse —— 不能让常驻服务因为多要一个类型而起不来。14 以下沿用清单里的类型,那里不做这项检查。
+     */
+    private fun startForegroundWithTypes(notification: Notification, fromVisibleUi: Boolean) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification)
+            return
+        }
+        val wanted = ForegroundTypes.forConnection(locationGranted(this), fromVisibleUi)
+        runningTypes = try {
+            startForeground(NOTIFICATION_ID, notification, typeBits(wanted))
+            wanted
+        } catch (e: SecurityException) {
+            if (wanted == ForegroundTypes.PLAIN) throw e
+            Log.w(TAG, "前台服务带 location 没起来(${e.message}),只用 specialUse;后台读不到位置")
+            startForeground(NOTIFICATION_ID, notification, typeBits(ForegroundTypes.PLAIN))
+            ForegroundTypes.PLAIN
+        }
+    }
+
+    @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun typeBits(kinds: Set<ForegroundTypes.Kind>): Int = kinds.fold(0) { bits, kind ->
+        bits or when (kind) {
+            ForegroundTypes.Kind.SPECIAL_USE -> android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            ForegroundTypes.Kind.LOCATION -> android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "服务销毁")
+        runningTypes = null
         // A2-FIX: Defensive cleanup with try-catch to ensure serviceScope.cancel() always runs
         // even if individual cleanup steps throw exceptions.
         try {
@@ -2131,7 +2187,6 @@ class GalaxyConnectionService : Service() {
             goalResult = rawResult.copy(
                 correlation_id = taskId,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 latency_ms = rawResult.latency_ms ?: 0L,
                 source_runtime_posture = payload.source_runtime_posture
             )
@@ -2173,7 +2228,6 @@ class GalaxyConnectionService : Service() {
                 subtask_index = null,
                 latency_ms = 0L,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 // Carry source_runtime_posture from the inbound payload so the error result
                 // has the same context fields as a normal execution result.
                 source_runtime_posture = payload.source_runtime_posture
@@ -3340,7 +3394,6 @@ class GalaxyConnectionService : Service() {
             goalResult = rawResult.copy(
                 correlation_id = taskId,
                 device_id = localDeviceId,
-                device_role = UFOGalaxyApplication.appSettings.deviceRole,
                 latency_ms = rawResult.latency_ms ?: 0L,
                 source_runtime_posture = envelope.source_runtime_posture,
                 executor_target_type = envelope.executor_target_type,

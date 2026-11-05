@@ -600,7 +600,7 @@ class Pr51AndroidParticipantRuntimeTruthTest {
         assertTrue(map.containsKey(keys.KEY_PARTICIPANT_ID))
         assertTrue(map.containsKey(keys.KEY_DEVICE_ID))
         assertTrue(map.containsKey(keys.KEY_HOST_ID))
-        assertTrue(map.containsKey(keys.KEY_DEVICE_ROLE))
+        assertFalse("runtime truth does not report a device role", map.containsKey("device_role"))
         assertTrue(map.containsKey(keys.KEY_PARTICIPATION_STATE))
         assertTrue(map.containsKey(keys.KEY_COORDINATION_ROLE))
         assertTrue(map.containsKey(keys.KEY_SOURCE_RUNTIME_POSTURE))
@@ -1234,7 +1234,6 @@ class Pr51AndroidParticipantRuntimeTruthTest {
             AndroidParticipantRuntimeTruth.KEY_PARTICIPANT_ID,
             AndroidParticipantRuntimeTruth.KEY_DEVICE_ID,
             AndroidParticipantRuntimeTruth.KEY_HOST_ID,
-            AndroidParticipantRuntimeTruth.KEY_DEVICE_ROLE,
             AndroidParticipantRuntimeTruth.KEY_PARTICIPATION_STATE,
             AndroidParticipantRuntimeTruth.KEY_COORDINATION_ROLE,
             AndroidParticipantRuntimeTruth.KEY_SOURCE_RUNTIME_POSTURE,

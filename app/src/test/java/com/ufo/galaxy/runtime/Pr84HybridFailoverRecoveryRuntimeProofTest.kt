@@ -142,8 +142,7 @@ class Pr84HybridFailoverRecoveryRuntimeProofTest {
             settings = settings,
             goalExecutor = goalExec,
             collaborationAgent = LocalCollaborationAgent(goalExec),
-            deviceId = "test-device",
-            deviceRole = "phone"
+            deviceId = "test-device"
         )
     }
 

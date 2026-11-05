@@ -183,19 +183,22 @@ class AndroidCapabilityVectorTest {
         assertFalse(AndroidCapabilityVector.ExecutionDimension.CROSS_DEVICE_COORDINATION in vector.executionDimensions)
     }
 
+    /** 设备角色名不决定能不能接跨设备任务:看的是真实具备的执行维度和参与状态(V2 设计文档第 6 步)。 */
     @Test
-    fun `hub role is not eligible for cross device participation even when cross device dimension is present`() {
-        val settings = allReadySettings().also { it.deviceRole = "hub" }
-        val descriptor = RuntimeHostDescriptor.of(
-            deviceId = "pixel-hub",
-            deviceRole = "hub",
-            hostId = "host-hub"
-        ).withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
+    fun `device role name does not change cross device eligibility`() {
+        for (role in listOf("phone", "hub", "tablet", "", "something_new")) {
+            val settings = allReadySettings().also { it.deviceRole = role }
+            val descriptor = RuntimeHostDescriptor.of(
+                deviceId = "pixel-$role",
+                deviceRole = role,
+                hostId = "host-$role"
+            ).withState(RuntimeHostDescriptor.HostParticipationState.ACTIVE)
 
-        val vector = AndroidCapabilityVector.from(settings, descriptor)
+            val vector = AndroidCapabilityVector.from(settings, descriptor)
 
-        assertFalse(vector.isEligibleForCrossDeviceParticipation)
-        assertFalse(vector.isEligibleForParallelSubtask)
+            assertTrue("role '$role'", vector.isEligibleForCrossDeviceParticipation)
+            assertTrue("role '$role'", vector.isEligibleForParallelSubtask)
+        }
     }
 
     @Test

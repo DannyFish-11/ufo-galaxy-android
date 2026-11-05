@@ -158,6 +158,14 @@ ufo-galaxy-android/
 | `RECEIVE_BOOT_COMPLETED` | Auto-start on device boot |
 | `VIBRATE` | Haptic feedback |
 | `POST_NOTIFICATIONS` | Status notifications |
+| `ACCESS_COARSE_LOCATION` / `ACCESS_FINE_LOCATION` | Optional: lets the agent read the phone's location (`location` action) |
+| `READ_CONTACTS` | Optional: lets the agent look up a contact's number (`contacts` action) |
+| `READ_CALENDAR` | Optional: lets the agent read upcoming events (`calendar` action) |
+
+The phone reports to the agent only the direct actions it can actually do right now — implemented **and** permitted
+(`com.ufo.galaxy.phone.PhoneActionCatalog`). SMS, calls and new calendar events are only *prepared*: the phone opens
+the system composer from a notification and the person taps to send / dial / save, so `SEND_SMS`, `CALL_PHONE` and
+`WRITE_CALENDAR` are not requested.
 
 ---
 

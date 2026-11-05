@@ -27,8 +27,7 @@ class CrossDeviceSwitchTest {
             "goal_execution_enabled" to true,
             "local_model_enabled" to true,
             "cross_device_enabled" to true,
-            "parallel_execution_enabled" to true,
-            "device_role" to "phone"
+            "parallel_execution_enabled" to true
         )
         val report = CapabilityReport(
             platform = "android",
@@ -55,7 +54,6 @@ class CrossDeviceSwitchTest {
         assertEquals(true, report.metadata["local_model_enabled"])
         assertEquals(true, report.metadata["cross_device_enabled"])
         assertEquals(true, report.metadata["parallel_execution_enabled"])
-        assertEquals("phone", report.metadata["device_role"])
     }
 
     @Test
